@@ -1,0 +1,51 @@
+# =============================================================================
+# Prometheus 监控配置（生产环境）
+# -----------------------------------------------------------------------------
+# 用途：定义 Prometheus 的指标采集任务、告警规则文件引用与 Alertmanager 路由。
+# 通过 docker-compose.yml 挂载到 /etc/prometheus/prometheus.yml。
+# =============================================================================
+
+# 全局配置：默认抓取与告警评估间隔
+global:
+  scrape_interval: 15s        # 默认每 15s 抓取一次指标
+  evaluation_interval: 15s    # 每 15s 评估一次告警规则
+
+# 告警规则文件引用
+rule_files:
+  - "/etc/prometheus/alerts.yml"
+
+# 指标采集任务列表
+scrape_configs:
+  # 采集 Prometheus 自身指标
+  - job_name: 'prometheus'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 采集后端 FastAPI 应用指标（暴露在 /metrics）
+  - job_name: 'fastapi-app'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['backend:8000']
+    metrics_path: /metrics
+    scheme: http
+
+  # 采集 Milvus 向量数据库指标
+  - job_name: 'milvus'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['milvus-standalone:9091']
+    metrics_path: /metrics
+    scheme: http
+
+  # 采集 PostgreSQL 指标（通过 postgres-exporter 9187 端口）
+  - job_name: 'postgresql'
+    scrape_interval: 10s
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+
+# 告警路由：将告警推送给 Alertmanager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['alertmanager:9093']

@@ -1,0 +1,48 @@
+# =============== Git / Version Control ===============
+.git
+.gitignore
+.gitattributes
+
+# =============== Docker ===============
+.dockerignore
+Dockerfile*
+
+# =============== Dependencies ===============
+node_modules
+.pnpm-store/
+
+# =============== Build Output ===============
+dist
+.nuxt
+.output
+.cache
+.vite
+tsconfig.tsbuildinfo
+.eslintcache
+
+# =============== Environment / Secrets ===============
+.env
+.env.*
+
+# =============== Testing ===============
+e2e/
+__tests__/
+playwright-report/
+test-results/
+playwright.config.ts
+vitest.config.ts
+*.spec.ts
+*.test.ts
+
+# =============== Development Config ===============
+.editorconfig
+.oxfmtrc.json
+.oxlintrc.json
+eslint.config.ts
+
+# =============== OS / IDE ===============
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo

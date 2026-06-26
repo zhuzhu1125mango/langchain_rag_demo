@@ -1,0 +1,145 @@
+# =============================================================================
+# 项目元数据：RAG 知识库问答系统后端
+# =============================================================================
+[tool.poetry]
+name = "rag-backend"                                      # 项目名称
+version = "0.1.0"                                         # 项目版本
+description = "RAG Knowledge Base QA System Backend"       # 项目描述
+authors = ["Developer <dev@example.com>"]                  # 作者信息
+package-mode = false                                      # 非包模式（应用而非库）
+
+# =============================================================================
+# 生产依赖：运行时必需的依赖，按功能分组
+# =============================================================================
+[tool.poetry.dependencies]
+python = "^3.12"                                          # Python 版本约束
+
+# 基础框架
+fastapi = "*"
+uvicorn = "*"
+pydantic = "*"
+pydantic-settings = "*"
+python-multipart = "*"
+PyYAML = "*"
+click = "*"
+colorama = "*"
+
+# 数据库
+SQLAlchemy = "*"
+psycopg2-binary = "*"
+asyncpg = "*"
+alembic = "*"
+
+# LangChain
+langchain = "*"
+langchain-community = "*"
+langchain-core = "*"
+langchain-text-splitters = "*"
+langchain-ollama = "*"
+langsmith = "*"
+
+# 向量数据库
+pymilvus = "*"
+
+# 对象存储
+minio = "*"
+
+# 文档解析
+pypdf = "*"
+python-docx = "*"
+openpyxl = "*"
+python-pptx = "*"
+"pdfminer.six" = "*"
+beautifulsoup4 = "*"
+lxml = "*"
+trafilatura = "*"
+markdown = "*"
+unstructured = "*"
+
+# AI/LLM
+ollama = "*"
+sentence-transformers = "*"
+
+# 网络
+httpx = "*"
+httpx-sse = "*"
+aiohttp = "*"
+requests = "*"
+websockets = "*"
+
+# 监控
+prometheus-client = "*"
+prometheus-fastapi-instrumentator = "*"
+
+# 缓存
+redis = "*"
+
+# 工具库
+tenacity = "*"
+backoff = "*"
+cachetools = "*"
+python-dateutil = "*"
+pytz = "*"
+certifi = "*"
+charset-normalizer = "*"
+filelock = "*"
+fsspec = "*"
+huggingface_hub = "*"
+safetensors = "*"
+tokenizers = "*"
+cryptography = "*"
+grpcio = "*"
+protobuf = "*"
+rich = "*"
+markdown-it-py = "*"
+Pygments = "*"
+typer = "*"
+tqdm = "*"
+pandas = "*"
+joblib = "*"
+packaging = "*"
+dataclasses-json = "*"
+marshmallow = "*"
+
+# 联网搜索
+duckduckgo-search = "*"
+
+# =============================================================================
+# 开发依赖：仅开发环境使用（测试、代码格式化、lint）
+# 通过 `poetry install --without dev` 在生产环境跳过
+# =============================================================================
+[tool.poetry.group.dev.dependencies]
+pytest = "*"
+pytest-asyncio = "*"
+pytest-cov = "*"
+pytest-mock = "*"
+black = "*"
+isort = "*"
+flake8 = "*"
+
+# =============================================================================
+# Demo 依赖：Gradio 演示界面相关
+# =============================================================================
+[tool.poetry.group.demo.dependencies]
+gradio = "*"
+gradio-client = "*"
+
+# =============================================================================
+# CLI 入口：通过 `poetry run start` 启动应用
+# =============================================================================
+[tool.poetry.scripts]
+start = "start:main"
+
+# =============================================================================
+# pytest 测试配置
+# =============================================================================
+[tool.pytest.ini_options]
+asyncio_mode = "auto"                          # 自动识别 async 测试函数
+asyncio_default_fixture_loop_scope = "session" # 事件循环作用域为整个会话
+
+# =============================================================================
+# 构建系统配置
+# =============================================================================
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

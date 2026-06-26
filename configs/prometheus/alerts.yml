@@ -1,0 +1,89 @@
+# =============================================================================
+# Prometheus 告警规则
+# -----------------------------------------------------------------------------
+# 用途：定义 RAG 系统的关键告警规则，按服务分为三组：
+#   - fastapi_alerts  后端 FastAPI 应用错误率/延迟/可用性
+#   - milvus_alerts   Milvus 向量数据库可用性/查询延迟
+#   - llm_alerts      LLM 调用延迟/错误率
+# 被 prometheus.yml / prometheus.dev.yml 中的 rule_files 引用。
+# =============================================================================
+
+groups:
+  # FastAPI 应用告警组
+  - name: fastapi_alerts
+    rules:
+      # 错误率告警：1 分钟内错误率 > 5% 持续 1 分钟触发
+      - alert: FastAPIHighErrorRate
+        expr: rate(rag_request_errors_total[1m]) > 0.05
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "FastAPI 错误率过高"
+          description: "错误率超过 5%，当前值 {{ $value }}"
+
+      # 延迟告警：P95 响应延迟 > 5 秒持续 1 分钟触发
+      - alert: FastAPILatencyHigh
+        expr: histogram_quantile(0.95, sum(rate(rag_request_duration_seconds_bucket[5m])) by (le)) > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "FastAPI 响应延迟过高"
+          description: "P95 延迟超过 5 秒，当前值 {{ $value }}s"
+
+      # 服务可用性告警：FastAPI 抓取失败 30 秒即触发
+      - alert: FastAPIDown
+        expr: up{job="fastapi-app"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "FastAPI 服务不可用"
+          description: "FastAPI 服务已停止响应"
+
+  # Milvus 向量数据库告警组
+  - name: milvus_alerts
+    rules:
+      # 服务可用性告警：Milvus 抓取失败 30 秒即触发
+      - alert: MilvusDown
+        expr: up{job="milvus"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Milvus 服务不可用"
+          description: "Milvus 服务已停止响应"
+
+      # 查询延迟告警：平均查询延迟 > 2 秒持续 1 分钟触发
+      - alert: MilvusHighQueryLatency
+        expr: rate(milvus_query_latency_seconds_sum[1m]) / rate(milvus_query_latency_seconds_count[1m]) > 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Milvus 查询延迟过高"
+          description: "平均查询延迟超过 2 秒"
+
+  # LLM 调用告警组
+  - name: llm_alerts
+    rules:
+      # LLM 调用延迟告警：P95 延迟 > 30 秒持续 1 分钟触发
+      - alert: LLMCallHighLatency
+        expr: rag_llm_call_duration_seconds_p95 > 30
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "LLM 调用延迟过高"
+          description: "P95 LLM 调用延迟超过 30 秒，当前值 {{ $value }}s"
+
+      # LLM 调用错误率告警：错误率 > 10% 持续 1 分钟触发
+      - alert: LLMCallErrors
+        expr: rate(rag_llm_call_errors_total[1m]) > 0.1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM 调用错误率过高"
+          description: "LLM 调用错误率超过 10%，当前值 {{ $value }}"

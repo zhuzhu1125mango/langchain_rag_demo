@@ -1,0 +1,51 @@
+# =============== Git / Version Control ===============
+.git
+.gitignore
+.gitattributes
+
+# =============== Docker ===============
+.dockerignore
+Dockerfile*
+
+# =============== Virtual Environment ===============
+venv/
+venv-new/
+.env/
+env/
+ENV/
+.venv/
+.poetry/
+
+# =============== Python Cache ===============
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# =============== Environment / Secrets ===============
+.env
+.env.*
+*.key
+*.pem
+*.license
+credentials.json
+service-account.json
+
+# =============== Data / Logs ===============
+data/**
+!data/.gitkeep
+logs/
+*.log
+*.log.*
+
+# =============== Development Artifacts ===============
+tests/
+.pytest_cache/
+*.md

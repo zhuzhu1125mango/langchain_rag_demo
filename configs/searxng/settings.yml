@@ -1,0 +1,69 @@
+# =============================================================================
+# SearXNG 元搜索引擎配置
+# -----------------------------------------------------------------------------
+# 用途：SearXNG 聚合多个搜索引擎（Bing/Google/DuckDuckGo/Wikipedia）的结果，
+# 供 RAG 系统的 Web 检索增强使用。
+# 通过 docker-compose 挂载到 /etc/searxng/settings.yml。
+# secret_key 可通过 SEARXNG_SECRET_KEY 环境变量覆盖。
+# =============================================================================
+
+# 通用配置
+general:
+  instance_name: "RAG Search"   # 实例名称
+  debug: false                 # 关闭调试日志
+  donation_url: false          # 关闭捐赠提示
+
+# 搜索行为配置
+search:
+  safe_search: 0                # 0=关闭安全搜索过滤
+  autocomplete: ""              # 自动补全服务（空表示禁用）
+  default_lang: "zh-CN"         # 默认搜索语言为中文
+  formats:
+    - html                  # HTML 网页格式
+    - json                   # JSON API 格式（RAG 系统使用）
+
+# 服务器配置
+server:
+  bind_address: "0.0.0.0"    # 监听所有网卡
+  port: 8080                  # 监听端口
+  # 生产环境必须修改为强随机密钥，可通过 SEARXNG_SECRET_KEY 环境变量覆盖
+  secret_key: "${SEARXNG_SECRET_KEY:-change-me-in-production}"  # 会话加密密钥
+  limiter: false              # 限流器（生产环境建议开启）
+  image_proxy: false          # 图片代理（按需启用）
+
+# UI 配置
+ui:
+  static_use_hash: true         # 静态资源使用 hash 路由
+
+# Redis 配置：未启用（false 表示不使用 Redis 缓存）
+redis:
+  url: false
+
+# 出站请求配置
+outgoing:
+  request_timeout: 10.0        # 单次请求超时（秒）
+  max_request_timeout: 15.0      # 最大请求超时（秒）
+  useragent_suffix: "RAG-Bot/1.0"  # UA 后缀，便于搜索引擎识别
+
+# 启用的插件
+enabled_plugins:
+  - "Hash plugin"             # 启用 hash 插件
+
+# 搜索引擎列表：按需启用/禁用
+engines:
+  - name: bing
+    engine: bing
+    shortcut: bi
+    enabled: true
+  - name: google
+    engine: google
+    shortcut: go
+    enabled: true
+  - name: duckduckgo
+    engine: duckduckgo
+    shortcut: ddg
+    enabled: true
+  - name: wikipedia
+    engine: wikipedia
+    shortcut: wp
+    enabled: true

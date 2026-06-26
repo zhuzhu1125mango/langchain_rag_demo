@@ -1,0 +1,52 @@
+{
+  "name": "rag-frontend",
+  "version": "1.0.0",
+  "description": "RAG Knowledge Base QA System Frontend",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "test:unit": "vitest run",
+    "test:e2e": "playwright test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@lucide/vue": "^1.17.0",
+    "@tanstack/vue-query": "^5.100.14",
+    "@vueuse/core": "^14.3.0",
+    "axios": "^1.16.1",
+    "element-plus": "^2.14.1",
+    "highlight.js": "^11.11.1",
+    "markdown-it": "^14.2.0",
+    "pinia": "^3.0.4",
+    "vue": "^3.5.35",
+    "vue-router": "^5.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0",
+    "@tailwindcss/postcss": "^4.3.0",
+    "@tsconfig/node24": "^24.0.4",
+    "@types/markdown-it": "^14.1.2",
+    "@types/node": "^25.9.1",
+    "@vitejs/plugin-vue": "^6.0.7",
+    "@vitest/eslint-plugin": "^1.6.19",
+    "@vue/eslint-config-typescript": "^14.7.0",
+    "@vue/tsconfig": "^0.9.1",
+    "autoprefixer": "^10.5.0",
+    "eslint": "^10.4.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-oxlint": "^1.68.0",
+    "eslint-plugin-playwright": "^2.10.4",
+    "eslint-plugin-vue": "^10.9.1",
+    "globals": "^17.6.0",
+    "postcss": "^8.5.15",
+    "tailwindcss": "^4.3.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.14",
+    "vitest": "^4.1.7",
+    "vue-tsc": "^3.3.3"
+  }
+}

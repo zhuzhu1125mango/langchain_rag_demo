@@ -1,0 +1,47 @@
+# =============================================================================
+# Alertmanager 告警分发配置
+# -----------------------------------------------------------------------------
+# 用途：定义告警的路由分组策略、接收端（receivers）和告警抑制规则。
+# 当前仅配置了 webhook 接收端占位，告警仅在 Alertmanager UI 中展示。
+# 启用真实通知时取消下方对应注释并填写真实配置。
+# =============================================================================
+
+# 全局配置
+global:
+  resolve_timeout: 5m    # 告警恢复通知的超时时间
+
+# 路由：控制告警分组与分发
+route:
+  group_by: ['alertname']   # 按告警名分组
+  group_wait: 10s          # 首次告警等待时间（聚合同组告警）
+  group_interval: 10s      # 同组告警之间的发送间隔
+  repeat_interval: 1h       # 重复告警发送间隔
+  receiver: 'webhook'     # 默认接收端
+
+# 接收端定义
+receivers:
+  # webhook 接收端占位
+  - name: 'webhook'
+    # 未配置真实 webhook 接收端，告警仅在 Alertmanager UI 中展示。
+    # 如需启用 webhook 通知，请取消下方注释并填写真实 URL：
+    # webhook_configs:
+    #   - url: 'http://your-webhook-endpoint/alert'
+    #     send_resolved: true
+
+  # 邮件告警配置（需要配置真实SMTP服务器后启用）
+  # - name: 'email'
+  #   email_configs:
+  #     - to: 'admin@example.com'
+  #       from: 'alertmanager@example.com'
+  #       smarthost: 'smtp.example.com:587'
+  #       auth_username: 'alertmanager'
+  #       auth_password: 'password'
+  #       send_resolved: true
+
+# 告警抑制规则：当 critical 告警触发时，抑制同名的 warning 告警
+inhibit_rules:
+  - source_match:
+      severity: 'critical'    # 抑制源告警级别
+    target_match:
+      severity: 'warning'    # 被抑制的告警级别
+    equal: ['alertname', 'dev', 'instance']  # 仅当这些标签相等时才抑制

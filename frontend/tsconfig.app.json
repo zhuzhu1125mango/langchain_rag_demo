@@ -1,0 +1,16 @@
+// 应用代码 TypeScript 配置
+// 继承 @vue/tsconfig 的 DOM 环境 base 配置，作用于 src 下的应用源码（排除单元测试）。
+// 主要覆盖项：开启 noUncheckedIndexedAccess、配置 `@/*` 路径别名、指定增量构建信息文件位置。
+{
+  "extends": "@vue/tsconfig/tsconfig.dom.json",
+  "include": ["src/**/*", "src/**/*.vue"],
+  "exclude": ["src/**/__tests__/*"],
+  "compilerOptions": {
+    "baseUrl": ".",
+    "noUncheckedIndexedAccess": true,
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo"
+  }
+}

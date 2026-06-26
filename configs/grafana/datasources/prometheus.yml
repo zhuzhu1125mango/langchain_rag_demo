@@ -1,0 +1,25 @@
+# =============================================================================
+# Grafana 数据源配置（Prometheus）
+# -----------------------------------------------------------------------------
+# 用途：通过 Grafana provisioning 自动注册 Prometheus 数据源。
+# 通过 docker-compose 挂载到 /etc/grafana/provisioning/datasources/。
+# Grafana 启动后自动加载此配置，无需手动在 UI 中添加数据源。
+# =============================================================================
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus          # 数据源名称
+    type: prometheus          # 数据源类型
+    access: proxy             # 通过 Grafana 后端代理访问
+    url: http://prometheus:9090  # Prometheus 服务地址（容器网络内）
+    isDefault: true           # 设为默认数据源
+    editable: true            # 允许在 UI 中编辑
+    jsonData:
+      httpMethod: POST        # 查询使用的 HTTP 方法
+      manageAlerts: true      # 启用 Grafana 告警管理
+      prometheusType: Prometheus
+      prometheusVersion: 2.40.0
+      cacheLevel: 'High'      # 缓存级别（减少重复查询压力）
+    secureJsonData:
+      tlsSkipVerify: true     # 跳过 TLS 证书校验（容器内通信）

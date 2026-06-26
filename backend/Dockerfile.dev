@@ -1,0 +1,43 @@
+# =============================================================================
+# 后端开发环境 Dockerfile
+# -----------------------------------------------------------------------------
+# 基础镜像：python:3.12-slim（精简版，体积小）
+# 特点：安装全部依赖（含开发依赖），uvicorn 启动时启用 --reload 热重载，
+#       源码通过 docker-compose 卷挂载，无需在镜像中固化代码变更。
+# =============================================================================
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# 安装系统依赖（build-essential/gcc 用于编译 Python 扩展，curl 用于健康检查）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# 安装 Poetry（依赖管理工具，锁定版本 2.1.3）
+RUN pip install --no-cache-dir poetry==2.1.3
+
+# 配置 Poetry：在容器中不创建虚拟环境（直接安装到系统 Python）
+RUN poetry config virtualenvs.create false
+
+# 复制 Poetry 配置文件（利用 Docker 缓存层，依赖不变时跳过后续安装）
+COPY pyproject.toml poetry.lock* ./
+
+# 安装依赖（包括开发依赖用于开发环境：pytest/black/isort 等）
+RUN poetry install --no-interaction --no-ansi --no-root
+
+# 复制项目代码（开发环境主要靠卷挂载，此处复制保证镜像可独立运行）
+COPY . .
+
+ENV PYTHONPATH=/app
+
+EXPOSE 8000
+
+# 健康检查：每 30s 探测 /health 端点
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# 启动命令：uvicorn 启动 FastAPI 应用，--reload 启用热重载
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

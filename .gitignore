@@ -1,0 +1,141 @@
+# =============== Python ===============
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.installed.cfg
+
+# =============== Virtual Environment ===============
+venv/
+venv-new/
+.env/
+env/
+ENV/
+virtualenv/
+.venv/
+
+# =============== Poetry / PDM ===============
+.poetry/
+.pdm-python
+.pdm-build/
+
+# =============== Environment Variables ===============
+.env
+.env.local
+.env.production
+.env.*.local
+.env.dev
+.env.prod
+
+# =============== IDE Configurations ===============
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+.ropeproject/
+
+# =============== Data & Documents ===============
+backend/data/**
+!backend/data/.gitkeep
+
+# =============== Logs ===============
+backend/logs/
+logs/
+*.log
+*.log.*
+
+# =============== Frontend ===============
+frontend/node_modules/
+frontend/dist/
+frontend/.nuxt/
+frontend/.output/
+frontend/.cache/
+frontend/.eslintcache
+frontend/.vite/
+frontend/tsconfig.tsbuildinfo
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/playwright-report/
+frontend/test-results/
+
+# =============== Python Type Checkers / Linters ===============
+.mypy_cache/
+.dmypy.json
+.ruff_cache/
+.pyre/
+.pytype/
+.cython/
+
+# =============== OS Files ===============
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# =============== Build Artifacts ===============
+dist/
+build/
+*.egg/
+*.whl
+
+# =============== Jupyter Notebooks ===============
+.ipynb_checkpoints/
+*.ipynb
+
+# =============== Testing ===============
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.hypothesis/
+.nox/
+
+# =============== Docker ===============
+docker-compose.override.yml
+
+# =============== Backend Test Files ===============
+# Note: backend/tests/ directory is intentionally NOT ignored
+# as it contains project's test suite
+
+# =============== Sensitive Files ===============
+minio.license
+*.license
+*.key
+*.pem
+credentials.json
+service-account.json
+
+# =============== Docker Volumes (Local) ===============
+# Note: Docker named volumes are not tracked by git
+# but local bind mounts should be ignored
+docker/volumes/
+
+# =============== Model Files ===============
+*.bin
+*.pt
+*.pth
+*.onnx
+*.pkl
+*.h5
+
+# =============== Temporary Files ===============
+*.tmp
+*.temp
+
+# =============== Deployment / Local Overrides ===============
+.vercel
+.netlify
+.local/
+*.local.yml
+*.local.yaml

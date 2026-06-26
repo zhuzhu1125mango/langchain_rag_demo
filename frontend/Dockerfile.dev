@@ -1,0 +1,17 @@
+# 开发环境镜像
+# 基于node:20-alpine，全局安装 pnpm 后安装依赖并复制源码，
+# 启动 Vite 开发服务器（--host 0.0.0.0 暴露给容器外访问），监听 5173 端口。
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN npm install -g pnpm
+
+COPY package*.json pnpm-lock.yaml ./
+RUN pnpm install
+
+COPY . .
+
+EXPOSE 5173
+
+CMD ["pnpm", "run", "dev", "--host", "0.0.0.0"]

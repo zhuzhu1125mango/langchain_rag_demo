@@ -1,0 +1,27 @@
+// Node 端工具链 TypeScript 配置
+// 作用于构建/测试/lint 等运行在 Node 环境的配置文件（vite/vitest/playwright/eslint）。
+// 关键项：target ES2022、moduleResolution bundler、types: ["node"]、noEmit（仅类型检查不产物）。
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"],
+    "noEmit": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "strict": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
+  },
+  "include": [
+    "vite.config.*",
+    "vitest.config.*",
+    "playwright.config.*",
+    "eslint.config.*"
+  ]
+}

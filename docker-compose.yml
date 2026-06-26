@@ -1,0 +1,318 @@
+# =============================================================================
+# 生产环境 Docker Compose 配置
+# -----------------------------------------------------------------------------
+# 用途：生产部署使用，包含 RAG 系统全部服务：
+#   - MinIO / Milvus / etcd / PostgreSQL / Redis / SearXNG  基础设施
+#   - backend   后端 API（使用 Dockerfile.prod 多阶段构建）
+#   - frontend  前端（nginx 静态托管构建产物）
+#   - Prometheus / Alertmanager / Grafana / postgres-exporter  监控告警栈
+# 所有服务默认 restart: unless-stopped，确保异常退出后自动恢复。
+# 使用方式：docker compose -f docker-compose.yml up -d
+# =============================================================================
+
+services:
+  # redis — 缓存服务，用于会话/搜索结果/向量缓存
+  redis:
+    image: redis:7.2-alpine
+    container_name: redis-prod
+    volumes:
+      - redis_data_prod:/data
+    networks:
+      - monitoring
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # searxng — 元搜索引擎，聚合多个搜索源供 RAG 检索增强使用
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng-prod
+    networks:
+      - monitoring
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./configs/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    environment:
+      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
+      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY}  # SearXNG 会话加密密钥
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+
+  # backend — 后端 API 服务（生产镜像，构建产物精简）
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: backend-prod
+    environment:
+      IN_DOCKER: "true"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB}
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}            # 业务访问 MinIO 的 key
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}            # 业务访问 MinIO 的 secret
+      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME}          # 文档存储 bucket
+      MINIO_SECURE: ${MINIO_SECURE}                    # 生产环境应启用 HTTPS
+      MILVUS_HOST: milvus-standalone
+      MILVUS_PORT: 19530
+      MILVUS_DATABASE: ${MILVUS_DATABASE}              # Milvus 数据库实例
+      MILVUS_COLLECTION_NAME: ${MILVUS_COLLECTION_NAME}# 向量集合名
+      MILVUS_INDEX_NAME: ${MILVUS_INDEX_NAME}          # 向量索引名
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: ${REDIS_DB}                            # Redis 逻辑库编号
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME}          # 对话使用的大模型
+      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}    # 向量化使用的模型
+      SKIP_OLLAMA_CHECK: "true"
+      OLLAMA_HOST: host.docker.internal                # 通过宿主机访问 Ollama
+      CHUNK_SIZE: ${CHUNK_SIZE}                        # 文档分块大小
+      CHUNK_OVERLAP: ${CHUNK_OVERLAP}                  # 文档分块重叠字符数
+      TOP_K: ${TOP_K}                                  # 检索召回数量
+      SEARCH_PROVIDER: ${SEARCH_PROVIDER}              # 搜索引擎提供方（searxng/tavily 等）
+      SEARXNG_BASE_URL: http://searxng:8080
+      SEARXNG_TIMEOUT: ${SEARXNG_TIMEOUT}
+      SEARCH_MAX_RESULTS: ${SEARCH_MAX_RESULTS}
+      SEARCH_FETCH_TIMEOUT: ${SEARCH_FETCH_TIMEOUT}
+      SEARCH_MAX_FETCH: ${SEARCH_MAX_FETCH}
+      SEARCH_MIN_CONTENT_LENGTH: ${SEARCH_MIN_CONTENT_LENGTH}
+      SEARCH_ENABLE_MULTI_QUERY: ${SEARCH_ENABLE_MULTI_QUERY}
+      SEARCH_NUM_QUERIES: ${SEARCH_NUM_QUERIES}
+      SEARCH_ENABLE_RERANK: ${SEARCH_ENABLE_RERANK}
+      SEARCH_RERANK_MODEL: ${SEARCH_RERANK_MODEL}
+      SEARCH_RERANK_TOP_K: ${SEARCH_RERANK_TOP_K}
+      SEARCH_CACHE_TTL: ${SEARCH_CACHE_TTL}
+      SEARCH_CONTENT_CACHE_TTL: ${SEARCH_CONTENT_CACHE_TTL}
+      SEARCH_ENABLE_FUNCTION_CALLING: ${SEARCH_ENABLE_FUNCTION_CALLING}
+      SEARCH_ENABLE_REACT: ${SEARCH_ENABLE_REACT}
+      SEARCH_REACT_MAX_STEPS: ${SEARCH_REACT_MAX_STEPS}
+      SEARCH_AGENT_FALLBACK_TO_PHASE2: ${SEARCH_AGENT_FALLBACK_TO_PHASE2}
+      TITLE_GENERATION_ENABLED: ${TITLE_GENERATION_ENABLED}
+      TITLE_MAX_LENGTH: ${TITLE_MAX_LENGTH}
+      TITLE_FALLBACK_LENGTH: ${TITLE_FALLBACK_LENGTH}
+      TITLE_GENERATION_MODEL: ${TITLE_GENERATION_MODEL}
+      SECRET_KEY: ${SECRET_KEY}                        # 应用签名密钥（JWT/Session）
+    volumes:
+      - ./backend/data:/app/data
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      milvus-standalone:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      searxng:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  # frontend — 前端生产服务，nginx 托管构建后的静态文件
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: frontend-prod
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"                                        # nginx 默认 HTTP 端口
+
+  # prometheus — 指标采集与存储
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: prometheus-prod
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./configs/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus_data_prod:/prometheus
+    networks:
+      - monitoring
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'                        # 启用热重载 API
+
+  # alertmanager — 告警路由与分发（邮件/webhook 等）
+  alertmanager:
+    image: prom/alertmanager:v0.29.0
+    container_name: alertmanager-prod
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./configs/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+      - alertmanager_data_prod:/alertmanager
+    networks:
+      - monitoring
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+
+  # grafana — 监控可视化面板
+  grafana:
+    image: grafana/grafana:12.0.2
+    container_name: grafana-prod
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./configs/grafana/datasources:/etc/grafana/provisioning/datasources
+      - grafana_data_prod:/var/lib/grafana
+    networks:
+      - monitoring
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}  # Grafana 管理员密码
+      - GF_USERS_ALLOW_SIGN_UP=false                              # 生产环境禁用自助注册
+
+  # etcd — Milvus 的元数据存储（键值对数据库）
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.30
+    container_name: etcd-prod
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+    volumes:
+      - etcd_data_prod:/etcd
+    networks:
+      - monitoring
+    restart: unless-stopped
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # minio — 对象存储，存放上传的原始文档与文件
+  minio:
+    image: minio/minio:latest
+    container_name: minio-prod
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}              # MinIO 管理员账号
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}      # MinIO 管理员密码
+    volumes:
+      - minio_data_prod:/minio_data
+    networks:
+      - monitoring
+    restart: unless-stopped
+    command: minio server /minio_data --console-address ":9001"
+    ports:
+      - "9000:9000"                                    # S3 API 端口
+      - "9001:9001"                                    # 管理控制台端口
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # milvus-standalone — 向量数据库，存储并检索文档向量
+  milvus-standalone:
+    image: milvusdb/milvus:v2.6.17
+    container_name: milvus-standalone-prod
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}          # 复用 MinIO 管理员账号
+      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}  # 复用 MinIO 管理员密码
+    volumes:
+      - milvus_data_prod:/var/lib/milvus
+    networks:
+      - monitoring
+    restart: unless-stopped
+    ports:
+      - "19530:19530"                                  # Milvus gRPC 端口
+      - "9091:9091"                                    # Milvus 健康检查/指标端口
+    depends_on:
+      etcd:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  # postgres — 关系型数据库，存放知识库/会话/实验等业务数据
+  postgres:
+    image: postgres:16.14
+    container_name: postgres-prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}                      # 初始化数据库名
+      POSTGRES_USER: ${POSTGRES_USER}                  # 数据库用户名
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}          # 数据库密码
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      LANG: en_US.utf8
+      LC_ALL: C.UTF-8
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+      - ./configs/postgres/init-pg-stat-statements.sh:/docker-entrypoint-initdb.d/init-pg-stat-statements.sh
+    networks:
+      - monitoring
+    restart: unless-stopped
+    ports:
+      - "5433:5432"                                    # 宿主机 5433 避免与本地 PG 冲突
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all", "-c", "client_encoding=UTF8", "-c", "listen_addresses=*"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # postgres-exporter — 将 PostgreSQL 指标导出给 Prometheus
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    container_name: postgres-exporter-prod
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      PG_EXPORTER_EXTEND_QUERIES: "true"               # 启用扩展查询（queries.yaml）
+      PG_EXPORTER_DISABLE_DEFAULT_METRICS: "false"
+    volumes:
+      - ./configs/postgres/queries.yaml:/etc/postgres_exporter/queries.yaml
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+# 持久化卷：所有服务的数据卷以 _prod 后缀区分生产环境
+volumes:
+  prometheus_data_prod:
+  alertmanager_data_prod:
+  grafana_data_prod:
+  etcd_data_prod:
+  minio_data_prod:
+  milvus_data_prod:
+  postgres_data_prod:
+  redis_data_prod:
+
+# 网络：所有服务共用 monitoring 桥接网络
+networks:
+  monitoring:
+    driver: bridge
