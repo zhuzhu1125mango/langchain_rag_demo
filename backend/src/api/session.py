@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 from src.database import get_db
+from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback as FeedbackModel
 from src.services.vector_store import VectorStoreManager
 from src.services.rag_chain import RAGChain
@@ -102,23 +103,28 @@ class BatchDeleteRequest(BaseModel):
 
 
 @router.post("/")
-async def create_session(request: CreateSessionRequest = Body(default=None), db: AsyncSession = Depends(get_db)):
+async def create_session(
+    request: CreateSessionRequest = Body(default=None),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     创建新会话
-    
+
     Args:
         request: 创建会话请求（可选）
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: {"id": 会话ID, "title": 会话标题}
     """
     title = request.title if request else None
     kb_ids = request.kb_ids if request else None
-    
+
     from datetime import datetime
     session = SessionModel(
-        user_id="default",
+        user_id=current_user.user_id,
         title=title or "新会话",
         messages=[],
         kb_ids=kb_ids or [],
@@ -127,21 +133,33 @@ async def create_session(request: CreateSessionRequest = Body(default=None), db:
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return {"id": str(session.id), "title": session.title}
+    return {
+        "id": str(session.id),
+        "title": session.title,
+        "kb_ids": session.kb_ids,
+    }
 
 
 @router.get("/", response_model=List[SessionResponse])
-async def list_sessions(db: AsyncSession = Depends(get_db)):
+async def list_sessions(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
-    获取会话列表
-    
+    获取当前用户的会话列表
+
     Args:
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         list: 会话列表（按更新时间倒序）
     """
-    result = await db.execute(select(SessionModel).order_by(SessionModel.updated_at.desc()))
+    result = await db.execute(
+        select(SessionModel)
+        .filter(SessionModel.user_id == current_user.user_id)
+        .order_by(SessionModel.updated_at.desc())
+    )
     sessions = result.scalars().all()
     return [
         SessionResponse(
@@ -165,20 +183,29 @@ _DEFAULT_QUICK_QUESTIONS = [
 
 
 @router.get("/quick_questions")
-async def get_quick_questions(db: AsyncSession = Depends(get_db)):
+async def get_quick_questions(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
-    获取基于用户历史的快捷问题
-    
+    获取基于当前用户历史的快捷问题
+
     根据用户历史提问记录，动态生成快捷问题，帮助用户快速访问常见问题。
     结果会按历史问题内容缓存 24 小时，并复用全局 RAGChain 实例，避免重复初始化。
-    
+
     Args:
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: {"quick_questions": 快捷问题列表}
     """
-    result = await db.execute(select(SessionModel).order_by(SessionModel.updated_at.desc()).limit(10))
+    result = await db.execute(
+        select(SessionModel)
+        .filter(SessionModel.user_id == current_user.user_id)
+        .order_by(SessionModel.updated_at.desc())
+        .limit(10)
+    )
     sessions = result.scalars().all()
     
     # 提取所有历史问题
@@ -215,14 +242,19 @@ async def get_quick_questions(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{session_id}")
-async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
+async def get_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     获取会话详情（含消息历史）
-    
+
     Args:
         session_id: 会话ID
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: 会话详情，包含消息历史
     """
@@ -231,6 +263,7 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
         session = result.scalar_one_or_none()
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
+        require_owner(session.user_id, current_user)
         return {
             "id": str(session.id),
             "title": session.title,
@@ -244,42 +277,60 @@ async def get_session(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/{session_id}")
-async def update_session(session_id: str, request: UpdateSessionRequest, db: AsyncSession = Depends(get_db)):
+async def update_session(
+    session_id: str,
+    request: UpdateSessionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     更新会话标题
-    
+
     Args:
         session_id: 会话ID
         request: 更新会话请求
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
-        dict: {"message": "更新成功"}
+        dict: 更新后的会话信息
     """
     try:
         result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(session_id)))
         session = result.scalar_one_or_none()
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
-        
+        require_owner(session.user_id, current_user)
+
         session.title = request.title
         if request.kb_ids is not None:
             session.kb_ids = request.kb_ids
         await db.commit()
-        return {"message": "更新成功"}
+        await db.refresh(session)
+        return {
+            "id": str(session.id),
+            "title": session.title,
+            "kb_ids": session.kb_ids,
+            "message": "更新成功",
+        }
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的会话ID")
 
 
 @router.delete("/{session_id}")
-async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     删除会话
-    
+
     Args:
         session_id: 会话ID
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: {"message": "删除成功"}
     """
@@ -288,7 +339,8 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
         session = result.scalar_one_or_none()
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
-        
+        require_owner(session.user_id, current_user)
+
         await db.delete(session)
         await db.commit()
         return {"message": "删除成功"}
@@ -297,33 +349,48 @@ async def delete_session(session_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/batch-delete")
-async def batch_delete_sessions(request: BatchDeleteRequest, db: AsyncSession = Depends(get_db)):
+async def batch_delete_sessions(
+    request: BatchDeleteRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     批量删除会话
-    
-    先删除关联的反馈记录，再删除会话记录，避免外键约束冲突。
+
+    仅删除当前用户拥有的会话。先删除关联的反馈记录，再删除会话记录，避免外键约束冲突。
     两步操作在同一个数据库事务中执行，保证原子性。
-    
+
     Args:
         request: 批量删除请求（会话ID列表）
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: {"deleted_count": 实际删除的会话数量}
     """
     if not request.ids:
         return {"deleted_count": 0}
-    
+
     try:
         session_ids = [uuid.UUID(session_id) for session_id in request.ids]
     except ValueError:
         raise HTTPException(status_code=400, detail="包含无效的会话ID")
-    
+
     try:
-        # 先删除关联的反馈记录
-        await db.execute(delete(FeedbackModel).where(FeedbackModel.session_id.in_(session_ids)))
-        # 再删除会话记录
-        result = await db.execute(delete(SessionModel).where(SessionModel.id.in_(session_ids)))
+        # 先删除关联的反馈记录（仅当前用户的）
+        await db.execute(
+            delete(FeedbackModel).where(
+                FeedbackModel.session_id.in_(session_ids),
+                FeedbackModel.owner_id == current_user.user_id,
+            )
+        )
+        # 再删除当前用户的会话记录
+        result = await db.execute(
+            delete(SessionModel).where(
+                SessionModel.id.in_(session_ids),
+                SessionModel.user_id == current_user.user_id,
+            )
+        )
         await db.commit()
         return {"deleted_count": result.rowcount}
     except IntegrityError as e:

@@ -5,6 +5,7 @@
       :current-k-b="currentKB"
       @select-kb="selectKnowledgeBase"
       @create-kb="showCreateKBModal = true"
+      @batch-delete="batchDeleteKnowledgeBases"
     />
 
     <div class="flex-1 flex flex-col overflow-hidden">
@@ -299,12 +300,14 @@ import {
   useCreateKnowledgeBase,
   useUpdateKnowledgeBase,
   useDeleteKnowledgeBase,
+  useBatchDeleteKnowledgeBases,
   useSearchDocuments
 } from '@/queries/kb'
 import type { KnowledgeBase, Document, SearchResult } from '@/queries/kb'
 import { Trash2, Upload, Edit3, FileText, Network, Search, FolderOpen, Database } from '@lucide/vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useToast } from '@/composables/useToast'
+import { ElMessageBox } from 'element-plus'
 import { useWebSocketNotifications } from '@/composables/useNotifications'
 import KnowledgeGraph from '@/components/KnowledgeGraph.vue'
 import KnowledgeBaseSidebar from '@/components/knowledge-base/KnowledgeBaseSidebar.vue'
@@ -393,6 +396,7 @@ const updateMutation = useUpdateDocument()
 const createKBMutation = useCreateKnowledgeBase()
 const updateKBMutation = useUpdateKnowledgeBase()
 const deleteKBMutation = useDeleteKnowledgeBase()
+const batchDeleteKBMutation = useBatchDeleteKnowledgeBases()
 const searchDocuments = useSearchDocuments()
 
 const currentKB = computed(() => kbStore.currentKB)
@@ -400,6 +404,14 @@ const currentKB = computed(() => kbStore.currentKB)
 watch(knowledgeBases, (newKbs) => {
   if (newKbs) {
     kbStore.setKnowledgeBases(newKbs)
+    // 若当前选中的知识库已被删除，自动切换到剩余中的默认或第一个
+    if (kbStore.currentKB) {
+      const stillExists = newKbs.some(kb => kb.id === kbStore.currentKB?.id)
+      if (!stillExists) {
+        const defaultKB = newKbs.find(kb => kb.is_default)
+        kbStore.setCurrentKB(defaultKB || newKbs[0] || null)
+      }
+    }
   }
 }, { immediate: true })
 
@@ -669,6 +681,50 @@ function deleteKnowledgeBaseConfirm(): void {
       }
     })
   }
+}
+
+/** 批量删除选中的知识库。 */
+async function batchDeleteKnowledgeBases(): Promise<void> {
+  const selectedCount = kbStore.selectedKBCount
+
+  if (selectedCount === 0) {
+    toast.warning('请先选择要删除的知识库')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedCount} 个知识库吗？其中的所有文档也将被删除，操作不可恢复。`,
+      '批量删除确认',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        confirmButtonClass: 'el-button--danger'
+      }
+    )
+  } catch {
+    return
+  }
+
+  const ids = kbStore.selectedKBs
+  toast.info('正在删除知识库...', `正在后台删除 ${selectedCount} 个知识库`)
+
+  batchDeleteKBMutation.mutate(ids, {
+    onSuccess: (result) => {
+      toast.success(
+        '批量删除成功',
+        `已删除 ${result.deleted_count} 个知识库${result.skipped_ids.length ? `，跳过 ${result.skipped_ids.length} 个` : ''}`
+      )
+      kbStore.exitBatchKBMode()
+      queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+    },
+    onError: (error) => {
+      toast.error('批量删除失败', error instanceof Error ? error.message : '未知错误')
+      queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
+    }
+  })
 }
 
 /** 上传完成回调：文档列表由 WebSocket 通知自动刷新，此处无需手动处理。 */

@@ -1,0 +1,21 @@
+请分析用户问题，判断最合适的处理方式。
+
+可选模式：
+- direct_llm：问候、闲聊、无需事实的问题
+- kb_only：需要查询知识库文档
+- tool_first：需要调用工具（天气、时间、计算等）
+- web_search：需要联网搜索实时信息
+- agent_research：复杂多步研究问题
+- hybrid：知识库+联网搜索都需要
+
+用户问题：{question}
+已选知识库：{kb_ids}
+是否开启联网搜索：{use_web_search}
+
+请输出 JSON 格式：
+{{
+  "primary_mode": "模式名",
+  "suggested_tools": ["tool1", "tool2"],
+  "fallback_strategy": "none|web_search|llm_direct|tell_failure",
+  "reasoning": "简短理由"
+}}

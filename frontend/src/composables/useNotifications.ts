@@ -46,6 +46,7 @@ export function useWebSocketNotifications() {
   let reconnectTimer: number | null = null
   let heartbeatTimer: number | null = null
   const subscribedChannels = ref<string[]>([])
+  let authFailed = false
 
   // 默认订阅频道
   const defaultChannels = ['kb:*', 'doc:*']
@@ -56,8 +57,18 @@ export function useWebSocketNotifications() {
       return
     }
 
+    // 认证失败后不再尝试重连，避免无效重试风暴
+    if (authFailed) {
+      return
+    }
+
     const channelParam = subscribedChannels.value.join(',') || defaultChannels.join(',')
-    const wsUrl = buildWsUrl(`/api/ws/notifications?channels=${encodeURIComponent(channelParam)}`)
+    const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
+    const queryParams = new URLSearchParams({ channels: channelParam })
+    if (apiKey) {
+      queryParams.set('api_key', apiKey)
+    }
+    const wsUrl = buildWsUrl(`/api/ws/notifications?${queryParams.toString()}`)
 
     try {
       ws = new WebSocket(wsUrl)
@@ -85,10 +96,18 @@ export function useWebSocketNotifications() {
         }
       }
 
-      ws.onclose = () => {
+      ws.onclose = (event) => {
         isConnected.value = false
         console.log('[WebSocket] Disconnected')
         stopHeartbeat()
+
+        // 认证失败（1008 Policy Violation）时标记失败并提示，不再重连
+        if (event.code === 1008) {
+          authFailed = true
+          toast.error('WebSocket 认证失败，请检查 API Key 配置')
+          return
+        }
+
         scheduleReconnect()
       }
 

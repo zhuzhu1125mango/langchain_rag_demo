@@ -1,3 +1,4 @@
+import asyncio
 from typing import List, Dict, Optional
 from .base import Strategy
 from .constants import GREETING_KEYWORDS
@@ -31,7 +32,7 @@ class SemanticStrategy(Strategy):
         self.threshold = 0.75
         self.knowledge_threshold = 0.65
     
-    def initialize(self):
+    async def initialize(self):
         global _model_cache
         if _model_cache['model'] is not None:
             self.model = _model_cache['model']
@@ -41,10 +42,17 @@ class SemanticStrategy(Strategy):
             return
         try:
             from sentence_transformers import SentenceTransformer, util
-            self.model = SentenceTransformer('all-MiniLM-L6-v2')
+            loop = asyncio.get_running_loop()
+            self.model = await loop.run_in_executor(
+                None, lambda: SentenceTransformer('all-MiniLM-L6-v2')
+            )
             self.util = util
-            self.greeting_embeddings = self.model.encode(self.greeting_examples)
-            self.knowledge_embeddings = self.model.encode(self.knowledge_examples)
+            self.greeting_embeddings = await loop.run_in_executor(
+                None, lambda: self.model.encode(self.greeting_examples)
+            )
+            self.knowledge_embeddings = await loop.run_in_executor(
+                None, lambda: self.model.encode(self.knowledge_examples)
+            )
             _model_cache['model'] = self.model
             _model_cache['util'] = self.util
             _model_cache['greeting_embeddings'] = self.greeting_embeddings
@@ -52,16 +60,21 @@ class SemanticStrategy(Strategy):
         except ImportError:
             self.model = None
     
-    def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
+    async def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
         """按语义相似度判断是否需要使用知识库。"""
         if self.model is None:
             self.confidence = 0.3
             return False
 
-        question_embedding = self.model.encode(question)
+        loop = asyncio.get_running_loop()
+        question_embedding = await loop.run_in_executor(
+            None, lambda: self.model.encode(question)
+        )
 
         # 与问候示例比对，命中高则判定为闲聊
-        greeting_scores = self.util.cos_sim(question_embedding, self.greeting_embeddings)
+        greeting_scores = await loop.run_in_executor(
+            None, lambda: self.util.cos_sim(question_embedding, self.greeting_embeddings)
+        )
         max_greeting_score = float(greeting_scores.max())
 
         if max_greeting_score >= self.threshold:
@@ -69,7 +82,9 @@ class SemanticStrategy(Strategy):
             return False
 
         # 与知识示例比对，命中高则判定为需要知识库
-        knowledge_scores = self.util.cos_sim(question_embedding, self.knowledge_embeddings)
+        knowledge_scores = await loop.run_in_executor(
+            None, lambda: self.util.cos_sim(question_embedding, self.knowledge_embeddings)
+        )
         max_knowledge_score = float(knowledge_scores.max())
 
         if max_knowledge_score >= self.knowledge_threshold:
@@ -88,7 +103,7 @@ class SemanticStrategy(Strategy):
         """返回 "semantic"。"""
         return "semantic"
 
-    def cleanup(self):
+    async def cleanup(self):
         """释放模型资源。"""
         if self.model is not None:
             del self.model
@@ -98,13 +113,18 @@ class SemanticStrategy(Strategy):
         """设置相似度阈值。"""
         self.threshold = threshold
 
-    def add_example(self, text: str, is_greeting: bool):
+    async def add_example(self, text: str, is_greeting: bool):
         """追加问候/知识示例向量。"""
         if is_greeting:
             self.greeting_examples.append(text)
         else:
             self.knowledge_examples.append(text)
-        
+
         if self.model is not None:
-            self.greeting_embeddings = self.model.encode(self.greeting_examples)
-            self.knowledge_embeddings = self.model.encode(self.knowledge_examples)
+            loop = asyncio.get_running_loop()
+            self.greeting_embeddings = await loop.run_in_executor(
+                None, lambda: self.model.encode(self.greeting_examples)
+            )
+            self.knowledge_embeddings = await loop.run_in_executor(
+                None, lambda: self.model.encode(self.knowledge_examples)
+            )

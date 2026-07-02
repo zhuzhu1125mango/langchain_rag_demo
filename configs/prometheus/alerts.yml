@@ -70,7 +70,7 @@ groups:
     rules:
       # LLM 调用延迟告警：P95 延迟 > 30 秒持续 1 分钟触发
       - alert: LLMCallHighLatency
-        expr: rag_llm_call_duration_seconds_p95 > 30
+        expr: histogram_quantile(0.95, sum(rate(rag_llm_call_duration_seconds_bucket[5m])) by (le)) > 30
         for: 1m
         labels:
           severity: warning
@@ -80,7 +80,7 @@ groups:
 
       # LLM 调用错误率告警：错误率 > 10% 持续 1 分钟触发
       - alert: LLMCallErrors
-        expr: rate(rag_llm_call_errors_total[1m]) > 0.1
+        expr: rate(rag_llm_call_errors_total[1m]) / rate(rag_llm_calls_total[1m]) > 0.1
         for: 1m
         labels:
           severity: critical

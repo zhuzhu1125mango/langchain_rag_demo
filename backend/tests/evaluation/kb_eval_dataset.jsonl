@@ -1,0 +1,5 @@
+{"question":"员工请假需要提前多久申请？","golden_chunk_ids":[],"golden_documents":["leave_policy"],"keywords":["请假","申请"]}
+{"question":"公司年终奖什么时候发放？","golden_chunk_ids":[],"golden_documents":["bonus_policy"],"keywords":["年终奖","发放"]}
+{"question":"试用期员工是否享受带薪年假？","golden_chunk_ids":[],"golden_documents":["leave_policy"],"keywords":["试用期","年假"]}
+{"question":"办公时间是什么时候？","golden_chunk_ids":[],"golden_documents":["work_hours"],"keywords":["办公时间","工作时间"]}
+{"question":"如何申请报销差旅费？","golden_chunk_ids":[],"golden_documents":["reimbursement"],"keywords":["报销","差旅费"]}

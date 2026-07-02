@@ -4,9 +4,10 @@ A/B测试实验API接口
 提供实验的创建、管理和分析功能
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+from src.auth import get_current_user, CurrentUser
 from src.services.experiment_manager import experiment_manager
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
@@ -26,7 +27,10 @@ class BatchDeleteExperimentsRequest(BaseModel):
 
 
 @router.post("/", summary="创建实验")
-async def create_experiment(request: CreateExperimentRequest):
+async def create_experiment(
+    request: CreateExperimentRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """创建新的A/B测试实验"""
     try:
         experiment_id = await experiment_manager.create_experiment(
@@ -41,7 +45,10 @@ async def create_experiment(request: CreateExperimentRequest):
 
 
 @router.get("/", summary="获取实验列表")
-async def list_experiments(status: Optional[str] = None):
+async def list_experiments(
+    status: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """获取实验列表，支持状态过滤"""
     try:
         experiments = await experiment_manager.list_experiments(status=status)
@@ -51,7 +58,10 @@ async def list_experiments(status: Optional[str] = None):
 
 
 @router.delete("/batch", summary="批量删除实验")
-async def batch_delete_experiments(request: BatchDeleteExperimentsRequest):
+async def batch_delete_experiments(
+    request: BatchDeleteExperimentsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """批量删除实验及其关联数据（变体、指标、结果、分流记录）"""
     try:
         result = await experiment_manager.delete_experiments(request.experiment_ids)
@@ -61,7 +71,10 @@ async def batch_delete_experiments(request: BatchDeleteExperimentsRequest):
 
 
 @router.get("/{experiment_id}", summary="获取实验详情")
-async def get_experiment(experiment_id: str):
+async def get_experiment(
+    experiment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """获取指定实验的详细信息"""
     try:
         experiment = await experiment_manager.get_experiment(experiment_id)
@@ -76,7 +89,10 @@ async def get_experiment(experiment_id: str):
 
 
 @router.post("/{experiment_id}/start", summary="启动实验")
-async def start_experiment(experiment_id: str):
+async def start_experiment(
+    experiment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """启动实验"""
     try:
         success = await experiment_manager.start_experiment(experiment_id)
@@ -91,7 +107,10 @@ async def start_experiment(experiment_id: str):
 
 
 @router.post("/{experiment_id}/stop", summary="停止实验")
-async def stop_experiment(experiment_id: str):
+async def stop_experiment(
+    experiment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """停止实验"""
     try:
         success = await experiment_manager.stop_experiment(experiment_id)
@@ -109,7 +128,8 @@ async def stop_experiment(experiment_id: str):
 async def allocate_traffic(
     experiment_id: str,
     user_id: str,
-    session_id: Optional[str] = None
+    session_id: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """为用户分配实验变体"""
     try:
@@ -133,7 +153,8 @@ async def record_metric(
     experiment_id: str,
     variant_id: str,
     metric_name: str,
-    metric_value: float
+    metric_value: float,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """记录实验指标数据"""
     try:
@@ -149,7 +170,10 @@ async def record_metric(
 
 
 @router.get("/{experiment_id}/metrics", summary="获取指标")
-async def get_metrics(experiment_id: str):
+async def get_metrics(
+    experiment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """获取实验的指标数据"""
     try:
         metrics = await experiment_manager.get_metrics(experiment_id)
@@ -159,7 +183,10 @@ async def get_metrics(experiment_id: str):
 
 
 @router.post("/{experiment_id}/analyze", summary="分析实验")
-async def analyze_experiment(experiment_id: str):
+async def analyze_experiment(
+    experiment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """分析实验结果"""
     try:
         result = await experiment_manager.analyze_experiment(experiment_id)
@@ -169,7 +196,10 @@ async def analyze_experiment(experiment_id: str):
 
 
 @router.get("/{experiment_id}/result", summary="获取实验结果")
-async def get_experiment_result(experiment_id: str):
+async def get_experiment_result(
+    experiment_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """获取实验的分析结果"""
     try:
         result = await experiment_manager.get_experiment_result(experiment_id)

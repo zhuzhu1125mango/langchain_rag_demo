@@ -25,11 +25,16 @@ class CacheService:
 
     async def _init_client(self):
         """初始化异步 Redis 连接。"""
+        password = settings.redis.REDIS_PASSWORD
+        if not password:
+            raise ValueError(
+                "REDIS_PASSWORD 未配置。Redis 密码为必填项，请在 .env 中设置 REDIS_PASSWORD。"
+            )
         self.client = aioredis.Redis(
             host=settings.redis.REDIS_HOST,
             port=settings.redis.REDIS_PORT,
             db=settings.redis.REDIS_DB,
-            password=settings.redis.REDIS_PASSWORD,
+            password=password,
             decode_responses=True,
             protocol=2
         )

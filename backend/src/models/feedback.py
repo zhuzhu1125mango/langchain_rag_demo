@@ -22,6 +22,7 @@ class Feedback(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # 评价唯一标识
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id"), nullable=True)    # 关联会话ID（允许空值，支持匿名评价）
     message_id = Column(String, nullable=False)                           # 消息ID
+    owner_id = Column(String, nullable=False, default="default")          # 资源所有者标识
     rating = Column(Integer, nullable=False)                              # 评分（1-5或1/-1）
     reason = Column(String)                                               # 评价原因/备注
     created_at = Column(DateTime(timezone=True), server_default=func.now()) # 创建时间

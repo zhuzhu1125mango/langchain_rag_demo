@@ -339,6 +339,76 @@ class RuleLearner:
             "new_threshold": new_threshold,
             "samples_analyzed": len(samples)
         }
+    
+    async def learn_intent_classifier(
+        self,
+        classifier,
+        limit: int = 100,
+    ) -> Dict[str, Any]:
+        """
+        基于历史执行反馈在线学习意图分类器示例库。
+        
+        将 strategy_executions 中带有用户反馈的记录转换为意图分类样本：
+        - 反馈为正（label=1）→ 视为 actual_mode = kb_only（知识库意图被正确触发）
+        - 反馈为负（label=0）→ 视为 actual_mode = direct_llm（不应使用知识库）
+        
+        调用 classifier.learn_from_feedback 将正确样本加入对应意图示例库。
+        
+        Args:
+            classifier: EmbeddingIntentClassifier 实例或具有 learn_from_feedback 方法的对象
+            limit: 最多处理的记录数
+            
+        Returns:
+            Dict[str, Any]: 学习统计信息
+        """
+        samples = await self.extract_training_samples(limit)
+        if len(samples) < 1:
+            return {
+                "status": "skipped",
+                "reason": "无可用反馈样本",
+                "samples_available": 0,
+            }
+        
+        learned = 0
+        correct = 0
+        skipped = 0
+        for sample in samples:
+            question = sample.get("question", "")
+            if not question:
+                skipped += 1
+                continue
+            
+            label = sample.get("label")
+            actual_mode = "kb_only" if label == 1 else "direct_llm"
+            
+            try:
+                # 获取分类器对当前问题的预测结果
+                result = await classifier.classify(question)
+                predicted_mode = result.primary_mode.value
+                confidence = result.confidence
+            except Exception as e:
+                skipped += 1
+                continue
+            
+            learn_result = await classifier.learn_from_feedback(
+                question=question,
+                predicted_mode=predicted_mode,
+                actual_mode=actual_mode,
+                confidence=confidence,
+            )
+            
+            if learn_result["status"] == "misclassification_learned":
+                learned += 1
+            else:
+                correct += 1
+        
+        return {
+            "status": "success",
+            "samples_used": len(samples),
+            "learned": learned,
+            "correct": correct,
+            "skipped": skipped,
+        }
 
 
 rule_learner = RuleLearner()

@@ -50,7 +50,7 @@ class DecisionPipeline:
             return False
         return bool(_GREETING_RE.match(question.strip()))
 
-    def decide(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
+    async def decide(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
         """决定当前问题应使用的问答模式。
 
         决策优先级：问候 > Function Calling / Agent > 联网搜索 > 强制模式 > 策略管理器。
@@ -138,7 +138,7 @@ class DecisionPipeline:
             )
 
         # 兜末级：交给策略管理器多策略投票决策
-        use_kb, confidence, strategy_results = self.strategy_manager.should_use_knowledge_base(question, history)
+        use_kb, confidence, strategy_results = await self.strategy_manager.should_use_knowledge_base(question, history)
         reasoning = "混合智能模式判断：" + ("需要使用知识库" if use_kb else "直接回答更合适")
 
         return DecisionResult(

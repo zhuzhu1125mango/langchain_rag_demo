@@ -770,8 +770,10 @@ data: {"type": "error", "error": "错误信息"}
     "top_k": 3
   },
   "model": {
-    "embedding_model_name": "nomic-embed-text:latest",
-    "ollama_model_name": "deepseek-r1:7b-qwen-distill-q4_K_M"
+    "embedding_model_name": "bge-m3:latest",
+    "embedding_dimension": 1024,
+    "ollama_model_name": "deepseek-r1:7b-qwen-distill-q4_K_M",
+    "fast_llm_model_name": "qwen2.5:7b"
   },
   "supported_extensions": [".txt", ".pdf", ".docx", ...]
 }

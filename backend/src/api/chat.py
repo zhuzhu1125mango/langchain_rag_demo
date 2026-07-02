@@ -21,6 +21,7 @@ import json
 import logging
 from datetime import datetime
 from src.database import get_db, async_session
+from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback, KnowledgeBase
 from src.services.rag_chain import RAGChain
 from src.services.vector_store import VectorStoreManager
@@ -43,13 +44,18 @@ class MessageRequest(BaseModel):
 
 
 @router.post("/messages")
-async def send_message(request: MessageRequest, db: AsyncSession = Depends(get_db)):
+async def send_message(
+    request: MessageRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     发送消息并获取回答（非流式）
 
     Args:
         request: 请求数据（问题、会话ID、知识库ID列表）
         db: 数据库会话
+        current_user: 当前认证用户
 
     Returns:
         dict: {"session_id": 会话ID, "answer": 回答内容, "sources": 来源列表, "answer_type": 回答类型}
@@ -69,10 +75,11 @@ async def send_message(request: MessageRequest, db: AsyncSession = Depends(get_d
         session = result.scalar_one_or_none()
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
+        require_owner(session.user_id, current_user)
         history = session.messages.copy()
     else:
         session = SessionModel(
-            user_id="default",
+            user_id=current_user.user_id,
             title=request.question[:50],
             messages=[],
             kb_ids=request.kb_ids or [],
@@ -137,7 +144,7 @@ async def send_message(request: MessageRequest, db: AsyncSession = Depends(get_d
     generated_title = None
     if title_generator.is_default_title(session.title):
         try:
-            session.title = title_generator.generate_title(request.question)
+            session.title = await title_generator.generate_title(request.question)
             generated_title = session.title
             logger.info(f"会话标题已生成(非流式): session={session.id}, title={session.title}")
         except Exception as title_err:
@@ -164,6 +171,7 @@ async def stream_answer(
     kb_ids: Optional[List[str]] = Query(None),
     use_web_search: Optional[bool] = Query(False),
     search_mode: Optional[str] = Query("simple"),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     流式回答接口（SSE）
@@ -172,6 +180,7 @@ async def stream_answer(
         question: 用户问题
         session_id: 会话ID（可选）
         kb_ids: 知识库ID列表（可选）
+        current_user: 当前认证用户
 
     Returns:
         StreamingResponse: 流式响应（SSE格式）
@@ -201,11 +210,12 @@ async def stream_answer(
                 async def error_generator():
                     yield json.dumps({"type": "error", "error": "会话不存在"})
                 return StreamingResponse(error_generator(), media_type="text/event-stream")
+            require_owner(session.user_id, current_user)
             current_session_id = str(session.id)
             history = session.messages.copy()
         else:
             session = SessionModel(
-                user_id="default",
+                user_id=current_user.user_id,
                 title=question[:50],
                 messages=[],
                 kb_ids=kb_ids or [],
@@ -228,7 +238,7 @@ async def stream_answer(
         logger.info(f"用户消息保存成功(流式): session={current_session_id}, message_id={user_message_id}, messages_count={len(session.messages)}")
 
     # 保存助手消息（流式生成结束或异常时调用）
-    async def save_assistant_message(full_answer, sources, source_metadata):
+    async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None):
         generated_title = None
         async with async_session() as db:
             result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(current_session_id)))
@@ -253,21 +263,24 @@ async def stream_answer(
             except Exception as exec_err:
                 logger.error(f"记录策略执行失败: {exec_err}", exc_info=True)
 
-            session.messages = session.messages + [{
+            message_payload = {
                 "id": assistant_message_id,
                 "role": "assistant",
                 "content": full_answer,
                 "sources": sources,
                 "source_metadata": source_metadata,
                 "timestamp": datetime.now().isoformat(),
-                "execution_id": execution_id
-            }]
+                "execution_id": execution_id,
+            }
+            if reasoning:
+                message_payload["reasoning"] = reasoning
+            session.messages = session.messages + [message_payload]
             flag_modified(session, "messages")
 
             # 若会话仍为默认标题，根据首条问题生成标题
             if title_generator.is_default_title(session.title):
                 try:
-                    session.title = title_generator.generate_title(question)
+                    session.title = await title_generator.generate_title(question)
                     generated_title = session.title
                     logger.info(f"会话标题已生成(流式): session={current_session_id}, title={session.title}")
                 except Exception as title_err:
@@ -283,6 +296,7 @@ async def stream_answer(
         sources = []
         source_metadata = []
         answer_type = "llm_direct"
+        reasoning_steps = []
 
         try:
             async for result in rag_chain.arun_stream(
@@ -291,6 +305,38 @@ async def stream_answer(
                 search_mode=search_mode or "simple"
             ):
                 chunk, source_texts, source_meta, at = result
+
+                # reasoning 事件：搜索/思考过程结构化数据
+                if at == "reasoning":
+                    try:
+                        reasoning_data = json.loads(chunk) if chunk else {}
+                    except Exception:
+                        reasoning_data = {}
+                    if reasoning_data and reasoning_data.get("type") == "reasoning":
+                        reasoning_steps.append(reasoning_data)
+                        logger.debug(f"SSE reasoning payload: {reasoning_data}")
+                        yield f"data: {json.dumps(reasoning_data)}\n\n"
+                    continue
+
+                # 搜索状态事件（向后兼容）：映射为 reasoning 步骤
+                if at == "search_status":
+                    try:
+                        status_data = json.loads(chunk) if chunk else {}
+                    except Exception:
+                        status_data = {}
+                    reasoning_payload = {
+                        "type": "reasoning",
+                        "step": "web_search",
+                        "status": status_data.get("status", "running"),
+                        "title": "联网搜索",
+                        "content": status_data.get("message", ""),
+                        "metadata": {"sources_count": status_data.get("sources", 0)},
+                    }
+                    reasoning_steps.append(reasoning_payload)
+                    logger.debug(f"SSE search_status mapped to reasoning: {reasoning_payload}")
+                    yield f"data: {json.dumps(reasoning_payload)}\n\n"
+                    continue
+
                 # 过滤模型思考阶段产生的空内容，避免前端显示异常
                 if chunk:
                     full_answer += chunk
@@ -306,7 +352,7 @@ async def stream_answer(
             # 如果已生成部分内容，尝试保存，避免用户消息孤立
             if full_answer:
                 try:
-                    save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata))
+                    save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, reasoning_steps))
                     await asyncio.shield(save_task)
                 except Exception as save_err:
                     logger.error(f"异常时保存部分助手消息失败: {save_err}", exc_info=True)
@@ -341,7 +387,7 @@ async def stream_answer(
         # 在发送 end 事件前先保存助手消息，确保客户端断开前消息已持久化
         generated_title = None
         try:
-            save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata))
+            save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, reasoning_steps))
             generated_title = await asyncio.shield(save_task)
         except Exception as e:
             logger.error(f"保存助手消息失败: {str(e)}", exc_info=True)
@@ -355,7 +401,8 @@ async def stream_answer(
             'message_id': assistant_message_id,
             'session_id': current_session_id,
             'sources': source_info,
-            'answer_type': answer_type
+            'answer_type': answer_type,
+            'reasoning': reasoning_steps,
         }
         if generated_title:
             end_payload['title'] = generated_title
@@ -472,7 +519,12 @@ async def enhance_context(request: EnhanceContextRequest, db: AsyncSession = Dep
 
 
 @router.post("/messages/{message_id}/feedback")
-async def submit_message_feedback(message_id: str, request: FeedbackRequest, db: AsyncSession = Depends(get_db)):
+async def submit_message_feedback(
+    message_id: str,
+    request: FeedbackRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     提交消息评价反馈
 
@@ -480,6 +532,7 @@ async def submit_message_feedback(message_id: str, request: FeedbackRequest, db:
         message_id: 消息ID
         request: 反馈数据（评分、原因、会话ID）
         db: 数据库会话
+        current_user: 当前认证用户
 
     Returns:
         dict: {"id": 评价ID, "message": "评价提交成功"}
@@ -506,6 +559,7 @@ async def submit_message_feedback(message_id: str, request: FeedbackRequest, db:
     feedback = Feedback(
         session_id=uuid.UUID(request.session_id) if request.session_id else None,
         message_id=message_id,
+        owner_id=current_user.user_id,
         rating=rating,
         reason=request.reason
     )

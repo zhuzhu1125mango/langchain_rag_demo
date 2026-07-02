@@ -13,6 +13,7 @@ from .experiment import (
     ExperimentMetric,
     ExperimentResult,
 )
+from .badcase import Badcase
 
 __all__ = [
     "Document",
@@ -30,4 +31,5 @@ __all__ = [
     "TrafficAllocation",
     "ExperimentMetric",
     "ExperimentResult",
+    "Badcase",
 ]

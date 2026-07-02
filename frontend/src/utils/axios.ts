@@ -23,12 +23,16 @@ const api = axios.create({
   delete<T = unknown>(url: string, config?: AxiosRequestConfig): Promise<T>
 }
 
-// 请求拦截器：自动附加 JWT Token
+// 请求拦截器：自动附加 JWT Token 和 API Key
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token')
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
+    }
+    const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
+    if (apiKey) {
+      config.headers['X-API-Key'] = apiKey
     }
     return config
   },

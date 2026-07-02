@@ -2,6 +2,7 @@
 pytest配置文件
 """
 
+import asyncio
 import os
 import sys
 
@@ -9,6 +10,53 @@ import pytest
 
 # 添加项目路径到Python路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+# Windows 下使用 SelectorEventLoop 替代 ProactorEventLoop，
+# 避免 TestClient 跨测试复用事件循环与连接池时触发 "Event loop is closed" /
+# "'NoneType' object has no attribute 'send'" 错误。
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+
+
+@pytest.fixture(autouse=True)
+def _reset_async_engine():
+    """在每个测试函数结束后释放异步数据库连接池。
+
+    TestClient 每次创建独立的事件循环线程，asyncpg 连接会绑定到特定事件循环。
+    若不在 teardown 时清空连接池，后续测试会复用绑定到已关闭事件循环的连接，
+    导致 "cannot perform operation: another operation is in progress" 等错误。
+    """
+    yield
+    try:
+        from src.database import async_engine
+        asyncio.run(async_engine.dispose())
+    except Exception:
+        pass
+
+
+def pytest_addoption(parser):
+    """注册自定义命令行选项。"""
+    parser.addoption(
+        "--run-e2e",
+        action="store_true",
+        default=False,
+        help="运行标记为 e2e 的端到端测试（默认跳过，需外部服务）",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    """根据 --run-e2e 选项决定是否跳过 e2e 测试。
+
+    未传入 --run-e2e 时，所有标记 e2e 的测试自动跳过；
+    传入 --run-e2e 时，正常执行。
+    """
+    if config.getoption("--run-e2e"):
+        return
+    skip_e2e = pytest.mark.skip(reason="需要 --run-e2e 选项运行（依赖外部服务）")
+    for item in items:
+        if "e2e" in item.keywords:
+            item.add_marker(skip_e2e)
 
 
 @pytest.fixture(autouse=True)

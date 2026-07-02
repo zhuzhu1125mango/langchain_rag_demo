@@ -40,6 +40,7 @@ langsmith = "*"
 
 # 向量数据库
 pymilvus = "*"
+pymilvus-model = ">=0.3.0"
 
 # 对象存储
 minio = "*"
@@ -73,10 +74,12 @@ prometheus-fastapi-instrumentator = "*"
 
 # 缓存
 redis = "*"
+aiolimiter = "*"
 
 # 工具库
 tenacity = "*"
 backoff = "*"
+aiofiles = "*"
 cachetools = "*"
 python-dateutil = "*"
 pytz = "*"
@@ -136,6 +139,9 @@ start = "start:main"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"                          # 自动识别 async 测试函数
 asyncio_default_fixture_loop_scope = "session" # 事件循环作用域为整个会话
+markers = [
+    "e2e: 端到端测试，需要外部服务（Ollama/Milvus/SearXNG/PostgreSQL）",
+]
 
 # =============================================================================
 # 构建系统配置

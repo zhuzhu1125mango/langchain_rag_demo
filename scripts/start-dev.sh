@@ -271,11 +271,22 @@ wait_for_health() {
     # Print container status table
     print_container_status
     
+    # SearXNG 应用层健康检查（Docker healthy 不代表 /healthz 返回 200）
+    if curl -fsS "http://localhost:8080/healthz" >/dev/null 2>&1; then
+        log_ok "SearXNG 搜索引擎健康检查通过"
+    else
+        log_warn "SearXNG 健康检查失败，搜索功能可能不可用"
+        log_info "请检查日志: docker logs searxng-dev"
+        all_healthy=false
+    fi
+    
+    echo ""
+    
     # Return status code
     [[ "$all_healthy" == true ]] && return 0 || return 1
 }
 
-print_container_status() {
+print_access_info() {
     log_info "容器状态:"
     echo ""
     

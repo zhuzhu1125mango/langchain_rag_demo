@@ -42,7 +42,7 @@ class KeywordStrategy(Strategy):
             "为什么", "原因", "理由", "原理", "机制"
         }
     
-    def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
+    async def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
         """精确匹配+正则判断是否需要使用知识库。"""
         question_lower = question.strip().lower()
 

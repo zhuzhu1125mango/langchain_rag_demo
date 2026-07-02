@@ -188,7 +188,7 @@ export function useKnowledgeBases() {
     queryKey: ['knowledge_bases'],
     queryFn: async (): Promise<KnowledgeBase[]> => {
       // 传大 page_size 一次性获取全部，前端无翻页 UI
-      const data = await api.get<KnowledgeBaseListResponse>('/knowledge_bases', { params: { page_size: 1000 } })
+      const data = await api.get<KnowledgeBaseListResponse>('/knowledge_bases/', { params: { page_size: 1000 } })
       return data.items || data as unknown as KnowledgeBase[]
     },
     staleTime: 0,
@@ -230,6 +230,28 @@ export function useDeleteKnowledgeBase() {
   return useMutation({
     mutationFn: async (kbId: string) => {
       await api.delete(`/knowledge_bases/${kbId}`)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
+      queryClient.invalidateQueries({ queryKey: ['documents'] })
+    }
+  })
+}
+
+export interface BatchDeleteKnowledgeBasesResult {
+  /** 实际删除的知识库数量。 */
+  deleted_count: number
+  /** 因不存在或无权限而跳过的 ID 列表。 */
+  skipped_ids: string[]
+}
+
+/** 批量删除知识库。 */
+export function useBatchDeleteKnowledgeBases() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (ids: string[]): Promise<BatchDeleteKnowledgeBasesResult> => {
+      const data = await api.post<BatchDeleteKnowledgeBasesResult>('/knowledge_bases/batch-delete', { ids })
+      return data
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })

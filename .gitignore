@@ -64,6 +64,20 @@ frontend/yarn.lock
 frontend/playwright-report/
 frontend/test-results/
 
+# =============== Backend ===============
+backend/node_modules/
+backend/package.json
+backend/pnpm-lock.yaml
+backend/test_output.txt
+backend/data/*.docx
+backend/data/*.pdf
+backend/data/*.txt
+backend/data/*.xlsx
+backend/data/*.pptx
+backend/data/*.doc
+backend/data/*.xls
+backend/data/*.ppt
+
 # =============== Python Type Checkers / Linters ===============
 .mypy_cache/
 .dmypy.json

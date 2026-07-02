@@ -31,9 +31,10 @@ class LLMInferenceStrategy(Strategy):
             "使用指南"
         ]
     
-    def initialize(self):
+    async def initialize(self):
         try:
-            self.llm = ChatOllama(model=settings.model.OLLAMA_MODEL_NAME, streaming=False)
+            model_name = settings.model.FAST_LLM_MODEL_NAME or settings.model.OLLAMA_MODEL_NAME
+            self.llm = ChatOllama(model=model_name, streaming=False)
         except Exception:
             self.llm = None
     
@@ -47,7 +48,7 @@ class LLMInferenceStrategy(Strategy):
                 return True
         return False
     
-    def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
+    async def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
         """LLM 推理判断是否需要使用知识库。"""
         if self._is_system_question(question):
             self.confidence = 0.95
@@ -75,7 +76,7 @@ class LLMInferenceStrategy(Strategy):
         prompt = template.format(question=question)
 
         try:
-            response = self.llm.invoke(prompt)
+            response = await self.llm.ainvoke(prompt)
             result = response.content.strip().upper()
 
             # 三态解析：YES 走知识库、NO 走纯 LLM、未识别默认走知识库并降置信度
@@ -100,7 +101,7 @@ class LLMInferenceStrategy(Strategy):
         """返回 "llm_inference"。"""
         return "llm_inference"
 
-    def cleanup(self):
+    async def cleanup(self):
         """释放 LLM。"""
         if self.llm is not None:
             del self.llm

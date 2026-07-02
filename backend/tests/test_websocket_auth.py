@@ -1,0 +1,117 @@
+"""
+WebSocket 通知通道认证与权限测试
+"""
+
+import uuid
+
+import pytest
+from fastapi.testclient import TestClient
+
+from src.config import settings
+from src.main import app
+
+
+@pytest.fixture
+def client():
+    """每个测试函数使用独立的 TestClient。"""
+    with TestClient(app) as c:
+        yield c
+
+
+@pytest.fixture(autouse=True)
+def reset_settings():
+    """测试结束后恢复认证相关配置，避免影响其他测试。"""
+    original_api_key = settings.security.API_KEY
+    original_secret_key = settings.security.SECRET_KEY
+    original_in_docker = settings.IN_DOCKER
+    yield
+    settings.security.API_KEY = original_api_key
+    settings.security.SECRET_KEY = original_secret_key
+    settings.IN_DOCKER = original_in_docker
+
+
+class TestWebSocketAuth:
+    """WebSocket 认证测试。"""
+
+    def test_ws_notifications_anonymous_in_dev_allowed(self, client):
+        """开发环境未配置 API_KEY 时，允许匿名 WebSocket 连接。"""
+        settings.security.API_KEY = None
+        settings.IN_DOCKER = False
+
+        with client.websocket_connect("/api/ws/notifications") as websocket:
+            data = websocket.receive_json()
+            assert data["type"] == "connected"
+
+    def _configure_production_mode(self):
+        """配置生产模式所需的强 SECRET_KEY、API_KEY 与 Docker 标志。"""
+        settings.security.SECRET_KEY = "Test-Secret-Key-For-WebSocket-Auth-123!"
+        settings.security.API_KEY = "test-api-key-for-websocket"
+        settings.IN_DOCKER = True
+
+    def test_ws_notifications_no_auth_in_docker_rejected(self, client):
+        """Docker 生产环境必须提供 API Key，否则拒绝连接。"""
+        self._configure_production_mode()
+
+        with pytest.raises(Exception):
+            with client.websocket_connect("/api/ws/notifications") as websocket:
+                websocket.receive_json()
+
+    def test_ws_notifications_valid_api_key_allowed(self, client):
+        """提供有效 API Key 时允许建立 WebSocket 连接。"""
+        self._configure_production_mode()
+
+        with client.websocket_connect(
+            "/api/ws/notifications?api_key=test-api-key-for-websocket"
+        ) as websocket:
+            data = websocket.receive_json()
+            assert data["type"] == "connected"
+
+    def test_ws_notifications_invalid_api_key_rejected(self, client):
+        """提供无效 API Key 时拒绝 WebSocket 连接。"""
+        self._configure_production_mode()
+
+        with pytest.raises(Exception):
+            with client.websocket_connect(
+                "/api/ws/notifications?api_key=wrong-key"
+            ) as websocket:
+                websocket.receive_json()
+
+    def test_ws_kb_valid_api_key_allowed(self, client):
+        """知识库通知通道使用有效 API Key 可连接。"""
+        self._configure_production_mode()
+
+        with client.websocket_connect(
+            "/api/ws/kb?api_key=test-api-key-for-websocket"
+        ) as websocket:
+            data = websocket.receive_json()
+            assert data["type"] == "connected"
+
+
+class TestWebSocketDocsPermission:
+    """文档通知通道权限测试。"""
+
+    def _configure_production_mode(self):
+        """配置生产模式所需的强 SECRET_KEY、API_KEY 与 Docker 标志。"""
+        settings.security.SECRET_KEY = "Test-Secret-Key-For-WebSocket-Auth-123!"
+        settings.security.API_KEY = "test-api-key-for-websocket"
+        settings.IN_DOCKER = True
+
+    def test_ws_docs_invalid_kb_id_rejected(self, client):
+        """无效的知识库 ID 应被拒绝。"""
+        self._configure_production_mode()
+
+        with pytest.raises(Exception):
+            with client.websocket_connect(
+                "/api/ws/docs/not-a-uuid?api_key=test-api-key-for-websocket"
+            ) as websocket:
+                websocket.receive_json()
+
+    def test_ws_docs_nonexistent_kb_rejected(self, client):
+        """不存在的知识库 ID 应被拒绝。"""
+        self._configure_production_mode()
+
+        with pytest.raises(Exception):
+            with client.websocket_connect(
+                f"/api/ws/docs/{uuid.uuid4()}?api_key=test-api-key-for-websocket"
+            ) as websocket:
+                websocket.receive_json()

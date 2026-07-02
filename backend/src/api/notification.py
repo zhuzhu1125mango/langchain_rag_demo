@@ -9,8 +9,16 @@ WebSocket通知路由 - 提供实时通知通道
 
 import asyncio
 import json
-from typing import List
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Path
+import uuid
+from typing import List, Optional
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Path, Depends
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.auth import get_current_user_for_ws, require_owner, CurrentUser
+from src.database import get_db
+from src.models.knowledge_base import KnowledgeBase
 from src.services.notification_service import (
     subscribe,
     unsubscribe,
@@ -29,12 +37,19 @@ class ConnectionManager:
         # connection_id -> (websocket, channels)
         self.active_connections: dict = {}
 
-    async def connect(self, websocket: WebSocket, connection_id: str, channels: List[str]):
+    async def connect(
+        self,
+        websocket: WebSocket,
+        connection_id: str,
+        channels: List[str],
+        user_id: Optional[str] = None,
+    ):
         """建立连接并订阅频道"""
         await websocket.accept()
         self.active_connections[connection_id] = {
             "websocket": websocket,
-            "channels": set(channels)
+            "channels": set(channels),
+            "user_id": user_id,
         }
 
         # 订阅到指定频道
@@ -93,14 +108,16 @@ async def websocket_notifications(
         "type": "connected" | "kb_list_changed" | "doc_list_changed" | "task_progress" | "task_completed" | "task_failed",
         "data": {...}
     }
+
+    认证方式：通过 query parameter `api_key` 传递 API Key。
     """
-    import uuid
+    current_user = await get_current_user_for_ws(websocket)
     connection_id = str(uuid.uuid4())
 
     # 解析频道列表
     channel_list = [c.strip() for c in channels.split(",") if c.strip()]
 
-    await manager.connect(websocket, connection_id, channel_list)
+    await manager.connect(websocket, connection_id, channel_list, user_id=current_user.user_id)
 
     try:
         while True:
@@ -155,11 +172,13 @@ async def websocket_knowledge_bases(websocket: WebSocket):
     - kb_created: 新建知识库
     - kb_updated: 知识库已更新
     - kb_deleted: 知识库已删除
+
+    认证方式：通过 query parameter `api_key` 传递 API Key。
     """
-    import uuid
+    current_user = await get_current_user_for_ws(websocket)
     connection_id = str(uuid.uuid4())
 
-    await manager.connect(websocket, connection_id, ["kb:*"])
+    await manager.connect(websocket, connection_id, ["kb:*"], user_id=current_user.user_id)
 
     try:
         while True:
@@ -178,7 +197,8 @@ async def websocket_knowledge_bases(websocket: WebSocket):
 @router.websocket("/ws/docs/{kb_id}")
 async def websocket_documents(
     websocket: WebSocket,
-    kb_id: str = Path(..., description="知识库ID")
+    kb_id: str = Path(..., description="知识库ID"),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     文档列表变更通知WebSocket
@@ -188,12 +208,36 @@ async def websocket_documents(
     - doc_created: 新文档上传完成
     - doc_deleted: 文档已删除
     - doc_processing: 文档处理进度更新
-    """
-    import uuid
-    connection_id = str(uuid.uuid4())
 
+    认证方式：通过 query parameter `api_key` 传递 API Key。
+    权限校验：仅允许知识库所有者或全局 API Key 用户订阅。
+    """
+    current_user = await get_current_user_for_ws(websocket)
+
+    # 校验知识库存在性与所有权
+    try:
+        kb_id_uuid = uuid.UUID(kb_id)
+    except ValueError:
+        await websocket.close(code=1008, reason="无效的知识库ID")
+        return
+
+    result = await db.execute(
+        select(KnowledgeBase).filter(KnowledgeBase.id == kb_id_uuid)
+    )
+    kb = result.scalar_one_or_none()
+    if not kb:
+        await websocket.close(code=1008, reason="知识库不存在")
+        return
+
+    try:
+        require_owner(kb.owner_id, current_user)
+    except Exception:
+        await websocket.close(code=1008, reason="无权访问该知识库")
+        return
+
+    connection_id = str(uuid.uuid4())
     channels = [f"doc:{kb_id}", "doc:*"]  # 订阅特定KB和全局
-    await manager.connect(websocket, connection_id, channels)
+    await manager.connect(websocket, connection_id, channels, user_id=current_user.user_id)
 
     try:
         while True:

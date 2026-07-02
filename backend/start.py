@@ -1,9 +1,8 @@
-"""
-启动脚本 - RAG知识库问答系统启动器
+"""启动脚本 - RAG知识库问答系统启动器
 
 本脚本负责：
 1. 检查Ollama服务是否运行
-2. 验证所需模型是否已安装
+2. 验证所需模型是否已安装（Embedding、主生成、轻量任务、重排序等）
 3. 检查数据库连接（PostgreSQL、MinIO、Milvus）
 4. 配置日志系统
 5. 启动FastAPI服务
@@ -38,6 +37,12 @@ from src.config import settings, LOG_DIR
 
 OLLAMA_MODEL_NAME = settings.model.OLLAMA_MODEL_NAME
 EMBEDDING_MODEL_NAME = settings.model.EMBEDDING_MODEL_NAME
+FAST_LLM_MODEL_NAME = settings.model.FAST_LLM_MODEL_NAME
+KB_RERANK_MODEL = settings.processing.KB_RERANK_MODEL
+KB_RERANK_PROVIDER = settings.processing.KB_RERANK_PROVIDER
+SEARCH_RERANK_MODEL = settings.search.SEARCH_RERANK_MODEL
+SEARCH_RERANK_PROVIDER = settings.search.SEARCH_RERANK_PROVIDER
+TITLE_GENERATION_MODEL = settings.title_generation.TITLE_GENERATION_MODEL
 POSTGRES_USER = settings.database.POSTGRES_USER
 POSTGRES_PASSWORD = settings.database.POSTGRES_PASSWORD
 POSTGRES_HOST = settings.database.POSTGRES_HOST
@@ -270,7 +275,30 @@ def check_and_pull_models(logger):
     Returns:
         bool: True表示所有模型都已就绪
     """
-    required_models = [EMBEDDING_MODEL_NAME, OLLAMA_MODEL_NAME]
+    # 收集所有通过 Ollama 调用的模型，并去重
+    # 清理可能混入的行内注释（如 "# 标题生成模型"）和空白字符
+    def _clean_model_name(value):
+        if not value:
+            return None
+        value = value.split("#", 1)[0].strip()
+        return value if value else None
+    
+    title_model = _clean_model_name(TITLE_GENERATION_MODEL) or FAST_LLM_MODEL_NAME
+    required_models = [
+        _clean_model_name(EMBEDDING_MODEL_NAME),
+        _clean_model_name(OLLAMA_MODEL_NAME),
+        _clean_model_name(FAST_LLM_MODEL_NAME),
+        title_model,
+    ]
+    if KB_RERANK_PROVIDER.lower() == "ollama":
+        rerank = _clean_model_name(KB_RERANK_MODEL)
+        if rerank:
+            required_models.append(rerank)
+    if SEARCH_RERANK_PROVIDER.lower() == "ollama":
+        search_rerank = _clean_model_name(SEARCH_RERANK_MODEL)
+        if search_rerank:
+            required_models.append(search_rerank)
+    required_models = list(dict.fromkeys(required_models))
     
     if OLLAMA_HOST != "localhost":
         installed_models = get_remote_models(OLLAMA_HOST)

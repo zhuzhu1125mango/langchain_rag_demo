@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 from src.database import get_db
+from src.auth import get_current_user, CurrentUser
 from src.models import Tag
 
 router = APIRouter(prefix="/tags", tags=["tags"])
@@ -34,14 +35,19 @@ class TagCreate(BaseModel):
 
 
 @router.post("/")
-async def create_tag(data: TagCreate, db: AsyncSession = Depends(get_db)):
+async def create_tag(
+    data: TagCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     创建标签
-    
+
     Args:
         data: 标签数据（名称、颜色）
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: {"id": 标签ID, "name": 标签名称}
     """
@@ -61,13 +67,17 @@ async def create_tag(data: TagCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/", response_model=List[TagResponse])
-async def list_tags(db: AsyncSession = Depends(get_db)):
+async def list_tags(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     获取标签列表
-    
+
     Args:
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         list: 标签列表
     """
@@ -83,15 +93,21 @@ async def list_tags(db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/{tag_id}")
-async def update_tag(tag_id: str, data: TagCreate, db: AsyncSession = Depends(get_db)):
+async def update_tag(
+    tag_id: str,
+    data: TagCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     更新标签
-    
+
     Args:
         tag_id: 标签ID
         data: 更新数据（名称、颜色）
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: {"message": "更新成功"}
     """
@@ -111,14 +127,19 @@ async def update_tag(tag_id: str, data: TagCreate, db: AsyncSession = Depends(ge
 
 
 @router.delete("/{tag_id}")
-async def delete_tag(tag_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_tag(
+    tag_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     删除标签
-    
+
     Args:
         tag_id: 标签ID
         db: 数据库会话
-        
+        current_user: 当前认证用户
+
     Returns:
         dict: {"message": "删除成功"}
     """

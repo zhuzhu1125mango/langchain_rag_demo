@@ -19,6 +19,11 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.config import settings
+from .tools.datetime_tool import get_current_datetime
+from .tools.tool_manager import ToolManager
+from .tools.plugins.web_search_tool import WebSearchTool
+from .tools.plugins.fetch_webpage_tool import FetchWebpageTool
+from .tools.plugins.datetime_tool import DateTimeTool
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,74 @@ def _extract_domain(url: str) -> str:
         return urlparse(url).netloc.lower().lstrip("www.")
     except Exception:
         return ""
+
+
+# 强时效性关键词：命中后若 Agent 未调用工具，自动降级到 Phase 2 联网搜索。
+# 这些关键词代表的问题必须依赖实时数据才能准确回答，LLM 自身知识无法覆盖。
+_REALTIME_KEYWORDS: set = {
+    # 天气/环境
+    "天气", "气温", "温度", "预报", "下雨", "下雪", "降雨", "降雪", "台风",
+    "空气质量", "pm2.5", "aqi",
+    "weather", "forecast", "temperature",
+    # 新闻/资讯
+    "新闻", "最新消息", "近日", "今天", "刚刚", "刚才", "热点",
+    "news", "latest news",
+    # 价格/行情
+    "价格", "多少钱", "股价", "股票", "基金", "汇率", "油价", "金价",
+    "比特币", "加密货币",
+    "price", "stock price", "exchange rate",
+    # 实时状态
+    "实时", "现在", "当前", "目前", "latest", "today", "now", "current",
+    # 赛事/排名
+    "比分", "赛果", "排名", "排行榜",
+    "score", "ranking",
+}
+
+
+def is_realtime_question(question: str) -> bool:
+    """判断问题是否为强时效性问题（必须联网搜索才能准确回答）。
+
+    用于 Function Calling Agent 决策失败时的降级判断：当 LLM 未调用 web_search
+    工具但问题命中时效性关键词时，自动降级到 Phase 2 直接搜索，避免 LLM
+    笼统回复"无法获取实时信息"。
+
+    Args:
+        question: 用户问题。
+
+    Returns:
+        bool: True 表示是强时效性问题，需要联网搜索。
+    """
+    if not question:
+        return False
+    q = question.lower()
+    return any(kw in q for kw in _REALTIME_KEYWORDS)
+
+
+# 检测 LLM 输出是否被工具调用 JSON 污染（未按预期输出自然语言回答）
+_TOOL_CALL_POLLUTION_PATTERNS = [
+    re.compile(r'\[\s*\{\s*"name"\s*:\s*"web_search"', re.IGNORECASE),
+    re.compile(r'\{\s*"name"\s*:\s*"web_search"', re.IGNORECASE),
+    re.compile(r'"tool"\s*:\s*"web_search"', re.IGNORECASE),
+    re.compile(r'"arguments"\s*:\s*\{\s*"query"', re.IGNORECASE),
+    re.compile(r'<tool_call>\s*\[', re.IGNORECASE),
+]
+
+
+def looks_like_tool_call(text: str) -> bool:
+    """判断文本是否包含工具调用 JSON，而非自然语言回答。
+
+    deepseek-r1 等推理模型容易把工具调用 JSON 直接输出为回答。
+    当检测到这种污染时，应视为 LLM 未正确回答，触发降级到 Phase 2 搜索。
+
+    Args:
+        text: LLM 输出文本。
+
+    Returns:
+        bool: True 表示文本被工具调用 JSON 污染。
+    """
+    if not text:
+        return False
+    return any(p.search(text) for p in _TOOL_CALL_POLLUTION_PATTERNS)
 
 
 @dataclass
@@ -95,48 +168,47 @@ class Tool:
 
 
 class SearchToolkit:
-    """搜索工具集，封装 WebSearchService 为可被 LLM 调用的工具"""
+    """搜索工具集兼容层。
+
+    内部基于新的 ToolManager 平台，保持对旧版 SearchAgent 的接口兼容。
+    新增工具通过 ToolManager 自动发现，无需在此硬编码。
+    """
 
     def __init__(self, web_search_service):
         self.web_search_service = web_search_service
+        self.tool_manager = ToolManager()
+        # 注册与搜索相关的核心工具，复用同一 WebSearchService 实例
+        self.tool_manager.register_tool(WebSearchTool(web_search_service))
+        self.tool_manager.register_tool(FetchWebpageTool(web_search_service))
+        self.tool_manager.register_tool(DateTimeTool())
         self._tools = self._build_tools()
 
     def _build_tools(self) -> List[Tool]:
-        return [
-            Tool(
-                name="web_search",
-                description="执行联网搜索，返回相关网页的标题、URL 和摘要，用于获取实时信息或外部知识",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "搜索关键词或问题，建议简洁明确",
-                        },
-                        "reason": {
-                            "type": "string",
-                            "description": "进行本次搜索的原因",
-                        },
-                    },
-                    "required": ["query"],
-                },
-                handler=self._handle_web_search,
-            ),
-            Tool(
-                name="fetch_webpage",
-                description="抓取指定网页的完整正文内容，用于深入查看某个搜索结果",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "url": {"type": "string", "description": "目标网页 URL"},
-                        "title": {"type": "string", "description": "网页标题（可选）"},
-                        "snippet": {"type": "string", "description": "网页摘要（可选）"},
-                    },
-                    "required": ["url"],
-                },
-                handler=self._handle_fetch_webpage,
-            ),
-        ]
+        """基于 ToolManager 注册的工具，生成旧版 Tool 对象列表。"""
+        tools = []
+        for base_tool in self.tool_manager.registry.list_tools():
+            # 包装 BaseTool 的 execute 为旧版 handler 签名
+            handler = self._make_handler(base_tool.name)
+            tools.append(
+                Tool(
+                    name=base_tool.name,
+                    description=base_tool.description,
+                    parameters=base_tool.parameters,
+                    handler=handler,
+                )
+            )
+        return tools
+
+    def _make_handler(self, tool_name: str) -> Callable[..., Awaitable[str]]:
+        """生成旧版 handler，内部调用 ToolManager.execute 并返回字符串。"""
+
+        async def handler(**kwargs) -> str:
+            result = await self.tool_manager.execute(tool_name, **kwargs)
+            if not result.success:
+                return f"工具执行失败: {result.error}"
+            return result.output
+
+        return handler
 
     @property
     def tools(self) -> List[Tool]:
@@ -149,43 +221,7 @@ class SearchToolkit:
         return None
 
     def tools_prompt(self) -> str:
-        return json.dumps([t.schema() for t in self._tools], ensure_ascii=False, indent=2)
-
-    async def _handle_web_search(self, query: str, **kwargs) -> str:
-        if not query:
-            return "搜索关键词为空，未执行搜索。"
-
-        try:
-            results = await self.web_search_service.search_multi(query)
-        except Exception as e:
-            logger.warning(f"工具搜索失败 [{query}]: {e}")
-            return f"搜索失败: {e}"
-
-        if not results:
-            return "未找到相关搜索结果。"
-
-        lines = []
-        for i, r in enumerate(results[: settings.search.SEARCH_MAX_RESULTS], 1):
-            lines.append(
-                f"[{i}] 标题: {r.title}\nURL: {r.url}\n摘要: {r.content[:500]}"
-            )
-        return "\n\n".join(lines)
-
-    async def _handle_fetch_webpage(self, url: str, title: str = "", snippet: str = "") -> str:
-        if not url:
-            return "URL 为空，无法抓取。"
-
-        try:
-            content = await self.web_search_service.fetch_content(url, title, snippet)
-        except Exception as e:
-            logger.warning(f"工具抓取失败 [{url}]: {e}")
-            return f"抓取失败: {e}"
-
-        if not content:
-            return "无法获取网页内容。"
-
-        text = content.content[:3000] if len(content.content) > 3000 else content.content
-        return f"标题: {content.title}\nURL: {content.url}\n正文:\n{text}"
+        return self.tool_manager.tools_prompt()
 
 
 class BaseSearchAgent:
@@ -265,24 +301,45 @@ class BaseSearchAgent:
         return await asyncio.gather(*tasks)
 
     def _extract_sources_from_texts(self, texts: List[str]) -> List[Dict[str, Any]]:
-        """从文本列表中提取 URL 来源信息（_extract_sources / _extract_sources_from_steps 的公共逻辑）"""
+        """从文本列表中提取 URL 来源信息（_extract_sources / _extract_sources_from_steps 的公共逻辑）
+
+        web_search 工具返回格式为 "[{i}] 标题: {title}\\nURL: {url}\\n摘要: {content}"，
+        多条结果以空行分隔。本方法按段落切分文本，逐段提取 URL 与标题，确保
+        多结果场景下 title 与 url 正确对应；title 缺失时回退为域名，再回退为"网页来源"。
+        """
         sources: List[Dict[str, Any]] = []
         url_pattern = re.compile(r"URL:\s*(https?://\S+)", re.IGNORECASE)
+        title_pattern = re.compile(r"标题:\s*(.+)", re.IGNORECASE)
 
         for text in texts:
-            # web_search / fetch_webpage 结果中都包含 URL: xxx
-            for match in url_pattern.finditer(text):
-                url = match.group(1).strip()
-                if not any(s.get("url") == url for s in sources):
-                    sources.append({
-                        "url": url,
-                        "source": _extract_domain(url),
-                        "document_id": "",
-                        "filename": "web_search",
-                        "chunk_index": 0,
-                        "total_chunks": 1,
-                        "page_content": text[:500],
-                    })
+            # 按空行切分段落，每段对应一条搜索结果（标题+URL+摘要）
+            segments = re.split(r"\n\s*\n", text)
+            for seg in segments:
+                url_match = url_pattern.search(seg)
+                if not url_match:
+                    continue
+                url = url_match.group(1).strip()
+                # 去重：同一 URL 只保留首次出现
+                if any(s.get("url") == url for s in sources):
+                    continue
+                # 提取标题：优先匹配 "标题: xxx"，缺失时回退到域名，再回退到"网页来源"
+                title = ""
+                title_match = title_pattern.search(seg)
+                if title_match:
+                    title = title_match.group(1).strip()
+                domain = _extract_domain(url)
+                if not title:
+                    title = domain or "网页来源"
+                sources.append({
+                    "url": url,
+                    "source": domain,
+                    "title": title,
+                    "document_id": "",
+                    "filename": "web_search",
+                    "chunk_index": 0,
+                    "total_chunks": 1,
+                    "page_content": seg[:500],
+                })
 
         return sources
 
@@ -315,7 +372,12 @@ class FunctionCallingHandler(BaseSearchAgent):
         tool_calls = self._parse_tool_calls(content)
 
         # 模型未调用工具，直接返回答案
+        # 但若为强时效性问题，返回空 answer 触发 RAGChain 降级到 Phase 2 直接搜索，
+        # 避免 LLM 笼统回复"无法获取实时信息"
         if not tool_calls:
+            if is_realtime_question(question):
+                logger.info(f"Function Calling 未调工具但识别为时效性问题，触发降级: {question}")
+                return SearchAgentResult(answer="", context="", sources=[])
             return SearchAgentResult(answer=content, context="", sources=[])
 
         tool_results = await self._execute_tool_calls(tool_calls)
@@ -329,6 +391,12 @@ class FunctionCallingHandler(BaseSearchAgent):
         except Exception as e:
             logger.warning(f"Function Calling 最终生成失败: {e}")
             answer = ""
+
+        # deepseek-r1 等推理模型容易把工具调用 JSON 直接输出为回答。
+        # 若检测到这种污染，视为回答无效，返回空 answer 触发 RAGChain 降级到 Phase 2 搜索。
+        if looks_like_tool_call(answer):
+            logger.warning(f"Function Calling 最终回答被工具 JSON 污染，触发降级: {answer[:200]}")
+            return SearchAgentResult(answer="", context=context, sources=sources, tool_calls=tool_calls)
 
         return SearchAgentResult(
             answer=answer,
@@ -353,6 +421,11 @@ class FunctionCallingHandler(BaseSearchAgent):
 
         if not tool_calls:
             # 没有工具调用，直接流式返回原内容（统一按 chunk 输出）
+            # 但若为强时效性问题，yield 空内容触发 RAGChain 降级到 Phase 2 直接搜索
+            if is_realtime_question(question):
+                logger.info(f"Function Calling 流式未调工具但识别为时效性问题，触发降级: {question}")
+                yield "", []
+                return
             yield content, []
             return
 
@@ -392,19 +465,39 @@ class FunctionCallingHandler(BaseSearchAgent):
 {self.toolkit.tools_prompt()}
 
 请按以下规则回复：
-1. 如果问题需要最新信息、外部知识、实时数据或超出你已有知识范围，请使用工具。
-2. 使用工具时，必须严格返回如下 JSON 格式（不要添加额外解释）：
+
+【必须使用工具的场景】（以下问题你的训练数据无法覆盖，必须调用 web_search）：
+- 天气、气温、预报（如"北京天气""吕梁明天会下雨吗"）
+- 新闻、最新消息、热点事件（如"最新AI新闻"）
+- 价格、股价、汇率、行情（如"比特币多少钱""今日油价"）
+- 实时数据、排名、比分（如"当前空气质量""某赛事比分"）
+- 任何包含"最新""最近""今天""现在""当前""实时"等时效性词汇的问题
+
+【不需要工具的场景】：
+- 常识、概念解释（如"什么是机器学习"）
+- 历史事实（如"二战结束于哪年"）
+- 你的训练数据已覆盖的稳定知识
+
+使用工具时，必须严格返回如下格式，且**只返回这一行，不要加 ```json 代码块、不要加 <think> 思考标签、不要加任何解释文字**：
 <tool_call>
 [{{"name": "web_search", "arguments": {{"query": "搜索关键词", "reason": "搜索原因"}}}}]
 </tool_call>
-3. 如果不需要工具，直接回答用户问题。
+
+错误示例（不要这样输出）：
+- ```json\n[{{"name": "web_search", ...}}]\n```
+- <think> 我觉得需要搜索 </think>[{{"name": "web_search", ...}}]
+
+正确示例：
+- 用户问"吕梁的天气" → 直接输出：
+<tool_call>[{{"name": "web_search", "arguments": {{"query": "吕梁天气", "reason": "查询实时天气"}}}}]</tool_call>
+- 用户问"什么是深度学习" → 直接回答，不调用工具
 
 对话历史：
 {history_context}
 
 用户问题：{question}
 
-请判断是否需要使用工具："""
+请判断是否需要使用工具（若为时效性问题，务必调用 web_search）："""
 
     def _build_final_prompt(
         self,
@@ -413,13 +506,14 @@ class FunctionCallingHandler(BaseSearchAgent):
         tool_results: List[ToolResult],
     ) -> str:
         results_text = self._format_tool_results(tool_results)
-        return f"""你是一个严谨的智能助手，请基于以下工具搜索结果回答用户问题。
+        return f"""你是一个严谨的智能助手，请基于以下工具搜索结果直接回答用户问题。
 
 要求：
 1. 只使用工具结果中的信息，禁止编造参考信息里不存在的信息。
 2. 如果工具结果中没有答案，直接说明"无法找到相关信息"。
 3. 关键事实标注来源编号，如[1]、[2]，对应工具结果中的条目编号。
 4. 保持回答简洁、准确、连贯。
+5. **禁止输出任何工具调用 JSON、```json 代码块、<tool_call> 标签或 <think> 思考过程**。
 
 对话历史：
 {history_context}

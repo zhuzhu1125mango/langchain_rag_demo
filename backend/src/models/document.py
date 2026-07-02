@@ -26,6 +26,7 @@ class Document(Base):
     file_type = Column(String, nullable=False)                             # 文件类型（扩展名）
     size = Column(Integer)                                                # 文件大小（字节）
     kb_id = Column(UUID(as_uuid=True), ForeignKey("knowledge_bases.id"), index=True)   # 所属知识库ID（带索引）
+    owner_id = Column(String, nullable=False, default="default")          # 资源所有者标识
     category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"))  # 所属分类ID
     
     knowledge_base = relationship("KnowledgeBase", backref="kb_documents")  # 关联的知识库

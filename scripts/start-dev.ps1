@@ -283,6 +283,22 @@ function Wait-ForHealth {
     # Print container status table
     Print-ContainerStatus
 
+    # SearXNG 应用层健康检查（Docker healthy 不代表 /healthz 返回 200）
+    try {
+        $searxngResponse = Invoke-WebRequest -Uri "http://localhost:8080/healthz" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
+        if ($searxngResponse.StatusCode -eq 200) {
+            Write-OK "SearXNG 搜索引擎健康检查通过"
+        } else {
+            Write-Warn "SearXNG 返回状态码 $($searxngResponse.StatusCode)，搜索功能可能不可用"
+            $allHealthy = $false
+        }
+    } catch {
+        Write-Warn "SearXNG 健康检查失败: $_"
+        Write-Info "请检查日志: docker logs searxng-dev"
+        $allHealthy = $false
+    }
+
+    Write-Host ""
     return $allHealthy
 }
 

@@ -11,6 +11,7 @@ from typing import Optional
 from langchain_ollama import ChatOllama
 
 from src.config import settings
+from src.services.model_manager import model_manager
 
 logger = logging.getLogger(__name__)
 
@@ -28,12 +29,17 @@ class TitleGenerator:
             cls._instance._llm = None
         return cls._instance
 
-    def _get_llm(self) -> Optional[ChatOllama]:
+    async def _get_llm(self) -> Optional[ChatOllama]:
         if self._llm is None:
             try:
-                model_name = (
+                preferred_model = (
                     settings.title_generation.TITLE_GENERATION_MODEL
+                    or settings.model.FAST_LLM_MODEL_NAME
                     or settings.model.OLLAMA_MODEL_NAME
+                )
+                model_name = await model_manager.get_model_for_task(
+                    "title_generation",
+                    preferred=preferred_model,
                 )
                 self._llm = ChatOllama(model=model_name, streaming=False)
             except Exception as e:
@@ -54,7 +60,7 @@ class TitleGenerator:
             return True
         return title.strip().lower() in DEFAULT_TITLES
 
-    def generate_title(self, question: str) -> str:
+    async def generate_title(self, question: str) -> str:
         """
         根据用户首条问题生成会话标题。
 
@@ -67,7 +73,7 @@ class TitleGenerator:
         if not settings.title_generation.TITLE_GENERATION_ENABLED:
             return self._fallback(question)
 
-        llm = self._get_llm()
+        llm = await self._get_llm()
         if llm is None:
             return self._fallback(question)
 
@@ -82,7 +88,7 @@ class TitleGenerator:
 标题："""
 
         try:
-            response = llm.invoke(prompt)
+            response = await llm.ainvoke(prompt)
             title = self._clean_title(response.content)
             if not title:
                 return self._fallback(question)

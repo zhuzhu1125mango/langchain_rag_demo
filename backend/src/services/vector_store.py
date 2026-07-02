@@ -55,6 +55,9 @@ class VectorStoreManager:
     async def search(self, query, k=3, document_ids=None, kb_ids=None):
         """检索与查询最相关的文档切片，并包装为 LangChain Document。
 
+        阶段一升级：默认走混合检索（dense + BM25 + RRF + rerank），
+        当混合检索未启用或失败时自动回退到纯 dense 检索。
+
         Args:
             query: 用户查询文本。
             k: 返回结果数量上限。
@@ -64,17 +67,46 @@ class VectorStoreManager:
         Returns:
             list[Document]: 包含元数据的 LangChain Document 列表。
         """
-        results = await self.milvus_service.search(query, k=k, document_ids=document_ids, kb_ids=kb_ids)
+        try:
+            results = await self.milvus_service.search_hybrid(
+                query, k=k, document_ids=document_ids, kb_ids=kb_ids
+            )
+        except Exception:
+            results = await self.milvus_service.search(
+                query, k=k, document_ids=document_ids, kb_ids=kb_ids
+            )
+        return self._results_to_documents(results)
+
+    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None):
+        """纯 dense 向量检索入口（兼容旧逻辑）。"""
+        results = await self.milvus_service.search_dense(
+            query, k=k, document_ids=document_ids, kb_ids=kb_ids
+        )
+        return self._results_to_documents(results)
+
+    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None):
+        """混合检索入口，返回经 RRF 融合与 Cross-Encoder 重排序后的 Document。"""
+        results = await self.milvus_service.search_hybrid(
+            query, k=k, document_ids=document_ids, kb_ids=kb_ids
+        )
+        return self._results_to_documents(results)
+
+    def _results_to_documents(self, results):
+        """将 Milvus 检索结果统一转换为 LangChain Document。"""
         docs = []
         for result in results:
             doc = Document(
                 page_content=result["content"],
                 metadata={
                     "kb_id": result.get("kb_id", ""),
-                    "document_id": result["document_id"],
-                    "source": result["source"],
-                    "chunk_index": result["chunk_index"],
-                    "score": result["score"]
+                    "document_id": result.get("document_id", ""),
+                    "source": result.get("source", ""),
+                    "chunk_index": result.get("chunk_index", 0),
+                    "score": result.get("rerank_score", result.get("rrf_score", result.get("score", 0.0))),
+                    "dense_score": result.get("dense_score", 0.0),
+                    "sparse_score": result.get("sparse_score", 0.0),
+                    "rrf_score": result.get("rrf_score", 0.0),
+                    "rerank_score": result.get("rerank_score", 0.0),
                 }
             )
             docs.append(doc)
@@ -87,6 +119,14 @@ class VectorStoreManager:
     async def delete_by_kb_id(self, kb_id):
         """按知识库 ID 删除向量数据。"""
         await self.milvus_service.delete_by_kb_id(kb_id)
+
+    async def delete_by_kb_ids(self, kb_ids):
+        """按多个知识库 ID 批量删除向量数据，并统一 flush 一次。"""
+        await self.milvus_service.delete_by_kb_ids(kb_ids)
+
+    async def flush(self):
+        """显式触发 Milvus flush。"""
+        await self.milvus_service.flush()
 
     async def count(self):
         """返回全部切片数量。"""

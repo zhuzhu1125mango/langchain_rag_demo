@@ -7,6 +7,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
+from src.auth import get_current_user, CurrentUser
 from src.services.learning_engine import learning_engine
 from src.services.strategy_manager import create_default_strategy_manager
 
@@ -20,7 +21,7 @@ class LearningConfigUpdate(BaseModel):
 
 
 @router.get("/stats", summary="获取学习统计信息")
-async def get_learning_stats():
+async def get_learning_stats(current_user: CurrentUser = Depends(get_current_user)):
     """获取学习引擎的统计信息"""
     try:
         await learning_engine.load_config()
@@ -47,7 +48,10 @@ async def get_learning_stats():
 
 
 @router.get("/misclassification", summary="获取误分类分析")
-async def get_misclassification_analysis(limit: int = 50):
+async def get_misclassification_analysis(
+    limit: int = 50,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """获取误分类案例分析报告"""
     try:
         analysis = await learning_engine.get_misclassification_analysis(limit)
@@ -70,10 +74,10 @@ async def get_misclassification_analysis(limit: int = 50):
 
 
 @router.post("/trigger", summary="触发学习")
-async def trigger_learning():
+async def trigger_learning(current_user: CurrentUser = Depends(get_current_user)):
     """手动触发学习流程"""
     try:
-        strategy_manager = create_default_strategy_manager()
+        strategy_manager = await create_default_strategy_manager()
         result = await learning_engine.trigger_learning(strategy_manager)
         return {"success": True, "data": result}
     except Exception as e:
@@ -87,7 +91,8 @@ async def record_execution(
     final_decision: bool,
     final_confidence: float,
     strategy_results: Dict[str, float],
-    used_knowledge_base: bool
+    used_knowledge_base: bool,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """记录策略执行"""
     try:
@@ -108,7 +113,8 @@ async def record_execution(
 async def record_feedback(
     execution_id: str,
     feedback_score: float,
-    reason: Optional[str] = None
+    reason: Optional[str] = None,
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """记录用户反馈"""
     try:
@@ -123,7 +129,10 @@ async def record_feedback(
 
 
 @router.put("/config", summary="更新学习引擎配置")
-async def update_learning_config(config: LearningConfigUpdate):
+async def update_learning_config(
+    config: LearningConfigUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """更新学习引擎配置"""
     try:
         await learning_engine.load_config()
@@ -150,7 +159,7 @@ async def update_learning_config(config: LearningConfigUpdate):
 
 
 @router.get("/config", summary="获取学习引擎配置")
-async def get_learning_config():
+async def get_learning_config(current_user: CurrentUser = Depends(get_current_user)):
     """获取学习引擎配置"""
     await learning_engine.load_config()
     return {
@@ -164,7 +173,7 @@ async def get_learning_config():
 
 
 @router.post("/enable", summary="启用学习引擎")
-async def enable_learning():
+async def enable_learning(current_user: CurrentUser = Depends(get_current_user)):
     """启用学习引擎"""
     await learning_engine.load_config()
     learning_engine.enable()
@@ -173,7 +182,7 @@ async def enable_learning():
 
 
 @router.post("/disable", summary="禁用学习引擎")
-async def disable_learning():
+async def disable_learning(current_user: CurrentUser = Depends(get_current_user)):
     """禁用学习引擎"""
     await learning_engine.load_config()
     learning_engine.disable()

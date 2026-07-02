@@ -15,6 +15,7 @@ services:
   redis:
     image: redis:7.2-alpine
     container_name: redis-prod
+    command: redis-server --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data_prod:/data
     networks:
@@ -23,7 +24,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -48,6 +49,12 @@ services:
       - CHOWN
       - SETGID
       - SETUID
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
 
   # backend — 后端 API 服务（生产镜像，构建产物精简）
   backend:
@@ -244,6 +251,12 @@ services:
       MINIO_ADDRESS: minio:9000
       MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}          # 复用 MinIO 管理员账号
       MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}  # 复用 MinIO 管理员密码
+      # 调整单集合 flush 限流阈值。Milvus 默认对单集合 flush 限流 0.1 QPS，
+      # 批量删除等高频 flush 场景会触发 rate limit。此处放宽到 2.0 QPS，
+      # 仍远低于正常刷盘能力，但可显著降低批量操作耗时。
+      # 客户端仍保留 0.15 QPS 的令牌桶限速 + 指数退避作为兜底保护。
+      MILVUS_QUOTAANDLIMITS_FLUSH_ENABLE: "true"
+      MILVUS_QUOTAANDLIMITS_FLUSH_COLLECTIONRATE_MAX: "2.0"
     volumes:
       - milvus_data_prod:/var/lib/milvus
     networks:

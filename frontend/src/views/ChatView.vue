@@ -83,7 +83,17 @@
               ]"
             >
               <Globe class="w-4 h-4" />
-              <span>{{ useWebSearch ? '搜索中' : '联网搜索' }}</span>
+              <span>{{
+                searchStatus === 'searching'
+                  ? '搜索中...'
+                  : searchStatus === 'failed'
+                    ? '搜索失败'
+                    : searchStatus === 'done'
+                      ? '搜索完成'
+                      : useWebSearch
+                        ? '联网搜索开启'
+                        : '联网搜索'
+              }}</span>
             </button>
           </div>
         </div>
@@ -139,7 +149,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useChatStore } from '@/stores/chat'
 import { useSessions, useDeleteSession, useBatchDeleteSessions, useSubmitFeedback, useGetSuggestions, useRewriteQuestion, useClassifyQuestion, useCompareKnowledgeBases } from '@/queries/chat'
-import type { Session, Message, MessageSource, CompareResponse } from '@/queries/chat'
+import type { Session, Message, MessageSource, CompareResponse, ReasoningStep } from '@/queries/chat'
 import { useKnowledgeBases, useRecommendKnowledgeBases } from '@/queries/kb'
 import type { KBRecommendation } from '@/queries/kb'
 import { Trash2, BookOpen, GitCompare, Globe, ChevronLeft, ChevronRight } from '@lucide/vue'
@@ -152,6 +162,7 @@ import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import { useToast } from '@/composables/useToast'
 import { api } from '@/utils/axios'
 import { generateId } from '@/utils/id'
+import { openExternalUrl } from '@/utils/url'
 
 /**
  * 聊天页面主视图。
@@ -169,6 +180,7 @@ const questionInput = ref('')
 const showKBSelector = ref(false)
 const selectedKBs = ref<string[]>([])
 const useWebSearch = ref(false)
+const searchStatus = ref<'idle' | 'searching' | 'done' | 'failed'>('idle')
 const suggestions = ref<string[]>([])
 const isGeneratingSuggestions = ref(false)
 const showHistoryPanel = ref(true)
@@ -186,6 +198,28 @@ const selectedSourceChunkIndex = ref(0)
 // 输入变化时两个函数依次调用，后者会清掉前者刚注册的定时器，从而保证
 // 一次输入抖动内只有最后一次注册的请求真正发出，避免并发重复请求。
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// SSE reasoning 事件节流：同一帧内多次 reasoning 更新合并为一次状态提交，
+// 避免高频时间线更新导致渲染抖动。
+let pendingReasoningUpdate: ReasoningStep[] | null = null
+let reasoningRafId: number | null = null
+
+/** 将 reasoning 步骤合并到现有列表：同 step 且同 id 的用新状态覆盖，新的追加。 */
+function mergeReasoningSteps(existing: ReasoningStep[], incoming: ReasoningStep[]): ReasoningStep[] {
+  const map = new Map<string, ReasoningStep>()
+  existing.forEach(s => map.set(s.id, s))
+  incoming.forEach(s => map.set(s.id, s))
+  return Array.from(map.values())
+}
+
+/** 取消挂起的 reasoning 节流更新。 */
+function cancelReasoningRaf(): void {
+  if (reasoningRafId !== null) {
+    cancelAnimationFrame(reasoningRafId)
+    reasoningRafId = null
+  }
+  pendingReasoningUpdate = null
+}
 
 // 子组件实例引用：用于调用子组件暴露的方法
 const sessionListRef = ref<InstanceType<typeof SessionListPanel> | null>(null)
@@ -286,25 +320,17 @@ function getKBName(kbId: string): string {
   return kb?.name || kbId
 }
 
-interface SourceInfo {
-  document_id?: string
-  document_name?: string
-  chunk_index?: number
-  url?: string
-  title?: string
-  source_type?: 'kb' | 'web'
-}
-
 /** 点击来源时跳转网页或打开文档切片弹窗。 */
-function navigateToSource(source: SourceInfo): void {
+function navigateToSource(source: MessageSource): void {
   if (source.source_type === 'web' && source.url) {
-    window.open(source.url, '_blank', 'noopener,noreferrer')
+    openExternalUrl(source.url)
     return
   }
+  // kb 来源优先用 document_id 定位文档切片，回退到 document_name
   const docId = source.document_id || source.document_name
   if (docId) {
     selectedSourceDocId.value = docId
-    selectedSourceChunkIndex.value = source.chunk_index || 0
+    selectedSourceChunkIndex.value = source.chunk_index ?? source.page ?? 0
     showSourceModal.value = true
   }
 }
@@ -381,6 +407,10 @@ async function sendMessage(): Promise<void> {
   const hasLoadingMessage = chatStore.messages.some(m => m.role === 'assistant' && m.isLoading)
   if (hasLoadingMessage) return
 
+  if (useWebSearch.value) {
+    searchStatus.value = 'searching'
+  }
+
   const question = questionInput.value.trim()
   questionInput.value = ''
 
@@ -413,6 +443,10 @@ async function sendMessage(): Promise<void> {
       use_web_search: useWebSearch.value.toString()
     })
 
+    if (useWebSearch.value) {
+      searchParams.append('search_mode', 'function_calling')
+    }
+
     if (selectedKBs.value.length > 0) {
       selectedKBs.value.forEach(kbId => searchParams.append('kb_ids', kbId))
     }
@@ -427,16 +461,31 @@ async function sendMessage(): Promise<void> {
 
     // SSE 事件协议：
     //   - content：data.content 为增量文本片段，累加到助手消息内容上
+    //   - reasoning：搜索/思考过程结构化数据，供前端折叠面板展示
+    //   - search_status：向后兼容，映射为 reasoning 步骤并更新搜索按钮状态
     //   - end：流结束，data.sources 为来源列表，data.message_id 为后端正式消息 ID，
-    //          data.session_id/data.title 用于新会话创建与标题更新
+    //          data.session_id/data.title 用于新会话创建与标题更新，data.reasoning 为完整推理过程
     //   - error：data.error 为错误描述，展示后关闭连接
     eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        const lastMsg = chatStore.messages[chatStore.messages.length - 1]
-        if (!lastMsg) return
+          try {
+            const data = JSON.parse(event.data)
+            const lastMsg = chatStore.messages[chatStore.messages.length - 1]
+            if (!lastMsg) return
 
-        if (data.type === 'content') {
+            if (data.type === 'search_status') {
+              searchStatus.value = data.status || 'idle'
+              return
+            }
+
+            if (data.type === 'reasoning') {
+              const step = data as ReasoningStep
+              const current = lastMsg.reasoning || []
+              const merged = mergeReasoningSteps(current, [step])
+              chatStore.updateMessage(lastMsg.id, { reasoning: merged })
+              return
+            }
+
+            if (data.type === 'content') {
           if (data.content) {
             receivedContent = true
             const updatedContent = (lastMsg.content || '') + data.content
@@ -444,16 +493,27 @@ async function sendMessage(): Promise<void> {
             messageListRef.value?.scrollToBottom()
           }
         } else if (data.type === 'end') {
+          // 强制 flush 可能挂起的 reasoning 更新
+          cancelReasoningRaf()
+          if (data.reasoning && Array.isArray(data.reasoning)) {
+            const finalReasoning = data.reasoning as ReasoningStep[]
+            const current = lastMsg.reasoning || []
+            chatStore.updateMessage(lastMsg.id, { reasoning: mergeReasoningSteps(current, finalReasoning) })
+          }
           if (data.sources) {
-            const mappedSources: MessageSource[] = data.sources.map((s: any) => ({
+            const mappedSources: MessageSource[] = data.sources.map((s: any, idx: number) => ({
               source: s.source || s.document_id || s.filename || '',
-              score: 0,
+              score: s.score || 0,
               document_name: s.filename,
               page: s.chunk_index,
               url: s.url,
               title: s.title || s.filename,
               source_type: s.source_type || (s.url ? 'web' : 'kb'),
-              content: s.content
+              content: s.content,
+              document_id: s.document_id,
+              chunk_index: s.chunk_index,
+              total_chunks: s.total_chunks,
+              index: idx + 1
             }))
             chatStore.updateMessage(lastMsg.id, { sources: mappedSources })
           }
@@ -485,12 +545,17 @@ async function sendMessage(): Promise<void> {
           // 刷新会话列表，确保新会话或更新后的会话出现在左侧列表
           queryClient.invalidateQueries({ queryKey: ['sessions'] })
           queryClient.refetchQueries({ queryKey: ['sessions'] })
+          searchStatus.value = 'idle'
           eventSource.close()
         } else if (data.type === 'error') {
+          cancelReasoningRaf()
+          searchStatus.value = 'idle'
           eventSource.close()
           chatStore.updateMessage(lastMsg.id, { content: `⚠ 错误: ${data.error}`, isLoading: false })
         }
       } catch {
+        cancelReasoningRaf()
+        searchStatus.value = 'idle'
         eventSource.close()
         if (!receivedContent) {
           const lastMsg = chatStore.messages[chatStore.messages.length - 1]
@@ -502,6 +567,8 @@ async function sendMessage(): Promise<void> {
     }
 
     eventSource.onerror = () => {
+      cancelReasoningRaf()
+      searchStatus.value = 'idle'
       eventSource.close()
       if (!receivedContent) {
         const lastMsg = chatStore.messages[chatStore.messages.length - 1]
@@ -511,6 +578,7 @@ async function sendMessage(): Promise<void> {
       }
     }
   } catch (error) {
+    searchStatus.value = 'idle'
     chatStore.addMessage({
       id: generateId(),
       role: 'assistant',
@@ -638,6 +706,7 @@ async function loadSession(sessionId: string): Promise<void> {
       id?: string
       role: 'user' | 'assistant'
       content: string
+      reasoning?: ReasoningStep[]
       source_metadata?: {
         filename?: string
         document_id?: string
@@ -667,14 +736,20 @@ async function loadSession(sessionId: string): Promise<void> {
         id: msg.id || generateId(),
         role: msg.role,
         content: msg.content,
-        sources: msg.source_metadata?.map((meta) => ({
+        reasoning: msg.reasoning,
+        sources: msg.source_metadata?.map((meta: any, idx: number) => ({
           source: meta.filename || meta.document_id || 'unknown',
-          score: 0,
+          score: meta.score || 0,
           document_name: meta.filename,
           page: meta.chunk_index,
           url: meta.url,
           title: meta.title || meta.filename,
-          source_type: meta.source === 'web_search' || meta.url ? 'web' : 'kb'
+          source_type: meta.source_type || (meta.source === 'web_search' || meta.url ? 'web' : 'kb'),
+          content: meta.page_content || meta.content,
+          document_id: meta.document_id,
+          chunk_index: meta.chunk_index,
+          total_chunks: meta.total_chunks,
+          index: idx + 1
         })) || [],
         isLoading: false
       }))

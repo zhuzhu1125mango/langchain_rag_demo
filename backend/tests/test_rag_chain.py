@@ -39,12 +39,12 @@ class TestRAGChain:
         rag_chain = RAGChain(vector_store)
         assert rag_chain._has_vector_store() is True
 
-    def test_should_use_knowledge_base_without_store(self):
+    async def test_should_use_knowledge_base_without_store(self):
         """测试向量库不存在时不使用知识库"""
         vector_store = VectorStoreManager()
         rag_chain = RAGChain(vector_store)
 
-        result = rag_chain._should_use_knowledge_base("什么是人工智能？")
+        result = await rag_chain._should_use_knowledge_base("什么是人工智能？")
         assert result is False
 
     @pytest.mark.skip(reason="依赖真实 Milvus 服务，create_vector_store 需要已初始化的 Milvus 连接，无法在单元测试中运行")
@@ -56,10 +56,10 @@ class TestRAGChain:
 
         rag_chain = RAGChain(vector_store)
 
-        result = rag_chain._should_use_knowledge_base("你好")
+        result = await rag_chain._should_use_knowledge_base("你好")
         assert result is False
 
-        result = rag_chain._should_use_knowledge_base("Hi")
+        result = await rag_chain._should_use_knowledge_base("Hi")
         assert result is False
 
     async def test_retrieve_documents_empty(self):

@@ -15,7 +15,7 @@ class Strategy(ABC):
     """
     
     @abstractmethod
-    def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
+    async def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
         """
         判断是否需要使用知识库
         
@@ -48,7 +48,7 @@ class Strategy(ABC):
         """
         pass
     
-    def initialize(self):
+    async def initialize(self):
         """
         初始化策略（可选）
         
@@ -56,7 +56,7 @@ class Strategy(ABC):
         """
         pass
     
-    def cleanup(self):
+    async def cleanup(self):
         """
         清理资源（可选）
         

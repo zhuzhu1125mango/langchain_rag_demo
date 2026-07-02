@@ -31,7 +31,7 @@ async def create_default_knowledge_base(db):
             id=uuid4(),
             name="默认知识库",
             description="系统默认知识库",
-            embedding_model="nomic-embed-text:latest",
+            embedding_model="bge-m3:latest",
             is_default=True,
             status="active"
         )

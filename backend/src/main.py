@@ -19,7 +19,7 @@ import os
 import time
 import asyncio
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -27,6 +27,8 @@ from contextlib import asynccontextmanager
 from src.database import async_engine, Base, init_db
 from src.config import settings, LOG_DIR
 from src.exceptions import AppException
+from src.utils.security import validate_secret_key, SecretKeyValidationError
+from src.auth import get_current_user
 from src.api import (
     document_router,
     chat_router,
@@ -38,7 +40,9 @@ from src.api import (
     experiment_router,
     knowledge_base_router,
     config_router,
-    notification_router
+    notification_router,
+    badcase_router,
+    evaluation_router,
 )
 from src.middleware.metrics import MetricsMiddleware, get_metrics, reset_metrics
 
@@ -104,7 +108,7 @@ async def _periodic_learning_task():
 
     while True:
         try:
-            strategy_manager = create_default_strategy_manager()
+            strategy_manager = await create_default_strategy_manager()
             result = await learning_engine.check_and_trigger_learning(strategy_manager)
             if result.get("status") != "skipped":
                 logger.info(f"自动学习触发成功: {result}")
@@ -126,11 +130,11 @@ async def lifespan(app: FastAPI):
     在应用关闭时无需特殊清理操作
     """
     # 生产环境安全检查
-    _default_secret = "your-secret-key-here-change-in-production"
     if settings.IN_DOCKER:
-        _secret = settings.security.SECRET_KEY
-        if not _secret or _secret == _default_secret or len(_secret) < 16:
-            raise RuntimeError("SECRET_KEY 必须在 Docker 生产环境中设置为不少于 16 字符的强随机值")
+        try:
+            validate_secret_key(settings.security.SECRET_KEY, in_docker=True)
+        except SecretKeyValidationError as e:
+            raise RuntimeError(f"SECRET_KEY 校验失败: {e}")
 
     # 关键凭据非空校验（Docker 环境）
     if settings.IN_DOCKER:
@@ -255,16 +259,20 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
 
-app.include_router(document_router, prefix="/api")
-app.include_router(chat_router, prefix="/api")
-app.include_router(session_router, prefix="/api")
-app.include_router(category_router, prefix="/api")
-app.include_router(tag_router, prefix="/api")
-app.include_router(feedback_router, prefix="/api")
-app.include_router(learning_router, prefix="/api")
-app.include_router(experiment_router, prefix="/api")
-app.include_router(knowledge_base_router, prefix="/api")
-app.include_router(config_router, prefix="/api")
+app.include_router(document_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(chat_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(session_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(category_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(tag_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(feedback_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(learning_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(experiment_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(knowledge_base_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(config_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(badcase_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(evaluation_router, prefix="/api", dependencies=[Depends(get_current_user)])
+# notification_router 仅包含 WebSocket 端点，认证在端点内通过 get_current_user_for_ws 处理，
+# 避免全局 HTTP 依赖在 WebSocket 上下文中因缺少 request 对象而失败。
 app.include_router(notification_router, prefix="/api")
 
 

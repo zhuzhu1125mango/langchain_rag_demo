@@ -8,10 +8,11 @@
 4. 重置配置到默认值
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from src.config import settings
+from src.auth import get_current_user, CurrentUser
 from src.services.document_processor import SUPPORTED_EXTENSIONS
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -26,8 +27,10 @@ class ProcessingConfig(BaseModel):
 
 class ModelConfig(BaseModel):
     """模型配置数据模型"""
-    embedding_model_name: str = "nomic-embed-text:latest"
+    embedding_model_name: str = "bge-m3:latest"
+    embedding_dimension: int = 1024
     ollama_model_name: str = "deepseek-r1:7b-qwen-distill-q4_K_M"
+    fast_llm_model_name: str = "qwen2.5:7b"
 
 
 class SystemConfigResponse(BaseModel):
@@ -45,7 +48,7 @@ class ProcessingConfigUpdate(BaseModel):
 
 
 @router.get("/", response_model=SystemConfigResponse)
-def get_system_config():
+async def get_system_config():
     """
     获取系统配置
     
@@ -60,14 +63,16 @@ def get_system_config():
         ),
         model=ModelConfig(
             embedding_model_name=settings.model.EMBEDDING_MODEL_NAME,
-            ollama_model_name=settings.model.OLLAMA_MODEL_NAME
+            embedding_dimension=settings.model.EMBEDDING_DIMENSION,
+            ollama_model_name=settings.model.OLLAMA_MODEL_NAME,
+            fast_llm_model_name=settings.model.FAST_LLM_MODEL_NAME,
         ),
         supported_extensions=SUPPORTED_EXTENSIONS
     )
 
 
 @router.get("/processing", response_model=ProcessingConfig)
-def get_processing_config():
+async def get_processing_config():
     """
     获取文档处理配置
     
@@ -82,16 +87,20 @@ def get_processing_config():
 
 
 @router.put("/processing", response_model=ProcessingConfig)
-def update_processing_config(config: ProcessingConfigUpdate):
+async def update_processing_config(
+    config: ProcessingConfigUpdate,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     更新文档处理配置
-    
+
     Args:
         config: 处理配置更新数据
-        
+        current_user: 当前认证用户
+
     Returns:
         ProcessingConfig: 更新后的配置
-        
+
     Raises:
         HTTPException: 参数验证失败时抛出
     """
@@ -127,7 +136,7 @@ def update_processing_config(config: ProcessingConfigUpdate):
 
 
 @router.get("/model", response_model=ModelConfig)
-def get_model_config():
+async def get_model_config():
     """
     获取模型配置
     
@@ -136,27 +145,32 @@ def get_model_config():
     """
     return ModelConfig(
         embedding_model_name=settings.model.EMBEDDING_MODEL_NAME,
-        ollama_model_name=settings.model.OLLAMA_MODEL_NAME
+        embedding_dimension=settings.model.EMBEDDING_DIMENSION,
+        ollama_model_name=settings.model.OLLAMA_MODEL_NAME,
+        fast_llm_model_name=settings.model.FAST_LLM_MODEL_NAME,
     )
 
 
 @router.post("/reset")
-def reset_config():
+async def reset_config(current_user: CurrentUser = Depends(get_current_user)):
     """
     重置配置到默认值
-    
+
+    Args:
+        current_user: 当前认证用户
+
     Returns:
         dict: {"message": "配置已重置"}
     """
     settings.processing.CHUNK_SIZE = 500
     settings.processing.CHUNK_OVERLAP = 50
     settings.processing.TOP_K = 3
-    
+
     return {"message": "配置已重置为默认值"}
 
 
 @router.get("/info")
-def get_system_info():
+async def get_system_info():
     """
     获取系统信息
     

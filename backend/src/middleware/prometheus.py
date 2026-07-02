@@ -66,6 +66,13 @@ LLM_CALL_DURATION = Histogram(
     registry=registry
 )
 
+LLM_CALL_ERRORS = Counter(
+    "rag_llm_call_errors_total",
+    "Total number of failed LLM calls",
+    ["model_name"],
+    registry=registry
+)
+
 # ==================== 向量检索指标 ====================
 
 VECTOR_SEARCH_TIME = Histogram(
@@ -146,13 +153,23 @@ def record_request(method, endpoint, status_code, duration):
 def record_llm_call(model_name, duration):
     """
     记录 LLM 调用
-    
+
     Args:
         model_name: 模型名称
         duration: 耗时（秒）
     """
     LLM_CALLS.labels(model_name=model_name).inc()
     LLM_CALL_DURATION.labels(model_name=model_name).observe(duration)
+
+
+def record_llm_call_error(model_name):
+    """
+    记录 LLM 调用失败
+
+    Args:
+        model_name: 模型名称
+    """
+    LLM_CALL_ERRORS.labels(model_name=model_name).inc()
 
 
 def record_vector_search(duration):

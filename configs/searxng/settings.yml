@@ -67,3 +67,12 @@ engines:
     engine: wikipedia
     shortcut: wp
     enabled: true
+
+# DOI 解析器配置（新版 SearXNG 强制要求，缺失会导致所有请求 500）
+doi_resolvers:
+  oadoi.org: 'https://oadoi.org/'
+  doi.org: 'https://doi.org/'
+  doai.io: 'https://dissem.in/'
+
+# 默认 DOI 解析器，必须与 doi_resolvers 中的 key 一致
+default_doi_resolver: 'oadoi.org'

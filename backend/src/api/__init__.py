@@ -9,6 +9,8 @@ from .experiment import router as experiment_router
 from .knowledge_base import router as knowledge_base_router
 from .config import router as config_router
 from .notification import router as notification_router
+from .badcase import router as badcase_router
+from .evaluation import router as evaluation_router
 
 __all__ = [
     "document_router",
@@ -21,5 +23,7 @@ __all__ = [
     "experiment_router",
     "knowledge_base_router",
     "config_router",
-    "notification_router"
+    "notification_router",
+    "badcase_router",
+    "evaluation_router",
 ]

@@ -15,7 +15,7 @@ class ContextStrategy(Strategy):
         self.knowledge_trigger_keywords = set(KNOWLEDGE_KEYWORDS)
         self.greeting_keywords = set(GREETING_KEYWORDS) | {"谢谢", "再见", "拜拜"}
     
-    def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
+    async def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
         """按历史对话模式评分判断是否需要使用知识库。"""
         question_lower = question.strip().lower()
         context_score = 0.0

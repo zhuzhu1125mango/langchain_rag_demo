@@ -139,7 +139,9 @@ poetry install
 
 # 拉取模型（首次运行需要下载，耗时较长）
 ollama pull deepseek-r1:7b-qwen-distill-q4_K_M
-ollama pull nomic-embed-text:latest
+ollama pull qwen2.5:7b
+ollama pull bge-m3:latest
+ollama pull qllama/bge-reranker-v2-m3:latest
 
 # 启动服务（推荐方式）
 poetry run python start.py
@@ -442,7 +444,7 @@ services:
 | `MINIO_BUCKET_NAME` | `documents` | `documents` | 否 |
 | `MINIO_SECURE` | `false` | `true` | 否 |
 | `REDIS_DB` | `0` | `0` | 否 |
-| `REDIS_PASSWORD` | 空 | **建议手动设置** | ✅ |
+| `REDIS_PASSWORD` | `dev_redis_password` | **必须手动设置** | ✅ |
 | `SECRET_KEY` | `dev-secret-key-not-for-production` | **必须手动设置** | ✅ |
 | `SEARCH_PROVIDER` | `searxng` | `searxng` | 否 |
 | `SEARXNG_BASE_URL` | `http://localhost:8080` | `http://searxng:8080` | 否 |
@@ -519,7 +521,8 @@ SEARCH_MIN_CONTENT_LENGTH=100
 SEARCH_ENABLE_MULTI_QUERY=true
 SEARCH_NUM_QUERIES=3
 SEARCH_ENABLE_RERANK=true
-SEARCH_RERANK_MODEL=BAAI/bge-reranker-base
+SEARCH_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
+SEARCH_RERANK_PROVIDER=ollama
 SEARCH_RERANK_TOP_K=5
 
 # Redis 缓存
@@ -534,7 +537,7 @@ SEARCH_AGENT_FALLBACK_TO_PHASE2=true
 ```
 
 **说明**：
-- 启用 `SEARCH_ENABLE_RERANK=true` 后，首次运行会下载 `BAAI/bge-reranker-base`，请确保容器可访问 HuggingFace 或已配置镜像
+- 启用 `SEARCH_ENABLE_RERANK=true` 后，默认通过 Ollama 本地调用 `qllama/bge-reranker-v2-m3:latest`；若切换为 `SEARCH_RERANK_PROVIDER=sentence_transformers`，则需联网下载对应 HuggingFace 模型
 - 使用 SearXNG 可避免 DuckDuckGo 的反爬限制，项目已内置 `searxng-dev` / `searxng-prod` 服务
 - Function Calling / ReAct 对本地模型的指令遵循能力要求较高，建议充分测试后再开启
 
@@ -547,7 +550,7 @@ SEARCH_AGENT_FALLBACK_TO_PHASE2=true
 TITLE_GENERATION_ENABLED=true
 TITLE_MAX_LENGTH=30
 TITLE_FALLBACK_LENGTH=30
-# 留空则默认使用 OLLAMA_MODEL_NAME
+# 留空则默认使用 FAST_LLM_MODEL_NAME
 TITLE_GENERATION_MODEL=
 ```
 
@@ -789,13 +792,12 @@ cat frontend/vite.config.js
 ```bash
 # 手动拉取模型
 ollama pull deepseek-r1:7b-qwen-distill-q4_K_M
-ollama pull nomic-embed-text:latest
+ollama pull qwen2.5:7b
+ollama pull bge-m3:latest
+ollama pull qllama/bge-reranker-v2-m3:latest
 
 # 查看已安装模型
 ollama list
-
-# 设置模型别名
-ollama tag deepseek-r1:7b-qwen-distill-q4_K_M default
 ```
 
 ### 8.5 Milvus 连接失败

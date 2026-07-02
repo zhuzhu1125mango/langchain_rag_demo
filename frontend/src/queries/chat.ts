@@ -40,6 +40,54 @@ export interface MessageSource {
   source_type?: 'kb' | 'web'
   /** 命中的文本片段内容。 */
   content?: string
+  /** 知识库文档 ID，用于定位文档切片详情（kb 来源点击弹窗必需）。 */
+  document_id?: string
+  /** 文档切片序号（与 page 同义，来自后端 chunk_index，保留以对齐后端字段）。 */
+  chunk_index?: number
+  /** 文档总切片数，用于展示 "第 N/M 段"。 */
+  total_chunks?: number
+  /** 来源序号（从 1 开始，用于编号徽章展示）。 */
+  index?: number
+}
+
+/** reasoning 步骤的额外结构化元数据。 */
+export interface ReasoningStepMetadata {
+  /** 来源数量。 */
+  sources_count?: number
+  /** 识别的主要模式。 */
+  primary_mode?: string
+  /** 推荐工具列表。 */
+  suggested_tools?: string[]
+  /** 搜索流程类型。 */
+  search_pipeline?: string
+  /** 是否需要实时信息。 */
+  needs_realtime?: boolean
+  /** 改写后的问题文本。 */
+  rewritten_question?: string
+  /** 调用的工具列表。 */
+  tools?: string[]
+  /** 其他后端透传字段。 */
+  [key: string]: unknown
+}
+
+/** 单条 reasoning/搜索过程步骤。 */
+export interface ReasoningStep {
+  /** 步骤唯一 ID，用于前端 diff/更新。 */
+  id: string
+  /** 步骤类型，如 intent_routing / web_search / kb_retrieve 等。 */
+  step: string
+  /** 状态：running / done / failed。 */
+  status: 'running' | 'done' | 'failed'
+  /** 前端展示标题。 */
+  title: string
+  /** 前端展示内容。 */
+  content: string
+  /** 创建时间戳（秒）。 */
+  timestamp?: number
+  /** 耗时（毫秒），可选。 */
+  duration_ms?: number | null
+  /** 额外结构化数据。 */
+  metadata?: ReasoningStepMetadata
 }
 
 export interface Message {
@@ -58,6 +106,8 @@ export interface Message {
   }
   /** 是否处于加载/流式接收中。 */
   isLoading?: boolean
+  /** 搜索/推理过程步骤列表。 */
+  reasoning?: ReasoningStep[]
 }
 
 /** 获取会话列表。 */

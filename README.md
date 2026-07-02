@@ -38,7 +38,7 @@
 | ORM | SQLAlchemy | ^2.0.34 | 异步数据库操作 |
 | 向量数据库 | Milvus | ^2.6.17 | 分布式向量存储 |
 | LLM 集成 | Ollama | ^0.2.10 | 本地模型运行 |
-| 嵌入模型 | Nomic Embed Text | latest | 离线向量嵌入 |
+| 嵌入模型 | bge-m3 | latest | 离线多语言向量嵌入，1024 维 |
 | 对象存储 | MinIO | latest | 分布式对象存储 |
 | 前端框架 | Vue 3 | ^3.5.35 | 现代前端框架 |
 | 状态管理 | Pinia | ^3.0.4 | 状态管理 |
@@ -60,6 +60,32 @@
 | 数据文件 | CSV, JSON | 结构化数据 |
 | 网页 | HTML, HTM | 网页文件 |
 | 电子书 | EPUB | 电子出版物 |
+
+---
+
+## 🧠 模型分工
+
+系统默认在 Ollama 本地部署多个模型，按任务特点分工协作，降低主模型负载并提升响应速度：
+
+| 任务 | 默认模型 | 说明 |
+|------|---------|------|
+| 主生成模型 | `deepseek-r1:7b-qwen-distill-q4_K_M` | 复杂推理、RAG 最终答案生成、Agent / Function Calling |
+| 轻量任务模型 | `qwen2.5:7b` | 意图路由、会话标题生成、Query 改写等结构化/低延迟任务 |
+| Embedding 模型 | `bge-m3:latest` | 多语言文档向量化，输出 1024 维稠密向量 |
+| 重排序模型 | `qllama/bge-reranker-v2-m3:latest` | 知识库检索与网页搜索结果精排，通过 Ollama 本地调用 |
+
+通过环境变量可灵活调整：
+
+```env
+OLLAMA_MODEL_NAME=deepseek-r1:7b-qwen-distill-q4_K_M
+FAST_LLM_MODEL_NAME=qwen2.5:7b
+EMBEDDING_MODEL_NAME=bge-m3:latest
+EMBEDDING_DIMENSION=1024
+KB_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
+SEARCH_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
+```
+
+> ⚠️ **Embedding 维度变更注意**：默认 Embedding 从 `nomic-embed-text`（768 维）切换为 `bge-m3`（1024 维）。现有 Milvus 集合会在服务启动时自动检测维度不一致并重建，旧知识库数据将丢失。请在启动前运行 `cd backend && poetry run python scripts/migrate_embedding_model.py --backup` 备份并重新上传文档。
 
 ---
 
@@ -339,8 +365,26 @@ poetry install
 # 启动服务（推荐方式）
 poetry run python start.py
 
+# 开发模式启动（代码改动后自动热重载，无需手动重启）
+poetry run python start.py --reload
+
 # API文档: http://localhost:8000/docs
 ```
+
+**开发热重载说明：**
+
+| 启动命令 | 模式 | 适用场景 |
+|---------|------|---------|
+| `poetry run python start.py` | 普通模式 | 调试断点、性能测试、首次启动检查 |
+| `poetry run python start.py --reload` | 热重载模式 | 日常开发迭代（推荐） |
+
+热重载模式基于 uvicorn `--reload`，保存 `backend/src/` 下任意 `.py` 文件后约 1-2 秒自动重启服务。
+
+> ⚠️ 注意事项：
+> - 仅限本地开发使用，生产/Docker 环境不要启用
+> - 修改 `config.py`、`.env` 等配置文件后，部分单例（如 OllamaEmbeddings 客户端）可能不会重建，若发现"改了没生效"请手动重启一次
+> - 首次启动仍会执行 Ollama / PostgreSQL / MinIO / Milvus 连通性检查
+> - 也可通过环境变量启用：`$env:RELOAD_MODE="true"; poetry run python start.py`
 
 #### 4. 启动前端
 
@@ -557,7 +601,7 @@ MINIO_BUCKET_NAME=documents
 MINIO_SECURE=false
 
 # Redis
-REDIS_PASSWORD=
+REDIS_PASSWORD=dev_redis_password
 
 # 安全密钥（开发环境可使用默认值，生产必须修改）
 SECRET_KEY=dev-secret-key-not-for-production
@@ -578,7 +622,7 @@ MINIO_BUCKET_NAME=documents
 MINIO_SECURE=true
 
 # Redis
-REDIS_PASSWORD=  # 建议手动设置
+REDIS_PASSWORD=  # 必须手动设置！
 
 # 安全密钥（必须设置为强密钥，否则后端启动失败）
 SECRET_KEY=  # 必须手动设置！
@@ -602,7 +646,7 @@ SECRET_KEY=  # 必须手动设置！
 | `REDIS_HOST` | Redis 主机 | `localhost` | 容器内自动覆盖为 `redis` |
 | `REDIS_PORT` | Redis 端口 | `6379` | - |
 | `REDIS_DB` | Redis 数据库编号 | `0` | 0-15 |
-| `REDIS_PASSWORD` | Redis 密码 | - | 生产环境建议设置 |
+| `REDIS_PASSWORD` | Redis 密码 | `dev_redis_password` | 必填，生产环境必须设置为强密码 |
 | `SEARCH_PROVIDER` | 搜索引擎 | `searxng` | `duckduckgo` / `searxng` / `tavily` |
 | `SEARCH_MAX_RESULTS` | 单次搜索返回结果数 | 10 | 1-20 |
 | `SEARCH_FETCH_TIMEOUT` | 网页抓取超时（秒） | 10 | - |
@@ -613,7 +657,12 @@ SECRET_KEY=  # 必须手动设置！
 | `SEARCH_ENABLE_MULTI_QUERY` | 是否启用 LLM 多角度 Query 改写 | `true` | true/false |
 | `SEARCH_NUM_QUERIES` | Query 改写生成的查询数 | 3 | - |
 | `SEARCH_ENABLE_RERANK` | 是否启用 Cross-Encoder 语义重排 | `true` | true/false |
-| `SEARCH_RERANK_MODEL` | 重排模型 | `BAAI/bge-reranker-base` | - |
+| `EMBEDDING_DIMENSION` | Embedding 向量维度 | `1024` | 需与 `EMBEDDING_MODEL_NAME` 对应 |
+| `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:7b` | 意图路由/标题/Query 改写 |
+| `KB_RERANK_MODEL` | 知识库重排模型 | `qllama/bge-reranker-v2-m3:latest` | - |
+| `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `ollama` | `sentence_transformers` / `ollama` |
+| `SEARCH_RERANK_MODEL` | 搜索重排模型 | `qllama/bge-reranker-v2-m3:latest` | - |
+| `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `ollama` | `sentence_transformers` / `ollama` |
 | `SEARCH_RERANK_TOP_K` | 重排后返回 Top-K | 5 | - |
 | `SEARCH_CACHE_TTL` | 搜索结果缓存时间（秒） | 3600 | - |
 | `SEARCH_CONTENT_CACHE_TTL` | 网页内容缓存时间（秒） | 86400 | - |
@@ -624,7 +673,7 @@ SECRET_KEY=  # 必须手动设置！
 | `TITLE_GENERATION_ENABLED` | 是否启用 LLM 自动生成会话标题 | `true` | true/false |
 | `TITLE_MAX_LENGTH` | 生成标题的最大长度 | `30` | - |
 | `TITLE_FALLBACK_LENGTH` | 生成失败时截取问题前 N 字 | `30` | - |
-| `TITLE_GENERATION_MODEL` | 指定标题生成模型 | - | 留空则使用 `OLLAMA_MODEL_NAME` |
+| `TITLE_GENERATION_MODEL` | 指定标题生成模型 | - | 留空则使用 `FAST_LLM_MODEL_NAME` |
 
 ### Docker 服务端口
 
@@ -810,7 +859,7 @@ MIT License
 3. **SECRET_KEY**: 生产环境必须在 `.env.prod` 中设置强密钥，否则后端容器启动失败
 4. **数据卷管理**: 使用 `docker-compose down -v` 会删除数据卷，**谨慎操作**
 5. **模型下载**: 首次运行需要下载 Ollama 模型，可能需要较长时间
-6. **搜索模型下载**: 启用重排时首次会联网下载 `BAAI/bge-reranker-base`，请确保网络可访问 HuggingFace 或已配置镜像
+6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qllama/bge-reranker-v2-m3:latest`、`ollama pull qwen2.5:7b` 与 `ollama pull deepseek-r1:7b-qwen-distill-q4_K_M`，耗时较长
 7. **内存要求**: 建议至少 8GB 内存，模型越大需要内存越多
 8. **端口冲突**: 确保常用端口（5433, 6379, 8000, 8080, 9000, 9001, 19530, 3000, 9090, 5173）未被占用
 9. **环境切换**: 同一时间只能运行一种环境（开发或生产），切换前请先停止当前环境

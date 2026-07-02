@@ -27,6 +27,7 @@ import math
 import uuid
 from collections import Counter
 from src.database import get_db, async_session_maker
+from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Document, Category, KnowledgeBase
 
 logger = logging.getLogger("rag_system")
@@ -374,7 +375,8 @@ async def upload_document(
     chunk_overlap: Optional[int] = Query(None, ge=0, le=500, description="文本块重叠大小（0-500）"),
     upload_id: Optional[str] = Query(None, description="上传任务ID（用于WebSocket进度推送）"),
     background_tasks: BackgroundTasks = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     上传文档（异步处理）
@@ -397,11 +399,17 @@ async def upload_document(
             kb = result.scalars().first()
             if not kb:
                 raise HTTPException(status_code=400, detail="知识库不存在")
+            require_owner(kb.owner_id, current_user)
         except ValueError:
             raise HTTPException(status_code=400, detail="无效的知识库ID")
     else:
-        # 使用默认知识库
-        result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.is_default == True))
+        # 使用当前用户的默认知识库
+        result = await db.execute(
+            select(KnowledgeBase).filter(
+                KnowledgeBase.is_default == True,
+                KnowledgeBase.owner_id == current_user.user_id,
+            )
+        )
         kb = result.scalars().first()
         if not kb:
             raise HTTPException(status_code=400, detail="没有找到默认知识库，请先创建知识库")
@@ -427,6 +435,7 @@ async def upload_document(
             file_type=ext.lower(),
             size=file.size,
             kb_id=kb_uuid,
+            owner_id=current_user.user_id,
             status="draft",
             processing_status="uploading",
             processing_message="正在上传文件...",
@@ -488,15 +497,30 @@ async def batch_upload(
     chunk_size: Optional[int] = Query(None, ge=50, le=2000, description="文本块大小（50-2000）"),
     chunk_overlap: Optional[int] = Query(None, ge=0, le=500, description="文本块重叠大小（0-500）"),
     background_tasks: BackgroundTasks = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     if kb_id:
         try:
-            uuid.UUID(kb_id)
+            kb_uuid = uuid.UUID(kb_id)
+            result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid))
+            kb = result.scalars().first()
+            if not kb:
+                raise HTTPException(status_code=400, detail="知识库不存在")
+            require_owner(kb.owner_id, current_user)
         except ValueError:
             raise HTTPException(status_code=400, detail="无效的知识库ID")
     else:
-        kb_id = await get_default_kb_id(db)
+        result = await db.execute(
+            select(KnowledgeBase).filter(
+                KnowledgeBase.is_default == True,
+                KnowledgeBase.owner_id == current_user.user_id,
+            )
+        )
+        kb = result.scalars().first()
+        if not kb:
+            raise HTTPException(status_code=400, detail="没有找到默认知识库，请先创建知识库")
+        kb_id = str(kb.id)
 
     from src.services.minio_service import MinioService
 
@@ -521,6 +545,7 @@ async def batch_upload(
                 file_type=ext.lower(),
                 size=file.size,
                 kb_id=uuid.UUID(kb_id) if kb_id else None,
+                owner_id=current_user.user_id,
                 status="draft",
                 processing_status="processing",
                 processing_message="正在处理文档...",
@@ -679,16 +704,17 @@ async def search_documents(
 async def list_documents(
     kb_id: Optional[str] = Query(None, description="知识库ID，不传则查询所有知识库的文档"),
     status: Optional[str] = Query(None, description="文档状态筛选：active（已上架）、inactive（已下架）"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
         logger.info(f"list_documents called with kb_id: {kb_id}, status: {status}")
-        
+
         query = select(Document).options(
             joinedload(Document.knowledge_base),
             joinedload(Document.category)
-        )
-        
+        ).filter(Document.owner_id == current_user.user_id)
+
         if kb_id:
             try:
                 query = query.filter(Document.kb_id == uuid.UUID(kb_id))
@@ -696,7 +722,7 @@ async def list_documents(
             except ValueError as e:
                 logger.error(f"Invalid kb_id format: {kb_id}")
                 raise HTTPException(status_code=400, detail="无效的知识库ID")
-        
+
         if status:
             if status == "active":
                 query = query.filter(Document.status == "published")
@@ -1039,24 +1065,35 @@ async def evaluate_document_quality(doc_id: str, db: AsyncSession = Depends(get_
 
 
 @router.get("/{doc_id}")
-async def get_document(doc_id: str, db: AsyncSession = Depends(get_db)):
+async def get_document(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     try:
         result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
         doc = result.scalar_one_or_none()
         if not doc:
             raise HTTPException(status_code=404, detail="文档不存在")
+        require_owner(doc.owner_id, current_user)
         return doc
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的文档ID")
 
 
 @router.put("/{doc_id}")
-async def update_document(doc_id: str, data: DocumentUpdate, db: AsyncSession = Depends(get_db)):
+async def update_document(
+    doc_id: str,
+    data: DocumentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     try:
         result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
         doc = result.scalar_one_or_none()
         if not doc:
             raise HTTPException(status_code=404, detail="文档不存在")
+        require_owner(doc.owner_id, current_user)
 
         if data.category_id:
             doc.category_id = uuid.UUID(data.category_id)
@@ -1081,7 +1118,8 @@ async def update_document(doc_id: str, data: DocumentUpdate, db: AsyncSession = 
 async def delete_document(
     doc_id: str,
     background_tasks: BackgroundTasks = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     删除文档（异步处理）
@@ -1096,6 +1134,7 @@ async def delete_document(
         doc = result.scalar_one_or_none()
         if not doc:
             raise HTTPException(status_code=404, detail="文档不存在")
+        require_owner(doc.owner_id, current_user)
 
         kb_id = str(doc.kb_id)
         file_path = doc.file_path
@@ -1131,7 +1170,8 @@ async def delete_document(
 async def batch_delete(
     body: dict = Body(...),
     background_tasks: BackgroundTasks = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     批量删除文档（异步处理）
@@ -1150,7 +1190,7 @@ async def batch_delete(
         try:
             result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
             doc = result.scalar_one_or_none()
-            if doc:
+            if doc and doc.owner_id == current_user.user_id:
                 kb_id = str(doc.kb_id)
                 file_path = doc.file_path
                 task_id = f"delete_{doc_id}_{uuid.uuid4().hex[:8]}"

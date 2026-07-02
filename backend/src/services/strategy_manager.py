@@ -90,21 +90,21 @@ class StrategyManager:
         if name in self.enabled_strategies:
             self.enabled_strategies.remove(name)
     
-    def initialize_all(self):
+    async def initialize_all(self):
         """
         初始化所有已注册的策略
         """
         for strategy in self.strategies.values():
-            strategy.initialize()
+            await strategy.initialize()
     
-    def cleanup_all(self):
+    async def cleanup_all(self):
         """
         清理所有策略资源
         """
         for strategy in self.strategies.values():
-            strategy.cleanup()
+            await strategy.cleanup()
     
-    def execute_strategy(self, strategy_name: str, question: str, 
+    async def execute_strategy(self, strategy_name: str, question: str, 
                         history: Optional[List[Dict[str, str]]] = None) -> Tuple[bool, float]:
         """
         执行单个策略
@@ -121,7 +121,7 @@ class StrategyManager:
             return False, 0.0
         
         strategy = self.strategies[strategy_name]
-        result = strategy.should_use_knowledge_base(question, history)
+        result = await strategy.should_use_knowledge_base(question, history)
         confidence = strategy.get_confidence()
         
         return result, confidence
@@ -183,7 +183,7 @@ class StrategyManager:
         
         return final_decision, min(final_confidence, 0.99), strategy_confidences
     
-    def should_use_knowledge_base(self, question: str, 
+    async def should_use_knowledge_base(self, question: str, 
                                   history: Optional[List[Dict[str, str]]] = None) -> Tuple[bool, float, Dict[str, float]]:
         """
         判断是否需要使用知识库（融合所有策略）
@@ -199,7 +199,7 @@ class StrategyManager:
         
         for name in self.enabled_strategies:
             if name in self.strategies:
-                result, confidence = self.execute_strategy(name, question, history)
+                result, confidence = await self.execute_strategy(name, question, history)
                 results.append((name, result, confidence))
         
         return self.fuse_results(results)
@@ -242,7 +242,7 @@ class StrategyManager:
                 self.weights[name] /= total
 
 
-def create_default_strategy_manager() -> StrategyManager:
+async def create_default_strategy_manager() -> StrategyManager:
     """
     创建默认的策略管理器，包含所有基础策略
     
@@ -256,6 +256,6 @@ def create_default_strategy_manager() -> StrategyManager:
     manager.register_strategy(LLMInferenceStrategy())
     manager.register_strategy(ContextStrategy())
     
-    manager.initialize_all()
+    await manager.initialize_all()
     
     return manager
