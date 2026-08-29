@@ -11,13 +11,13 @@ import sys
 question = sys.argv[1] if len(sys.argv) > 1 else '测试流式消息保存8'
 disconnect_after = float(sys.argv[2]) if len(sys.argv) > 2 else 0
 
-url = f'http://localhost:8000/api/chat/stream?question={question}&use_web_search=false'
+url = 'http://localhost:8000/api/chat/stream'
 print(f'Starting SSE request to {url}')
 if disconnect_after > 0:
     print(f'Will disconnect after {disconnect_after}s')
 start = time.time()
 try:
-    with requests.get(url, stream=True, timeout=300) as r:
+    with requests.post(url, json={'question': question, 'use_web_search': False}, stream=True, timeout=300) as r:
         print(f'Status: {r.status_code}')
         for line in r.iter_lines():
             if line:

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.config import settings
-from .tools.datetime_tool import get_current_datetime
+from .tools.plugins._datetime_impl import get_current_datetime
 from .tools.tool_manager import ToolManager
 from .tools.plugins.web_search_tool import WebSearchTool
 from .tools.plugins.fetch_webpage_tool import FetchWebpageTool

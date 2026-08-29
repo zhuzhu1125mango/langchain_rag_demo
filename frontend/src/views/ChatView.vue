@@ -438,26 +438,45 @@ async function sendMessage(): Promise<void> {
 
     messageListRef.value?.scrollToBottom()
 
-    const searchParams = new URLSearchParams({
-      question: question,
-      use_web_search: useWebSearch.value.toString()
-    })
+    // 改用 POST + fetch 流式读取（替代 EventSource）：
+    //   - question 不再走 URL query，避免进入 nginx 访问日志与浏览器历史
+    //   - EventSource 无法携带自定义头，POST 可统一走 X-API-Key 认证
+    const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
+    const requestHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (apiKey) {
+      requestHeaders['X-API-Key'] = apiKey
+    }
+    const savedToken = localStorage.getItem('token')
+    if (savedToken) {
+      requestHeaders['Authorization'] = `Bearer ${savedToken}`
+    }
+
+    const requestBody: Record<string, unknown> = {
+      question,
+      use_web_search: useWebSearch.value
+    }
 
     if (useWebSearch.value) {
-      searchParams.append('search_mode', 'function_calling')
+      requestBody.search_mode = 'function_calling'
     }
 
     if (selectedKBs.value.length > 0) {
-      selectedKBs.value.forEach(kbId => searchParams.append('kb_ids', kbId))
+      requestBody.kb_ids = selectedKBs.value
     }
 
     if (chatStore.currentSession?.id) {
-      searchParams.append('session_id', chatStore.currentSession.id)
+      requestBody.session_id = chatStore.currentSession.id
     }
 
-    const eventSource = new EventSource(`/api/chat/stream?${searchParams.toString()}`)
-
+    const controller = new AbortController()
     let receivedContent = false
+    let streamEnded = false
+    const closeStream = () => {
+      if (!streamEnded) {
+        streamEnded = true
+        controller.abort()
+      }
+    }
 
     // SSE 事件协议：
     //   - content：data.content 为增量文本片段，累加到助手消息内容上
@@ -466,26 +485,26 @@ async function sendMessage(): Promise<void> {
     //   - end：流结束，data.sources 为来源列表，data.message_id 为后端正式消息 ID，
     //          data.session_id/data.title 用于新会话创建与标题更新，data.reasoning 为完整推理过程
     //   - error：data.error 为错误描述，展示后关闭连接
-    eventSource.onmessage = (event) => {
-          try {
-            const data = JSON.parse(event.data)
-            const lastMsg = chatStore.messages[chatStore.messages.length - 1]
-            if (!lastMsg) return
+    const processEvent = (eventData: string) => {
+      try {
+        const data = JSON.parse(eventData)
+        const lastMsg = chatStore.messages[chatStore.messages.length - 1]
+        if (!lastMsg) return
 
-            if (data.type === 'search_status') {
-              searchStatus.value = data.status || 'idle'
-              return
-            }
+        if (data.type === 'search_status') {
+          searchStatus.value = data.status || 'idle'
+          return
+        }
 
-            if (data.type === 'reasoning') {
-              const step = data as ReasoningStep
-              const current = lastMsg.reasoning || []
-              const merged = mergeReasoningSteps(current, [step])
-              chatStore.updateMessage(lastMsg.id, { reasoning: merged })
-              return
-            }
+        if (data.type === 'reasoning') {
+          const step = data as ReasoningStep
+          const current = lastMsg.reasoning || []
+          const merged = mergeReasoningSteps(current, [step])
+          chatStore.updateMessage(lastMsg.id, { reasoning: merged })
+          return
+        }
 
-            if (data.type === 'content') {
+        if (data.type === 'content') {
           if (data.content) {
             receivedContent = true
             const updatedContent = (lastMsg.content || '') + data.content
@@ -547,17 +566,17 @@ async function sendMessage(): Promise<void> {
           queryClient.invalidateQueries({ queryKey: ['sessions'] })
           queryClient.refetchQueries({ queryKey: ['sessions'] })
           searchStatus.value = 'idle'
-          eventSource.close()
+          closeStream()
         } else if (data.type === 'error') {
           cancelReasoningRaf()
           searchStatus.value = 'idle'
-          eventSource.close()
+          closeStream()
           chatStore.updateMessage(lastMsg.id, { content: `⚠ 错误: ${data.error}`, isLoading: false })
         }
       } catch {
         cancelReasoningRaf()
         searchStatus.value = 'idle'
-        eventSource.close()
+        closeStream()
         if (!receivedContent) {
           const lastMsg = chatStore.messages[chatStore.messages.length - 1]
           if (lastMsg) {
@@ -567,15 +586,69 @@ async function sendMessage(): Promise<void> {
       }
     }
 
-    eventSource.onerror = () => {
+    const response = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: requestHeaders,
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
+    })
+
+    if (!response.ok) {
+      closeStream()
+      searchStatus.value = 'idle'
+      let detail = ''
+      try {
+        const err = await response.json()
+        detail = typeof err?.detail === 'string' ? `: ${err.detail}` : ''
+      } catch {
+        // 非 JSON 错误体，忽略
+      }
+      chatStore.updateMessage(assistantMsgId, {
+        content: `⚠ 请求失败 (${response.status})${detail}`,
+        isLoading: false
+      })
+      return
+    }
+
+    if (!response.body) {
+      closeStream()
+      searchStatus.value = 'idle'
+      chatStore.updateMessage(assistantMsgId, { content: '⚠ 服务端不支持流式响应', isLoading: false })
+      return
+    }
+
+    // 逐块读取 SSE 流：按空行（\n\n）切分事件，提取 "data: " 行
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    try {
+      while (!streamEnded) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const events = buffer.split('\n\n')
+        buffer = events.pop() || ''
+
+        for (const event of events) {
+          const dataLine = event.split('\n').find(line => line.startsWith('data:'))
+          if (!dataLine) continue
+          processEvent(dataLine.slice(5).trim())
+        }
+      }
+    } finally {
+      // 释放底层连接（服务端正常结束或中途退出均安全）
+      controller.abort()
+    }
+
+    // 流结束但未收到 end/error 事件且无内容：等价于旧 EventSource 的 onerror
+    if (!streamEnded && !receivedContent) {
       cancelReasoningRaf()
       searchStatus.value = 'idle'
-      eventSource.close()
-      if (!receivedContent) {
-        const lastMsg = chatStore.messages[chatStore.messages.length - 1]
-        if (lastMsg) {
-          chatStore.updateMessage(lastMsg.id, { content: '⚠ 连接断开，无法获取响应', isLoading: false })
-        }
+      const lastMsg = chatStore.messages[chatStore.messages.length - 1]
+      if (lastMsg) {
+        chatStore.updateMessage(lastMsg.id, { content: '⚠ 连接断开，无法获取响应', isLoading: false })
       }
     }
   } catch (error) {

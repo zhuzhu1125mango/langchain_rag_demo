@@ -65,18 +65,17 @@ export function useWebSocketNotifications() {
     const channelParam = subscribedChannels.value.join(',') || defaultChannels.join(',')
     const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
     const queryParams = new URLSearchParams({ channels: channelParam })
-    if (apiKey) {
-      queryParams.set('api_key', apiKey)
-    }
     const wsUrl = buildWsUrl(`/api/ws/notifications?${queryParams.toString()}`)
 
     try {
       ws = new WebSocket(wsUrl)
 
       ws.onopen = () => {
-        isConnected.value = true
-        console.log('[WebSocket] Connected')
-        startHeartbeat()
+        console.log('[WebSocket] Connected, sending auth frame')
+        // 首帧鉴权：api_key 不再走 URL query（避免进反向代理访问日志），
+        // 连接建立后立即发送 auth 帧；开发模式（后端未配置 API_KEY）服务端
+        // 会不经校验直接回发 auth_ok。
+        ws?.send(JSON.stringify({ type: 'auth', api_key: apiKey || '' }))
       }
 
       ws.onmessage = (event) => {
@@ -84,7 +83,14 @@ export function useWebSocketNotifications() {
           const notification: Notification = JSON.parse(event.data)
           lastNotification.value = notification
 
-          // 根据通知类型处理
+          // 首帧鉴权结果：通过后启动心跳；未通过场景由服务端以 1008 关闭
+          if (notification.type === 'auth_ok') {
+            isConnected.value = true
+            console.log('[WebSocket] Authenticated')
+            startHeartbeat()
+            return
+          }
+
           if (notification.type === 'connected') {
             console.log('[WebSocket] Subscribed to channels:', notification.channels)
             subscribedChannels.value = notification.channels || []

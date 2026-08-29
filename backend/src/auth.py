@@ -4,10 +4,11 @@
 当前阶段以 API Key 认证为主（适合自托管单实例），JWT 接口预留以便后续扩展多用户。
 """
 
+import asyncio
 import hmac
 import logging
 from typing import Optional
-from fastapi import Depends, HTTPException, Security, status, WebSocket
+from fastapi import Depends, HTTPException, Security, status, WebSocket, WebSocketDisconnect
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from starlette.exceptions import WebSocketException
 from pydantic import BaseModel
@@ -15,6 +16,9 @@ from pydantic import BaseModel
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+# WS 首帧鉴权等待时长：超时未发 auth 帧视为无效客户端
+WS_AUTH_TIMEOUT_SECONDS = 10.0
 
 # 认证方式声明
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -95,10 +99,17 @@ async def get_current_user(
 
 
 async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
-    """从 WebSocket 查询参数中获取并校验 API Key。
+    """WebSocket 首帧鉴权。
 
-    浏览器 WebSocket API 不支持自定义请求头，因此复用 query parameter 传递 api_key。
-    Docker 生产环境必须配置 API_KEY，否则拒绝所有 WebSocket 连接。
+    浏览器 WebSocket 无法携带自定义请求头，而 query parameter 传密钥会进入
+    反向代理访问日志与浏览器历史。改为连接建立后由客户端首帧发送
+    ``{"type": "auth", "api_key": "..."}`` 完成认证，认证通过前不推送任何业务数据。
+
+    流程：
+    1. accept 接受连接（握手阶段不校验，凭据不落 URL）；
+    2. 开发模式（未配置 API_KEY 且非 Docker）直接放行；
+    3. 等待首帧 auth（超时 ``WS_AUTH_TIMEOUT_SECONDS`` 秒）；
+    4. 校验通过发送 ``{"type": "auth_ok"}``，失败以 1008 关闭连接。
 
     Args:
         websocket: FastAPI WebSocket 对象。
@@ -107,25 +118,51 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
         CurrentUser: 当前认证用户信息。
 
     Raises:
-        WebSocketException: 认证失败时抛出，并先发送 close 帧断开连接。
+        WebSocketException: 认证失败/超时时抛出（连接已以 1008 关闭），
+            用于终止端点协程。
     """
+    await websocket.accept()
+
     configured_key = getattr(settings, "API_KEY", None) or getattr(settings.security, "API_KEY", None)
 
     # 未配置 API_KEY 且非 Docker 环境：开发模式允许匿名访问
     if not configured_key and not settings.IN_DOCKER:
+        await websocket.send_json({"type": "auth_ok"})
         return _DEFAULT_USER
 
-    api_key = websocket.query_params.get("api_key")
+    try:
+        first_frame = await asyncio.wait_for(
+            websocket.receive_json(), timeout=WS_AUTH_TIMEOUT_SECONDS
+        )
+    except (asyncio.TimeoutError, TimeoutError):
+        await websocket.close(code=1008, reason="认证超时")
+        raise WebSocketException(code=1008, reason="认证超时")
+    except WebSocketDisconnect:
+        # 客户端在鉴权前断开，无需再发 close 帧
+        raise WebSocketException(code=1008, reason="连接已断开")
+    except Exception:
+        # 非 JSON 帧 / 非 dict 帧
+        await websocket.close(code=1008, reason="无效的认证帧")
+        raise WebSocketException(code=1008, reason="无效的认证帧")
+
+    api_key = first_frame.get("api_key") if isinstance(first_frame, dict) else None
     if api_key and _verify_api_key(api_key):
+        await websocket.send_json({"type": "auth_ok"})
         return CurrentUser(user_id="api_key_user", is_authenticated=True)
 
-    # 认证失败，发送 close 帧后抛出异常终止连接建立
     await websocket.close(code=1008, reason="无效的认证凭据")
     raise WebSocketException(code=1008, reason="无效的认证凭据")
 
 
 def require_owner(owner_id: str, current_user: CurrentUser) -> None:
-    """校验当前用户是否为资源所有者。
+    """校验当前用户是否为资源所有者（per-user 隔离）。
+
+    规则：
+    - 资源 owner_id 与当前用户 ID 必须一致（含 api_key_user，创建资源时
+      owner_id 一律记录为当前用户 ID，因此单租户 API Key 形态天然自洽）；
+    - owner_id 为空的遗留数据保持放行，避免历史数据被锁死
+      （可用 scripts/migrate_owner_id.py 补齐）；
+    - 开发模式默认用户（default）在非 Docker 环境放行所有资源。
 
     Args:
         owner_id: 资源所有者 ID。
@@ -136,7 +173,7 @@ def require_owner(owner_id: str, current_user: CurrentUser) -> None:
     """
     if not current_user.is_authenticated:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
-    if owner_id and owner_id != current_user.user_id and current_user.user_id != "api_key_user":
+    if owner_id and owner_id != current_user.user_id:
         # 开发模式默认用户可访问所有资源（向后兼容）
         if current_user.user_id == "default" and not settings.IN_DOCKER:
             return

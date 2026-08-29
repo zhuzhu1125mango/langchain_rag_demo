@@ -1,0 +1,184 @@
+# =============================================================================
+# CI：后端单测 / 后端集成测试（服务容器）/ 前端构建
+# -----------------------------------------------------------------------------
+# - backend-unit:        纯单测，默认跳过 integration/e2e 标记，无需外部服务
+# - backend-integration: GitHub Actions services 挂起 PostgreSQL/Redis/MinIO/
+#                        etcd/Milvus 后运行 `pytest --run-integration`
+# - frontend:            pnpm 安装 + 类型检查构建，保证前端可编译
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend-unit:
+    name: Backend Unit Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # 默认即跳过 integration / e2e 标记（conftest.py 控制），CI 无需外部服务
+      - name: Run unit tests
+        run: uv run pytest -q
+
+  backend-integration:
+    name: Backend Integration Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: postgres:16.14
+        env:
+          POSTGRES_USER: rag_ci
+          POSTGRES_PASSWORD: rag_ci_password
+          POSTGRES_DB: rag_ci_db
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rag_ci -d rag_ci_db"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      minio:
+        image: minio/minio:RELEASE.2025-10-15T17-29-55Z
+        env:
+          MINIO_ROOT_USER: rag_ci_minio
+          MINIO_ROOT_PASSWORD: rag_ci_minio_password
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      etcd:
+        image: quay.io/coreos/etcd:v3.5.30
+        env:
+          ETCD_AUTO_COMPACTION_MODE: revision
+          ETCD_AUTO_COMPACTION_RETENTION: "1000"
+          ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+        ports:
+          - 2379:2379
+        options: >-
+          --health-cmd "etcdctl --endpoints=http://localhost:2379 endpoint health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+      # Milvus 复用上方 minio/etcd（GHA services 同一网络内以服务名互访）
+      milvus:
+        image: milvusdb/milvus:v2.6.17
+        cmd: ["milvus", "run", "standalone"]
+        env:
+          ETCD_ENDPOINTS: etcd:2379
+          MINIO_ADDRESS: minio:9000
+          MINIO_ACCESS_KEY_ID: rag_ci_minio
+          MINIO_SECRET_ACCESS_KEY: rag_ci_minio_password
+        ports:
+          - 19530:19530
+          - 9091:9091
+
+    env:
+      # 与 services 容器对齐（pydantic-settings 直接读环境变量，优先级高于 .env 文件）
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: rag_ci
+      POSTGRES_PASSWORD: rag_ci_password
+      POSTGRES_DB: rag_ci_db
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      MINIO_ENDPOINT: localhost:9000
+      MINIO_ACCESS_KEY: rag_ci_minio
+      MINIO_SECRET_KEY: rag_ci_minio_password
+      MINIO_BUCKET_NAME: documents
+      MILVUS_HOST: localhost
+      MILVUS_PORT: "19530"
+      # 应用启动时 Ollama 未就绪属预期：预热为 best-effort，连接失败仅告警不阻塞
+      OLLAMA_HOST: http://localhost:11434
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # Milvus 无官方 health check 镜像选项，轮询 9091/healthz 就绪
+      - name: Wait for Milvus ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:9091/healthz > /dev/null; then
+              echo "Milvus ready after ${i} attempts"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Milvus failed to become ready in 300s"
+          exit 1
+
+      - name: Run integration tests
+        run: uv run pytest --run-integration -q
+
+  frontend:
+    name: Frontend Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # build 脚本本身包含 vue-tsc -b 类型检查
+      - name: Build
+        run: pnpm build

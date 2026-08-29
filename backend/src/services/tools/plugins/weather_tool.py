@@ -6,7 +6,7 @@
 from typing import Any, Optional
 
 from src.services.tools.tool_manager import BaseTool, ToolResult
-from src.services.tools import weather_tool as weather_tool_module
+from src.services.tools.plugins import _weather_impl as weather_tool_module
 
 
 class WeatherTool(BaseTool):

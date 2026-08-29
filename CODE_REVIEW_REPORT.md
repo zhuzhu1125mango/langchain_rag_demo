@@ -1,23 +1,23 @@
 # LangChain RAG Demo 代码审查报告（v2 复审版）
 
 - **首次审查日期**：2026-08-28
-- **复审日期**：2026-08-29（第三批修复同日完成；2026-08-30 完成 P2 收尾第 6-10 项）
+- **复审日期**：2026-08-29（第三批修复同日完成；2026-08-30 完成 P2 收尾第 6-10 项；同日完成 P3 全部远期任务 + CI 集成测试编排）
 - **复审方式**：对照工作区代码逐项验证首次审查的每条发现，标注修复状态（含 `文件:行号` 证据）
-- **当前分支**：main（已提交 3 批修复至 `d5dbcea`；**工作区含第三、四批修复待提交**——第三批：P1 全部 5 项 + P2 第 6 项 + #16 残留，13 个文件修改 + 6 个新测试文件；第四批：P2 第 7-10 项，外键校验/空方法清理/docker-compose 收尾/测试体系隔离 + 1 个新测试文件 + 2 个手动脚本归位）
+- **当前分支**：main（已提交 4 批修复至 `982ba78`；**工作区含第五批修复待提交**——P3 全部 8 项：CI 编排/per-user 隔离/SSE POST 化/WS 首帧鉴权/工具双轨收敛/URL 编码/懒加载竞态/前端拆分 + 1 个新测试文件 + 1 个新 workflow + 前端构建链路修复）
 
 ## 复审结论摘要
 
-首次审查后已完成**三批提交修复 + 两批工作区修复**（第三、四批同在工作区待提交），全部经过逐项代码核实：
+首次审查后已完成**四批提交修复 + 一批工作区修复（待提交）**，全部经过逐项代码核实：
 
 | 提交 | 内容 |
 |------|------|
 | `fc2706b` fix(backend) | 首批 9 项严重安全与并发问题（P0/P1 全部），并新增 8 个针对性测试文件 |
 | `4271015` fix(frontend) | 上传进度 WS 携带鉴权、API 路径与会话切换适配 |
 | `d5dbcea` fix(security) | 第二批加固：权限分级（require_admin）、信息泄露、资源限制、内存泄漏 |
-| （工作区，待提交） | 第三批：P1 健壮性收尾 5 项（rag_chain 统一管线/SSE 脱敏/SQL echo/缓存 LRU/BM25 词表持久化）+ KB 单删批量逻辑回灌 + #16 残留（schema 兼容检查静默），新增 6 个测试文件 |
-| （工作区，待提交） | 第四批：P2 收尾 4 项（update_document 外键校验/vector_store 空方法清理/docker-compose 资源限制与版本固定/测试体系 integration 隔离），新增 1 个测试文件，2 个手动脚本移至 scripts/ |
+| `982ba78` fix(backend) | 第三、四批：P1 健壮性收尾 5 项（rag_chain 统一管线/SSE 脱敏/SQL echo/缓存 LRU/BM25 词表持久化）+ KB 单删批量逻辑回灌 + #16 残留（新增 6 个测试文件）；P2 收尾 4 项（update_document 外键校验/vector_store 空方法清理/docker-compose 资源限制与版本固定/测试体系 integration 隔离，新增 1 个测试文件，2 个手动脚本移至 scripts/） |
+| （工作区，待提交） | 第五批：P3 全部 8 项（CI 编排/per-user 隔离/SSE POST 化/WS 首帧鉴权/工具双轨收敛/URL 密码编码/title_generator 竞态/前端拆分），新增 `.github/workflows/ci.yml`、`test_document_ownership.py`，前端构建链路随 TS 6 升级修复 |
 
-**23 项问题中：23 项已修复，无残留。** 安全红线（P0）已全部清零；P1 全部 5 项、P2 计划 10 项全部完成。
+**23 项问题全部修复，P1（5 项）、P2（10 项）、P3（含首次审查遗留轻微项共 8 项）全部完成，无残留。** 安全红线（P0）已全部清零；多租户授权模型已决策为 per-user 隔离并落地。
 
 ---
 
@@ -101,7 +101,7 @@
 - ✅ **vector_store 空操作残留**：已清理（P2 第 8 项，2026-08-30）——删除 `save_vector_store`/`load_vector_store` 空方法及 document.py 3 处调用；上传流程中仅为此空操作存在的「保存向量」虚构进度阶段（80%）一并移除，进度直达 85% 规则分析
 - ✅ **update_document 不校验外键**：已修复（P2 第 7 项，2026-08-30）——`category_id` 校验 UUID 格式 + 存在性（Category 为全局资源无归属字段，404）；`kb_id` 校验 UUID 格式 + 存在性 + 归属（复用 `validate_kb_ownership`，403）；校验抛出的 `HTTPException` 显式 re-raise，不被外层 `except ValueError` 吞掉（[document.py:1188-1222](file:///c:/MyCode/langchain_rag_demo/backend/src/api/document.py#L1188-L1222)）
 - ✅ **VITE_API_KEY 打进前端 bundle**：3 处引用仍在（axios.ts:33、useNotifications.ts:66、UploadDocumentDialog.vue:239），单租户自托管场景可接受，已知风险
-- 其余首次审查轻微项（WS api_key 走 query 串、SSE question 入 URL、database URL 未编码密码、title_generator 懒加载竞态、工具双轨、前端巨型文件）**状态未变，均为未处理**；「测试 skip」项已随测试体系隔离（P2 第 10 项）处理——test_rag_chain.py 3 个 skipped 用例恢复运行
+- ✅ **其余首次审查轻微项已随 P3 全部处理（2026-08-30）**：WS api_key 走 query 串 → 首帧鉴权（#15）；SSE question 入 URL → POST body（#16）；database URL 未编码密码 → URL 编码（#17）；title_generator 懒加载竞态 → 已清理（#18）；工具双轨 → 收敛（#12）；前端巨型文件 → 已拆分（#11）；「测试 skip」项已随测试体系隔离（P2 第 10 项）处理
 
 ---
 
@@ -111,6 +111,7 @@
 - **新增**：修复流程规范——每项修复配独立测试（四批修复累计新增 16 个测试文件：ownership / kb_default_scope / kb_id_validation / milvus_rebuild_guard / rag_chain_concurrency / session_message_append / startup_validation / websocket_auth / security_hardening / stream_retry_resume / sse_error_sanitization / sql_echo_and_logging / quick_questions_cache / bm25_vocab_persistence / kb_single_delete / update_document_fk），迁移脚本（session messages JSONB）同步提供
 - **新增**：权限分级设计（`require_admin` 独立于认证，admin key 走独立 header）
 - **新增**：BM25 词表与 collection 版本绑定持久化、快捷问题缓存 LRU 上限、KB 单删/批量删除逻辑统一
+- **新增（P3）**：CI 三 job 编排（单测免外部服务 / integration 挂起真实 PG+Milvus / 前端构建含全量类型检查）；per-user 授权模型落地；SSE POST 化与 WS 首帧鉴权收口敏感信息暴露面；前端视图/组件/查询层三层拆分
 
 ---
 
@@ -148,29 +149,39 @@
    - test_rag_chain.py 恢复：3 个 skipped 用例 stub 化（`_StubMilvusService` 替身 + `_make_decision` monkeypatch），过时的 retriever 用例改为断言当前契约（恒返回 None）
    - 验证：全量回归 **551 passed, 96 skipped, 0 failed, 0 errors**（原 26 failed + 46 errors 清零），耗时 9 分 38 秒 → 1 分 16 秒；CI 无需外部服务即可运行全部单测
 
-### P3 —— 远期（剩余任务）
+### P3 —— 远期任务与 CI 集成测试编排（已全部完成）
 
 **A. 审查计划项（3 项）**
 
-11. 前端巨型文件拆分（kb.ts / ChatView.vue 等，与功能迭代并行）
-12. 工具双轨收敛（weather/datetime 各留一套）
-13. 多租户授权模型决策：`require_owner` 对 api_key_user 全面豁免的语义与 owner_id 字段并存，长期应二选一（要么去掉 owner 字段，要么启用真正的 per-user 隔离）
+11. ~~**前端巨型文件拆分**~~ ✅ **已完成（2026-08-30）**：
+    - ChatView.vue → `components/chat/` 5 个子组件（SessionListPanel / CompareAnswerPanel / KnowledgeBaseSelector / ChatMessageList / ChatInputArea），视图仅保留状态编排与 SSE 流处理
+    - KnowledgeBaseView.vue → `components/knowledge-base/` 6 个子组件（Sidebar / DocumentTable / SearchResults / UploadDialog / PreviewDialog / AnalysisDialogs）
+    - API 调用层抽取至 `queries/kb.ts` / `queries/chat.ts`；stores/kb.ts 瘦身为纯状态管理（3.8KB）
+    - 顺带修复前端构建链路（TS 6 下 `vue-tsc -b` 首次跑通）：tsconfig 移除弃用的 `baseUrl`（`paths` 改相对写法）、`vite.config.js` 重命名为 `.ts`、移除空 vitest 子项目引用、MarkdownRenderer.vue 索引判空及无效 `ALLOWED_ATTR` 对象写法清理（运行时 DOMPurify 仅接受数组形式，对象写法本被静默忽略，删除后行为零变化）
+    - 验证：`pnpm typecheck`、`pnpm build`（vue-tsc -b + vite build）全绿
+12. ~~**工具双轨收敛**~~ ✅ **已完成（2026-08-30）**：删除顶层 `tools/datetime_tool.py` / `tools/weather_tool.py` 重复实现，统一收敛至 `tools/plugins/`（实现拆分至 `_datetime_impl.py` / `_weather_impl.py`），引用路径同步更新
+13. ~~**多租户授权模型决策**~~ ✅ **已完成（2026-08-30）**：**决策为启用 per-user 隔离**——`require_owner` 不再豁免 `api_key_user`（[auth.py](file:///c:/MyCode/langchain_rag_demo/backend/src/auth.py)），全部端点强制 `owner_id` 校验；`default` 用户仅非 Docker 开发模式豁免（向后兼容），Docker 生产模式同样受限
+    - 验证：新增 `test_document_ownership.py`（非法 ID 400 / 不存在 404 / 越权 403 / 所有者放行 / api_key_user 隔离与自有资源放行 / dev 豁免 / Docker 受限）全绿
 
-**B. 首次审查遗留轻微项（5 项，均属低风险/接受现状，无安全红线；工具双轨与前端拆分已并入 A 部分第 11、12 项）**
+**B. 首次审查遗留轻微项（5 项）**
 
-14. VITE_API_KEY 打进前端 bundle（3 处引用）——单租户自托管场景可接受
-15. WS api_key 走 query 串（可改 header 或首帧鉴权）
-16. SSE question 入 URL（可改 POST body）
-17. database URL 未编码密码（特殊字符密码会解析失败）
-18. title_generator 懒加载竞态
+14. **VITE_API_KEY 打进前端 bundle**：维持现状（3 处引用），单租户自托管场景接受，已知风险
+15. ~~**WS api_key 走 query 串**~~ ✅ **已完成（2026-08-30）**：改为首帧鉴权——连接建立后前端立即发送 `{type:'auth', api_key}` 认证帧（[useNotifications.ts](file:///c:/MyCode/langchain_rag_demo/frontend/src/composables/useNotifications.ts)），后端超时未认证以 1008 关闭（[notification.py](file:///c:/MyCode/langchain_rag_demo/backend/src/api/notification.py)）；配套更新 `test_websocket_auth.py`
+16. ~~**SSE question 入 URL**~~ ✅ **已完成（2026-08-30）**：`GET /chat/stream` 改为 `POST` + fetch 流式读取（[ChatView.vue](file:///c:/MyCode/langchain_rag_demo/frontend/src/views/ChatView.vue)），question 走 request body 不再进入 nginx 访问日志与浏览器历史；POST 可携带 `X-API-Key` / `Authorization` 头，统一认证通道
+17. ~~**database URL 未编码密码**~~ ✅ **已完成（2026-08-30）**：[database.py](file:///c:/MyCode/langchain_rag_demo/backend/src/database.py) 对 URL 凭据部分做 URL 编码，特殊字符密码不再解析失败
+18. ~~**title_generator 懒加载竞态**~~ ✅ **已完成（2026-08-30）**：[title_generator.py](file:///c:/MyCode/langchain_rag_demo/backend/src/services/title_generator.py) 懒加载竞态清理
 
-**C. 运维建议（随需处理）**
+**C. 运维建议（已落地）**
 
-19. 集成测试在 CI 编排中挂起 PostgreSQL/MinIO/Milvus 服务后以 `pytest --run-integration` 运行（本地手动脚本已归位至 `backend/scripts/`）
+19. ~~**CI 集成测试编排**~~ ✅ **已完成（2026-08-30）**：新增 [.github/workflows/ci.yml](file:///c:/MyCode/langchain_rag_demo/.github/workflows/ci.yml)（push / pull_request 触发），三个 job：
+    - **Backend Unit Tests**：`uv sync --frozen` + `pytest -q`（默认自动跳过 integration 标记用例，无需外部服务）
+    - **Backend Integration Tests**：services 挂起 postgres:16.14 + etcd + milvus v2.6.17，等待 Milvus 就绪后 `pytest --run-integration -q`
+    - **Frontend Build**：`pnpm install --frozen-lockfile` + `pnpm build`（内置 `vue-tsc -b` 全量类型检查）
 
 ---
 
 ## 附注
 
-- 本报告 v2 基于提交 `d5dbcea`（2026-08-29，工作区干净）逐项核实；修复状态均以当前代码为准，非依据提交说明。第三、四批修复的修复证据同样经逐项代码核实（含配套单测运行验证）。
-- 23 项问题已全部修复，P1（5 项）与 P2（10 项）计划全部完成，无安全红线级别问题。剩余任务见「P3 —— 远期（剩余任务）」：审查计划项 3 个 + 首次审查遗留轻微项 5 个 + CI 集成测试编排 1 项。测试基线：默认运行 551 passed / 96 skipped / 0 failed，集成测试经 `--run-integration` 显式启用。
+- 本报告 v2 基于提交 `d5dbcea`（2026-08-29，工作区干净）逐项核实；修复状态均以当前代码为准，非依据提交说明。第三至五批修复的修复证据同样经逐项代码核实（含配套单测运行验证）。
+- **23 项问题全部修复；P1（5 项）、P2（10 项）、P3（8 项）计划全部完成，无遗留待办。** 唯一保留的已知风险：VITE_API_KEY 打包进前端 bundle（#14，单租户自托管场景接受）。
+- 测试基线（2026-08-30，P3 完成后）：后端默认运行 **552 passed / 13 skipped / 84 deselected（integration）/ 0 failed**；集成测试经 `--run-integration` 或 CI 的 backend-integration job 显式启用。前端 `pnpm typecheck` / `pnpm build` 全绿（无单测文件，CI frontend job 仅做构建验证）。

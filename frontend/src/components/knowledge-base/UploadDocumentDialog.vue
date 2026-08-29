@@ -235,21 +235,26 @@ async function uploadFiles(): Promise<void> {
 /** 为指定上传任务建立 WebSocket 进度连接。 */
 function setupProgressWebSocket(uploadId: string): Promise<void> {
   return new Promise((resolve) => {
-    // 服务端要求 WS 握手携带凭据（与通知 WS 一致，通过 query 传递 api_key）
+    // 首帧鉴权：api_key 不走 URL query（避免进反向代理访问日志），
+    // 连接建立后发送 auth 帧，收到服务端 auth_ok 确认后再开始上传流程
     const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
-    const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : ''
-    const wsUrl = buildWsUrl(`/api/documents/upload/progress/ws/${uploadId}${query}`)
+    const wsUrl = buildWsUrl(`/api/documents/upload/progress/ws/${uploadId}`)
     const ws = new WebSocket(wsUrl)
 
     wsConnections.value.set(uploadId, ws)
 
     ws.onopen = () => {
-      resolve()
+      ws.send(JSON.stringify({ type: 'auth', api_key: apiKey || '' }))
     }
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        // 首帧鉴权确认：服务端已认证，后续进度推送可达
+        if (data.type === 'auth_ok') {
+          resolve()
+          return
+        }
         // data.progress：当前处理进度百分比（0-100）
         if (data.progress !== undefined) {
           uploadProgress.value = Math.round(data.progress)
@@ -269,10 +274,14 @@ function setupProgressWebSocket(uploadId: string): Promise<void> {
 
     ws.onerror = () => {
       closeWebSocket(uploadId)
+      // 鉴权或连接失败也放行上传：进度退化为仅轮询/最终结果展示
+      resolve()
     }
 
     ws.onclose = () => {
       wsConnections.value.delete(uploadId)
+      // 兜底：鉴权被拒（1008）时不一定触发 onerror，放行上传避免流程卡死
+      resolve()
     }
   })
 }

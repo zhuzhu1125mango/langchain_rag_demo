@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 
-from src.services.tools.weather_tool import _extract_city_name
+from src.services.tools.plugins._weather_impl import _extract_city_name
 
 
 @dataclass

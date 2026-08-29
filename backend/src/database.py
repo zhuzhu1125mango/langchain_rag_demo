@@ -1,14 +1,17 @@
 from contextlib import asynccontextmanager
+from urllib.parse import quote_plus
+
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import declarative_base, sessionmaker
 from src.config import settings
 
+# 密码/库名做 URL 编码，避免特殊字符（@ : / # 等）破坏连接串解析
 SQLALCHEMY_ASYNC_DATABASE_URL = (
-    f"postgresql+asyncpg://{settings.database.POSTGRES_USER}:"
-    f"{settings.database.POSTGRES_PASSWORD}@"
-    f"{settings.database.POSTGRES_HOST}:"
+    f"postgresql+asyncpg://{quote_plus(settings.database.POSTGRES_USER)}:"
+    f"{quote_plus(settings.database.POSTGRES_PASSWORD)}@"
+    f"{quote_plus(settings.database.POSTGRES_HOST)}:"
     f"{settings.database.POSTGRES_PORT}/"
-    f"{settings.database.POSTGRES_DB}"
+    f"{quote_plus(settings.database.POSTGRES_DB)}"
 )
 
 async_engine = create_async_engine(

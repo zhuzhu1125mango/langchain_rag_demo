@@ -1,5 +1,9 @@
 """
-WebSocket 通知通道认证与权限测试
+WebSocket 通知通道认证与权限测试（首帧鉴权协议）
+
+协议：连接建立后客户端首帧发送 {"type": "auth", "api_key": "..."}，
+服务端校验通过回发 {"type": "auth_ok"}，之后才开始业务消息；
+失败或超时以 1008 关闭连接。
 """
 
 import uuid
@@ -12,6 +16,11 @@ from fastapi.testclient import TestClient
 
 from src.config import settings
 from src.main import app
+
+
+def _auth_ok_frame(api_key: str) -> dict:
+    """构造首帧鉴权消息。"""
+    return {"type": "auth", "api_key": api_key}
 
 
 @pytest.fixture
@@ -37,11 +46,13 @@ class TestWebSocketAuth:
     """WebSocket 认证测试。"""
 
     def test_ws_notifications_anonymous_in_dev_allowed(self, client):
-        """开发环境未配置 API_KEY 时，允许匿名 WebSocket 连接。"""
+        """开发环境未配置 API_KEY 时，允许匿名 WebSocket 连接（服务端直接回 auth_ok）。"""
         settings.security.API_KEY = None
         settings.IN_DOCKER = False
 
         with client.websocket_connect("/api/ws/notifications") as websocket:
+            data = websocket.receive_json()
+            assert data == {"type": "auth_ok"}
             data = websocket.receive_json()
             assert data["type"] == "connected"
 
@@ -52,7 +63,7 @@ class TestWebSocketAuth:
         settings.IN_DOCKER = True
 
     def test_ws_notifications_no_auth_in_docker_rejected(self, client):
-        """Docker 生产环境必须提供 API Key，否则拒绝连接。"""
+        """Docker 生产环境连接后不发 auth 帧，应被关闭。"""
         self._configure_production_mode()
 
         with pytest.raises(Exception):
@@ -60,32 +71,42 @@ class TestWebSocketAuth:
                 websocket.receive_json()
 
     def test_ws_notifications_valid_api_key_allowed(self, client):
-        """提供有效 API Key 时允许建立 WebSocket 连接。"""
+        """首帧提供有效 API Key 时允许建立 WebSocket 连接。"""
         self._configure_production_mode()
 
-        with client.websocket_connect(
-            "/api/ws/notifications?api_key=test-api-key-for-websocket"
-        ) as websocket:
+        with client.websocket_connect("/api/ws/notifications") as websocket:
+            websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
+            data = websocket.receive_json()
+            assert data == {"type": "auth_ok"}
             data = websocket.receive_json()
             assert data["type"] == "connected"
 
     def test_ws_notifications_invalid_api_key_rejected(self, client):
-        """提供无效 API Key 时拒绝 WebSocket 连接。"""
+        """首帧提供无效 API Key 时拒绝 WebSocket 连接。"""
         self._configure_production_mode()
 
         with pytest.raises(Exception):
-            with client.websocket_connect(
-                "/api/ws/notifications?api_key=wrong-key"
-            ) as websocket:
+            with client.websocket_connect("/api/ws/notifications") as websocket:
+                websocket.send_json(_auth_ok_frame("wrong-key"))
+                websocket.receive_json()
+
+    def test_ws_notifications_non_json_first_frame_rejected(self, client):
+        """首帧非 JSON 应被拒绝。"""
+        self._configure_production_mode()
+
+        with pytest.raises(Exception):
+            with client.websocket_connect("/api/ws/notifications") as websocket:
+                websocket.send_text("not-a-json")
                 websocket.receive_json()
 
     def test_ws_kb_valid_api_key_allowed(self, client):
-        """知识库通知通道使用有效 API Key 可连接。"""
+        """知识库通知通道首帧鉴权后可连接。"""
         self._configure_production_mode()
 
-        with client.websocket_connect(
-            "/api/ws/kb?api_key=test-api-key-for-websocket"
-        ) as websocket:
+        with client.websocket_connect("/api/ws/kb") as websocket:
+            websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
+            data = websocket.receive_json()
+            assert data == {"type": "auth_ok"}
             data = websocket.receive_json()
             assert data["type"] == "connected"
 
@@ -104,9 +125,8 @@ class TestWebSocketDocsPermission:
         self._configure_production_mode()
 
         with pytest.raises(Exception):
-            with client.websocket_connect(
-                "/api/ws/docs/not-a-uuid?api_key=test-api-key-for-websocket"
-            ) as websocket:
+            with client.websocket_connect("/api/ws/docs/not-a-uuid") as websocket:
+                websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
                 websocket.receive_json()
 
     def test_ws_docs_nonexistent_kb_rejected(self, client):
@@ -115,8 +135,9 @@ class TestWebSocketDocsPermission:
 
         with pytest.raises(Exception):
             with client.websocket_connect(
-                f"/api/ws/docs/{uuid.uuid4()}?api_key=test-api-key-for-websocket"
+                f"/api/ws/docs/{uuid.uuid4()}"
             ) as websocket:
+                websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
                 websocket.receive_json()
 
 
@@ -156,11 +177,12 @@ class TestUploadProgressWSAuth:
         with ws_client.websocket_connect(
             "/api/documents/upload/progress/ws/dev-upload-1"
         ) as websocket:
+            assert websocket.receive_json() == {"type": "auth_ok"}
             websocket.send_json({"action": "ping"})
             assert websocket.receive_json() == {"type": "pong"}
 
     def test_upload_ws_no_auth_in_docker_rejected(self, ws_client):
-        """Docker 生产模式未携带凭据必须在握手阶段被拒绝。"""
+        """Docker 生产模式不发 auth 帧应被关闭。"""
         self._configure_production_mode()
 
         with pytest.raises(Exception):
@@ -175,16 +197,19 @@ class TestUploadProgressWSAuth:
 
         with pytest.raises(Exception):
             with ws_client.websocket_connect(
-                "/api/documents/upload/progress/ws/some-upload?api_key=wrong-key"
+                "/api/documents/upload/progress/ws/some-upload"
             ) as websocket:
+                websocket.send_json(_auth_ok_frame("wrong-key"))
                 websocket.receive_json()
 
     def test_upload_ws_valid_api_key_allowed(self, ws_client):
-        """Docker 生产模式有效凭据可建立连接并响应心跳。"""
+        """Docker 生产模式首帧有效凭据可建立连接并响应心跳。"""
         self._configure_production_mode()
 
         with ws_client.websocket_connect(
-            "/api/documents/upload/progress/ws/some-upload?api_key=test-api-key-for-websocket"
+            "/api/documents/upload/progress/ws/some-upload"
         ) as websocket:
+            websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
+            assert websocket.receive_json() == {"type": "auth_ok"}
             websocket.send_json({"action": "ping"})
             assert websocket.receive_json() == {"type": "pong"}

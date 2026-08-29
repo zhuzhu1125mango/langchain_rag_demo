@@ -1,7 +1,9 @@
-"""天气查询工具。
+"""天气查询实现（供插件与意图路由共用）。
 
 集成 Open-Meteo 免费天气 API，提供比 SearXNG 网页抓取更可靠、实时的天气数据。
 Open-Meteo 无需 API key，支持城市名地理编码，适合离线/低成本部署场景。
+
+本模块只含实现逻辑，不含 BaseTool 插件类；插件定义见同包 weather_tool.py。
 """
 import asyncio
 import re

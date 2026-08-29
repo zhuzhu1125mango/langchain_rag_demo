@@ -65,7 +65,7 @@ onMounted(() => {
     if (node.tagName === 'A') {
       const href = node.getAttribute('href') || ''
       const schemeMatch = href.match(/^(\w+):/)
-      if (schemeMatch && !['http:', 'https:'].includes(schemeMatch[1].toLowerCase())) {
+      if (schemeMatch && !['http:', 'https:'].includes(schemeMatch[1]?.toLowerCase() ?? '')) {
         node.removeAttribute('href')
         node.setAttribute('role', 'link')
         node.setAttribute('aria-disabled', 'true')
@@ -92,13 +92,9 @@ const renderedContent = computed(() => {
       'strong', 'b', 'em', 'i', 'code', 'pre',
       'a', 'blockquote',
       'table', 'thead', 'tbody', 'tr', 'th', 'td'
-    ],
-    ALLOWED_ATTR: {
-      '*': ['class'],
-      'a': ['href', 'target', 'rel', 'role', 'aria-disabled', 'data-cite-index'],
-      'code': ['class'],
-      'sup': ['class', 'data-cite-index', 'tabindex', 'role']
-    }
+    ]
+    // 属性白名单走 DOMPurify 默认集（ALLOWED_ATTR 仅支持数组形式的严格白名单，
+    // 按标签配置的对象写法会被运行时静默忽略，等于默认行为，故不显式传入）
   })
 })
 
@@ -137,12 +133,12 @@ function injectCitations(html: string, sources: MessageSource[]): string {
     // 保留 <p> 之前的非段落内容（如 <h1>、<ul> 等）
     parts.push(html.slice(lastIdx, match.index))
 
-    const inner = match[1]
+    const inner = match[1] ?? ''
     // 提取段落纯文本用于指纹匹配（去标签和空白）
     const text = inner.replace(/<[^>]+>/g, '').replace(/\s+/g, '')
 
-    if (fpIdx < fingerprints.length && text.includes(fingerprints[fpIdx].fingerprint)) {
-      const fp = fingerprints[fpIdx]
+    const fp = fpIdx < fingerprints.length ? fingerprints[fpIdx] : undefined
+    if (fp && text.includes(fp.fingerprint)) {
       parts.push(`<p>${inner}<sup class="cite-ref" data-cite-index="${fp.index}" tabindex="0" role="button" aria-label="引用来源 ${fp.index}">[${fp.index}]</sup></p>`)
       fpIdx++
     } else {

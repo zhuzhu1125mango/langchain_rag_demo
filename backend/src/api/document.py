@@ -1332,11 +1332,11 @@ def get_upload_progress_endpoint(upload_id: str):
 async def upload_progress_ws(websocket: WebSocket, upload_id: str):
     """WebSocket 实时推送上传进度
 
-    认证方式：query parameter `api_key`（浏览器 WS 不支持自定义请求头）。
-    认证失败时在握手阶段以 1008 关闭连接。
+    认证方式：连接后首帧发送 {"type": "auth", "api_key": "..."} 完成鉴权（首帧鉴权，
+    避免密钥进入反向代理访问日志）。认证失败或超时以 1008 关闭连接。
     """
+    # accept 与首帧鉴权均在 get_current_user_for_ws 内完成
     await get_current_user_for_ws(websocket)
-    await websocket.accept()
 
     # 注册 WebSocket 连接
     register_ws_connection(upload_id, websocket)

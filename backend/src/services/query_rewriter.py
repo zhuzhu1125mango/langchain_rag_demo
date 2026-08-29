@@ -335,7 +335,7 @@ class QueryRewriter:
         """从天气类问题中提取城市名。"""
         # 复用 weather_tool 的城市提取逻辑
         try:
-            from src.services.tools.weather_tool import _extract_city_name
+            from src.services.tools.plugins._weather_impl import _extract_city_name
 
             city = _extract_city_name(question)
             return city or ""

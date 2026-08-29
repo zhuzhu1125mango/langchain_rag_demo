@@ -24,7 +24,7 @@ from .kb_comparator import KBComparator
 from .document_analyzer import DocumentAnalyzer
 from .kb_recommender import KBRecommender
 from .knowledge_graph_generator import KnowledgeGraphGenerator
-from .tools.datetime_tool import build_datetime_answer
+from .tools.plugins._datetime_impl import build_datetime_answer
 from .intent_router import IntentRouter, PrimaryMode, FallbackStrategy
 from .tool_executor import ToolExecutor
 from .answer_generator import AnswerGenerator

@@ -31,7 +31,7 @@ from src.services.search_postprocessor import SearchPostprocessor
 from src.services.tools.plugins.calculator_tool import CalculatorTool
 from src.services.tools.plugins.datetime_tool import DateTimeTool, build_datetime_answer
 from src.services.tools.plugins.weather_tool import WeatherTool
-from src.services.tools.weather_tool import _extract_city_name
+from src.services.tools.plugins._weather_impl import _extract_city_name
 from src.services.tools.tool_manager import ToolManager, ToolResult
 from src.services.search_types import SearchResult
 from src.services.trace_collector import TraceCollector

@@ -15,6 +15,7 @@ from typing import List, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Path, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.websockets import WebSocketState
 
 from src.auth import get_current_user_for_ws, require_owner, CurrentUser
 from src.database import get_db
@@ -45,7 +46,9 @@ class ConnectionManager:
         user_id: Optional[str] = None,
     ):
         """建立连接并订阅频道"""
-        await websocket.accept()
+        # 首帧鉴权流程已在 get_current_user_for_ws 中 accept，此处幂等处理
+        if websocket.client_state != WebSocketState.CONNECTED:
+            await websocket.accept()
         self.active_connections[connection_id] = {
             "websocket": websocket,
             "channels": set(channels),
@@ -109,7 +112,7 @@ async def websocket_notifications(
         "data": {...}
     }
 
-    认证方式：通过 query parameter `api_key` 传递 API Key。
+    认证方式：连接后首帧发送 {"type": "auth", "api_key": "..."} 完成鉴权（首帧鉴权）。
     """
     current_user = await get_current_user_for_ws(websocket)
     connection_id = str(uuid.uuid4())
@@ -173,7 +176,7 @@ async def websocket_knowledge_bases(websocket: WebSocket):
     - kb_updated: 知识库已更新
     - kb_deleted: 知识库已删除
 
-    认证方式：通过 query parameter `api_key` 传递 API Key。
+    认证方式：连接后首帧发送 {"type": "auth", "api_key": "..."} 完成鉴权（首帧鉴权）。
     """
     current_user = await get_current_user_for_ws(websocket)
     connection_id = str(uuid.uuid4())
@@ -209,7 +212,7 @@ async def websocket_documents(
     - doc_deleted: 文档已删除
     - doc_processing: 文档处理进度更新
 
-    认证方式：通过 query parameter `api_key` 传递 API Key。
+    认证方式：连接后首帧发送 {"type": "auth", "api_key": "..."} 完成鉴权（首帧鉴权）。
     权限校验：仅允许知识库所有者或全局 API Key 用户订阅。
     """
     current_user = await get_current_user_for_ws(websocket)

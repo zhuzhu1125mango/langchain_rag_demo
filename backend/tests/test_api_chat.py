@@ -70,9 +70,9 @@ class TestChatAPI:
     
     def test_stream_answer(self):
         """测试流式回答"""
-        response = client.get(
+        response = client.post(
             "/api/chat/stream",
-            params={"question": "你好"}
+            json={"question": "你好"}
         )
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/event-stream"

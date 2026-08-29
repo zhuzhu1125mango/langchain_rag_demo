@@ -8,7 +8,7 @@
 4. 敏感词过滤
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -179,28 +179,31 @@ async def send_message(
     }
 
 
-@router.get("/stream")
+@router.post("/stream")
 async def stream_answer(
     request: Request,
-    question: str = Query(...),
-    session_id: Optional[str] = Query(None),
-    kb_ids: Optional[List[str]] = Query(None),
-    use_web_search: Optional[bool] = Query(False),
-    search_mode: Optional[str] = Query("simple"),
+    payload: MessageRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
-    流式回答接口（SSE）
+    流式回答接口（SSE，POST body 传参）
+
+    改为 POST 的原因：question 走 GET query 会进入 nginx 访问日志与浏览器历史，
+    存在泄露面；且 EventSource 无法携带认证头，POST + fetch 可统一走 X-API-Key。
 
     Args:
-        question: 用户问题
-        session_id: 会话ID（可选）
-        kb_ids: 知识库ID列表（可选）
+        payload: 请求数据（question 必填，其余可选）
         current_user: 当前认证用户
 
     Returns:
         StreamingResponse: 流式响应（SSE格式）
     """
+    question = payload.question
+    session_id = payload.session_id
+    kb_ids = payload.kb_ids
+    use_web_search = payload.use_web_search
+    search_mode = payload.search_mode
+
     # request_id 由中间件生成并挂载到 request.state，SSE 错误事件仅回传该 ID
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
 

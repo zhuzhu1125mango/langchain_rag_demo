@@ -101,19 +101,3 @@ class TitleGenerator(AsyncSingleton["TitleGenerator"]):
         """LLM 失败时的降级截断方案。"""
         fallback_len = settings.title_generation.TITLE_FALLBACK_LENGTH
         return question[:fallback_len].strip() or "新会话"
-
-
-# 保留全局变量以兼容现有调用，但首次访问时需要在异步上下文中完成初始化。
-# 推荐在新代码中直接使用 `await TitleGenerator.get_instance()`。
-title_generator = None
-
-
-async def get_title_generator() -> TitleGenerator:
-    """获取 TitleGenerator 单例实例。
-
-    用于兼容需要在模块级别访问标题生成器的同步/异步上下文。
-    """
-    global title_generator
-    if title_generator is None:
-        title_generator = await TitleGenerator.get_instance()
-    return title_generator

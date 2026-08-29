@@ -44,8 +44,8 @@ from src.services.intent_router.tool_registry import (
     ToolMetaRegistry,
     get_tool_meta_registry,
 )
-from src.services.tools.datetime_tool import is_datetime_question
-from src.services.tools.weather_tool import _extract_city_name
+from src.services.tools.plugins._datetime_impl import is_datetime_question
+from src.services.tools.plugins._weather_impl import _extract_city_name
 
 logger = logging.getLogger("intent_router")
 

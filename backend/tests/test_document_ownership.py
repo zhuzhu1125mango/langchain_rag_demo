@@ -3,7 +3,8 @@
 
 验证 _get_owned_document 辅助函数的鉴权语义：
 - 非法 ID → 400；不存在 → 404；非所有者 → 403
-- api_key_user 与 dev 默认用户的豁免行为与既有端点一致
+- per-user 隔离：api_key_user 不豁免（仅能访问 owner_id=api_key_user 的资源）；
+  dev 默认用户仅在非 Docker 开发模式豁免
 
 不依赖真实数据库/向量库，可随单元测试全量运行。
 """
@@ -68,9 +69,19 @@ class TestGetOwnedDocument:
         assert result is doc
 
 
-    async def test_api_key_user_bypasses_ownership(self):
-        """api_key_user 豁免对象级校验（单租户部署形态，与既有端点行为一致）。"""
+    async def test_api_key_user_isolated(self):
+        """api_key_user 不再豁免对象级校验：访问他人资源返回 403（per-user 隔离）。"""
         doc = _doc(owner_id="user_a")
+        db = _make_db(doc)
+        api_user = CurrentUser(user_id="api_key_user", is_authenticated=True)
+        with pytest.raises(HTTPException) as exc:
+            await _get_owned_document(db, str(uuid_mod.uuid4()), api_user)
+        assert exc.value.status_code == 403
+
+
+    async def test_api_key_user_can_access_own_resource(self):
+        """api_key_user 访问自己名下（owner_id=api_key_user）的资源放行。"""
+        doc = _doc(owner_id="api_key_user")
         db = _make_db(doc)
         api_user = CurrentUser(user_id="api_key_user", is_authenticated=True)
         result = await _get_owned_document(db, str(uuid_mod.uuid4()), api_user)
