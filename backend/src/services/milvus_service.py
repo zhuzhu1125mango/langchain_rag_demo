@@ -231,8 +231,9 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                     collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
                     index_params=index_params
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            # 索引创建失败会显著劣化检索性能，不能静默吞掉
+            logger.error(f"确保 dense HNSW 索引存在时失败: {e}", exc_info=True)
 
     async def _ensure_sparse_index(self):
         """确保 sparse BM25 索引存在；若不存在则创建。"""
@@ -253,8 +254,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                     collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
                     index_params=sparse_index_params
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"确保 sparse BM25 索引存在时失败: {e}", exc_info=True)
 
     async def insert_embeddings(self, documents, kb_id=""):
         """将文档切块后的 embedding 批量插入 Milvus。

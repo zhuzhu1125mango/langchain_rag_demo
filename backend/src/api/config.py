@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from src.config import settings
-from src.auth import get_current_user, CurrentUser
+from src.auth import get_current_user, require_admin, CurrentUser
 from src.services.document_processor import SUPPORTED_EXTENSIONS
 
 router = APIRouter(prefix="/config", tags=["config"])
@@ -89,14 +89,14 @@ async def get_processing_config():
 @router.put("/processing", response_model=ProcessingConfig)
 async def update_processing_config(
     config: ProcessingConfigUpdate,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     """
-    更新文档处理配置
+    更新文档处理配置（管理操作：需 ADMIN_KEY 或开发模式）
 
     Args:
         config: 处理配置更新数据
-        current_user: 当前认证用户
+        current_user: 当前认证用户（经管理员鉴权）
 
     Returns:
         ProcessingConfig: 更新后的配置
@@ -152,12 +152,12 @@ async def get_model_config():
 
 
 @router.post("/reset")
-async def reset_config(current_user: CurrentUser = Depends(get_current_user)):
+async def reset_config(current_user: CurrentUser = Depends(require_admin)):
     """
-    重置配置到默认值
+    重置配置到默认值（管理操作：需 ADMIN_KEY 或开发模式）
 
     Args:
-        current_user: 当前认证用户
+        current_user: 当前认证用户（经管理员鉴权）
 
     Returns:
         dict: {"message": "配置已重置"}

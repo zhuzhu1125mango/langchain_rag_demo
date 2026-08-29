@@ -636,7 +636,7 @@ async def recommend_knowledge_bases(request: KBRecommendationRequest):
         recommendations = await rag_chain.recommend_knowledge_bases(request.question, request.top_k)
         return recommendations
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"知识库推荐失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="知识库推荐失败，请稍后重试")
 
 
 class KnowledgeGraphRequest(BaseModel):
@@ -662,4 +662,4 @@ async def generate_knowledge_graph(request: KnowledgeGraphRequest = Body(...)):
         result = await rag_chain.generate_knowledge_graph(request.kb_ids)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"生成知识图谱失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="生成知识图谱失败，请稍后重试")

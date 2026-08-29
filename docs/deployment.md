@@ -448,6 +448,7 @@ services:
 | `SECRET_KEY` | 不设置（启动自动生成临时密钥） | **必须手动设置强密钥** | ✅ |
 | `APP_ENV` | 不设置 | Docker 部署不设置；非 Docker 生产部署必设 `production` | 否 |
 | `MILVUS_REBUILD_ON_MISMATCH` | `false` | `false`（除非已确认可丢弃向量数据） | 否 |
+| `ADMIN_KEY` | 不设置（管理接口仅限开发模式） | 建议设置；未设置时管理接口一律 403 | ✅ |
 | `SEARCH_PROVIDER` | `searxng` | `searxng` | 否 |
 | `SEARXNG_BASE_URL` | `http://localhost:8080` | `http://searxng:8080` | 否 |
 | `GF_SECURITY_ADMIN_PASSWORD` | `admin` | **必须手动设置** | ✅ |
@@ -484,6 +485,15 @@ python scripts/migrate_session_messages_jsonb.py
 `POSTGRES_PASSWORD` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` 非空。
 开发模式（非生产）下 `SECRET_KEY` 缺失时会自动生成临时随机密钥并告警
 （重启后旧签名失效）。
+
+**管理操作鉴权**：`PUT /config/processing`、`POST /config/reset`、
+`POST /metrics/reset` 为管理操作。配置了 `ADMIN_KEY` 时请求须携带匹配的
+`X-Admin-Key` 头（常量时间比较）；生产模式未配置时一律 403；开发模式放行。
+
+**基础设施端口**：生产编排（`docker-compose.yml`）中 Redis/PostgreSQL/MinIO/
+Milvus/SearXNG/Prometheus/Alertmanager/Grafana 的宿主机端口仅绑定
+`127.0.0.1`，对外只暴露 backend(8000) 与 frontend(80)；远程运维走 SSH
+隧道或反向代理。
 
 ### 6.5 配置检查清单
 

@@ -74,6 +74,9 @@ class SecuritySettings(BaseSettings):
     SECRET_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     API_KEY: Optional[str] = None  # 全局 API Key（自托管单实例认证）
+    # 管理操作密钥（全局配置修改、/metrics/reset 等）。
+    # 生产模式未设置时管理接口一律 403；设置后请求须携带匹配的 X-Admin-Key 头。
+    ADMIN_KEY: Optional[str] = None
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
@@ -103,6 +106,9 @@ class ProcessingSettings(BaseSettings):
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 50
     TOP_K: int = 3
+
+    # 单文件上传大小上限（MB）。服务端按实际接收字节数校验，不信任客户端声明。
+    MAX_UPLOAD_SIZE_MB: int = 100
 
     # 混合检索相关配置
     KB_ENABLE_HYBRID_SEARCH: bool = True

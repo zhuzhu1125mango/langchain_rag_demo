@@ -4,6 +4,7 @@
 当前阶段以 API Key 认证为主（适合自托管单实例），JWT 接口预留以便后续扩展多用户。
 """
 
+import hmac
 import logging
 from typing import Optional
 from fastapi import Depends, HTTPException, Security, status, WebSocket
@@ -17,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # 认证方式声明
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+admin_key_header = APIKeyHeader(name="X-Admin-Key", auto_error=False)
 jwt_bearer = HTTPBearer(auto_error=False)
 
 
@@ -32,17 +34,11 @@ _DEFAULT_USER = CurrentUser(user_id="default", is_authenticated=True)
 
 
 def _verify_api_key(api_key: Optional[str]) -> bool:
-    """校验 API Key 是否匹配配置。"""
+    """校验 API Key 是否匹配配置（常量时间比较，防止时序攻击）。"""
     configured_key = getattr(settings, "API_KEY", None) or getattr(settings.security, "API_KEY", None)
     if not configured_key:
         return False
-    # 使用常量时间比较防止时序攻击
-    if len(api_key or "") != len(configured_key):
-        return False
-    result = 0
-    for a, b in zip(api_key or "", configured_key):
-        result |= ord(a) ^ ord(b)
-    return result == 0
+    return hmac.compare_digest((api_key or "").encode(), configured_key.encode())
 
 
 def _extract_user_from_jwt(credentials: HTTPAuthorizationCredentials) -> Optional[CurrentUser]:
@@ -145,3 +141,27 @@ def require_owner(owner_id: str, current_user: CurrentUser) -> None:
         if current_user.user_id == "default" and not settings.IN_DOCKER:
             return
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该资源")
+
+
+async def require_admin(
+    current_user: CurrentUser = Depends(get_current_user),
+    x_admin_key: Optional[str] = Security(admin_key_header),
+) -> CurrentUser:
+    """管理操作鉴权（全局配置修改、指标重置等）。
+
+    规则：
+    - 配置了 ``ADMIN_KEY``：请求须携带匹配的 ``X-Admin-Key`` 头（常量时间比较）；
+    - 未配置 ``ADMIN_KEY``：仅开发模式放行，生产模式一律 403，
+      避免任何认证用户篡改全局运行时配置。
+    """
+    admin_key = getattr(settings.security, "ADMIN_KEY", None)
+    if admin_key:
+        if x_admin_key and hmac.compare_digest(x_admin_key.encode(), admin_key.encode()):
+            return current_user
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要有效的 X-Admin-Key")
+    if settings.IS_PRODUCTION:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="生产环境执行管理操作需配置 ADMIN_KEY 并携带 X-Admin-Key 头",
+        )
+    return current_user

@@ -67,6 +67,27 @@ router = APIRouter(prefix="/documents", tags=["documents"])
 ws_router = APIRouter(prefix="/documents", tags=["documents"])
 
 
+def _ensure_upload_size(file: UploadFile) -> int:
+    """校验上传大小上限并返回实测字节数。
+
+    不信任客户端声明的 size，按服务端实际接收的字节数校验；
+    超过 settings.processing.MAX_UPLOAD_SIZE_MB 时抛出 413。
+    """
+    file.file.seek(0, os.SEEK_END)
+    actual_size = file.file.tell()
+    file.file.seek(0)
+    limit = settings.processing.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    if actual_size > limit:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"文件过大: 实测 {actual_size / 1024 / 1024:.1f} MB，"
+                f"超过上限 {settings.processing.MAX_UPLOAD_SIZE_MB} MB"
+            ),
+        )
+    return actual_size
+
+
 async def _get_owned_document(
     db: AsyncSession, doc_id: str, current_user: CurrentUser
 ) -> Document:
@@ -302,6 +323,11 @@ async def process_document_async(
             doc.chunks_count = len(chunks)
             await db.commit()
 
+            # 进度记录写入终态（终态记录保留 60s 后由 progress_manager 自动清理）
+            update_upload_progress(
+                task_upload_id, status="completed", message="处理完成", processing_progress=100
+            )
+
             # 发送完成通知
             await notify_task_completed(task_upload_id, {
                 "doc_id": doc_id,
@@ -323,20 +349,23 @@ async def process_document_async(
         except Exception as e:
             logger.error(f"文档处理失败: {doc_id}, 错误: {str(e)}", exc_info=True)
 
-            # 更新文档状态为失败
+            # 更新文档状态为失败（用户可见文案保持通用，详细错误仅进日志）
             try:
                 result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
                 doc = result.scalars().first()
                 if doc:
                     doc.processing_status = "failed"
-                    doc.processing_message = f"处理失败: {str(e)}"
+                    doc.processing_message = "处理失败，请重新上传或联系管理员"
                     doc.processing_progress = 0
                     await db.commit()
             except Exception:
-                pass
+                logger.error(f"写入文档失败状态时出错: {doc_id}", exc_info=True)
+
+            # 进度记录写入终态
+            update_upload_progress(task_upload_id, status="failed", message="处理失败，请稍后重试")
 
             # 发送失败通知
-            await notify_task_failed(task_upload_id, str(e))
+            await notify_task_failed(task_upload_id, "文档处理失败")
 
 
 async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str, task_id: str):
@@ -379,6 +408,9 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
 
             await notify_task_progress(task_id, 100, "删除完成")
 
+            # 进度记录写入终态（终态记录保留 60s 后由 progress_manager 自动清理）
+            update_upload_progress(task_id, status="completed", message="删除完成")
+
             # 发送完成通知
             await notify_task_completed(task_id, {
                 "doc_id": doc_id,
@@ -399,7 +431,8 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
 
         except Exception as e:
             logger.error(f"文档删除失败: {doc_id}, 错误: {str(e)}", exc_info=True)
-            await notify_task_failed(task_id, str(e))
+            update_upload_progress(task_id, status="failed", message="删除失败，请稍后重试")
+            await notify_task_failed(task_id, "文档删除失败")
 
 
 @router.post("/upload")
@@ -424,6 +457,9 @@ async def upload_document(
     _, ext = os.path.splitext(file.filename)
     if ext.lower() not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"不支持的文件类型: {ext}")
+
+    # 大小上限校验（实测字节数，不信任客户端声明）
+    actual_size = _ensure_upload_size(file)
 
     # 验证知识库ID
     kb_uuid = None
@@ -459,7 +495,7 @@ async def upload_document(
         minio_service = await MinioService.get_instance()
 
         # 更新状态：开始上传
-        create_upload_progress(task_upload_id, file.filename, file.size)
+        create_upload_progress(task_upload_id, file.filename, actual_size)
         update_upload_progress(task_upload_id, status="uploading", message="正在上传文件...")
 
         # 先创建文档记录，标记为上传中
@@ -468,7 +504,7 @@ async def upload_document(
             filename=file.filename,
             file_path="",
             file_type=ext.lower(),
-            size=file.size,
+            size=actual_size,
             kb_id=kb_uuid,
             owner_id=current_user.user_id,
             status="draft",
@@ -525,10 +561,10 @@ async def upload_document(
         raise
     except Exception as e:
         logger.error(f"上传文件失败: {str(e)}", exc_info=True)
-        update_upload_progress(task_upload_id, status="failed", message=f"上传失败: {str(e)}")
-        await notify_task_failed(task_upload_id, str(e))
+        update_upload_progress(task_upload_id, status="failed", message="上传失败，请稍后重试")
+        await notify_task_failed(task_upload_id, "文件处理失败")
         await db.rollback()
-        raise HTTPException(status_code=500, detail=f"上传文件失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="上传文件失败，请稍后重试")
 
 
 @router.post("/batch")
@@ -575,6 +611,8 @@ async def batch_upload(
             continue
 
         try:
+            # 大小上限校验（实测字节数）；超限计入该文件的失败原因
+            actual_size = _ensure_upload_size(file)
             doc_id = uuid.uuid4()
             file_path = await minio_service.upload_file_async(file, doc_id)
 
@@ -584,7 +622,7 @@ async def batch_upload(
                 filename=file.filename,
                 file_path=file_path,
                 file_type=ext.lower(),
-                size=file.size,
+                size=actual_size,
                 kb_id=uuid.UUID(kb_id) if kb_id else None,
                 owner_id=current_user.user_id,
                 status="draft",
@@ -598,7 +636,7 @@ async def batch_upload(
             await db.commit()
 
             task_upload_id = f"batch_{doc_id}"
-            create_upload_progress(task_upload_id, file.filename, file.size)
+            create_upload_progress(task_upload_id, file.filename, actual_size)
             update_upload_progress(task_upload_id, status="processing", message="正在处理文档...")
 
             # 将文档处理添加到后台任务
@@ -618,8 +656,12 @@ async def batch_upload(
                 "doc_id": str(doc_id),
                 "upload_id": task_upload_id
             })
+        except HTTPException as e:
+            # 校验类失败（413 超限等）：保留业务提示，不泄露内部错误
+            results.append({"filename": file.filename, "status": "failed", "reason": str(e.detail)})
         except Exception as e:
-            results.append({"filename": file.filename, "status": "failed", "reason": str(e)})
+            logger.error(f"批量上传单文件失败: {file.filename}: {e}", exc_info=True)
+            results.append({"filename": file.filename, "status": "failed", "reason": "处理失败，请稍后重试"})
 
     # 使知识库列表缓存失效，确保批量上传后文档数量实时更新
     try:
@@ -757,7 +799,7 @@ async def search_documents(
         return search_results
     except Exception as e:
         logger.error(f"搜索失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="搜索失败，请稍后重试")
 
 
 @router.get("/", response_model=List[DocumentResponse])
@@ -874,7 +916,7 @@ async def preview_doc(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"预览文档失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="预览文档失败，请稍后重试")
 
 
 @router.get("/{doc_id}/chunks")
@@ -896,7 +938,7 @@ async def get_doc_chunks(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"获取文本块失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取文本块失败，请稍后重试")
 
 
 @router.get("/{doc_id}/source/{chunk_index}", response_model=DocumentSourceResponse)
@@ -957,7 +999,7 @@ async def get_document_source(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"获取文档来源失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取文档来源失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="获取文档来源失败，请稍后重试")
 
 
 @router.post("/{doc_id}/reprocess")
@@ -1030,7 +1072,7 @@ async def reprocess_document(
         raise HTTPException(status_code=400, detail="无效的文档ID")
     except Exception as e:
         logger.error(f"重新处理文档失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"重新处理文档失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="重新处理文档失败，请稍后重试")
 
 
 @router.post("/{doc_id}/classify", response_model=DocumentClassificationResponse)
@@ -1096,7 +1138,7 @@ async def classify_document(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"文档分类失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"文档分类失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="文档分类失败，请稍后重试")
 
 
 @router.post("/{doc_id}/quality", response_model=DocumentQualityResponse)
@@ -1127,7 +1169,7 @@ async def evaluate_document_quality(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"文档质量评估失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"文档质量评估失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="文档质量评估失败，请稍后重试")
 
 
 @router.get("/{doc_id}")
@@ -1412,7 +1454,7 @@ async def detect_duplicates(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"重复检测失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"重复检测失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="重复检测失败，请稍后重试")
 
 
 async def classify_document_with_llm(content: str) -> dict:

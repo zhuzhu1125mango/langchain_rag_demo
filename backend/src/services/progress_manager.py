@@ -77,6 +77,12 @@ def get_upload_progress(upload_id: str) -> Optional[UploadProgress]:
     return progress_store.get(upload_id)
 
 
+# 终态（completed/failed）记录保留窗口（秒）：留时间给 WS 客户端读取最终状态，
+# 之后自动清理，避免进程内进度缓存只增不减（内存泄漏）。
+TERMINAL_STATUSES = {"completed", "failed"}
+PROGRESS_RETENTION_SECONDS = 60.0
+
+
 def update_upload_progress(upload_id: str, **kwargs):
     """更新上传进度"""
     progress = progress_store.get(upload_id)
@@ -89,8 +95,36 @@ def update_upload_progress(upload_id: str, **kwargs):
             loop = asyncio.get_running_loop()
             # 如果已经在事件循环中，调度任务
             loop.call_soon(lambda: asyncio.create_task(notify_ws_clients_async(upload_id)))
+            # 到达终态后调度延迟清理
+            if progress.status in TERMINAL_STATUSES:
+                _schedule_terminal_cleanup(upload_id)
         except RuntimeError:
             # 如果没有事件循环，创建新事件循环
+            pass
+
+
+def _schedule_terminal_cleanup(upload_id: str):
+    """终态记录延迟清理调度（保留 PROGRESS_RETENTION_SECONDS 秒）。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.call_later(
+        PROGRESS_RETENTION_SECONDS,
+        lambda: asyncio.create_task(_cleanup_terminal_progress(upload_id)),
+    )
+
+
+async def _cleanup_terminal_progress(upload_id: str):
+    """清理已达终态的进度记录与残留 WS 连接。"""
+    progress = progress_store.get(upload_id)
+    if progress is not None and progress.status in TERMINAL_STATUSES:
+        remove_upload_progress(upload_id)
+    connections = ws_connections.pop(upload_id, [])
+    for conn in connections:
+        try:
+            await conn.close()
+        except Exception:
             pass
 
 

@@ -44,6 +44,16 @@ class MessageRequest(BaseModel):
     search_mode: Optional[str] = "simple"
 
 
+def _parse_session_id(raw: Optional[str]) -> Optional[uuid.UUID]:
+    """解析会话 ID；非法值返回 400 而非 500。"""
+    if not raw:
+        return None
+    try:
+        return uuid.UUID(raw)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="无效的会话ID")
+
+
 @router.post("/messages")
 async def send_message(
     request: MessageRequest,
@@ -76,7 +86,7 @@ async def send_message(
 
     # 获取或创建会话
     if request.session_id:
-        result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(request.session_id)))
+        result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(request.session_id)))
         session = result.scalar_one_or_none()
         if not session:
             raise HTTPException(status_code=404, detail="会话不存在")
@@ -215,7 +225,7 @@ async def stream_answer(
 
     async with async_session() as db:
         if session_id:
-            result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(session_id)))
+            result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(session_id)))
             session = result.scalar_one_or_none()
             if not session:
                 async def error_generator():
@@ -456,7 +466,7 @@ async def get_suggestions(
     # 获取历史对话
     history = []
     if request.session_id:
-        result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(request.session_id)))
+        result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(request.session_id)))
         session = result.scalar_one_or_none()
         if session:
             require_owner(session.user_id, current_user)
@@ -477,7 +487,7 @@ async def get_suggestions(
         return {"suggestions": suggestions}
     except Exception as e:
         logger.error(f"生成推荐问题失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"生成推荐问题失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="生成推荐问题失败，请稍后重试")
 
 
 class FeedbackRequest(BaseModel):
@@ -528,7 +538,7 @@ async def enhance_context(
     """
     history = []
     if request.session_id:
-        result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(request.session_id)))
+        result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(request.session_id)))
         session = result.scalar_one_or_none()
         if session:
             require_owner(session.user_id, current_user)
@@ -542,7 +552,7 @@ async def enhance_context(
         return result
     except Exception as e:
         logger.error(f"上下文增强失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"上下文增强失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="上下文增强失败，请稍后重试")
 
 
 @router.post("/messages/{message_id}/feedback")
@@ -584,7 +594,7 @@ async def submit_message_feedback(
     feedback_score = (rating - 3) / 2.0
 
     feedback = Feedback(
-        session_id=uuid.UUID(request.session_id) if request.session_id else None,
+        session_id=_parse_session_id(request.session_id),
         message_id=message_id,
         owner_id=current_user.user_id,
         rating=rating,
@@ -599,17 +609,24 @@ async def submit_message_feedback(
         execution_id = None
         if request.session_id:
             result = await db.execute(
-                select(SessionModel).filter(SessionModel.id == uuid.UUID(request.session_id))
+                select(SessionModel).filter(SessionModel.id == _parse_session_id(request.session_id))
             )
             session = result.scalar_one_or_none()
-            if session and session.messages:
-                for msg in session.messages:
+            if session:
+                require_owner(session.user_id, current_user)
+                for msg in (session.messages or []):
                     if msg.get("id") == message_id:
                         execution_id = msg.get("execution_id")
                         break
         else:
-            # 未提供 session_id 时遍历查询（兼容性处理）
-            result = await db.execute(select(SessionModel))
+            # 未提供 session_id 时仅在当前用户最近的会话中回溯，
+            # 限定范围与条数，避免全表扫描和读取他人会话
+            result = await db.execute(
+                select(SessionModel)
+                .filter(SessionModel.user_id == current_user.user_id)
+                .order_by(SessionModel.updated_at.desc())
+                .limit(200)
+            )
             sessions = result.scalars().all()
             for session in sessions:
                 if session.messages:
@@ -627,6 +644,8 @@ async def submit_message_feedback(
                 reason=request.reason
             )
             logger.info(f"学习反馈已记录: execution_id={execution_id}, score={feedback_score}")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"记录学习反馈失败: {e}", exc_info=True)
 
@@ -652,7 +671,7 @@ async def rewrite_question(request: RewriteRequest):
         return result
     except Exception as e:
         logger.error(f"问题重写失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"问题重写失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="问题重写失败，请稍后重试")
 
 
 @router.post("/classify")
@@ -674,7 +693,7 @@ async def classify_question(request: ClassifyRequest):
         return result
     except Exception as e:
         logger.error(f"问题分类失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"问题分类失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="问题分类失败，请稍后重试")
 
 
 @router.post("/compare")
@@ -719,4 +738,4 @@ async def compare_knowledge_bases(
         return {"comparison": result, "question": request.question}
     except Exception as e:
         logger.error(f"答案对比失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"答案对比失败: {str(e)}")
+        raise HTTPException(status_code=500, detail="答案对比失败，请稍后重试")

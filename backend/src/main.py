@@ -29,7 +29,7 @@ from src.database import async_engine, Base, init_db
 from src.config import settings, LOG_DIR
 from src.exceptions import AppException
 from src.utils.security import validate_secret_key, SecretKeyValidationError
-from src.auth import get_current_user
+from src.auth import get_current_user, require_admin, CurrentUser
 from src.api import (
     document_router,
     document_ws_router,
@@ -74,14 +74,15 @@ class RequestTracingMiddleware:
             request.state.request_id = request_id
             
             start_time = time.time()
-            logger.info(f"Request started: {request.method} {request.url} [{request_id}]")
-            
+            # 仅记录 path，不记录 query string（其中可能携带 api_key 等凭据）
+            logger.info(f"Request started: {request.method} {request.url.path} [{request_id}]")
+
             async def send_wrapper(message):
                 if message["type"] == "http.response.start":
                     duration = time.time() - start_time
                     status_code = message["status"]
                     logger.info(
-                        f"Request completed: {request.method} {request.url} [{request_id}] "
+                        f"Request completed: {request.method} {request.url.path} [{request_id}] "
                         f"Status: {status_code} Duration: {duration:.2f}s"
                     )
                 await send(message)
@@ -323,8 +324,10 @@ async def health_check_detail():
             await conn.run_sync(lambda c: None)
         checks["database"] = {"status": "healthy"}
     except Exception as e:
-        checks["database"] = {"status": "unhealthy", "error": str(e)}
-    
+        # 详细错误仅进日志，避免向客户端泄露连接串/拓扑信息
+        logger.error(f"健康检查数据库异常: {e}", exc_info=True)
+        checks["database"] = {"status": "unhealthy", "error": "数据库连接失败"}
+
     try:
         from src.services.cache_service import CacheService
         cache = await CacheService.get_instance()
@@ -333,7 +336,8 @@ async def health_check_detail():
         else:
             checks["redis"] = {"status": "unhealthy", "error": "Redis ping 失败或缓存服务不可用"}
     except Exception as e:
-        checks["redis"] = {"status": "unhealthy", "error": str(e)}
+        logger.error(f"健康检查 Redis 异常: {e}", exc_info=True)
+        checks["redis"] = {"status": "unhealthy", "error": "Redis 连接失败"}
     
     overall_status = "healthy" if all(c["status"] == "healthy" for c in checks.values()) else "unhealthy"
     
@@ -352,8 +356,8 @@ def get_metrics_endpoint():
 
 
 @app.post("/metrics/reset")
-def reset_metrics_endpoint():
-    """重置监控指标接口"""
+def reset_metrics_endpoint(current_user: CurrentUser = Depends(require_admin)):
+    """重置监控指标接口（管理操作：需 ADMIN_KEY 或开发模式）"""
     reset_metrics()
     return {"message": "监控指标已重置"}
 
