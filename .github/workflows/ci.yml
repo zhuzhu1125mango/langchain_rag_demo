@@ -24,10 +24,10 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -73,7 +73,9 @@ jobs:
           --health-retries 10
 
       minio:
-        image: minio/minio:RELEASE.2025-10-15T17-29-55Z
+        # 开源社区版最终发行 tag（此后 MinIO 社区版归档）；该 tag 需真实存在于
+        # Docker Hub，写错 tag 会导致 service 初始化 docker pull 失败、整个 job 挂掉
+        image: minio/minio:RELEASE.2025-09-07T16-13-09Z
         env:
           MINIO_ROOT_USER: rag_ci_minio
           MINIO_ROOT_PASSWORD: rag_ci_minio_password
@@ -123,10 +125,10 @@ jobs:
       OLLAMA_HOST: http://localhost:11434
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v10
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -172,13 +174,13 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: pnpm/action-setup@v4
         with:
           version: 10
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 24
           cache: pnpm

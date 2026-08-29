@@ -262,7 +262,7 @@ services:
 
   # minio — 对象存储，存放上传的原始文档与文件
   minio:
-    image: minio/minio:RELEASE.2025-10-15T17-29-55Z   # 开源版最终发行（含 CVE-2025 修复），项目已归档，固定 tag
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z   # 开源社区版最终发行（此前 tag 为社区版最后一版，此后项目归档；该 tag 须真实存在于 Docker Hub）
     container_name: minio-prod
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}              # MinIO 管理员账号
