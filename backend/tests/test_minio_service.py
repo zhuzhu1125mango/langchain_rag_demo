@@ -5,6 +5,9 @@ MinIO服务单元测试
 import asyncio
 
 import pytest
+
+# 依赖真实 MinIO 服务（上传/下载/删除真实对象），默认跳过
+pytestmark = pytest.mark.integration
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 import io

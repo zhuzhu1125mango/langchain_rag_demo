@@ -8,7 +8,7 @@
 4. 敏感词过滤
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -181,6 +181,7 @@ async def send_message(
 
 @router.get("/stream")
 async def stream_answer(
+    request: Request,
     question: str = Query(...),
     session_id: Optional[str] = Query(None),
     kb_ids: Optional[List[str]] = Query(None),
@@ -200,6 +201,9 @@ async def stream_answer(
     Returns:
         StreamingResponse: 流式响应（SSE格式）
     """
+    # request_id 由中间件生成并挂载到 request.state，SSE 错误事件仅回传该 ID
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+
     # 敏感词检测
     detected, word, category = sensitive_filter.detect(question)
     if detected:
@@ -377,7 +381,8 @@ async def stream_answer(
                     await asyncio.shield(save_task)
                 except Exception as save_err:
                     logger.error(f"异常时保存部分助手消息失败: {save_err}", exc_info=True)
-            error_payload = {'type': 'error', 'error': f'生成回答失败: {str(e)}'}
+            # 详细错误仅进日志（上方 logger.error 已带 exc_info），客户端只收通用文案 + request_id
+            error_payload = {'type': 'error', 'error': '生成回答失败，请稍后重试', 'request_id': request_id}
             logger.debug(f"SSE error payload: {error_payload}")
             yield f"data: {json.dumps(error_payload)}\n\n"
             return
@@ -412,7 +417,7 @@ async def stream_answer(
             generated_title = await asyncio.shield(save_task)
         except Exception as e:
             logger.error(f"保存助手消息失败: {str(e)}", exc_info=True)
-            error_payload = {'type': 'error', 'error': f'保存消息失败: {str(e)}'}
+            error_payload = {'type': 'error', 'error': '回答已生成但保存失败，请稍后重试', 'request_id': request_id}
             logger.debug(f"SSE error payload: {error_payload}")
             yield f"data: {json.dumps(error_payload)}\n\n"
             return

@@ -2,6 +2,9 @@
 PostgreSQL连接测试
 """
 import pytest
+
+# 依赖真实 PostgreSQL（直接建立连接），默认跳过
+pytestmark = pytest.mark.integration
 import psycopg2
 
 from src.config import settings

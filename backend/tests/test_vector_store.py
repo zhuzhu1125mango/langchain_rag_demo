@@ -5,6 +5,9 @@
 import asyncio
 
 import pytest
+
+# 依赖真实 Milvus 服务（向量插入/检索/计数），默认跳过
+pytestmark = pytest.mark.integration
 from langchain_core.documents import Document
 
 from src.services.milvus_service import MilvusService

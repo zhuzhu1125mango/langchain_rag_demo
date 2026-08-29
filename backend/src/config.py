@@ -20,6 +20,8 @@ class DatabaseSettings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "langchain_rag_db"
+    # SQLAlchemy 回显 SQL 语句；生产保持 False（默认），开发可在 .env.dev 打开
+    SQL_ECHO: bool = False
     
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
@@ -53,6 +55,10 @@ class MilvusSettings(BaseSettings):
     MILVUS_FLUSH_RATE_LIMIT: float = 0.15        # 每秒允许的最大 flush 次数（需 <= 服务端 0.1 的倒数窗口）
     MILVUS_FLUSH_MAX_RETRY: int = 3              # rate limit 触发后的最大重试次数
     MILVUS_FLUSH_BASE_WAIT: float = 1.5          # 首次退避等待秒数
+
+    # BM25 sparse 词表持久化目录；留空使用 backend/src/data/bm25。
+    # 词表与 collection 绑定落盘，服务重启后加载，保证历史 sparse 向量与查询编码空间一致。
+    MILVUS_BM25_VOCAB_DIR: str = ""
 
     # 集合 schema/维度不匹配时是否允许删除重建（破坏性操作，旧向量数据全部丢失）。
     # 默认 False：不匹配时启动失败并给出明确提示，避免静默清空知识库数据。

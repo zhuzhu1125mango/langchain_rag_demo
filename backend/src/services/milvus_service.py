@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import os
 import uuid
 import logging
 import re
@@ -17,7 +18,7 @@ from pymilvus import AsyncMilvusClient, DataType
 from pymilvus.exceptions import MilvusException
 from langchain_ollama import OllamaEmbeddings
 from aiolimiter import AsyncLimiter
-from src.config import settings
+from src.config import settings, DATA_DIR
 from src.utils.async_singleton import AsyncSingleton
 
 logger = logging.getLogger("milvus_service")
@@ -57,6 +58,9 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         )
         self.embeddings = OllamaEmbeddings(model=settings.model.EMBEDDING_MODEL_NAME)
         await self._ensure_collection()
+        # 启动时加载与 collection 绑定的持久化 BM25 词表，
+        # 保证查询编码空间与历史 sparse 向量一致（不依赖"先插入过文档"）
+        await asyncio.to_thread(self._load_bm25_vocabulary)
 
     async def _async_cleanup(self):
         """关闭 Milvus 客户端连接。"""
@@ -73,6 +77,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         """确保集合存在，schema 包含 dense + sparse 向量字段及对应索引。"""
         has_collection = await self.client.has_collection(settings.milvus.MILVUS_COLLECTION_NAME)
         if not has_collection:
+            # 集合新建意味着历史 sparse 向量已清空，重置持久化词表（与 collection 版本绑定）
+            await asyncio.to_thread(self._remove_bm25_vocabulary)
             schema = await self._build_schema()
             await self.client.create_collection(
                 collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
@@ -209,8 +215,11 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                     "如需启用混合检索，请运行迁移脚本: python backend/scripts/migrate_hybrid_index.py"
                 )
                 self._sparse_enabled = False
-        except Exception:
-            pass
+        except Exception as e:
+            # schema 兼容检查失败不能静默：无法确认字段存在性会使降级判断失效。
+            # 此处不阻塞启动（保持 _sparse_enabled 不变），后续插入/检索路径
+            # 对 sparse 字段缺失已有独立降级兜底。
+            logger.error(f"检查集合 sparse_embedding 字段时失败: {e}", exc_info=True)
 
     async def _ensure_index(self):
         """确保 dense HNSW 索引存在；若不存在则创建。"""
@@ -307,14 +316,74 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         return len(data)
 
     async def _ensure_bm25_fitted(self, corpus: List[str]):
-        """确保 BM25 模型已初始化并在当前语料上完成 fit。
+        """确保 BM25 模型已就绪（词表来源：磁盘持久化 > 当前语料 fit）。
 
-        首次调用时创建默认中文分析器并 fit；后续增量插入时重新 fit 以纳入新词。
+        词表一旦就绪不再重新 fit：每次重 fit 会改变 idf 词到维度的映射，
+        导致历史 sparse 向量与新查询的编码空间不一致（#14）。
+        新增语料中的未登录词在编码时被忽略，由 dense 通道覆盖。
         """
-        if self.bm25_ef is None:
-            analyzer = build_default_analyzer(language="zh")
-            self.bm25_ef = BM25EmbeddingFunction(analyzer)
+        if self.bm25_ef is not None:
+            return
+        if await asyncio.to_thread(self._load_bm25_vocabulary):
+            return
+        analyzer = build_default_analyzer(language="zh")
+        self.bm25_ef = BM25EmbeddingFunction(analyzer)
         await asyncio.to_thread(self.bm25_ef.fit, corpus)
+        await asyncio.to_thread(self._save_bm25_vocabulary)
+        logger.info("BM25 词表已在当前语料上 fit 并持久化")
+
+    def _bm25_vocab_path(self) -> str:
+        """BM25 词表持久化文件路径（与 collection 名绑定）。"""
+        vocab_dir = settings.milvus.MILVUS_BM25_VOCAB_DIR or os.path.join(DATA_DIR, "bm25")
+        safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", settings.milvus.MILVUS_COLLECTION_NAME)
+        return os.path.join(vocab_dir, f"bm25_{safe_name}.json")
+
+    def _load_bm25_vocabulary(self) -> bool:
+        """尝试从磁盘加载与 collection 绑定的 BM25 词表。
+
+        Returns:
+            bool: 加载成功返回 True；未启用 sparse / 文件不存在 / 文件损坏返回 False，
+                  此时 bm25_ef 为 None，由首次插入语料 fit 重建。
+        """
+        if not self._sparse_enabled:
+            return False
+        path = self._bm25_vocab_path()
+        if not os.path.exists(path):
+            logger.info(f"BM25 词表文件不存在，将在首次插入语料时 fit: {path}")
+            return False
+        try:
+            self.bm25_ef = BM25EmbeddingFunction(build_default_analyzer(language="zh"))
+            self.bm25_ef.load(path)
+            logger.info(f"BM25 词表已从磁盘加载: {path}")
+            return True
+        except Exception as e:
+            logger.warning(
+                f"加载 BM25 词表失败，将回退为首次插入时 fit；"
+                f"若集合内已有历史 sparse 向量，建议重建以保证编码空间一致: {e}"
+            )
+            self.bm25_ef = None
+            return False
+
+    def _save_bm25_vocabulary(self) -> None:
+        """将当前 BM25 词表原子写入磁盘（先写临时文件再替换）。"""
+        path = self._bm25_vocab_path()
+        tmp_path = f"{path}.tmp"
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self.bm25_ef.save(tmp_path)
+            os.replace(tmp_path, path)
+        except Exception as e:
+            logger.warning(f"BM25 词表持久化失败（不影响本次插入，重启后将重新 fit）: {e}")
+
+    def _remove_bm25_vocabulary(self) -> None:
+        """删除磁盘上的持久化 BM25 词表（集合重建时词表随之重置）。"""
+        path = self._bm25_vocab_path()
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                logger.info(f"集合新建，已重置持久化 BM25 词表: {path}")
+        except Exception as e:
+            logger.warning(f"重置 BM25 词表文件失败: {e}")
 
     @staticmethod
     def _convert_sparse_embeddings(sparse_matrix):

@@ -21,6 +21,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     ports:
       - "127.0.0.1:6379:6379"      # 仅绑定回环地址，避免基础设施端口暴露到外部网络
     healthcheck:
@@ -31,11 +36,16 @@ services:
 
   # searxng — 元搜索引擎，聚合多个搜索源供 RAG 检索增强使用
   searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng:2026.8.20-8d3dd0cd4   # 固定日期版本 tag，避免 latest 漂移引入不可控变更
     container_name: searxng-prod
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
     ports:
       - "127.0.0.1:8080:8080"      # 仅绑定回环地址，避免基础设施端口暴露到外部网络（后端经 docker 网络访问 searxng:8080）
     volumes:
@@ -118,6 +128,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2.0"
     depends_on:
       postgres:
         condition: service_healthy
@@ -141,6 +156,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
     depends_on:
       - backend
     ports:
@@ -159,6 +179,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -179,6 +204,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
@@ -195,6 +225,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: "0.5"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}  # Grafana 管理员密码
       - GF_USERS_ALLOW_SIGN_UP=false                              # 生产环境禁用自助注册
@@ -212,6 +247,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
     command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     healthcheck:
       test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
@@ -222,7 +262,7 @@ services:
 
   # minio — 对象存储，存放上传的原始文档与文件
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-10-15T17-29-55Z   # 开源版最终发行（含 CVE-2025 修复），项目已归档，固定 tag
     container_name: minio-prod
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}              # MinIO 管理员账号
@@ -232,6 +272,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
     command: minio server /minio_data --console-address ":9001"
     ports:
       - "127.0.0.1:9000:9000"      # S3 API 端口，仅绑定回环地址，避免基础设施端口暴露到外部网络（后端经 docker 网络访问 minio:9000）                                    # S3 API 端口
@@ -263,6 +308,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
     ports:
       - "127.0.0.1:19530:19530"    # Milvus gRPC 端口，仅绑定回环地址，避免基础设施端口暴露到外部网络（后端经 docker 网络访问）                                  # Milvus gRPC 端口
       - "127.0.0.1:9091:9091"      # 健康检查/指标端口，仅绑定回环地址，避免基础设施端口暴露到外部网络                                    # Milvus 健康检查/指标端口
@@ -289,6 +339,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
     ports:
       - "127.0.0.1:5433:5432"      # 宿主机 5433 避免与本地 PG 冲突；仅绑定回环地址，避免基础设施端口暴露到外部网络                                    # 宿主机 5433 避免与本地 PG 冲突
     command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all", "-c", "client_encoding=UTF8", "-c", "listen_addresses=*"]
@@ -300,7 +355,7 @@ services:
 
   # postgres-exporter — 将 PostgreSQL 指标导出给 Prometheus
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
+    image: prometheuscommunity/postgres-exporter:v0.20.1   # 固定版本 tag，避免 latest 漂移
     container_name: postgres-exporter-prod
     environment:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
@@ -311,6 +366,11 @@ services:
     networks:
       - monitoring
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
     depends_on:
       postgres:
         condition: service_healthy

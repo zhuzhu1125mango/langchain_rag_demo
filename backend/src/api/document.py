@@ -13,7 +13,6 @@
 """
 
 import logging
-import sys
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, Body, WebSocket, WebSocketDisconnect, Path, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,19 +29,16 @@ from src.database import get_db, async_session_maker
 from src.auth import get_current_user, get_current_user_for_ws, CurrentUser, require_owner
 from src.models import Document, Category, KnowledgeBase
 
+# 复用全局 "rag_system" logger，级别与处理器由应用启动配置统一管理，
+# 模块内不得自行调整级别或追加输出处理器（会导致日志重复输出）
 logger = logging.getLogger("rag_system")
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler(sys.stdout)
-handler.setLevel(logging.DEBUG)
-formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-handler.setFormatter(formatter)
-logger.addHandler(handler)
 from src.services.document_processor import process_document, save_uploaded_file, SUPPORTED_EXTENSIONS, preview_document, get_document_chunks
 from src.services.vector_store import VectorStoreManager
 from src.services.rag_chain import RAGChain
 from src.services.document_analyzer import DocumentAnalyzer
 from src.schemas.document import DuplicateDetectionRequest, DocumentQualityResponse, DocumentClassificationResponse
 from src.api.knowledge_base import invalidate_kb_list_cache
+from src.utils.validators import validate_kb_ownership
 from src.services.progress_manager import (
     create_upload_progress,
     update_upload_progress,
@@ -223,15 +219,7 @@ async def process_document_async(
             await db.commit()
             await notify_task_progress(task_upload_id, 70, "向量生成完成")
 
-            # 阶段3：保存向量 (70-80%)
-            doc.processing_message = "正在保存向量..."
-            doc.processing_progress = 80
-            await db.commit()
-            await notify_task_progress(task_upload_id, 80, "正在保存向量...")
-
-            await vector_store.save_vector_store()
-
-            # 阶段4：规则分析 (80-90%)
+            # 阶段3：规则分析 (70-90%)
             doc.processing_message = "正在分析文档内容..."
             doc.processing_progress = 85
             await db.commit()
@@ -394,7 +382,6 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
             await notify_task_progress(task_id, 50, "正在删除向量...")
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_document_id(doc_id)
-            await vector_store.save_vector_store()
 
             await notify_task_progress(task_id, 80, "向量已删除")
 
@@ -1033,7 +1020,6 @@ async def reprocess_document(
         try:
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_document_id(doc_id)
-            await vector_store.save_vector_store()
             logger.info(f"已删除文档旧向量: {doc_id}")
         except Exception as e:
             logger.warning(f"删除旧向量失败（可能不存在）: {doc_id}, 错误: {str(e)}")
@@ -1193,20 +1179,35 @@ async def update_document(
         doc = await _get_owned_document(db, doc_id, current_user)
 
         if data.category_id:
-            doc.category_id = uuid.UUID(data.category_id)
+            # 外键校验：Category 为全局资源（无归属字段），仅校验存在性
+            try:
+                category_uuid = uuid.UUID(data.category_id)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="无效的分类ID")
+            category = (
+                await db.execute(select(Category).filter(Category.id == category_uuid))
+            ).scalar_one_or_none()
+            if not category:
+                raise HTTPException(status_code=404, detail="分类不存在")
+            doc.category_id = category_uuid
         if data.tags is not None:
             doc.tags = data.tags
         if data.status:
             doc.status = data.status
         if data.kb_id:
+            # 外键校验：kb_id 必须存在且属于当前用户，防止越权移动文档
             try:
-                doc.kb_id = uuid.UUID(data.kb_id)
+                kb_uuid = uuid.UUID(data.kb_id)
             except ValueError:
                 raise HTTPException(status_code=400, detail="无效的知识库ID")
+            await validate_kb_ownership(db, [data.kb_id], current_user)
+            doc.kb_id = kb_uuid
 
         await db.commit()
         await db.refresh(doc)
         return {"message": "更新成功"}
+    except HTTPException:
+        raise
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的ID格式")
 

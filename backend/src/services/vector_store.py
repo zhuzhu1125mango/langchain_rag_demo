@@ -24,14 +24,6 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         await self.milvus_service.insert_embeddings(documents, kb_id)
         return self.milvus_service
 
-    async def save_vector_store(self):
-        """Milvus 实时落盘，此方法保留以兼容旧接口，无需额外操作。"""
-        pass
-
-    async def load_vector_store(self):
-        """Milvus 由 MilvusService 自动加载，此方法保留以兼容旧接口。"""
-        return True
-
     async def add_documents(self, documents, kb_id=""):
         """向指定知识库追加文档切片。"""
         await self.milvus_service.insert_embeddings(documents, kb_id)

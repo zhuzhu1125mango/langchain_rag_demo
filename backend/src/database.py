@@ -13,7 +13,7 @@ SQLALCHEMY_ASYNC_DATABASE_URL = (
 
 async_engine = create_async_engine(
     SQLALCHEMY_ASYNC_DATABASE_URL,
-    echo=True,
+    echo=settings.database.SQL_ECHO,
     pool_size=20,
     max_overflow=50,
     pool_timeout=30,

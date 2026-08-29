@@ -8,6 +8,7 @@ import time
 import asyncio
 import logging
 from contextvars import ContextVar
+from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
 from langchain_ollama import ChatOllama
 
@@ -62,6 +63,96 @@ _request_decision: ContextVar[Optional[DecisionResult]] = ContextVar(
 _request_retrieval_score: ContextVar[float] = ContextVar(
     "rag_request_retrieval_score", default=0.0
 )
+
+
+# ----------------------------------------------------------------------
+# 提示词模板（流式/非流式共用的单一事实来源，消除两套模板漂移）
+# ----------------------------------------------------------------------
+KB_ANSWER_TEMPLATE = """
+你是一个严谨的智能助手，请基于以下参考信息回答用户问题。
+
+回答要求：
+1. 优先使用参考信息中的内容，禁止编造参考信息里不存在的信息。
+2. 如果参考信息中没有答案，直接说明"无法找到相关信息"。
+3. 关键事实必须标注来源编号，如[1]、[2]，对应参考信息中的来源编号。
+4. 如果同时包含知识库和联网搜索结果，优先以知识库内容为准，联网搜索作为补充。
+5. 对于价格、日期、数据等时效性信息，优先提取具体数值并突出展示，
+   标注数据来源；若多个来源数据不一致，给出范围而非随机选取。
+6. **禁止输出任何工具调用 JSON、```json 代码块、<tool_call> 标签或 <RichMediaReference> 思考过程**。
+7. **禁止在回答开头使用"根据搜索结果"、"根据参考信息"、"资料显示"、"我认为"等前缀，直接陈述答案**。
+8. 当工具结果置信度低于 60% 时，不要以绝对语气给出具体数值，应说明"数据可能存在偏差，建议通过官方渠道核实"。
+
+对话历史:
+{history}
+
+参考信息:
+{context}
+
+当前问题:
+{question}
+
+请结合参考信息给出准确、连贯的回答：
+"""
+
+LLM_DIRECT_TEMPLATE = """
+你是一个智能助手。本次联网搜索未能返回有效结果。
+请基于你已有的知识回答用户问题：
+- 非时效性问题：正常回答。
+- 涉及时效性信息（如价格、新闻、天气、实时数据等）：基于你的知识作答，
+  并在回答末尾标注"以上信息基于训练数据，可能不具备实时性，建议核实最新情况"，
+  不要简单拒绝或只说"无法获取实时信息"。
+
+回答要求：
+1. **禁止在回答开头使用"根据搜索结果"、"根据参考信息"、"资料显示"、"我认为"等前缀，直接陈述答案**。
+2. 保持回答的连贯性和上下文一致性。
+
+对话历史:
+{history}
+
+当前问题:
+{question}
+
+请结合历史对话进行回答：
+"""
+
+
+@dataclass
+class _PipelineState:
+    """问答管线各阶段的共享状态（单次请求内有效，不跨请求复用）。
+
+    事件协议（_pipeline 及各阶段 yield 的元组，首元素为事件类型）：
+    - ("reasoning", payload_str): reasoning 过程事件（流式对外转发，非流式忽略）
+    - ("chunk", text, source_texts, source_metadata, answer_type): 答案片段
+    - ("final", state): 终态事件，携带完整状态供 run() 做非流式后处理
+    """
+
+    question: str
+    kb_ids: Optional[List[str]]
+    history: Optional[List[dict]]
+    use_web_search: bool
+    search_mode: str
+
+    trace: Any = None
+    resolved_question: str = ""
+    history_context: str = ""
+
+    intent_decision: Any = None
+    decision: Optional[DecisionResult] = None
+    use_kb: bool = False
+    is_agent_mode: bool = False
+
+    docs: List[Any] = field(default_factory=list)
+    source_texts: List[str] = field(default_factory=list)
+    source_metadata: List[Dict] = field(default_factory=list)
+    search_context: str = ""
+    cross_source_data: Optional[Dict] = None
+    web_sources_for_citation: List[Dict] = field(default_factory=list)
+    answer_type: str = "llm_direct"
+
+    # 累积的最终答案（清洗后的全部 chunk 拼接），终态写入 trace
+    final_answer: str = ""
+    # 阶段置 True 表示流程已产出完整回答（datetime/tool_first/纯 Agent 短路）
+    finished: bool = False
 
 
 class RAGChain(AsyncSingleton["RAGChain"]):
@@ -508,56 +599,39 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             })
         return citation_sources
 
-    async def _post_process_answer(
+    async def _verify_answer_suffix(
         self,
         answer: str,
         citation_sources: List[Dict],
         cross_source_data: Optional[Dict] = None,
     ) -> tuple:
-        """对生成答案做引用补全 + 事实校验后处理（P0-f 链路整合）。
+        """对答案做事实校验并返回警告后缀（P0-f 链路整合）。
 
-        流程：
-        1. CitationBackfiller.backfill：补全/校验内联引用 [n]/[?]。
-        2. AnswerVerifier.verify：计算置信度，生成警告后缀。
-        3. 追加警告后缀到答案末尾。
-
-        任意环节失败均不阻塞主流程，返回原始答案。
+        不修改答案文本本身，后缀由调用方决定追加方式：
+        流式在生成结束后以 chunk 追加；非流式可拼接后返回。
 
         Args:
-            answer: LLM 生成的原始答案。
-            citation_sources: 供引用补全/校验使用的来源列表。
+            answer: 待校验的答案文本。
+            citation_sources: 供校验使用的来源列表。
             cross_source_data: 多源交叉验证数据（来自 build_search_context_enhanced）。
 
         Returns:
-            (processed_answer, verification_result):
-                - processed_answer: 补全引用并追加警告后的答案。
-                - verification_result: 校验结果（None 表示跳过校验）。
+            (suffix, verification_result):
+                - suffix: 警告后缀（无警告时为 None）。
+                - verification_result: 校验结果（校验不可用时为 None）。
         """
-        processed = answer
-        verification_result = None
-
-        # 1. 引用补全
-        if self.citation_backfiller is not None and citation_sources:
-            try:
-                processed = await self.citation_backfiller.backfill(processed, citation_sources)
-            except Exception as e:
-                logger.warning(f"引用补全失败，保留原始答案: {e}")
-
-        # 2. 事实校验 + 警告后缀
-        if self.answer_verifier is not None and citation_sources:
-            try:
-                verification_result = await self.answer_verifier.verify(
-                    answer=processed,
-                    sources=citation_sources,
-                    cross_source_data=cross_source_data,
-                )
-                suffix = self.answer_verifier.format_warning_suffix(verification_result)
-                if suffix:
-                    processed = processed + suffix
-            except Exception as e:
-                logger.warning(f"答案校验失败，跳过警告追加: {e}")
-
-        return processed, verification_result
+        if self.answer_verifier is None:
+            return None, None
+        try:
+            verification_result = await self.answer_verifier.verify(
+                answer=answer,
+                sources=citation_sources,
+                cross_source_data=cross_source_data,
+            )
+            return self.answer_verifier.format_warning_suffix(verification_result), verification_result
+        except Exception as e:
+            logger.warning(f"答案校验失败，跳过警告追加: {e}")
+            return None, None
 
     @staticmethod
     def _reasoning_payload(step: str, status: str, title: str, content: str = "", duration_ms: Optional[int] = None, metadata: Optional[Dict] = None) -> str:
@@ -606,62 +680,90 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             logger.warning(f"Agent 流式执行失败 [{mode.value}]: {e}")
         yield "", []
 
-    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
-        """
-        流式运行RAG问答（支持多轮对话优化）
-        
-        生成器函数，逐块返回回答内容
-        支持检索结果质量评估和自动降级机制
-        支持联网搜索功能
-        支持指代消解和上下文压缩
-        
-        Args:
-            question: 用户问题
-            kb_ids: 指定的知识库ID列表（可选）
-            history: 历史消息列表（可选），每个消息包含role和content
-            force_mode: 强制问答模式（可选）
-            use_web_search: 是否使用联网搜索（可选）
-            
-        Yields:
-            tuple: (chunk_content, source_texts, source_metadata, answer_type)
-                - chunk_content: 回答片段
-                - source_texts: 来源文档文本列表
-                - source_metadata: 来源元信息列表（包含filename、chunk_index等）
-                - answer_type: 回答类型（"knowledge_base"、"llm_direct"、"web_search"、"hybrid_search"、"function_calling"或"agent_search"）
-        """
-        # 阶段三：初始化链路追踪
-        trace = TraceCollector()
-        trace.set_basic(question=question)
+    # ------------------------------------------------------------------
+    # 统一问答管线：流式/非流式共用的单一实现。
+    # arun_stream() 转发事件给 SSE 消费方；run() 累积 chunk 返回完整结果。
+    # ------------------------------------------------------------------
+    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple"):
+        """执行完整问答流程，按事件协议产出 reasoning/chunk/final 事件。"""
+        state = _PipelineState(
+            question=question,
+            kb_ids=kb_ids,
+            history=history,
+            use_web_search=use_web_search,
+            search_mode=search_mode,
+        )
+        state.trace = TraceCollector()
+        state.trace.set_basic(question=question)
 
-        enhanced = await self.enhance_context(question, history or [])
-        resolved_question = enhanced["resolved_question"]
-        history_context = enhanced["enhanced_context"]
-        trace.data["resolved_question"] = resolved_question
+        # 阶段 1：上下文增强（指代消解）
+        await self._stage_enhance_context(state)
 
-        # ------------------------------------------------------------------
-        # 优先处理时间/日期类问题，直接返回系统时间，不依赖搜索或 LLM
-        # ------------------------------------------------------------------
-        datetime_answer = build_datetime_answer(resolved_question)
+        # 阶段 2：时间/日期类问题快捷返回
+        datetime_answer = build_datetime_answer(state.resolved_question)
         if datetime_answer:
             if PROMETHEUS_AVAILABLE:
                 record_kb_query("datetime_tool")
-            yield datetime_answer, [], [], "datetime_tool"
-            trace.set_final_answer(datetime_answer)
-            trace.finish()
-            trace.save_background()
-            await self._update_conversation_summary(history or [])
+            state.final_answer = datetime_answer
+            yield ("chunk", datetime_answer, [], [], "datetime_tool")
+            async for ev in self._finalize(state):
+                yield ev
             return
 
-        # ------------------------------------------------------------------
-        # 阶段二：意图路由，优先处理 tool_first 类问题（天气、计算等）
-        # ------------------------------------------------------------------
+        # 阶段 3：意图路由（含问题改写）
+        async for ev in self._stage_intent(state):
+            yield ev
+
+        # 阶段 4：工具优先（天气/计算等 tool_first 类）
+        async for ev in self._stage_tool_first(state):
+            yield ev
+        if state.finished:
+            async for ev in self._finalize(state):
+                yield ev
+            return
+
+        # 阶段 5：知识库使用决策
+        await self._stage_decide(state)
+
+        # 阶段 6：Agent 模式（纯模式短路 / 混合收集上下文 / Phase 2 降级）
+        async for ev in self._stage_agent(state):
+            yield ev
+        if state.finished:
+            async for ev in self._finalize(state):
+                yield ev
+            return
+
+        # 阶段 7：常规联网搜索（Phase 2）
+        async for ev in self._stage_web_search(state):
+            yield ev
+
+        # 阶段 8：知识库检索
+        async for ev in self._stage_kb_retrieval(state):
+            yield ev
+
+        # 阶段 9：构建最终上下文并生成回答
+        async for ev in self._stage_generate(state):
+            yield ev
+
+        async for ev in self._finalize(state):
+            yield ev
+
+    async def _stage_enhance_context(self, state: _PipelineState):
+        """阶段 1：上下文增强（指代消解与上下文压缩）。"""
+        enhanced = await self.enhance_context(state.question, state.history or [])
+        state.resolved_question = enhanced["resolved_question"]
+        state.history_context = enhanced["enhanced_context"]
+        state.trace.data["resolved_question"] = state.resolved_question
+
+    async def _stage_intent(self, state: _PipelineState):
+        """阶段 3：意图路由，tool_first 类问题优先走工具执行。"""
         intent_start = time.time()
         intent_decision = await self.intent_router.route(
-            resolved_question,
-            kb_ids=kb_ids,
-            use_web_search=use_web_search,
-            search_mode=search_mode,
-            history=history,
+            state.resolved_question,
+            kb_ids=state.kb_ids,
+            use_web_search=state.use_web_search,
+            search_mode=state.search_mode,
+            history=state.history,
         )
         intent_duration = int((time.time() - intent_start) * 1000)
         logger.info(
@@ -670,10 +772,10 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             f"pipeline={intent_decision.search_pipeline.value}"
         )
 
-        trace.set_intent(intent_decision)
+        state.intent_decision = intent_decision
+        state.trace.set_intent(intent_decision)
 
-        # 发送意图路由 reasoning 事件
-        yield self._reasoning_payload(
+        yield ("reasoning", self._reasoning_payload(
             REASONING_STEP_INTENT,
             "done",
             "意图路由",
@@ -685,515 +787,526 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 "search_pipeline": intent_decision.search_pipeline.value,
                 "needs_realtime": intent_decision.needs_realtime,
             },
-        ), [], [], "reasoning"
+        ))
 
         # 优先使用意图路由层产生的 context_rewrite 作为实际执行问题
         if intent_decision.context_rewrite:
-            trace.data["context_rewrite"] = intent_decision.context_rewrite
-            if intent_decision.context_rewrite != resolved_question:
-                resolved_question = intent_decision.context_rewrite
-                logger.info(f"使用意图路由改写后的问题: {resolved_question}")
-                yield self._reasoning_payload(
+            state.trace.data["context_rewrite"] = intent_decision.context_rewrite
+            if intent_decision.context_rewrite != state.resolved_question:
+                state.resolved_question = intent_decision.context_rewrite
+                logger.info(f"使用意图路由改写后的问题: {state.resolved_question}")
+                yield ("reasoning", self._reasoning_payload(
                     REASONING_STEP_CONTEXT_REWRITE,
                     "done",
                     "问题改写",
-                    content=f"改写为：{resolved_question}",
-                    metadata={"rewritten_question": resolved_question},
-                ), [], [], "reasoning"
+                    content=f"改写为：{state.resolved_question}",
+                    metadata={"rewritten_question": state.resolved_question},
+                ))
 
-        if intent_decision.primary_mode == PrimaryMode.TOOL_FIRST:
-            yield self._reasoning_payload(
+    async def _stage_tool_first(self, state: _PipelineState):
+        """阶段 4：工具优先执行，成功时流式生成答案并短路后续流程。"""
+        intent_decision = state.intent_decision
+        if intent_decision is None or intent_decision.primary_mode != PrimaryMode.TOOL_FIRST:
+            return
+
+        yield ("reasoning", self._reasoning_payload(
+            REASONING_STEP_TOOL_EXECUTE,
+            "running",
+            "工具调用",
+            content=f"正在调用 {', '.join(intent_decision.suggested_tools)} ...",
+            metadata={"tools": intent_decision.suggested_tools},
+        ))
+
+        tool_execute_start = time.time()
+        tool_results = await self.tool_executor.execute_with_fallback(
+            intent_decision, state.resolved_question, state.history_context
+        )
+        tool_execute_duration = int((time.time() - tool_execute_start) * 1000)
+        state.trace.set_tool_calls(tool_results)
+        successful_results = [r for r in tool_results if r.success and r.output]
+
+        if successful_results:
+            yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_TOOL_EXECUTE,
-                "running",
+                "done",
                 "工具调用",
-                content=f"正在调用 {', '.join(intent_decision.suggested_tools)} ...",
-                metadata={"tools": intent_decision.suggested_tools},
-            ), [], [], "reasoning"
+                content=f"工具调用成功：{', '.join(r.tool_name for r in successful_results)}",
+                duration_ms=tool_execute_duration,
+                metadata={"tools": [r.tool_name for r in successful_results]},
+            ))
 
-            tool_execute_start = time.time()
-            tool_results = await self.tool_executor.execute_with_fallback(
-                intent_decision, resolved_question, history_context
+            # 合并来源信息
+            all_sources = []
+            for tr in successful_results:
+                all_sources.extend(tr.sources or [])
+            source_texts, source_metadata = self._web_sources_to_metadata(all_sources)
+
+            async for chunk, _ in self.answer_generator.generate_stream(
+                question=state.resolved_question,
+                history_context=state.history_context,
+                tool_results=successful_results,
+                is_realtime=intent_decision.needs_realtime,
+            ):
+                cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
+                if polluted:
+                    state.trace.set_pollution_detected(True)
+                if cleaned_chunk:
+                    state.final_answer += cleaned_chunk
+                    yield ("chunk", cleaned_chunk, source_texts, source_metadata, "tool_first")
+            state.finished = True
+        else:
+            # 工具失败且无降级成功：走后续原有流程
+            logger.warning(
+                f"工具优先调用失败: {intent_decision.suggested_tools}, 转入原有流程"
             )
-            tool_execute_duration = int((time.time() - tool_execute_start) * 1000)
-            trace.set_tool_calls(tool_results)
-            successful_results = [r for r in tool_results if r.success and r.output]
+            state.trace.set_fallback(True, "工具优先调用失败，转入原有流程")
+            yield ("reasoning", self._reasoning_payload(
+                REASONING_STEP_TOOL_EXECUTE,
+                "failed",
+                "工具调用",
+                content=f"工具调用失败：{', '.join(intent_decision.suggested_tools)}，转入后续流程",
+                duration_ms=tool_execute_duration,
+                metadata={"tools": intent_decision.suggested_tools},
+            ))
+            yield ("reasoning", self._reasoning_payload(
+                REASONING_STEP_FALLBACK,
+                "done",
+                "流程降级",
+                content="工具调用失败，转入检索生成流程",
+            ))
 
-            if successful_results:
-                yield self._reasoning_payload(
-                    REASONING_STEP_TOOL_EXECUTE,
-                    "done",
-                    "工具调用",
-                    content=f"工具调用成功：{', '.join(r.tool_name for r in successful_results)}",
-                    duration_ms=tool_execute_duration,
-                    metadata={"tools": [r.tool_name for r in successful_results]},
-                ), [], [], "reasoning"
-
-                # 合并来源信息
-                all_sources = []
-                for tr in successful_results:
-                    all_sources.extend(tr.sources or [])
-                source_texts, source_metadata = self._web_sources_to_metadata(all_sources)
-
-                answer_type = "tool_first"
-                full_answer = ""
-                async for chunk, _ in self.answer_generator.generate_stream(
-                    question=resolved_question,
-                    history_context=history_context,
-                    tool_results=successful_results,
-                    is_realtime=intent_decision.needs_realtime,
-                ):
-                    # 阶段三：清洗输出
-                    cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
-                    if polluted:
-                        trace.set_pollution_detected(True)
-                    if cleaned_chunk:
-                        full_answer += cleaned_chunk
-                        yield cleaned_chunk, source_texts, source_metadata, answer_type
-
-                trace.set_final_answer(full_answer)
-                trace.finish()
-                trace.save_background()
-                await self._update_conversation_summary(history or [])
-                return
-            else:
-                # 工具失败且无降级成功：走后续原有流程
-                logger.warning(
-                    f"工具优先调用失败: {intent_decision.suggested_tools}, 转入原有流程"
-                )
-                trace.set_fallback(True, "工具优先调用失败，转入原有流程")
-                yield self._reasoning_payload(
-                    REASONING_STEP_TOOL_EXECUTE,
-                    "failed",
-                    "工具调用",
-                    content=f"工具调用失败：{', '.join(intent_decision.suggested_tools)}，转入后续流程",
-                    duration_ms=tool_execute_duration,
-                    metadata={"tools": intent_decision.suggested_tools},
-                ), [], [], "reasoning"
-                yield self._reasoning_payload(
-                    REASONING_STEP_FALLBACK,
-                    "done",
-                    "流程降级",
-                    content="工具调用失败，转入检索生成流程",
-                ), [], [], "reasoning"
-
+    async def _stage_decide(self, state: _PipelineState):
+        """阶段 5：知识库使用决策（决策结果写入请求级 ContextVar）。"""
         strategy_decision = await self._should_use_knowledge_base(
-            resolved_question, history, kb_ids, use_web_search=use_web_search, search_mode=search_mode
+            state.resolved_question, state.history, state.kb_ids,
+            use_web_search=state.use_web_search, search_mode=state.search_mode
+        )
+        state.decision = self.get_last_decision()
+        state.use_kb = strategy_decision
+        state.is_agent_mode = bool(
+            state.decision
+            and state.decision.mode in (QAMode.FUNCTION_CALLING, QAMode.AGENT_SEARCH)
         )
 
-        decision = self.get_last_decision()
-        use_kb = strategy_decision
+    async def _stage_agent(self, state: _PipelineState):
+        """阶段 6：Agent 模式（Function Calling / ReAct）。
 
-        docs = []
-        source_texts = []
-        source_metadata = []
-        search_context = ""
-        # P0-f：多源交叉验证数据与 web 来源，供引用补全/答案校验后处理使用
-        cross_source_data: Optional[Dict] = None
-        web_sources_for_citation: List[Dict] = []
-        is_agent_mode = decision and decision.mode in (QAMode.FUNCTION_CALLING, QAMode.AGENT_SEARCH)
+        纯 Agent 模式：流式输出 Agent 回答，空输出或被工具 JSON 污染时
+        降级到 Phase 2 联网搜索；Agent + 知识库混合：先收集 web 上下文，
+        再与知识库合并生成。
+        """
+        if not state.is_agent_mode:
+            return
 
-        # ------------------------------------------------------------------
-        # Phase 3 Agent 模式
-        # ------------------------------------------------------------------
-        if is_agent_mode:
-            agent_sources = []
-            agent_answer = ""
+        agent_sources = []
 
-            if not use_kb:
-                # 纯 Agent 模式：直接流式输出 Agent 生成的回答
-                answer_type = "function_calling" if decision.mode == QAMode.FUNCTION_CALLING else "agent_search"
-                async for chunk, agent_src in self._stream_agent(resolved_question, history_context, decision.mode):
-                    if chunk:
-                        agent_answer += chunk
-                        yield chunk, source_texts, source_metadata, answer_type
-                    agent_sources = agent_src
-
-                # 方案B：Agent 未调用工具（输出为空且无 sources），或 Agent 输出被工具 JSON 污染
-                # （deepseek-r1 容易把工具调用 JSON 直接当回答输出），降级到 Phase 2 联网搜索。
-                # 适用于时效性问题 Agent 决策失败的场景（如"吕梁天气"未触发 web_search），
-                # 确保实时信息一定被搜索，而非由 LLM 笼统回复"无法获取"或输出工具 JSON。
-                from src.services.search_agent import looks_like_tool_call
-                answer_polluted = looks_like_tool_call(agent_answer)
-                if (not agent_answer and not agent_sources or answer_polluted) and settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
-                    if answer_polluted:
-                        logger.warning(f"Agent 回答被工具 JSON 污染，降级到 Phase 2 联网搜索: {resolved_question}")
-                    else:
-                        logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {resolved_question}")
-                    web_search_start = time.time()
-                    yield self._reasoning_payload(
-                        REASONING_STEP_WEB_SEARCH,
-                        "running",
-                        "联网搜索",
-                        content="正在联网搜索...",
-                    ), [], [], "reasoning"
-                    try:
-                        search_context, web_sources, cross_source_data = await self.web_search_service.build_search_context_enhanced(
-                            resolved_question, conversation_context=history or []
-                        )
-                        web_search_duration = int((time.time() - web_search_start) * 1000)
-                        if web_sources:
-                            source_texts, source_metadata = self._web_sources_to_metadata(web_sources)
-                            web_sources_for_citation = web_sources
-                            yield self._reasoning_payload(
-                                REASONING_STEP_WEB_SEARCH,
-                                "done",
-                                "联网搜索",
-                                content=f"联网搜索完成，找到 {len(web_sources)} 个来源",
-                                duration_ms=web_search_duration,
-                                metadata={"sources_count": len(web_sources)},
-                            ), [], [], "reasoning"
-                        else:
-                            yield self._reasoning_payload(
-                                REASONING_STEP_WEB_SEARCH,
-                                "failed",
-                                "联网搜索",
-                                content="未找到相关网络结果",
-                                duration_ms=web_search_duration,
-                            ), [], [], "reasoning"
-                    except Exception as e:
-                        logger.warning(f"Agent 降级搜索失败: {e}")
-                        yield self._reasoning_payload(
-                            REASONING_STEP_WEB_SEARCH,
-                            "failed",
-                            "联网搜索",
-                            content="联网搜索服务不可用",
-                        ), [], [], "reasoning"
-                    # 不 return，继续走后续 final_context 构建与回答生成逻辑。
-                    # 重置 is_agent_mode 让 answer_type 正确显示为 web_search。
-                    is_agent_mode = False
-                else:
-                    source_texts, source_metadata = self._web_sources_to_metadata(agent_sources)
-                    # 阶段三：保存 Agent 链路
-                    cleaned_answer, polluted = OutputSanitizer.sanitize(agent_answer)
-                    trace.set_final_answer(cleaned_answer)
-                    trace.set_pollution_detected(polluted)
-                    trace.finish()
-                    trace.save_background()
-                    await self._update_conversation_summary(history or [])
-                    return
-
-            # Agent + 知识库混合：先让 Agent 收集 web 上下文，再与知识库合并生成
-            agent_result = await self._run_agent(resolved_question, history_context, decision.mode)
-            if agent_result.answer or agent_result.context:
-                search_context = agent_result.context or agent_result.answer
-                agent_sources = agent_result.sources
-            elif settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
-                # 方案B：Agent 未调用工具时降级到 Phase 2 联网搜索
-                logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {resolved_question}")
-                web_search_start = time.time()
-                search_context, web_sources, cross_source_data = await self.web_search_service.build_search_context_enhanced(
-                    resolved_question, conversation_context=history or []
-                )
-                web_search_duration = int((time.time() - web_search_start) * 1000)
-                if web_sources:
-                    source_texts, source_metadata = self._web_sources_to_metadata(web_sources)
-                    web_sources_for_citation = web_sources
-                    yield self._reasoning_payload(
-                        REASONING_STEP_WEB_SEARCH,
-                        "done",
-                        "联网搜索",
-                        content=f"联网搜索完成，找到 {len(web_sources)} 个来源",
-                        duration_ms=web_search_duration,
-                        metadata={"sources_count": len(web_sources)},
-                    ), [], [], "reasoning"
-                else:
-                    yield self._reasoning_payload(
-                        REASONING_STEP_WEB_SEARCH,
-                        "failed",
-                        "联网搜索",
-                        content="未找到相关网络结果",
-                        duration_ms=web_search_duration,
-                    ), [], [], "reasoning"
-                is_agent_mode = False
-
-            if not source_texts and not source_metadata and agent_sources:
-                source_texts, source_metadata = self._web_sources_to_metadata(agent_sources)
-                web_sources_for_citation = agent_sources
-            logger.info(
-                f"Agent 搜索已触发: mode={decision.mode.value}, query={resolved_question}, "
-                f"context_length={len(search_context)}, sources={len(source_metadata)}"
+        if not state.use_kb:
+            # 纯 Agent 模式：直接流式输出 Agent 生成的回答
+            answer_type = (
+                "function_calling"
+                if state.decision.mode == QAMode.FUNCTION_CALLING
+                else "agent_search"
             )
+            state.answer_type = answer_type
+            async for chunk, agent_src in self._stream_agent(
+                state.resolved_question, state.history_context, state.decision.mode
+            ):
+                if chunk:
+                    state.final_answer += chunk
+                    yield ("chunk", chunk, state.source_texts, state.source_metadata, answer_type)
+                agent_sources = agent_src
 
-        # ------------------------------------------------------------------
-        # 常规联网搜索模式（Phase 2）
-        # ------------------------------------------------------------------
-        elif decision and decision.mode in (QAMode.WEB_SEARCH, QAMode.HYBRID_SEARCH):
-            web_search_start = time.time()
-            yield self._reasoning_payload(
-                REASONING_STEP_WEB_SEARCH,
-                "running",
-                "联网搜索",
-                content="正在联网搜索...",
-            ), [], [], "reasoning"
-            try:
-                search_context, web_sources, cross_source_data = await self.web_search_service.build_search_context_enhanced(
-                    resolved_question, conversation_context=history or []
-                )
-                web_search_duration = int((time.time() - web_search_start) * 1000)
-                if web_sources:
-                    web_texts, web_metadata = self._web_sources_to_metadata(web_sources)
-                    source_texts.extend(web_texts)
-                    source_metadata.extend(web_metadata)
-                    web_sources_for_citation = web_sources
-                    yield self._reasoning_payload(
-                        REASONING_STEP_WEB_SEARCH,
-                        "done",
-                        "联网搜索",
-                        content=f"联网搜索完成，找到 {len(web_sources)} 个来源",
-                        duration_ms=web_search_duration,
-                        metadata={"sources_count": len(web_sources)},
-                    ), [], [], "reasoning"
+            # 方案B：Agent 未调用工具（输出为空且无 sources），或 Agent 输出被工具 JSON 污染
+            # （deepseek-r1 容易把工具调用 JSON 直接当回答输出），降级到 Phase 2 联网搜索。
+            # 适用于时效性问题 Agent 决策失败的场景（如"吕梁天气"未触发 web_search），
+            # 确保实时信息一定被搜索，而非由 LLM 笼统回复"无法获取"或输出工具 JSON。
+            from src.services.search_agent import looks_like_tool_call
+            answer_polluted = looks_like_tool_call(state.final_answer)
+            if (not state.final_answer and not agent_sources or answer_polluted) and settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
+                if answer_polluted:
+                    logger.warning(f"Agent 回答被工具 JSON 污染，降级到 Phase 2 联网搜索: {state.resolved_question}")
                 else:
-                    yield self._reasoning_payload(
-                        REASONING_STEP_WEB_SEARCH,
-                        "failed",
-                        "联网搜索",
-                        content="未找到相关网络结果",
-                        duration_ms=web_search_duration,
-                    ), [], [], "reasoning"
-                logger.info(f"联网搜索已触发: mode={decision.mode.value}, query={resolved_question}, context_length={len(search_context)}, sources={len(web_sources)}")
-            except Exception as e:
-                logger.warning(f"联网搜索失败: {e}")
-                yield self._reasoning_payload(
+                    logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {state.resolved_question}")
+                async for ev in self._phase2_web_search(state):
+                    yield ev
+                # 不终止，继续走后续 final_context 构建与回答生成逻辑。
+                # 重置 is_agent_mode 让 answer_type 正确显示为 web_search。
+                state.is_agent_mode = False
+            else:
+                state.source_texts, state.source_metadata = self._web_sources_to_metadata(agent_sources)
+                # 阶段三：保存 Agent 链路（trace 记录清洗后的完整回答）
+                cleaned_answer, polluted = OutputSanitizer.sanitize(state.final_answer)
+                state.final_answer = cleaned_answer
+                state.trace.set_pollution_detected(polluted)
+                state.finished = True
+            if state.finished:
+                return
+
+        # Agent + 知识库混合：先让 Agent 收集 web 上下文，再与知识库合并生成
+        agent_result = await self._run_agent(state.resolved_question, state.history_context, state.decision.mode)
+        if agent_result.answer or agent_result.context:
+            state.search_context = agent_result.context or agent_result.answer
+            agent_sources = agent_result.sources
+        elif settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
+            # 方案B：Agent 未调用工具时降级到 Phase 2 联网搜索
+            logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {state.resolved_question}")
+            async for ev in self._phase2_web_search(state):
+                yield ev
+            state.is_agent_mode = False
+
+        if not state.source_texts and not state.source_metadata and agent_sources:
+            state.source_texts, state.source_metadata = self._web_sources_to_metadata(agent_sources)
+            state.web_sources_for_citation = agent_sources
+        logger.info(
+            f"Agent 搜索已触发: mode={state.decision.mode.value}, query={state.resolved_question}, "
+            f"context_length={len(state.search_context)}, sources={len(state.source_metadata)}"
+        )
+
+    async def _phase2_web_search(self, state: _PipelineState):
+        """Agent 降级路径的 Phase 2 联网搜索（含 reasoning 事件）。"""
+        web_search_start = time.time()
+        yield ("reasoning", self._reasoning_payload(
+            REASONING_STEP_WEB_SEARCH,
+            "running",
+            "联网搜索",
+            content="正在联网搜索...",
+        ))
+        try:
+            search_context, web_sources, cross_source_data = await self.web_search_service.build_search_context_enhanced(
+                state.resolved_question, conversation_context=state.history or []
+            )
+            state.search_context = search_context
+            state.cross_source_data = cross_source_data
+            web_search_duration = int((time.time() - web_search_start) * 1000)
+            if web_sources:
+                web_texts, web_metadata = self._web_sources_to_metadata(web_sources)
+                state.source_texts.extend(web_texts)
+                state.source_metadata.extend(web_metadata)
+                state.web_sources_for_citation = web_sources
+                yield ("reasoning", self._reasoning_payload(
+                    REASONING_STEP_WEB_SEARCH,
+                    "done",
+                    "联网搜索",
+                    content=f"联网搜索完成，找到 {len(web_sources)} 个来源",
+                    duration_ms=web_search_duration,
+                    metadata={"sources_count": len(web_sources)},
+                ))
+            else:
+                yield ("reasoning", self._reasoning_payload(
                     REASONING_STEP_WEB_SEARCH,
                     "failed",
                     "联网搜索",
-                    content="联网搜索服务不可用",
-                ), [], [], "reasoning"
+                    content="未找到相关网络结果",
+                    duration_ms=web_search_duration,
+                ))
+        except Exception as e:
+            logger.warning(f"Agent 降级搜索失败: {e}")
+            yield ("reasoning", self._reasoning_payload(
+                REASONING_STEP_WEB_SEARCH,
+                "failed",
+                "联网搜索",
+                content="联网搜索服务不可用",
+            ))
 
-        # ------------------------------------------------------------------
-        # 知识库检索
-        # ------------------------------------------------------------------
-        kb_search_started = False
-        if use_kb and decision and decision.mode in (
+    async def _stage_web_search(self, state: _PipelineState):
+        """阶段 7：常规联网搜索模式（Phase 2）。"""
+        if not (state.decision and state.decision.mode in (QAMode.WEB_SEARCH, QAMode.HYBRID_SEARCH)):
+            return
+
+        web_search_start = time.time()
+        yield ("reasoning", self._reasoning_payload(
+            REASONING_STEP_WEB_SEARCH,
+            "running",
+            "联网搜索",
+            content="正在联网搜索...",
+        ))
+        try:
+            search_context, web_sources, cross_source_data = await self.web_search_service.build_search_context_enhanced(
+                state.resolved_question, conversation_context=state.history or []
+            )
+            state.search_context = search_context
+            state.cross_source_data = cross_source_data
+            web_search_duration = int((time.time() - web_search_start) * 1000)
+            if web_sources:
+                web_texts, web_metadata = self._web_sources_to_metadata(web_sources)
+                state.source_texts.extend(web_texts)
+                state.source_metadata.extend(web_metadata)
+                state.web_sources_for_citation = web_sources
+                yield ("reasoning", self._reasoning_payload(
+                    REASONING_STEP_WEB_SEARCH,
+                    "done",
+                    "联网搜索",
+                    content=f"联网搜索完成，找到 {len(web_sources)} 个来源",
+                    duration_ms=web_search_duration,
+                    metadata={"sources_count": len(web_sources)},
+                ))
+            else:
+                yield ("reasoning", self._reasoning_payload(
+                    REASONING_STEP_WEB_SEARCH,
+                    "failed",
+                    "联网搜索",
+                    content="未找到相关网络结果",
+                    duration_ms=web_search_duration,
+                ))
+            logger.info(
+                f"联网搜索已触发: mode={state.decision.mode.value}, query={state.resolved_question}, "
+                f"context_length={len(state.search_context)}, sources={len(web_sources)}"
+            )
+        except Exception as e:
+            logger.warning(f"联网搜索失败: {e}")
+            yield ("reasoning", self._reasoning_payload(
+                REASONING_STEP_WEB_SEARCH,
+                "failed",
+                "联网搜索",
+                content="联网搜索服务不可用",
+            ))
+
+    async def _stage_kb_retrieval(self, state: _PipelineState):
+        """阶段 8：知识库检索与相关性评估。"""
+        if not (state.use_kb and state.decision and state.decision.mode in (
             QAMode.PURE_KB, QAMode.HYBRID_INTELLIGENT, QAMode.HYBRID_SEARCH,
             QAMode.FUNCTION_CALLING, QAMode.AGENT_SEARCH
-        ):
-            kb_search_started = True
-            yield self._reasoning_payload(
-                REASONING_STEP_KB_RETRIEVE,
-                "running",
-                "知识库检索",
-                content="正在检索知识库...",
-            ), [], [], "reasoning"
-            kb_search_start = time.time()
-            docs = await self._retrieve_documents(resolved_question, kb_ids)
+        )):
+            return
 
-            kb_search_duration = int((time.time() - kb_search_start) * 1000)
-            if docs and len(docs) > 0:
-                _retrieval_score, has_relevant = await self._calculate_relevance(resolved_question, docs)
-                _request_retrieval_score.set(_retrieval_score)
+        yield ("reasoning", self._reasoning_payload(
+            REASONING_STEP_KB_RETRIEVE,
+            "running",
+            "知识库检索",
+            content="正在检索知识库...",
+        ))
+        kb_search_start = time.time()
+        state.docs = await self._retrieve_documents(state.resolved_question, state.kb_ids)
 
-                if has_relevant:
-                    doc_texts, doc_metadata = self._extract_source_info(docs)
-                    source_texts.extend(doc_texts)
-                    source_metadata.extend(doc_metadata)
-                    yield self._reasoning_payload(
-                        REASONING_STEP_KB_RETRIEVE,
-                        "done",
-                        "知识库检索",
-                        content=f"知识库检索完成，命中 {len(doc_metadata)} 个片段",
-                        duration_ms=kb_search_duration,
-                        metadata={"sources_count": len(doc_metadata)},
-                    ), [], [], "reasoning"
-                else:
-                    docs = []
-                    yield self._reasoning_payload(
-                        REASONING_STEP_KB_RETRIEVE,
-                        "done",
-                        "知识库检索",
-                        content="知识库检索完成，未找到高度相关内容",
-                        duration_ms=kb_search_duration,
-                        metadata={"sources_count": 0},
-                    ), [], [], "reasoning"
-            else:
-                yield self._reasoning_payload(
+        kb_search_duration = int((time.time() - kb_search_start) * 1000)
+        if state.docs and len(state.docs) > 0:
+            _retrieval_score, has_relevant = await self._calculate_relevance(state.resolved_question, state.docs)
+            _request_retrieval_score.set(_retrieval_score)
+
+            if has_relevant:
+                doc_texts, doc_metadata = self._extract_source_info(state.docs)
+                state.source_texts.extend(doc_texts)
+                state.source_metadata.extend(doc_metadata)
+                yield ("reasoning", self._reasoning_payload(
                     REASONING_STEP_KB_RETRIEVE,
                     "done",
                     "知识库检索",
-                    content="知识库检索完成，未找到相关内容",
+                    content=f"知识库检索完成，命中 {len(doc_metadata)} 个片段",
+                    duration_ms=kb_search_duration,
+                    metadata={"sources_count": len(doc_metadata)},
+                ))
+            else:
+                state.docs = []
+                yield ("reasoning", self._reasoning_payload(
+                    REASONING_STEP_KB_RETRIEVE,
+                    "done",
+                    "知识库检索",
+                    content="知识库检索完成，未找到高度相关内容",
                     duration_ms=kb_search_duration,
                     metadata={"sources_count": 0},
-                ), [], [], "reasoning"
+                ))
+        else:
+            yield ("reasoning", self._reasoning_payload(
+                REASONING_STEP_KB_RETRIEVE,
+                "done",
+                "知识库检索",
+                content="知识库检索完成，未找到相关内容",
+                duration_ms=kb_search_duration,
+                metadata={"sources_count": 0},
+            ))
 
-        # ------------------------------------------------------------------
-        # 构建最终上下文并生成回答（使用 ContextBuilder 统一构建）
-        # ------------------------------------------------------------------
-        web_sources_for_context = list(web_sources_for_citation) if web_sources_for_citation else []
-        if search_context and not web_sources_for_context:
+    async def _stage_generate(self, state: _PipelineState):
+        """阶段 9：构建最终上下文（ContextBuilder）并流式生成回答。"""
+        web_sources_for_context = list(state.web_sources_for_citation) if state.web_sources_for_citation else []
+        if state.search_context and not web_sources_for_context:
             # Agent 等场景可能只返回格式化上下文字符串，构造一条合成来源
             web_sources_for_context.append({
                 "title": "联网搜索结果",
-                "content": search_context,
+                "content": state.search_context,
                 "url": "",
                 "source": "web_search",
             })
 
         final_context, numbered_sources = self.context_builder.build_context(
-            question=resolved_question,
-            kb_docs=docs,
+            question=state.resolved_question,
+            kb_docs=state.docs,
             web_sources=web_sources_for_context,
         )
         # 用 ContextBuilder 返回的统一编号来源替换旧的 source_texts/source_metadata
         if numbered_sources:
-            source_texts = [s["content"] for s in numbered_sources]
-            source_metadata = numbered_sources
+            state.source_texts = [s["content"] for s in numbered_sources]
+            state.source_metadata = numbered_sources
 
         if final_context:
             if PROMETHEUS_AVAILABLE:
-                if search_context and docs:
+                if state.search_context and state.docs:
                     record_kb_query("hybrid_search")
-                elif search_context:
+                elif state.search_context:
                     record_kb_query("web_search")
                 else:
                     record_kb_query("knowledge_base")
 
-            answer_type = "web_search" if search_context else "knowledge_base"
-            if is_agent_mode:
-                answer_type = "function_calling" if decision.mode == QAMode.FUNCTION_CALLING else "agent_search"
-            elif search_context and docs:
+            answer_type = "web_search" if state.search_context else "knowledge_base"
+            if state.is_agent_mode:
+                answer_type = "function_calling" if state.decision.mode == QAMode.FUNCTION_CALLING else "agent_search"
+            elif state.search_context and state.docs:
                 answer_type = "hybrid_search"
+            state.answer_type = answer_type
 
-            template = """
-            你是一个严谨的智能助手，请基于以下参考信息回答用户问题。
-
-            回答要求：
-            1. 优先使用参考信息中的内容，禁止编造参考信息里不存在的信息。
-            2. 如果参考信息中没有答案，直接说明"无法找到相关信息"。
-            3. 关键事实必须标注来源编号，如[1]、[2]，对应参考信息中的来源编号。
-            4. 如果同时包含知识库和联网搜索结果，优先以知识库内容为准，联网搜索作为补充。
-            5. 对于价格、日期、数据等时效性信息，优先提取具体数值并突出展示，
-               标注数据来源；若多个来源数据不一致，给出范围而非随机选取。
-            6. **禁止输出任何工具调用 JSON、```json 代码块、<tool_call> 标签或 <RichMediaReference> 思考过程**。
-            7. **禁止在回答开头使用"根据搜索结果"、"根据参考信息"、"资料显示"、"我认为"等前缀，直接陈述答案**。
-            8. 当工具结果置信度低于 60% 时，不要以绝对语气给出具体数值，应说明"数据可能存在偏差，建议通过官方渠道核实"。
-
-            对话历史:
-            {history}
-
-            参考信息:
-            {context}
-
-            当前问题:
-            {question}
-
-            请结合参考信息给出准确、连贯的回答：
-            """
-            prompt = template.format(history=history_context, context=final_context, question=resolved_question)
-            # P0-f：流式输出时累积答案，结束后做事实校验并追加警告后缀
-            streamed_answer = ""
+            prompt = KB_ANSWER_TEMPLATE.format(
+                history=state.history_context,
+                context=final_context,
+                question=state.resolved_question,
+            )
             answer_generate_start = time.time()
-            yield self._reasoning_payload(
+            yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_ANSWER_GENERATE,
                 "running",
                 "生成回答",
                 content="正在生成回答...",
-            ), [], [], "reasoning"
-            async for chunk_tuple in self._stream_with_retry(prompt, source_texts, source_metadata, answer_type):
-                streamed_answer += chunk_tuple[0] or ""
-                yield chunk_tuple
+            ))
+            async for chunk, source_texts, source_metadata, at in self._stream_with_retry(
+                prompt, state.source_texts, state.source_metadata, answer_type
+            ):
+                cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
+                if polluted:
+                    state.trace.set_pollution_detected(True)
+                if cleaned_chunk:
+                    state.final_answer += cleaned_chunk
+                    yield ("chunk", cleaned_chunk, source_texts, source_metadata, at)
             answer_generate_duration = int((time.time() - answer_generate_start) * 1000)
-            yield self._reasoning_payload(
+            yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_ANSWER_GENERATE,
                 "done",
                 "生成回答",
                 content="回答生成完成",
                 duration_ms=answer_generate_duration,
-            ), [], [], "reasoning"
-            # 含 web 来源时做后处理：引用补全（仅追加警告，不修改已流式输出的正文）+ 事实校验
-            if web_sources_for_citation and self.answer_verifier is not None:
+            ))
+            # 含 web 来源时做事实校验：追加警告后缀（引用补全仅非流式在生成前做）
+            if state.web_sources_for_citation and self.answer_verifier is not None:
                 try:
-                    citation_sources = self._build_citation_sources(web_sources_for_citation)
-                    verification_result = await self.answer_verifier.verify(
-                        answer=streamed_answer,
-                        sources=citation_sources,
-                        cross_source_data=cross_source_data,
+                    citation_sources = self._build_citation_sources(state.web_sources_for_citation)
+                    suffix, verification_result = await self._verify_answer_suffix(
+                        state.final_answer, citation_sources, state.cross_source_data
                     )
-                    suffix = self.answer_verifier.format_warning_suffix(verification_result)
                     if suffix:
-                        yield suffix, source_texts, source_metadata, answer_type
-                    trace.data["verification"] = {
-                        "confidence": verification_result.confidence,
-                        "is_consistent": verification_result.is_consistent,
-                        "warnings": verification_result.warnings,
-                    }
+                        state.final_answer += suffix
+                        yield ("chunk", suffix, state.source_texts, state.source_metadata, answer_type)
+                    if verification_result is not None:
+                        state.trace.data["verification"] = {
+                            "confidence": verification_result.confidence,
+                            "is_consistent": verification_result.is_consistent,
+                            "warnings": verification_result.warnings,
+                        }
                 except Exception as e:
                     logger.warning(f"流式答案校验失败，跳过警告追加: {e}")
         else:
             if PROMETHEUS_AVAILABLE:
                 record_kb_query("llm_direct")
 
-            template = """
-            你是一个智能助手。本次联网搜索未能返回有效结果。
-            请基于你已有的知识回答用户问题：
-            - 非时效性问题：正常回答。
-            - 涉及时效性信息（如价格、新闻、天气、实时数据等）：基于你的知识作答，
-              并在回答末尾标注"以上信息基于训练数据，可能不具备实时性，建议核实最新情况"，
-              不要简单拒绝或只说"无法获取实时信息"。
-
-            回答要求：
-            1. **禁止在回答开头使用"根据搜索结果"、"根据参考信息"、"资料显示"、"我认为"等前缀，直接陈述答案**。
-            2. 保持回答的连贯性和上下文一致性。
-
-            对话历史:
-            {history}
-
-            当前问题:
-            {question}
-
-            请结合历史对话进行回答：
-            """
-            prompt = template.format(history=history_context, question=resolved_question)
+            state.answer_type = "llm_direct"
+            prompt = LLM_DIRECT_TEMPLATE.format(
+                history=state.history_context,
+                question=state.resolved_question,
+            )
             answer_generate_start = time.time()
-            yield self._reasoning_payload(
+            yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_ANSWER_GENERATE,
                 "running",
                 "生成回答",
                 content="正在生成回答...",
-            ), [], [], "reasoning"
-            async for chunk_tuple in self._stream_with_retry(prompt, [], [], "llm_direct"):
-                yield chunk_tuple
+            ))
+            async for chunk, source_texts, source_metadata, at in self._stream_with_retry(
+                prompt, [], [], "llm_direct"
+            ):
+                cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
+                if polluted:
+                    state.trace.set_pollution_detected(True)
+                if cleaned_chunk:
+                    state.final_answer += cleaned_chunk
+                    yield ("chunk", cleaned_chunk, source_texts, source_metadata, at)
             answer_generate_duration = int((time.time() - answer_generate_start) * 1000)
-            yield self._reasoning_payload(
+            yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_ANSWER_GENERATE,
                 "done",
                 "生成回答",
                 content="回答生成完成",
                 duration_ms=answer_generate_duration,
-            ), [], [], "reasoning"
+            ))
 
-        # 阶段三：保存链路追踪（原有流程结束时）
-        trace.finish()
-        trace.save_background()
+    async def _finalize(self, state: _PipelineState):
+        """终态：链路追踪落盘 + 对话摘要更新。"""
+        state.trace.set_final_answer(state.final_answer)
+        state.trace.finish()
+        state.trace.save_background()
+        await self._update_conversation_summary(state.history or [])
+        yield ("final", state)
 
-        await self._update_conversation_summary(history or [])
+    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
+        """
+        流式运行RAG问答。
+
+        转发统一管线 _pipeline 的事件并保持 4 元组公开 API 不变：
+        - ("reasoning", payload) → (payload, [], [], "reasoning")
+        - ("chunk", text, sources, meta, type) → 原样转发
+        - ("final", state) → 仅供 run() 消费，不对外产出
+
+        Yields:
+            tuple: (chunk_content, source_texts, source_metadata, answer_type)
+                - chunk_content: 回答片段或 reasoning JSON 负载
+                - source_texts: 来源文档文本列表
+                - source_metadata: 来源元信息列表（包含filename、chunk_index等）
+                - answer_type: 回答类型（"knowledge_base"、"llm_direct"、"web_search"、"hybrid_search"、"function_calling"、"agent_search"或"reasoning"）
+        """
+        async for ev in self._pipeline(
+            question, kb_ids=kb_ids, history=history,
+            use_web_search=use_web_search, search_mode=search_mode,
+        ):
+            kind = ev[0]
+            if kind == "chunk":
+                yield ev[1], ev[2], ev[3], ev[4]
+            elif kind == "reasoning":
+                yield ev[1], [], [], "reasoning"
 
     async def _stream_with_retry(self, prompt, source_texts, source_metadata, answer_type, max_retries=2):
         """
-        带重试机制的流式生成
-        
+        带重试机制的续传式流式生成
+
+        中途失败重试时携带已输出内容作为续写上下文，仅产出新增部分，
+        避免整体重发 prompt 导致用户看到重复内容。
+
         Args:
             prompt: 提示词
             source_texts: 来源文本列表
             source_metadata: 来源元信息列表
             answer_type: 回答类型
             max_retries: 最大重试次数
-            
+
         Yields:
             tuple: (chunk_content, source_texts, source_metadata, answer_type)
         """
-        # 记录 LLM 调用开始时间
         llm_start = time.time()
-        
+        yielded_part = ""
+
         for attempt in range(max_retries):
+            current_prompt = prompt
+            if yielded_part:
+                current_prompt = (
+                    f"{prompt}\n\n"
+                    "你上一次的回答因异常中断。已输出的部分如下，"
+                    "请从中断处直接继续输出剩余内容，禁止重复任何已输出内容：\n"
+                    f"{yielded_part}\n\n请继续："
+                )
             try:
-                async for chunk in self.llm.astream(prompt):
-                    yield chunk.content, source_texts, source_metadata, answer_type
-                
+                async for chunk in self.llm.astream(current_prompt):
+                    if chunk.content:
+                        yielded_part += chunk.content
+                        yield chunk.content, source_texts, source_metadata, answer_type
+
                 # 记录 LLM 调用时间（Prometheus）
                 if PROMETHEUS_AVAILABLE:
                     record_llm_call(settings.model.OLLAMA_MODEL_NAME, time.time() - llm_start)
-                
+
                 return
             except Exception as e:
                 if PROMETHEUS_AVAILABLE:
@@ -1201,24 +1314,22 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1)
                     continue
-                else:
-                    error_msg = f"模型调用失败: {str(e)}"
-                    yield error_msg, source_texts, source_metadata, "error"
+                error_msg = f"模型调用失败: {str(e)}"
+                yield error_msg, source_texts, source_metadata, "error"
 
     async def run(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
         """
-        非流式运行RAG问答（支持多轮对话优化）
+        非流式运行RAG问答。
 
-        支持检索结果质量评估和自动降级机制
-        支持联网搜索功能
-        支持指代消解和上下文压缩
-        支持 Phase 3 Function Calling / ReAct Agent 模式
+        复用 _pipeline 单一实现：累积全部答案 chunk 返回完整结果，
+        reasoning 过程事件在此路径被忽略。流式/非流式因此共享同一套
+        阶段逻辑、提示词模板与续传式重试。
 
         Args:
             question: 用户问题
             kb_ids: 指定的知识库ID列表（可选）
             history: 历史消息列表（可选），每个消息包含role和content
-            force_mode: 强制问答模式（可选）
+            force_mode: 强制问答模式（可选，保留签名兼容）
             use_web_search: 是否使用联网搜索（可选）
             search_mode: 搜索模式（可选）：simple/function_calling/agent
 
@@ -1229,285 +1340,37 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 - source_metadata: 来源元信息列表（包含filename、chunk_index等）
                 - answer_type: 回答类型（"knowledge_base"、"llm_direct"、"web_search"、"hybrid_search"、"function_calling"或"agent_search"）
         """
-        enhanced = await self.enhance_context(question, history or [])
-        resolved_question = enhanced["resolved_question"]
-        history_context = enhanced["enhanced_context"]
+        chunks: List[str] = []
+        source_texts: List[str] = []
+        source_metadata: List[Dict] = []
+        answer_type = "llm_direct"
+        state: Optional[_PipelineState] = None
 
-        # 阶段三：初始化链路追踪
-        trace = TraceCollector()
-        trace.set_basic(question=question)
-        trace.data["resolved_question"] = resolved_question
-
-        # ------------------------------------------------------------------
-        # 优先处理时间/日期类问题，直接返回系统时间，不依赖搜索或 LLM
-        # ------------------------------------------------------------------
-        datetime_answer = build_datetime_answer(resolved_question)
-        if datetime_answer:
-            if PROMETHEUS_AVAILABLE:
-                record_kb_query("datetime_tool")
-            trace.set_final_answer(datetime_answer)
-            trace.finish()
-            trace.save_background()
-            await self._update_conversation_summary(history or [])
-            return datetime_answer, [], [], "datetime_tool"
-
-        # ------------------------------------------------------------------
-        # 阶段二：意图路由，优先处理 tool_first 类问题（天气、计算等）
-        # ------------------------------------------------------------------
-        intent_decision = await self.intent_router.route(
-            resolved_question,
-            kb_ids=kb_ids,
-            use_web_search=use_web_search,
-            search_mode=search_mode,
-            history=history,
-        )
-        logger.info(
-            f"意图路由: mode={intent_decision.primary_mode.value}, "
-            f"tools={intent_decision.suggested_tools}, reason={intent_decision.reasoning}, "
-            f"pipeline={intent_decision.search_pipeline.value}"
-        )
-
-        trace.set_intent(intent_decision)
-
-        # 优先使用意图路由层产生的 context_rewrite 作为实际执行问题
-        if intent_decision.context_rewrite:
-            trace.data["context_rewrite"] = intent_decision.context_rewrite
-            if intent_decision.context_rewrite != resolved_question:
-                resolved_question = intent_decision.context_rewrite
-                logger.info(f"使用意图路由改写后的问题: {resolved_question}")
-
-        if intent_decision.primary_mode == PrimaryMode.TOOL_FIRST:
-            tool_results = await self.tool_executor.execute_with_fallback(
-                intent_decision, resolved_question, history_context
-            )
-            trace.set_tool_calls(tool_results)
-            successful_results = [r for r in tool_results if r.success and r.output]
-
-            if successful_results:
-                all_sources = []
-                for tr in successful_results:
-                    all_sources.extend(tr.sources or [])
-                source_texts, source_metadata = self._web_sources_to_metadata(all_sources)
-
-                answer, _ = await self.answer_generator.generate(
-                    question=resolved_question,
-                    history_context=history_context,
-                    tool_results=successful_results,
-                    is_realtime=intent_decision.needs_realtime,
-                )
-                cleaned_answer, polluted = OutputSanitizer.sanitize(answer)
-                trace.set_final_answer(cleaned_answer)
-                trace.set_pollution_detected(polluted)
-                trace.finish()
-                trace.save_background()
-                await self._update_conversation_summary(history or [])
-                return cleaned_answer, source_texts, source_metadata, "tool_first"
-            else:
-                logger.warning(
-                    f"工具优先调用失败: {intent_decision.suggested_tools}, 转入原有流程"
-                )
-                trace.set_fallback(True, "工具优先调用失败，转入原有流程")
-
-        strategy_decision = await self._should_use_knowledge_base(
-            resolved_question, history, kb_ids, use_web_search=use_web_search, search_mode=search_mode
-        )
-
-        decision = self.get_last_decision()
-        use_kb = strategy_decision
-
-        docs = []
-        source_texts = []
-        source_metadata = []
-        search_context = ""
-        # P0-f：多源交叉验证数据与 web 来源，供引用补全/答案校验后处理使用
-        cross_source_data: Optional[Dict] = None
-        web_sources_for_citation: List[Dict] = []
-        is_agent_mode = decision and decision.mode in (QAMode.FUNCTION_CALLING, QAMode.AGENT_SEARCH)
-
-        # ------------------------------------------------------------------
-        # Phase 3 Agent 模式
-        # ------------------------------------------------------------------
-        if is_agent_mode:
-            from src.services.search_agent import looks_like_tool_call
-
-            agent_sources = []
-            agent_result = await self._run_agent(resolved_question, history_context, decision.mode)
-
-            # deepseek-r1 容易把工具调用 JSON 直接输出为回答。
-            # 若检测到污染，视为无效回答，走 Phase 2 搜索降级。
-            answer_polluted = looks_like_tool_call(agent_result.answer)
-
-            if agent_result.answer and not answer_polluted and not use_kb:
-                # 纯 Agent 模式：直接返回 Agent 生成的答案
-                source_texts, source_metadata = self._web_sources_to_metadata(agent_result.sources)
-                cleaned_answer, _ = OutputSanitizer.sanitize(agent_result.answer)
-                trace.set_final_answer(cleaned_answer)
-                trace.set_pollution_detected(answer_polluted)
-                trace.finish()
-                trace.save_background()
-                await self._update_conversation_summary(history or [])
-                answer_type = "function_calling" if decision.mode == QAMode.FUNCTION_CALLING else "agent_search"
-                return cleaned_answer, source_texts, source_metadata, answer_type
-
-            if (agent_result.answer or agent_result.context) and not answer_polluted:
-                search_context = agent_result.context or agent_result.answer
-                agent_sources = agent_result.sources
-            elif settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
-                # 方案B：Agent 未调用工具（answer/context 均空）时降级到 Phase 2 联网搜索。
-                # 重置 is_agent_mode 让 answer_type 正确显示为 web_search。
-                logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {resolved_question}")
-                search_context, web_sources, cross_source_data = await self.web_search_service.build_search_context_enhanced(
-                    resolved_question, conversation_context=history or []
-                )
-                if web_sources:
-                    source_texts, source_metadata = self._web_sources_to_metadata(web_sources)
-                    web_sources_for_citation = web_sources
-                is_agent_mode = False
-
-            if not source_texts and not source_metadata and agent_sources:
-                source_texts, source_metadata = self._web_sources_to_metadata(agent_sources)
-                web_sources_for_citation = agent_sources
-            logger.info(
-                f"Agent 搜索已触发: mode={decision.mode.value}, query={resolved_question}, "
-                f"context_length={len(search_context)}, sources={len(source_metadata)}"
-            )
-
-        # ------------------------------------------------------------------
-        # 常规联网搜索模式（Phase 2）
-        # ------------------------------------------------------------------
-        elif decision and decision.mode in (QAMode.WEB_SEARCH, QAMode.HYBRID_SEARCH):
-            try:
-                search_context, web_sources, cross_source_data = await self.web_search_service.build_search_context_enhanced(
-                    resolved_question, conversation_context=history or []
-                )
-                if web_sources:
-                    web_texts, web_metadata = self._web_sources_to_metadata(web_sources)
-                    source_texts.extend(web_texts)
-                    source_metadata.extend(web_metadata)
-                    web_sources_for_citation = web_sources
-                logger.info(f"联网搜索已触发: mode={decision.mode.value}, query={resolved_question}, context_length={len(search_context)}, sources={len(web_sources)}")
-            except Exception as e:
-                logger.warning(f"联网搜索失败: {e}")
-
-        # ------------------------------------------------------------------
-        # 知识库检索
-        # ------------------------------------------------------------------
-        if use_kb and decision and decision.mode in (
-            QAMode.PURE_KB, QAMode.HYBRID_INTELLIGENT, QAMode.HYBRID_SEARCH,
-            QAMode.FUNCTION_CALLING, QAMode.AGENT_SEARCH
+        async for ev in self._pipeline(
+            question, kb_ids=kb_ids, history=history,
+            use_web_search=use_web_search, search_mode=search_mode,
         ):
-            docs = await self._retrieve_documents(resolved_question, kb_ids)
+            kind = ev[0]
+            if kind == "chunk":
+                text, st, sm, at = ev[1], ev[2], ev[3], ev[4]
+                if text:
+                    chunks.append(text)
+                source_texts, source_metadata, answer_type = st, sm, at
+            elif kind == "final":
+                state = ev[1]
 
-            if docs and len(docs) > 0:
-                _retrieval_score, has_relevant = await self._calculate_relevance(resolved_question, docs)
-                _request_retrieval_score.set(_retrieval_score)
+        answer = "".join(chunks)
 
-                if has_relevant:
-                    doc_texts, doc_metadata = self._extract_source_info(docs)
-                    source_texts.extend(doc_texts)
-                    source_metadata.extend(doc_metadata)
-                else:
-                    docs = []
+        # 非流式增强：引用补全（校验/回填内联 [n]/[?] 标注）。
+        # 事实校验警告后缀已由管线在生成结束后统一追加，此处不再重复。
+        if state is not None and state.web_sources_for_citation and self.citation_backfiller is not None:
+            try:
+                citation_sources = self._build_citation_sources(state.web_sources_for_citation)
+                answer = await self.citation_backfiller.backfill(answer, citation_sources)
+            except Exception as e:
+                logger.warning(f"引用补全失败，保留原始答案: {e}")
 
-        # ------------------------------------------------------------------
-        # 构建最终上下文并生成回答（使用 ContextBuilder 统一构建）
-        # ------------------------------------------------------------------
-        web_sources_for_context = list(web_sources_for_citation) if web_sources_for_citation else []
-        if search_context and not web_sources_for_context:
-            web_sources_for_context.append({
-                "title": "联网搜索结果",
-                "content": search_context,
-                "url": "",
-                "source": "web_search",
-            })
-
-        final_context, numbered_sources = self.context_builder.build_context(
-            question=resolved_question,
-            kb_docs=docs,
-            web_sources=web_sources_for_context,
-        )
-        if numbered_sources:
-            source_texts = [s["content"] for s in numbered_sources]
-            source_metadata = numbered_sources
-
-        if final_context:
-            answer_type = "web_search" if search_context else "knowledge_base"
-            if is_agent_mode:
-                answer_type = "function_calling" if decision.mode == QAMode.FUNCTION_CALLING else "agent_search"
-            elif search_context and docs:
-                answer_type = "hybrid_search"
-
-            template = """
-            你是一个严谨的智能助手，请基于以下参考信息回答用户问题。
-
-            回答要求：
-            1. 优先使用参考信息中的内容，禁止编造参考信息里不存在的信息。
-            2. 如果参考信息中没有答案，直接说明"无法找到相关信息"。
-            3. 关键事实必须标注来源编号，如[1]、[2]，对应参考信息中的来源编号。
-            4. 如果同时包含知识库和联网搜索结果，优先以知识库内容为准，联网搜索作为补充。
-            5. 对于价格、日期、数据等时效性信息，优先提取具体数值并突出展示，
-               标注数据来源；若多个来源数据不一致，给出范围而非随机选取。
-
-            对话历史:
-            {history}
-
-            参考信息:
-            {context}
-
-            当前问题:
-            {question}
-
-            请结合参考信息给出准确、连贯的回答：
-            """
-            prompt = template.format(history=history_context, context=final_context, question=resolved_question)
-            answer = await self.llm.ainvoke(prompt)
-            cleaned_answer, polluted = OutputSanitizer.sanitize(answer.content)
-            # P0-f：对含 web 搜索来源的答案做引用补全 + 事实校验后处理
-            if web_sources_for_citation:
-                citation_sources = self._build_citation_sources(web_sources_for_citation)
-                cleaned_answer, verification_result = await self._post_process_answer(
-                    cleaned_answer, citation_sources, cross_source_data
-                )
-                if verification_result is not None:
-                    trace.data["verification"] = {
-                        "confidence": verification_result.confidence,
-                        "is_consistent": verification_result.is_consistent,
-                        "warnings": verification_result.warnings,
-                    }
-            trace.set_final_answer(cleaned_answer)
-            trace.set_pollution_detected(polluted)
-            trace.finish()
-            trace.save_background()
-
-            await self._update_conversation_summary(history or [])
-            return cleaned_answer, source_texts, source_metadata, answer_type
-        else:
-            template = """
-            你是一个智能助手。本次联网搜索未能返回有效结果。
-            请基于你已有的知识回答用户问题：
-            - 非时效性问题：正常回答。
-            - 涉及时效性信息（如价格、新闻、天气、实时数据等）：基于你的知识作答，
-              并在回答末尾标注"以上信息基于训练数据，可能不具备实时性，建议核实最新情况"，
-              不要简单拒绝或只说"无法获取实时信息"。
-
-            对话历史:
-            {history}
-
-            当前问题:
-            {question}
-
-            请结合历史对话进行回答，保持回答的连贯性和上下文一致性。
-            """
-            prompt = template.format(history=history_context, question=resolved_question)
-            answer = await self.llm.ainvoke(prompt)
-            cleaned_answer, polluted = OutputSanitizer.sanitize(answer.content)
-            trace.set_final_answer(cleaned_answer)
-            trace.set_pollution_detected(polluted)
-            trace.finish()
-            trace.save_background()
-
-            await self._update_conversation_summary(history or [])
-            return cleaned_answer, [], [], "llm_direct"
+        return answer, source_texts, source_metadata, answer_type
 
     async def rewrite_question(self, question: str) -> dict:
         """

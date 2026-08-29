@@ -3,10 +3,15 @@ A/B测试框架单元测试
 """
 
 import pytest
+
+# 依赖真实 PostgreSQL（实验记录读写），默认跳过；与 asyncio 标记合并
 import asyncio
 from src.services.experiment_manager import ExperimentManager
 
-pytestmark = pytest.mark.asyncio(loop_scope="session")
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.asyncio(loop_scope="session"),
+]
 
 
 class TestExperimentManager:

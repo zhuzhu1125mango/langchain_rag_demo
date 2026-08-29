@@ -202,6 +202,7 @@ class TestGoldPriceToolExecute:
     """金价工具 execute 方法测试。"""
 
     @pytest.mark.asyncio
+    @pytest.mark.integration  # execute 成功路径会写价格历史到 PostgreSQL
     async def test_execute_gold_cny_gram(self):
         """mock 数据源后 execute 应返回成功结果。"""
         mock_resp = MockResponse(
@@ -291,6 +292,7 @@ class TestExchangeRateToolExecute:
     """汇率工具 execute 方法测试。"""
 
     @pytest.mark.asyncio
+    @pytest.mark.integration  # execute 成功路径会写价格历史到 PostgreSQL
     async def test_execute_usd_to_cny(self):
         """mock 数据源后 execute 应返回成功结果。"""
         mock_resp = MockResponse(
@@ -308,6 +310,7 @@ class TestExchangeRateToolExecute:
         assert result.sources[0].get("data_type") == "exchange_rate"
 
     @pytest.mark.asyncio
+    @pytest.mark.integration  # execute 成功路径会写价格历史到 PostgreSQL
     async def test_execute_with_amount(self):
         """mock 数据源后 execute 应正确换算金额。"""
         mock_resp = MockResponse(

@@ -4,7 +4,7 @@
 1. QueryRewriter 多轮上下文补全 + 规则快速路径
 2. SearchPostprocessor 数值提取 + 多源交叉验证
 3. CitationBackfiller 引用补全 + AnswerVerifier 事实校验
-4. RAGChain._post_process_answer 完整后处理流程
+4. RAGChain._verify_answer_suffix 完整后处理流程
 5. IntentRouter 分级流水线分类
 
 依赖外部服务（Ollama/SearXNG/Milvus）的 e2e 测试默认跳过，
@@ -192,24 +192,18 @@ class TestCitationAndVerificationIntegration:
 
 
 # =============================================================================
-# 4. RAGChain._post_process_answer 集成（使用 mock）
+# 4. RAGChain._verify_answer_suffix 集成（使用 mock）
 # =============================================================================
 class TestRagChainPostProcessIntegration:
     """RAGChain 后处理流程集成测试（mock embeddings/LLM）。"""
 
     @pytest.mark.asyncio
-    async def test_post_process_answer_with_mock_backfiller(self):
-        """_post_process_answer 应调用 backfiller + verifier 并追加警告。"""
+    async def test_verify_answer_suffix_with_mock_verifier(self):
+        """_verify_answer_suffix 应调用 verifier 并返回警告后缀与校验结果。"""
         from src.services.rag_chain import RAGChain
 
         # 创建 RAGChain 实例（绕过 _async_init）
         chain = RAGChain.__new__(RAGChain)
-
-        # mock CitationBackfiller
-        mock_backfiller = AsyncMock()
-        async def mock_backfill(answer, sources):
-            return answer + "[1]"
-        mock_backfiller.backfill = mock_backfill
 
         # mock AnswerVerifier
         mock_verifier = AsyncMock()
@@ -226,39 +220,34 @@ class TestRagChainPostProcessIntegration:
         ))
         mock_verifier.format_warning_suffix = lambda result: "\n\n⚠️ 当前回答可信度较低，未在多个独立来源中得到验证，请谨慎参考。"
 
-        chain.citation_backfiller = mock_backfiller
         chain.answer_verifier = mock_verifier
 
         sources = [{"source_index": 1, "title": "test", "content": "test", "url": "https://a.com"}]
-        processed, verification = await chain._post_process_answer(
+        suffix, verification = await chain._verify_answer_suffix(
             "测试答案。", sources, {"validated_values": [], "single_source_values": [], "conflicting_values": []}
         )
 
-        # 应包含 backfiller 添加的引用
-        assert "[1]" in processed
-        # 应包含 verifier 追加的警告
-        assert "可信度较低" in processed
+        # 应返回 verifier 追加的警告后缀
+        assert suffix is not None
+        assert "可信度较低" in suffix
         # 应返回校验结果
         assert verification is not None
         assert verification.confidence == 0.3
 
     @pytest.mark.asyncio
-    async def test_post_process_answer_no_sources_skips(self):
-        """无来源时应跳过后处理，返回原始答案。"""
+    async def test_verify_answer_suffix_no_verifier_skips(self):
+        """答案校验器不可用时应跳过校验，返回 (None, None)。"""
         from src.services.rag_chain import RAGChain
 
         chain = RAGChain.__new__(RAGChain)
-        chain.citation_backfiller = AsyncMock()
-        chain.answer_verifier = AsyncMock()
+        chain.answer_verifier = None
 
-        processed, verification = await chain._post_process_answer(
+        suffix, verification = await chain._verify_answer_suffix(
             "原始答案。", [], None
         )
 
-        assert processed == "原始答案。"
+        assert suffix is None
         assert verification is None
-        # backfiller/verifier 不应被调用
-        chain.citation_backfiller.backfill.assert_not_called()
 
     def test_build_citation_sources_format(self):
         """_build_citation_sources 应生成正确格式。"""
@@ -366,7 +355,7 @@ class TestSearchOptimizationE2E:
 
     @pytest.mark.asyncio
     async def test_e2e_rag_chain_post_process(self):
-        """RAGChain._post_process_answer 真实环境测试。
+        """RAGChain 后处理链路真实环境测试。
 
         需启动完整后端服务后手动运行。
         """

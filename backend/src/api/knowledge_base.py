@@ -447,21 +447,34 @@ async def delete_knowledge_base(
         docs = doc_result.scalars().all()
 
         from src.services.minio_service import MinioService
-        minio_service = await MinioService.get_instance()
-        vector_store = await VectorStoreManager.get_instance()
 
-        for doc in docs:
-            if doc.file_path.startswith("minio://"):
-                minio_service.delete_file(doc.file_path)
-            await vector_store.delete_by_document_id(str(doc.id))
+        # 向量清理：按 kb_id 一次删除并统一 flush（替代逐文档删除 + 多次 flush，
+        # 避免 Milvus 单集合 0.1 QPS 限流）；失败不阻塞数据库记录删除，仅记录告警。
+        try:
+            vector_store = await VectorStoreManager.get_instance()
+            await vector_store.delete_by_kb_ids([str(kb.id)])
+        except Exception as exc:
+            logger.warning("删除知识库时向量存储清理失败，继续删除数据库记录: %s", exc)
+
+        # 删除 MinIO 中的原始文件（并发执行），失败仅告警不阻塞。
+        minio_service = await MinioService.get_instance()
+
+        async def cleanup_minio_file(doc: Document) -> None:
+            if not doc.file_path or not doc.file_path.startswith("minio://"):
+                return
+            try:
+                await minio_service.delete_file_async(doc.file_path)
+            except Exception as exc:
+                logger.warning("删除 MinIO 文件 %s 失败: %s", doc.file_path, exc)
+
+        await asyncio.gather(*(cleanup_minio_file(doc) for doc in docs))
+
+        # 批量删除数据库记录：先删 Document，再删 KnowledgeBase，防止外键冲突。
+        await db.execute(delete(Document).filter(Document.kb_id == kb.id))
+        await db.execute(delete(KnowledgeBase).filter(KnowledgeBase.id == kb.id))
+        await db.commit()
 
         await invalidate_kb_list_cache(current_user.user_id)
-
-        for doc in docs:
-            await db.delete(doc)
-
-        await db.delete(kb)
-        await db.commit()
 
         return {"message": "知识库已删除"}
     except ValueError:

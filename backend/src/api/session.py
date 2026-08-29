@@ -12,6 +12,7 @@
 import logging
 import asyncio
 import hashlib
+from collections import OrderedDict
 from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,8 +31,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 # 快捷问题缓存：key 为历史问题哈希，value 为 (缓存时间, 问题列表)
-_quick_questions_cache: dict[str, tuple[datetime, list[str]]] = {}
+# OrderedDict 实现 LRU：命中移到末尾，超限时从头部（最久未使用）淘汰
+_quick_questions_cache: OrderedDict[str, tuple[datetime, list[str]]] = OrderedDict()
 _QUICK_QUESTIONS_CACHE_TTL = timedelta(hours=24)
+_QUICK_QUESTIONS_CACHE_MAX_SIZE = 256
 
 def _get_quick_questions_cache_key(questions: list[str]) -> str:
     """根据历史问题列表生成缓存键"""
@@ -49,13 +52,27 @@ def _get_cached_quick_questions(questions: list[str]) -> Optional[list[str]]:
     if datetime.now() - cached_at > _QUICK_QUESTIONS_CACHE_TTL:
         _quick_questions_cache.pop(key, None)
         return None
+    # 命中时刷新 LRU 顺序
+    _quick_questions_cache.move_to_end(key)
     return suggestions
 
 
 def _set_cached_quick_questions(questions: list[str], suggestions: list[str]) -> None:
-    """缓存生成的快捷问题"""
+    """缓存生成的快捷问题（写时惰性清理过期项 + LRU 容量上限）"""
     key = _get_quick_questions_cache_key(questions)
-    _quick_questions_cache[key] = (datetime.now(), suggestions)
+    now = datetime.now()
+    # 写时惰性清理过期项，避免过期堆积挤占容量
+    expired_keys = [
+        k for k, (cached_at, _) in _quick_questions_cache.items()
+        if now - cached_at > _QUICK_QUESTIONS_CACHE_TTL
+    ]
+    for k in expired_keys:
+        _quick_questions_cache.pop(k, None)
+    _quick_questions_cache[key] = (now, suggestions)
+    _quick_questions_cache.move_to_end(key)
+    # 超出容量上限时淘汰最久未使用的条目
+    while len(_quick_questions_cache) > _QUICK_QUESTIONS_CACHE_MAX_SIZE:
+        _quick_questions_cache.popitem(last=False)
 
 
 async def _get_rag_chain() -> RAGChain:

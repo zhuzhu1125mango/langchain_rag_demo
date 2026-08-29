@@ -5,6 +5,9 @@ WebSocket 通知通道认证与权限测试
 import uuid
 
 import pytest
+
+# 依赖真实 PostgreSQL（TestClient 触发 app lifespan），默认跳过
+pytestmark = pytest.mark.integration
 from fastapi.testclient import TestClient
 
 from src.config import settings

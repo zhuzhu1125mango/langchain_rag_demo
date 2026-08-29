@@ -6,6 +6,7 @@ Milvus 破坏性重建防护测试（修复6）。
 现在默认拒绝重建并启动失败，仅在 MILVUS_REBUILD_ON_MISMATCH=true 时放行。
 """
 
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -140,3 +141,26 @@ class TestNoSilentFailure:
             await svc._ensure_dimension_match()
 
         svc.client.drop_collection.assert_not_called()
+
+    async def test_sparse_field_check_error_not_silent(self, caplog):
+        """sparse 字段兼容检查失败：记录 error 日志（不静默）、不阻塞启动。"""
+        svc = _make_service()
+        svc._sparse_enabled = True
+        svc.client.describe_collection.side_effect = ConnectionError("milvus down")
+
+        with caplog.at_level(logging.ERROR, logger="milvus_service"):
+            await svc._add_sparse_field_if_missing()
+
+        assert any("sparse_embedding 字段" in r.message for r in caplog.records)
+        # 异常不传播；降级开关保持不变，后续插入/检索路径独立兜底
+        assert svc._sparse_enabled is True
+
+    async def test_missing_sparse_field_degrades(self):
+        """字段缺失时降级为纯向量检索（既有行为回归）。"""
+        svc = _make_service()
+        svc._sparse_enabled = True
+        svc.client.describe_collection.return_value = _collection_info([EMBEDDING_FIELD_1024])
+
+        await svc._add_sparse_field_if_missing()
+
+        assert svc._sparse_enabled is False

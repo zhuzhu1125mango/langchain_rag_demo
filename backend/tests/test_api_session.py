@@ -3,6 +3,9 @@
 """
 
 import pytest
+
+# 依赖真实 PostgreSQL（TestClient 触发 app lifespan + DB 读写），默认跳过
+pytestmark = pytest.mark.integration
 from fastapi.testclient import TestClient
 from src.main import app
 import uuid

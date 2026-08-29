@@ -43,20 +43,38 @@ def pytest_addoption(parser):
         default=False,
         help="运行标记为 e2e 的端到端测试（默认跳过，需外部服务）",
     )
+    parser.addoption(
+        "--run-integration",
+        action="store_true",
+        default=False,
+        help="运行标记为 integration 的集成测试（默认跳过，需 PostgreSQL/MinIO/Milvus 等真实服务）",
+    )
+
+
+def pytest_configure(config):
+    """注册自定义 marker，避免 PytestUnknownMarkWarning。"""
+    config.addinivalue_line(
+        "markers",
+        "integration: 集成测试，依赖真实外部服务（PostgreSQL/MinIO/Milvus/Redis），"
+        "默认跳过，传入 --run-integration 运行",
+    )
 
 
 def pytest_collection_modifyitems(config, items):
-    """根据 --run-e2e 选项决定是否跳过 e2e 测试。
+    """根据 --run-e2e / --run-integration 选项决定是否跳过对应测试。
 
-    未传入 --run-e2e 时，所有标记 e2e 的测试自动跳过；
-    传入 --run-e2e 时，正常执行。
+    未传入对应选项时，所有标记 e2e / integration 的测试自动跳过；
+    传入后正常执行。
     """
-    if config.getoption("--run-e2e"):
-        return
     skip_e2e = pytest.mark.skip(reason="需要 --run-e2e 选项运行（依赖外部服务）")
+    skip_integration = pytest.mark.skip(reason="需要 --run-integration 选项运行（依赖真实外部服务）")
+    run_e2e = config.getoption("--run-e2e")
+    run_integration = config.getoption("--run-integration")
     for item in items:
-        if "e2e" in item.keywords:
+        if "e2e" in item.keywords and not run_e2e:
             item.add_marker(skip_e2e)
+        if "integration" in item.keywords and not run_integration:
+            item.add_marker(skip_integration)
 
 
 @pytest.fixture(autouse=True)

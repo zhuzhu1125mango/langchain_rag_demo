@@ -43,6 +43,7 @@ virtualenv/
 # =============== Data & Documents ===============
 backend/data/**
 !backend/data/.gitkeep
+backend/src/data/bm25/
 
 # =============== Logs ===============
 backend/logs/
