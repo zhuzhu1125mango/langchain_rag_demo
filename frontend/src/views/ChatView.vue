@@ -144,7 +144,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useChatStore } from '@/stores/chat'
@@ -531,12 +531,13 @@ async function sendMessage(): Promise<void> {
           // 分支：新会话创建 / 已有会话标题更新
           if (data.session_id && !chatStore.currentSession) {
             // 首条消息触发后端创建新会话，写入当前会话并 replace 路由 query
-            chatStore.setCurrentSession({
+            // 直接赋值，避免 setCurrentSession 清空已渲染的流式消息
+            chatStore.currentSession = {
               id: data.session_id,
               title: data.title || question.slice(0, 50),
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
-            })
+            }
             router.replace({ path: '/', query: { session: data.session_id } })
           } else if (data.title && chatStore.currentSession) {
             // 后端生成了新标题，更新当前会话并刷新列表
@@ -603,7 +604,7 @@ function clearChat(): void {
 /** 创建新会话并切换到该会话。 */
 async function createNewSession(): Promise<void> {
   try {
-    const res = await api.post<{ id: string; title: string }>('/sessions', { title: '新会话' })
+    const res = await api.post<{ id: string; title: string }>('/sessions/', { title: '新会话' })
     if (res && res.id) {
       chatStore.setCurrentSession({
         id: res.id,
@@ -769,4 +770,18 @@ onMounted(() => {
     loadSession(sessionId)
   }
 })
+
+/** 监听 URL 中 session 参数变化，自动加载对应会话历史。 */
+watch(
+  () => route.query.session as string | undefined,
+  (sessionId) => {
+    if (!sessionId) {
+      chatStore.setCurrentSession(null)
+      return
+    }
+    if (sessionId !== chatStore.currentSession?.id) {
+      loadSession(sessionId)
+    }
+  }
+)
 </script>

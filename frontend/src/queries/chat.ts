@@ -115,7 +115,7 @@ export function useSessions() {
   return useQuery({
     queryKey: ['sessions'],
     queryFn: async (): Promise<Session[]> => {
-      const res = await api.get<Session[]>('/sessions')
+      const res = await api.get<Session[]>('/sessions/')
       return res
     },
     staleTime: 5 * 60 * 1000

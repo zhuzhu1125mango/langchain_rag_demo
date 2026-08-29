@@ -235,9 +235,10 @@ async function uploadFiles(): Promise<void> {
 /** 为指定上传任务建立 WebSocket 进度连接。 */
 function setupProgressWebSocket(uploadId: string): Promise<void> {
   return new Promise((resolve) => {
-    const wsUrl = import.meta.env.DEV
-      ? `ws://localhost:8000/api/documents/upload/progress/ws/${uploadId}`
-      : `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/documents/upload/progress/ws/${uploadId}`
+    // 服务端要求 WS 握手携带凭据（与通知 WS 一致，通过 query 传递 api_key）
+    const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
+    const query = apiKey ? `?api_key=${encodeURIComponent(apiKey)}` : ''
+    const wsUrl = buildWsUrl(`/api/documents/upload/progress/ws/${uploadId}${query}`)
     const ws = new WebSocket(wsUrl)
 
     wsConnections.value.set(uploadId, ws)

@@ -166,7 +166,7 @@ export function useDocuments(params: Record<string, unknown> = {}, options: Reco
     queryKey: ['documents', effectiveParams],
     queryFn: async ({ queryKey }: { queryKey: unknown[] }): Promise<DocumentListResponse> => {
       const [, queryParams] = queryKey as [string, Record<string, unknown>]
-      const data = await api.get<DocumentListResponse | Document[]>('/documents', { params: queryParams })
+      const data = await api.get<DocumentListResponse | Document[]>('/documents/', { params: queryParams })
       if (Array.isArray(data)) {
         return { items: data, total: data.length }
       }
@@ -201,7 +201,7 @@ export function useCreateKnowledgeBase() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (data: Partial<KnowledgeBase>): Promise<KnowledgeBase> => {
-      const res = await api.post<KnowledgeBase>('/knowledge_bases', data)
+      const res = await api.post<KnowledgeBase>('/knowledge_bases/', data)
       return res as KnowledgeBase
     },
     onSuccess: () => {
@@ -265,7 +265,7 @@ export function useCategories() {
   return useQuery({
     queryKey: ['categories'],
     queryFn: async (): Promise<Category[]> => {
-      const data = await api.get<Category[]>('/categories')
+      const data = await api.get<Category[]>('/categories/')
       return data
     },
     staleTime: 10 * 60 * 1000
@@ -277,7 +277,7 @@ export function useTags() {
   return useQuery({
     queryKey: ['tags'],
     queryFn: async (): Promise<Tag[]> => {
-      const data = await api.get<Tag[]>('/tags')
+      const data = await api.get<Tag[]>('/tags/')
       return data
     },
     staleTime: 10 * 60 * 1000
@@ -289,7 +289,7 @@ export function useCreateCategory() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (data: CategoryCreateRequest): Promise<{ id: string; name: string }> => {
-      const res = await api.post<{ id: string; name: string }>('/categories', data)
+      const res = await api.post<{ id: string; name: string }>('/categories/', data)
       return res
     },
     onSuccess: () => {
@@ -330,7 +330,7 @@ export function useCreateTag() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (data: TagCreateRequest): Promise<{ id: string; name: string }> => {
-      const res = await api.post<{ id: string; name: string }>('/tags', data)
+      const res = await api.post<{ id: string; name: string }>('/tags/', data)
       return res
     },
     onSuccess: () => {
@@ -603,7 +603,7 @@ export function useFeedbackList(
       const params: Record<string, unknown> = { skip, limit }
       if (sessionId) params.session_id = sessionId
       if (messageId) params.message_id = messageId
-      const data = await api.get<FeedbackItem[]>('/feedback', { params })
+      const data = await api.get<FeedbackItem[]>('/feedback/', { params })
       return data
     },
     staleTime: 5 * 60 * 1000
@@ -676,7 +676,7 @@ export function useExperiments(status?: string) {
     queryKey: ['experiments', status],
     queryFn: async (): Promise<Experiment[]> => {
       const params = status ? { status } : undefined
-      const data = await api.get<{ success: boolean; data: Experiment[] }>('/experiments', { params })
+      const data = await api.get<{ success: boolean; data: Experiment[] }>('/experiments/', { params })
       return data.data
     },
     staleTime: 5 * 60 * 1000
@@ -688,7 +688,7 @@ export function useCreateExperiment() {
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: async (data: ExperimentCreateRequest): Promise<{ experiment_id: string }> => {
-      const res = await api.post<{ success: boolean; experiment_id: string }>('/experiments', data)
+      const res = await api.post<{ success: boolean; experiment_id: string }>('/experiments/', data)
       return { experiment_id: res.experiment_id }
     },
     onSuccess: () => {
