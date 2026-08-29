@@ -603,8 +603,9 @@ MINIO_SECURE=false
 # Redis
 REDIS_PASSWORD=dev_redis_password
 
-# 安全密钥（开发环境可使用默认值，生产必须修改）
-SECRET_KEY=dev-secret-key-not-for-production
+# 安全密钥：开发环境可不设置，后端启动时自动生成临时随机密钥
+#（重启后旧签名失效）；生产环境必须设置为强密钥
+SECRET_KEY=
 ```
 
 ```env
@@ -626,6 +627,14 @@ REDIS_PASSWORD=  # 必须手动设置！
 
 # 安全密钥（必须设置为强密钥，否则后端启动失败）
 SECRET_KEY=  # 必须手动设置！
+
+# 环境标记：Docker 部署无需设置（由 IN_DOCKER 推断为生产）；
+# 非 Docker 的生产部署（直接 uvicorn/systemd 运行）必须设置，否则不执行强校验
+APP_ENV=production
+
+# Milvus 集合 schema/维度不匹配时是否允许删除重建（破坏性！旧向量数据全部丢失）
+# 默认 false：不匹配时启动失败并提示；确认可接受数据丢失后才改为 true
+MILVUS_REBUILD_ON_MISMATCH=false
 ```
 
 ### 核心配置参数说明
@@ -642,7 +651,9 @@ SECRET_KEY=  # 必须手动设置！
 | `MINIO_SECRET_KEY` | 后端连接 MinIO 的 Secret Key | - | - |
 | `MINIO_BUCKET_NAME` | MinIO 存储桶名称 | `documents` | - |
 | `MINIO_SECURE` | 是否启用 HTTPS | `false` | true/false |
-| `SECRET_KEY` | JWT/安全签名密钥 | - | 生产环境必须设置为强密钥 |
+| `SECRET_KEY` | JWT/安全签名密钥 | 无（开发缺失时启动自动生成临时密钥） | 生产环境必须设置为强密钥，否则启动失败 |
+| `APP_ENV` | 显式环境标记 | 空（按 IN_DOCKER 推断） | 非 Docker 生产部署必须设为 `production` |
+| `MILVUS_REBUILD_ON_MISMATCH` | 集合 schema/维度不匹配时是否删除重建 | `false` | 破坏性操作，开启前必须完成数据迁移/备份 |
 | `REDIS_HOST` | Redis 主机 | `localhost` | 容器内自动覆盖为 `redis` |
 | `REDIS_PORT` | Redis 端口 | `6379` | - |
 | `REDIS_DB` | Redis 数据库编号 | `0` | 0-15 |

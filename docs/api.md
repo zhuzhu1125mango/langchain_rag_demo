@@ -843,6 +843,11 @@ data: {"type": "error", "error": "错误信息"}
 
 系统通过 WebSocket 提供实时通知，主要用于知识库列表变更、文档列表变更、上传任务进度等场景。
 
+**鉴权**：所有 WebSocket 通道与服务端 HTTP 接口使用同一凭据。配置了 `API_KEY`
+（或生产模式）时必须在握手 URL 上以 query 参数携带 `?api_key=<key>`
+（浏览器 WebSocket 不支持自定义请求头），凭据缺失或错误会在握手阶段被拒绝
+（关闭码 1008）；未配置 `API_KEY` 的开发环境允许匿名连接。
+
 ### 11.1 通用通知通道
 
 **WebSocket** `ws://localhost:8000/ws/notifications`
@@ -900,9 +905,10 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ### 11.4 上传进度通知
 
-**WebSocket** `ws://localhost:8000/ws/upload/{upload_id}`
+**WebSocket** `ws://localhost:8000/api/documents/upload/progress/ws/{upload_id}`
 
-订阅指定上传任务的实时进度通知。
+订阅指定上传任务的实时进度通知。客户端可发送 `{"action": "ping"}`，服务端
+回复 `{"type": "pong"}` 作为心跳。
 
 ---
 

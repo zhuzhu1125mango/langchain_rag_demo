@@ -445,7 +445,9 @@ services:
 | `MINIO_SECURE` | `false` | `true` | 否 |
 | `REDIS_DB` | `0` | `0` | 否 |
 | `REDIS_PASSWORD` | `dev_redis_password` | **必须手动设置** | ✅ |
-| `SECRET_KEY` | `dev-secret-key-not-for-production` | **必须手动设置** | ✅ |
+| `SECRET_KEY` | 不设置（启动自动生成临时密钥） | **必须手动设置强密钥** | ✅ |
+| `APP_ENV` | 不设置 | Docker 部署不设置；非 Docker 生产部署必设 `production` | 否 |
+| `MILVUS_REBUILD_ON_MISMATCH` | `false` | `false`（除非已确认可丢弃向量数据） | 否 |
 | `SEARCH_PROVIDER` | `searxng` | `searxng` | 否 |
 | `SEARXNG_BASE_URL` | `http://localhost:8080` | `http://searxng:8080` | 否 |
 | `GF_SECURITY_ADMIN_PASSWORD` | `admin` | **必须手动设置** | ✅ |
@@ -457,6 +459,31 @@ services:
 > **说明**：
 > - `SEARXNG_BASE_URL`：本地（非 Docker）开发使用 `http://localhost:8080`（见 `.env.dev` / `.env.example`）；Docker 模式下后端容器通过 `docker-compose.dev.yml` / `docker-compose.yml` 硬编码为 `http://searxng:8080`，`.env` 中的值不会生效。
 > - SearXNG 的 `redis: url: false`（见 `configs/searxng/settings.yml`）显式关闭 SearXNG 自身的 Redis 限流缓存，与项目 Redis 缓存用途相互独立，无需修改。
+
+### 6.4.1 存量库升级：sessions.messages 列迁移 JSONB
+
+消息保存已改为 `jsonb ||` 原子追加（并发安全），要求 `sessions.messages` 列为
+JSONB 类型。**新建库无需处理**（建表即为 JSONB）；从旧版本升级的存量库必须在
+启动新版后端前执行一次迁移脚本（幂等，可重复运行）：
+
+```bash
+cd backend
+python scripts/migrate_session_messages_jsonb.py
+```
+
+未迁移直接启动新版时，消息写入会报 `operator does not exist: json || jsonb`。
+
+### 6.4.2 启动强校验（生产模式）
+
+满足以下任一条件即按生产标准执行启动校验，校验失败将拒绝启动：
+
+- Docker 部署（`IN_DOCKER=true`）；
+- 显式设置 `APP_ENV=production`（用于非 Docker 的生产部署，如直接 uvicorn/systemd 运行）。
+
+校验项：`SECRET_KEY` 强度（≥32 字符、≥3 种字符类型、不在弱密钥黑名单），
+`POSTGRES_PASSWORD` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` 非空。
+开发模式（非生产）下 `SECRET_KEY` 缺失时会自动生成临时随机密钥并告警
+（重启后旧签名失效）。
 
 ### 6.5 配置检查清单
 
