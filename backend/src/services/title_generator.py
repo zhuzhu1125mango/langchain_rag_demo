@@ -12,22 +12,18 @@ from langchain_ollama import ChatOllama
 
 from src.config import settings
 from src.services.model_manager import model_manager
+from src.utils.async_singleton import AsyncSingleton
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_TITLES = {"新会话", "未命名对话", "", "new chat", "new session"}
 
 
-class TitleGenerator:
+class TitleGenerator(AsyncSingleton["TitleGenerator"]):
     """基于 LLM 的会话标题生成器"""
 
-    _instance: Optional["TitleGenerator"] = None
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._llm = None
-        return cls._instance
+    def __init__(self):
+        self._llm = None
 
     async def _get_llm(self) -> Optional[ChatOllama]:
         if self._llm is None:
@@ -107,4 +103,17 @@ class TitleGenerator:
         return question[:fallback_len].strip() or "新会话"
 
 
-title_generator = TitleGenerator()
+# 保留全局变量以兼容现有调用，但首次访问时需要在异步上下文中完成初始化。
+# 推荐在新代码中直接使用 `await TitleGenerator.get_instance()`。
+title_generator = None
+
+
+async def get_title_generator() -> TitleGenerator:
+    """获取 TitleGenerator 单例实例。
+
+    用于兼容需要在模块级别访问标题生成器的同步/异步上下文。
+    """
+    global title_generator
+    if title_generator is None:
+        title_generator = await TitleGenerator.get_instance()
+    return title_generator

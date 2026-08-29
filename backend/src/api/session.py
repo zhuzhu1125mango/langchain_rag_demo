@@ -23,7 +23,6 @@ import uuid
 from src.database import get_db
 from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback as FeedbackModel
-from src.services.vector_store import VectorStoreManager
 from src.services.rag_chain import RAGChain
 
 logger = logging.getLogger(__name__)
@@ -33,11 +32,6 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 # 快捷问题缓存：key 为历史问题哈希，value 为 (缓存时间, 问题列表)
 _quick_questions_cache: dict[str, tuple[datetime, list[str]]] = {}
 _QUICK_QUESTIONS_CACHE_TTL = timedelta(hours=24)
-
-# 全局复用的 RAGChain 与 VectorStoreManager 实例，避免每次请求重复初始化
-_rag_chain_instance: Optional[RAGChain] = None
-_vector_store_instance: Optional[VectorStoreManager] = None
-
 
 def _get_quick_questions_cache_key(questions: list[str]) -> str:
     """根据历史问题列表生成缓存键"""
@@ -65,13 +59,12 @@ def _set_cached_quick_questions(questions: list[str], suggestions: list[str]) ->
 
 
 async def _get_rag_chain() -> RAGChain:
-    """获取全局复用的 RAGChain 实例（异步懒加载）"""
-    global _rag_chain_instance, _vector_store_instance
-    if _rag_chain_instance is None:
-        _vector_store_instance = await VectorStoreManager.get_instance()
-        _rag_chain_instance = await RAGChain.get_instance(_vector_store_instance)
-        logger.info("RAGChain 全局实例初始化完成")
-    return _rag_chain_instance
+    """获取全局复用的 RAGChain 单例实例。
+
+    RAGChain 已在应用启动预热阶段完成初始化，这里直接获取，避免重复创建。
+    若因测试等场景未预热，则降级为懒加载初始化。
+    """
+    return await RAGChain.get_instance()
 
 
 class SessionResponse(BaseModel):

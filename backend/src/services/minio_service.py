@@ -6,31 +6,31 @@
 
 import asyncio
 import logging
-import threading
 import uuid
 from minio import Minio
 from minio.error import S3Error
 
 from src.config import settings
+from src.utils.async_singleton import AsyncSingleton
 
 logger = logging.getLogger("minio_service")
 
 
-class MinioService:
+class MinioService(AsyncSingleton["MinioService"]):
     """MinIO 客户端封装，提供同步与异步文件操作。"""
 
-    _instance = None
-    _lock = threading.Lock()
+    def __init__(self):
+        self._client = None
 
-    def __new__(cls):
-        """创建或返回单例，首次创建时初始化客户端并确保 bucket 存在。"""
-        if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
-                    cls._instance._client = cls._create_client()
-                    cls._instance._ensure_bucket()
-        return cls._instance
+    async def _async_init(self):
+        """异步初始化 MinIO 客户端并确保 bucket 存在。"""
+        self._client = self._create_client()
+        await self._ensure_bucket_async()
+
+    async def _ensure_bucket_async(self):
+        """在线程池中执行 bucket 检查与创建，避免阻塞事件循环。"""
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, self._ensure_bucket)
 
     @staticmethod
     def _create_client():
@@ -92,8 +92,11 @@ class MinioService:
             file_key: minio:// 协议的文件地址。
             expires: 链接有效期（秒），默认 1 小时。
         """
+        from datetime import timedelta
+
         actual_key = file_key.replace(f"minio://{settings.minio.MINIO_BUCKET_NAME}/", "")
-        return self._client.presigned_get_object(settings.minio.MINIO_BUCKET_NAME, actual_key, expires=expires)
+        delta = expires if isinstance(expires, timedelta) else timedelta(seconds=expires)
+        return self._client.presigned_get_object(settings.minio.MINIO_BUCKET_NAME, actual_key, expires=delta)
 
     def file_exists(self, file_key):
         """同步检查文件是否存在。"""

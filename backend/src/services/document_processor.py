@@ -260,7 +260,7 @@ def get_local_file_path(file_path):
     if file_path.startswith("minio://"):
         from src.services.minio_service import MinioService
         
-        minio_service = MinioService()
+        minio_service = MinioService.get_instance_sync()
         _, ext = os.path.splitext(file_path)
         
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
@@ -452,7 +452,7 @@ async def save_uploaded_file(uploaded_file):
     """
     from src.services.minio_service import MinioService
     
-    minio_service = MinioService()
+    minio_service = await MinioService.get_instance()
     
     if isinstance(uploaded_file, str):
         if uploaded_file.startswith("minio://"):
@@ -504,7 +504,7 @@ def preview_document(file_path, max_length=1000, page=1, page_size=500):
     """
     if file_path.startswith("minio://"):
         from src.services.minio_service import MinioService
-        minio_service = MinioService()
+        minio_service = MinioService.get_instance_sync()
         if not minio_service.file_exists(file_path):
             raise ValueError("文件不存在")
     elif not os.path.exists(file_path):
@@ -556,7 +556,7 @@ def get_document_chunks(file_path, chunk_strategy=ChunkingStrategy.AUTO):
     """
     if file_path.startswith("minio://"):
         from src.services.minio_service import MinioService
-        minio_service = MinioService()
+        minio_service = MinioService.get_instance_sync()
         if not minio_service.file_exists(file_path):
             raise ValueError("文件不存在")
     elif not os.path.exists(file_path):

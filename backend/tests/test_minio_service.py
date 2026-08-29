@@ -2,12 +2,15 @@
 MinIO服务单元测试
 """
 
+import asyncio
+
 import pytest
-from src.services.minio_service import MinioService
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 import io
 import uuid
+
+from src.services.minio_service import MinioService
 
 
 class TestMinioService:
@@ -15,8 +18,9 @@ class TestMinioService:
     
     def setup_method(self):
         """每个测试前初始化MinIO服务"""
-        MinioService._instance = None
-        self.minio_service = MinioService()
+        # 重置单例状态，确保测试隔离
+        asyncio.run(MinioService.reset_instance())
+        self.minio_service = MinioService.get_instance_sync()
         self.uploaded_files = []
     
     def teardown_method(self):
@@ -27,6 +31,7 @@ class TestMinioService:
                     self.minio_service.delete_file(file_key)
             except Exception:
                 pass
+        asyncio.run(MinioService.reset_instance())
     
     def _create_upload_file(self, filename: str, content: bytes, content_type: str = "text/plain") -> UploadFile:
         """创建UploadFile对象"""

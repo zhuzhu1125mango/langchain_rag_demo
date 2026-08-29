@@ -4,36 +4,20 @@
 供 RAG 链统一使用。
 """
 
-import asyncio
 from langchain_core.documents import Document
 from src.services.milvus_service import MilvusService
+from src.utils.async_singleton import AsyncSingleton
 
 
-class VectorStoreManager:
+class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
     """向量存储管理器，负责 Document 与 Milvus 之间的转换。"""
-
-    _instance = None
-    _lock = asyncio.Lock()
-    _initialized = False
 
     def __init__(self):
         self.milvus_service = None
 
     async def _async_init(self):
         """异步初始化 MilvusService 连接。"""
-        async with VectorStoreManager._lock:
-            if VectorStoreManager._initialized:
-                return
-            self.milvus_service = await MilvusService.get_instance()
-            VectorStoreManager._initialized = True
-
-    @classmethod
-    async def get_instance(cls) -> "VectorStoreManager":
-        """获取 VectorStoreManager 单例。"""
-        if cls._instance is None:
-            cls._instance = cls()
-        await cls._instance._async_init()
-        return cls._instance
+        self.milvus_service = await MilvusService.get_instance()
 
     async def create_vector_store(self, documents, kb_id=""):
         """首次创建向量存储并插入文档（语义同 add_documents）。"""
