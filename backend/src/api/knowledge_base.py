@@ -37,6 +37,10 @@ KB_LIST_CACHE_TTL = timedelta(seconds=60)
 BATCH_DELETE_MAX_IDS = 1000
 BATCH_DELETE_CHUNK_SIZE = 800
 
+# 缓存操作兜底超时（秒）。即使 Redis 客户端自身已配置超时，
+# 这里再加一层保护，确保任何情况下知识库列表接口都不会被缓存阻塞。
+KB_CACHE_OPERATION_TIMEOUT = 2.0
+
 router = APIRouter(prefix="/knowledge_bases", tags=["knowledge_bases"])
 
 
@@ -99,13 +103,21 @@ class BatchDeleteKnowledgeBasesResponse(BaseModel):
     skipped_ids: List[str]
 
 
-async def get_default_kb(db: AsyncSession) -> Optional[KnowledgeBase]:
-    result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.is_default == True))
-    return result.scalar_one_or_none()
+async def set_single_default(db: AsyncSession, kb_id: uuid.UUID, owner_id: str):
+    """设置指定用户的唯一默认知识库。
 
+    「清空默认标志」仅作用于该 owner 名下的知识库，避免跨用户重置。
 
-async def set_single_default(db: AsyncSession, kb_id: uuid.UUID):
-    await db.execute(update(KnowledgeBase).values(is_default=False))
+    Args:
+        db: 数据库会话。
+        kb_id: 目标知识库 ID（调用方需已校验归属）。
+        owner_id: 资源所有者标识。
+    """
+    await db.execute(
+        update(KnowledgeBase)
+        .where(KnowledgeBase.owner_id == owner_id)
+        .values(is_default=False)
+    )
     result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_id))
     kb = result.scalar_one_or_none()
     if kb:
@@ -146,7 +158,7 @@ async def create_knowledge_base(
     await db.commit()
     await db.refresh(kb)
 
-    await _invalidate_kb_list_cache(current_user.user_id)
+    await invalidate_kb_list_cache(current_user.user_id)
 
     return KnowledgeBaseResponse(
         id=str(kb.id),
@@ -175,7 +187,7 @@ def _kb_list_cache_key(user_id: str, page: int, page_size: int) -> str:
     return f"{KB_LIST_CACHE_PREFIX}:{user_id}:{page}:{page_size}"
 
 
-async def _invalidate_kb_list_cache(user_id: str) -> None:
+async def invalidate_kb_list_cache(user_id: str) -> None:
     """使指定用户的知识库列表缓存失效。"""
     try:
         cache = await CacheService.get_instance()
@@ -195,8 +207,12 @@ async def list_knowledge_bases(
     cache = None
     cached = None
     try:
-        cache = await CacheService.get_instance()
-        cached = await cache.get(cache_key)
+        cache = await asyncio.wait_for(
+            CacheService.get_instance(), timeout=KB_CACHE_OPERATION_TIMEOUT
+        )
+        cached = await asyncio.wait_for(
+            cache.get(cache_key), timeout=KB_CACHE_OPERATION_TIMEOUT
+        )
     except Exception as exc:
         logger.warning("读取知识库列表缓存失败: %s", exc)
 
@@ -206,7 +222,7 @@ async def list_knowledge_bases(
     subq = select(
         Document.kb_id,
         func.count(Document.id).label("doc_count")
-    ).group_by(Document.kb_id).subquery()
+    ).filter(Document.owner_id == current_user.user_id).group_by(Document.kb_id).subquery()
 
     owner_filter = KnowledgeBase.owner_id == current_user.user_id
     total_result = await db.execute(select(func.count(KnowledgeBase.id)).filter(owner_filter))
@@ -248,10 +264,14 @@ async def list_knowledge_bases(
         total_pages=total_pages
     )
 
-    try:
-        await cache.set(cache_key, response.model_dump(), expire=KB_LIST_CACHE_TTL)
-    except Exception as exc:
-        logger.warning("写入知识库列表缓存失败: %s", exc)
+    if cache is not None:
+        try:
+            await asyncio.wait_for(
+                cache.set(cache_key, response.model_dump(), expire=KB_LIST_CACHE_TTL),
+                timeout=KB_CACHE_OPERATION_TIMEOUT,
+            )
+        except Exception as exc:
+            logger.warning("写入知识库列表缓存失败: %s", exc)
 
     return response
 
@@ -271,7 +291,12 @@ async def get_default_knowledge_base(
     if not kb:
         raise HTTPException(status_code=404, detail="没有找到默认知识库")
 
-    doc_count_result = await db.execute(select(func.count(Document.id)).filter(Document.kb_id == kb.id))
+    doc_count_result = await db.execute(
+        select(func.count(Document.id)).filter(
+            Document.kb_id == kb.id,
+            Document.owner_id == current_user.user_id
+        )
+    )
     doc_count = doc_count_result.scalar_one()
 
     return KnowledgeBaseResponse(
@@ -306,7 +331,10 @@ async def get_knowledge_base(
         require_owner(kb.owner_id, current_user)
 
         doc_count_result = await db.execute(
-            select(func.count(Document.id)).filter(Document.kb_id == kb_id_uuid)
+            select(func.count(Document.id)).filter(
+                Document.kb_id == kb_id_uuid,
+                Document.owner_id == current_user.user_id
+            )
         )
         doc_count = doc_count_result.scalar_one()
 
@@ -364,9 +392,14 @@ async def update_knowledge_base(
         await db.commit()
         await db.refresh(kb)
 
-        await _invalidate_kb_list_cache(current_user.user_id)
+        await invalidate_kb_list_cache(current_user.user_id)
 
-        doc_count_result = await db.execute(select(func.count(Document.id)).filter(Document.kb_id == kb_id_uuid))
+        doc_count_result = await db.execute(
+            select(func.count(Document.id)).filter(
+                Document.kb_id == kb_id_uuid,
+                Document.owner_id == current_user.user_id
+            )
+        )
         doc_count = doc_count_result.scalar_one()
 
         return KnowledgeBaseResponse(
@@ -414,7 +447,7 @@ async def delete_knowledge_base(
         docs = doc_result.scalars().all()
 
         from src.services.minio_service import MinioService
-        minio_service = MinioService()
+        minio_service = await MinioService.get_instance()
         vector_store = await VectorStoreManager.get_instance()
 
         for doc in docs:
@@ -422,7 +455,7 @@ async def delete_knowledge_base(
                 minio_service.delete_file(doc.file_path)
             await vector_store.delete_by_document_id(str(doc.id))
 
-        await _invalidate_kb_list_cache(current_user.user_id)
+        await invalidate_kb_list_cache(current_user.user_id)
 
         for doc in docs:
             await db.delete(doc)
@@ -453,6 +486,11 @@ async def batch_delete_knowledge_bases(
         return BatchDeleteKnowledgeBasesResponse(deleted_count=0, skipped_ids=[])
 
     if len(request.ids) > BATCH_DELETE_MAX_IDS:
+        logger.warning(
+            "批量删除知识库被拒绝: ids数量=%d 超过上限=%d",
+            len(request.ids),
+            BATCH_DELETE_MAX_IDS,
+        )
         raise HTTPException(
             status_code=400,
             detail=f"单次批量删除最多允许 {BATCH_DELETE_MAX_IDS} 个知识库",
@@ -461,6 +499,7 @@ async def batch_delete_knowledge_bases(
     try:
         kb_ids = [uuid.UUID(kid) for kid in request.ids]
     except ValueError:
+        logger.warning("批量删除知识库被拒绝: 包含无效的知识库ID %s", request.ids)
         raise HTTPException(status_code=400, detail="包含无效的知识库ID")
 
     result = await db.execute(
@@ -486,27 +525,42 @@ async def batch_delete_knowledge_bases(
         )
         remaining = result.scalars().all()
         if not remaining:
+            logger.warning(
+                "批量删除知识库被拒绝: 用户 %s 尝试删除其全部知识库",
+                current_user.user_id,
+            )
             raise HTTPException(status_code=400, detail="不能删除最后一个知识库")
         remaining[0].is_default = True
 
     from src.services.minio_service import MinioService
-    minio_service = MinioService()
-    vector_store = await VectorStoreManager.get_instance()
 
     # 批量删除向量：合并为一个 delete 表达式并统一 flush 一次，
     # 避免每个知识库单独 flush 触发 Milvus 单集合 0.1 QPS 限流。
+    # 向量清理失败不应阻塞数据库记录删除，仅记录告警，避免服务抖动导致知识库无法删除。
     if found_ids:
-        await vector_store.delete_by_kb_ids([str(kb_id) for kb_id in found_ids])
+        try:
+            vector_store = await VectorStoreManager.get_instance()
+            await vector_store.delete_by_kb_ids([str(kb_id) for kb_id in found_ids])
+        except Exception as exc:
+            logger.warning(
+                "批量删除知识库时向量存储清理失败，继续删除数据库记录: %s", exc
+            )
 
     # 删除 MinIO 中的原始文件，按 BATCH_DELETE_CHUNK_SIZE 分批并发，避免单次任务过多。
-    doc_result = await db.execute(select(Document).filter(Document.kb_id.in_(found_ids)))
+    # MinIO 清理失败不应阻塞数据库记录删除，仅记录告警。
+    doc_result = await db.execute(
+        select(Document).filter(Document.kb_id.in_(found_ids))
+    )
     docs = doc_result.scalars().all()
 
     async def cleanup_minio_file(doc: Document) -> None:
-        if doc.file_path.startswith("minio://"):
-            await asyncio.get_event_loop().run_in_executor(
-                None, minio_service.delete_file, doc.file_path
-            )
+        if not doc.file_path or not doc.file_path.startswith("minio://"):
+            return
+        try:
+            minio_service = await MinioService.get_instance()
+            await minio_service.delete_file_async(doc.file_path)
+        except Exception as exc:
+            logger.warning("删除 MinIO 文件 %s 失败: %s", doc.file_path, exc)
 
     if docs:
         for i in range(0, len(docs), BATCH_DELETE_CHUNK_SIZE):
@@ -529,7 +583,14 @@ async def batch_delete_knowledge_bases(
         )
     await db.commit()
 
-    await _invalidate_kb_list_cache(current_user.user_id)
+    await invalidate_kb_list_cache(current_user.user_id)
+
+    logger.info(
+        "批量删除知识库成功: 用户=%s 删除数量=%d 跳过数量=%d",
+        current_user.user_id,
+        len(kbs),
+        len(skipped_ids),
+    )
 
     return BatchDeleteKnowledgeBasesResponse(
         deleted_count=len(kbs),
@@ -550,7 +611,7 @@ async def set_default_knowledge_base(
             raise HTTPException(status_code=404, detail="知识库不存在")
         require_owner(kb.owner_id, current_user)
 
-        await set_single_default(db, uuid.UUID(kb_id))
+        await set_single_default(db, uuid.UUID(kb_id), current_user.user_id)
 
         return {"message": "已设置为默认知识库"}
     except ValueError:

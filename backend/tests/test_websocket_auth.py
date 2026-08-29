@@ -115,3 +115,73 @@ class TestWebSocketDocsPermission:
                 f"/api/ws/docs/{uuid.uuid4()}?api_key=test-api-key-for-websocket"
             ) as websocket:
                 websocket.receive_json()
+
+
+class TestUploadProgressWSAuth:
+    """上传进度 WebSocket 鉴权测试（回归：此前该端点完全无鉴权）。
+
+    使用不触发 lifespan 的 TestClient：该 WS 端点仅依赖 settings，
+    不需要 Redis/Milvus 预热，可在无外部服务的环境中运行。
+    """
+
+    @pytest.fixture
+    def ws_client(self):
+        return TestClient(app)
+
+    def _configure_production_mode(self):
+        """配置生产模式所需的强 SECRET_KEY、API_KEY 与 Docker 标志。"""
+        settings.security.SECRET_KEY = "Test-Secret-Key-For-WebSocket-Auth-123!"
+        settings.security.API_KEY = "test-api-key-for-websocket"
+        settings.IN_DOCKER = True
+
+    @pytest.fixture(autouse=True)
+    def reset_settings(self):
+        """测试结束后恢复认证相关配置。"""
+        original_api_key = settings.security.API_KEY
+        original_secret_key = settings.security.SECRET_KEY
+        original_in_docker = settings.IN_DOCKER
+        yield
+        settings.security.API_KEY = original_api_key
+        settings.security.SECRET_KEY = original_secret_key
+        settings.IN_DOCKER = original_in_docker
+
+    def test_upload_ws_anonymous_in_dev_allowed(self, ws_client):
+        """开发环境未配置 API_KEY 时允许匿名连接。"""
+        settings.security.API_KEY = None
+        settings.IN_DOCKER = False
+
+        with ws_client.websocket_connect(
+            "/api/documents/upload/progress/ws/dev-upload-1"
+        ) as websocket:
+            websocket.send_json({"action": "ping"})
+            assert websocket.receive_json() == {"type": "pong"}
+
+    def test_upload_ws_no_auth_in_docker_rejected(self, ws_client):
+        """Docker 生产模式未携带凭据必须在握手阶段被拒绝。"""
+        self._configure_production_mode()
+
+        with pytest.raises(Exception):
+            with ws_client.websocket_connect(
+                "/api/documents/upload/progress/ws/some-upload"
+            ) as websocket:
+                websocket.receive_json()
+
+    def test_upload_ws_invalid_api_key_rejected(self, ws_client):
+        """Docker 生产模式无效凭据必须被拒绝。"""
+        self._configure_production_mode()
+
+        with pytest.raises(Exception):
+            with ws_client.websocket_connect(
+                "/api/documents/upload/progress/ws/some-upload?api_key=wrong-key"
+            ) as websocket:
+                websocket.receive_json()
+
+    def test_upload_ws_valid_api_key_allowed(self, ws_client):
+        """Docker 生产模式有效凭据可建立连接并响应心跳。"""
+        self._configure_production_mode()
+
+        with ws_client.websocket_connect(
+            "/api/documents/upload/progress/ws/some-upload?api_key=test-api-key-for-websocket"
+        ) as websocket:
+            websocket.send_json({"action": "ping"})
+            assert websocket.receive_json() == {"type": "pong"}

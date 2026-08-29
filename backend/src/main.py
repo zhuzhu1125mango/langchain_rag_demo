@@ -16,6 +16,7 @@ RAG Knowledge Base QA System API - FastAPI入口文件
 
 import logging
 import os
+import secrets
 import time
 import asyncio
 from uuid import uuid4
@@ -31,6 +32,7 @@ from src.utils.security import validate_secret_key, SecretKeyValidationError
 from src.auth import get_current_user
 from src.api import (
     document_router,
+    document_ws_router,
     chat_router,
     session_router,
     category_router,
@@ -129,24 +131,33 @@ async def lifespan(app: FastAPI):
     在应用启动时自动创建所有数据库表
     在应用关闭时无需特殊清理操作
     """
-    # 生产环境安全检查
-    if settings.IN_DOCKER:
+    # 生产级安全检查：无论是否 Docker，凡生产模式一律强制
+    if settings.IS_PRODUCTION:
         try:
             validate_secret_key(settings.security.SECRET_KEY, in_docker=True)
         except SecretKeyValidationError as e:
             raise RuntimeError(f"SECRET_KEY 校验失败: {e}")
 
-    # 关键凭据非空校验（Docker 环境）
-    if settings.IN_DOCKER:
+        # 关键凭据非空校验
         _missing_creds = []
         if not settings.database.POSTGRES_PASSWORD:
             _missing_creds.append("POSTGRES_PASSWORD")
+        if not settings.minio.MINIO_ACCESS_KEY:
+            _missing_creds.append("MINIO_ACCESS_KEY")
         if not settings.minio.MINIO_SECRET_KEY:
             _missing_creds.append("MINIO_SECRET_KEY")
         if _missing_creds:
-            _msg = f"生产环境启动失败: 关键凭据为空: {', '.join(_missing_creds)}，请在 .env.prod 中设置强密码"
+            _msg = f"生产环境启动失败: 关键凭据为空: {', '.join(_missing_creds)}，请在环境配置中设置强密码"
             logger.error(_msg)
             raise RuntimeError(_msg)
+    else:
+        # 开发模式兜底：未设置 SECRET_KEY 时生成临时随机密钥（重启后签名失效）
+        if not settings.security.SECRET_KEY:
+            settings.security.SECRET_KEY = secrets.token_urlsafe(48)
+            logger.warning(
+                "SECRET_KEY 未设置，已生成临时随机密钥（仅限开发环境，重启后旧签名失效）；"
+                "生产部署必须设置强密钥或 APP_ENV=production"
+            )
 
     await init_db()
     logger.info("Database tables created successfully")
@@ -157,10 +168,20 @@ async def lifespan(app: FastAPI):
         from src.services.rag_chain import RAGChain
         from src.services.cache_service import CacheService
 
-        await CacheService.get_instance()
+        # Redis 为必需依赖，初始化必须成功；设置短超时避免启动时长时间挂死
+        await asyncio.wait_for(CacheService.get_instance(), timeout=8.0)
         vector_store = await VectorStoreManager.get_instance()
-        await RAGChain.get_instance(vector_store)
+        rag_chain = await RAGChain.get_instance(vector_store)
         logger.info("核心异步服务预热完成")
+
+        # 预热 LLM，触发 Ollama 将模型加载到内存，避免首个用户请求阻塞 20~40 秒。
+        # 该步骤为最佳努力（best-effort），失败仅记录警告，不中断启动。
+        try:
+            if rag_chain.llm is not None:
+                await asyncio.wait_for(rag_chain.llm.ainvoke("hello"), timeout=60.0)
+                logger.info("LLM 预热完成")
+        except Exception as e:
+            logger.warning(f"LLM 预热失败，首次调用可能较慢: {e}")
     except Exception as e:
         logger.error(f"核心异步服务预热失败: {e}", exc_info=True)
         raise RuntimeError(f"核心异步服务预热失败: {e}")
@@ -183,7 +204,8 @@ app = FastAPI(
     title="RAG Knowledge Base QA System API",
     description="基于LangChain的私有文档知识库问答系统API，支持多格式文档导入、智能问答、会话管理等功能",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 app.add_middleware(RequestTracingMiddleware)
@@ -260,6 +282,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 app.include_router(document_router, prefix="/api", dependencies=[Depends(get_current_user)])
+# document_ws_router 仅包含 WebSocket 端点，认证在端点内通过 get_current_user_for_ws 处理，
+# 原因同 notification_router：router 级 HTTP 依赖在 WebSocket 上下文中缺少 request 对象会失败。
+app.include_router(document_ws_router, prefix="/api")
 app.include_router(chat_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(session_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(category_router, prefix="/api", dependencies=[Depends(get_current_user)])
@@ -303,8 +328,10 @@ async def health_check_detail():
     try:
         from src.services.cache_service import CacheService
         cache = await CacheService.get_instance()
-        await cache.ping()
-        checks["redis"] = {"status": "healthy"}
+        if await cache.ping():
+            checks["redis"] = {"status": "healthy"}
+        else:
+            checks["redis"] = {"status": "unhealthy", "error": "Redis ping 失败或缓存服务不可用"}
     except Exception as e:
         checks["redis"] = {"status": "unhealthy", "error": str(e)}
     

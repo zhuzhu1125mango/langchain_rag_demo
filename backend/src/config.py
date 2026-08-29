@@ -25,11 +25,12 @@ class DatabaseSettings(BaseSettings):
 
 class MinIOSettings(BaseSettings):
     MINIO_ENDPOINT: str = "localhost:9000"
-    MINIO_ACCESS_KEY: str = "admin"
-    MINIO_SECRET_KEY: str = "password123"
+    # 无默认凭据：缺失时由启动校验拦截（生产模式），避免弱凭据静默上线
+    MINIO_ACCESS_KEY: str = ""
+    MINIO_SECRET_KEY: str = ""
     MINIO_BUCKET_NAME: str = "documents"
     MINIO_SECURE: bool = False
-    
+
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 class MilvusSettings(BaseSettings):
@@ -53,6 +54,11 @@ class MilvusSettings(BaseSettings):
     MILVUS_FLUSH_MAX_RETRY: int = 3              # rate limit 触发后的最大重试次数
     MILVUS_FLUSH_BASE_WAIT: float = 1.5          # 首次退避等待秒数
 
+    # 集合 schema/维度不匹配时是否允许删除重建（破坏性操作，旧向量数据全部丢失）。
+    # 默认 False：不匹配时启动失败并给出明确提示，避免静默清空知识库数据。
+    # 确认可接受数据丢失（或已完成迁移备份）后显式设为 true 重启以自动重建。
+    MILVUS_REBUILD_ON_MISMATCH: bool = False
+
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 class RedisSettings(BaseSettings):
@@ -64,7 +70,8 @@ class RedisSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 class SecuritySettings(BaseSettings):
-    SECRET_KEY: str = "your-secret-key-here-change-in-production"
+    # 无默认值：生产模式缺失/弱值时启动失败；开发模式由启动逻辑生成临时随机密钥
+    SECRET_KEY: str = ""
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     API_KEY: Optional[str] = None  # 全局 API Key（自托管单实例认证）
 
@@ -227,10 +234,21 @@ class Settings(BaseSettings):
     evaluation: EvaluationSettings = EvaluationSettings()
 
     IN_DOCKER: bool = False
+    # 显式环境标记：dev | production。未设置时按 IN_DOCKER 推断。
+    # 非 Docker 的生产部署（裸跑 uvicorn/systemd）必须设置 APP_ENV=production，
+    # 否则启动时不执行强密钥/凭据校验。
+    APP_ENV: Optional[str] = None
     # 任务级模型角色映射（可选），key 为任务名，value 为 settings.model 中的字段名
     MODEL_TASK_ROLES: Optional[Dict[str, str]] = None
-    
+
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+
+    @property
+    def IS_PRODUCTION(self) -> bool:
+        """是否以生产级标准运行（决定启动时是否强制安全校验）。"""
+        if self.APP_ENV:
+            return self.APP_ENV == "production"
+        return self.IN_DOCKER
 
 settings = Settings()
 

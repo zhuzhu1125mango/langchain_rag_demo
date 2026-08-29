@@ -7,6 +7,7 @@
 import time
 import asyncio
 import logging
+from contextvars import ContextVar
 from typing import List, Dict, Optional, Any
 from langchain_ollama import ChatOllama
 
@@ -49,14 +50,24 @@ try:
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
-class RAGChain:
+from src.utils.async_singleton import AsyncSingleton
+
+# 请求级决策/检索状态。RAGChain 是进程级单例，此前将决策结果挂在
+# self 上，并发请求会互相覆盖（串号）。ContextVar 在每个 asyncio Task
+# 中独立复制：并发请求互不可见；同一 Task 内 set 后可被后续代码读取。
+# 注意：set 与 get 必须发生在同一 Task（不要跨 asyncio.create_task 读取）。
+_request_decision: ContextVar[Optional[DecisionResult]] = ContextVar(
+    "rag_request_decision", default=None
+)
+_request_retrieval_score: ContextVar[float] = ContextVar(
+    "rag_request_retrieval_score", default=0.0
+)
+
+
+class RAGChain(AsyncSingleton["RAGChain"]):
     """RAG 问答链类，结合知识库与 LLM 进行智能问答。"""
 
-    _instance = None
-    _lock = asyncio.Lock()
-    _initialized = False
-
-    def __init__(self, vector_store, strategy_manager=None):
+    def __init__(self, vector_store=None, strategy_manager=None):
         """初始化 RAG 问答链。
 
         Args:
@@ -68,11 +79,8 @@ class RAGChain:
         self.retriever = None
         self.strategy_manager = strategy_manager
         self.decision_pipeline = None
-        self.last_decision = None
-        self.last_strategy_confidences = {}
         self.similarity_threshold = 0.4
         self.sentence_transformer = None
-        self.last_retrieval_score = 0.0
         self.last_reasoning: List[Dict[str, Any]] = []
         self.web_search_service = None
         self.search_toolkit = None
@@ -94,69 +102,72 @@ class RAGChain:
         self.knowledge_graph_generator = None
 
     async def _async_init(self):
-        async with RAGChain._lock:
-            if RAGChain._initialized:
-                return
-            answer_model = await model_manager.get_model_for_task("answer")
-            self.llm = ChatOllama(model=answer_model, streaming=True)
-            self.strategy_manager = self.strategy_manager or await create_default_strategy_manager()
-            self.decision_pipeline = DecisionPipeline(self.strategy_manager)
+        """异步初始化 RAG 问答链。
 
-            # 初始化联网搜索服务（注入 LLM 和缓存）
-            cache_service = None
-            try:
-                from src.services.cache_service import CacheService
-                cache_service = await CacheService.get_instance()
-            except Exception as e:
-                logger.warning(f"缓存服务初始化失败，联网搜索将不使用缓存: {e}")
-            self.web_search_service = WebSearchService(llm=self.llm, cache_service=cache_service)
+        依赖的 vector_store 和 strategy_manager 通过 __init__ 传入，
+        首次调用时完成一次性初始化。
+        """
+        if self.vector_store is None:
+            self.vector_store = await VectorStoreManager.get_instance()
+        self.strategy_manager = self.strategy_manager or await create_default_strategy_manager()
+        self.decision_pipeline = DecisionPipeline(self.strategy_manager)
 
-            # 初始化 Phase 3 Agent（按需延迟创建 handler，但先创建 toolkit）
-            self.search_toolkit = SearchToolkit(self.web_search_service)
+        answer_model = await model_manager.get_model_for_task("answer")
+        self.llm = ChatOllama(model=answer_model, streaming=True)
 
-            # 初始化阶段二组件
-            self.intent_router = IntentRouter()
-            self.tool_executor = ToolExecutor(self.search_toolkit.tool_manager)
-            self.answer_generator = AnswerGenerator(
-                self.llm,
-                numerical_validator=NumericalValidator(),
-            )
-            self.context_builder = ContextBuilder()
+        # 初始化联网搜索服务（注入 LLM 和缓存）
+        cache_service = None
+        try:
+            from src.services.cache_service import CacheService
+            cache_service = await CacheService.get_instance()
+        except Exception as e:
+            logger.warning(f"缓存服务初始化失败，联网搜索将不使用缓存: {e}")
+        self.web_search_service = WebSearchService(llm=self.llm, cache_service=cache_service)
 
-            # P0-f：初始化引用补全器与答案校验器（复用 Milvus 服务的 embeddings）
-            embeddings = None
-            try:
-                if self._has_vector_store() and self.vector_store.milvus_service is not None:
-                    embeddings = self.vector_store.milvus_service.embeddings
-            except Exception as e:
-                logger.warning(f"获取 embeddings 失败，引用补全将降级为仅校验模式: {e}")
-            self.citation_backfiller = None
-            self.answer_verifier = None
-            try:
-                from .citation_backfiller import CitationBackfiller
-                from .output_sanitizer import AnswerVerifier
-                self.citation_backfiller = CitationBackfiller(embeddings=embeddings)
-                self.answer_verifier = AnswerVerifier(embeddings=embeddings, llm=self.llm)
-            except Exception as e:
-                logger.warning(f"引用补全器/答案校验器初始化失败，将跳过后处理: {e}")
+        # 初始化 Phase 3 Agent（按需延迟创建 handler，但先创建 toolkit）
+        self.search_toolkit = SearchToolkit(self.web_search_service)
 
-            # 初始化各独立服务（按职责拆分）
-            self.context_enhancer = ContextEnhancer(self.llm)
-            self.question_processor = QuestionProcessor(self.llm)
-            self.kb_comparator = KBComparator(self.llm, self)
-            self.document_analyzer = DocumentAnalyzer(self.llm, self)
-            self.kb_recommender = KBRecommender(self)
-            self.knowledge_graph_generator = KnowledgeGraphGenerator(self.llm, self)
+        # 初始化阶段二组件
+        self.intent_router = IntentRouter()
+        self.tool_executor = ToolExecutor(self.search_toolkit.tool_manager)
+        self.answer_generator = AnswerGenerator(
+            self.llm,
+            numerical_validator=NumericalValidator(),
+        )
+        self.context_builder = ContextBuilder()
 
-            RAGChain._initialized = True
+        # P0-f：初始化引用补全器与答案校验器（复用 Milvus 服务的 embeddings）
+        embeddings = None
+        try:
+            if self._has_vector_store() and self.vector_store.milvus_service is not None:
+                embeddings = self.vector_store.milvus_service.embeddings
+        except Exception as e:
+            logger.warning(f"获取 embeddings 失败，引用补全将降级为仅校验模式: {e}")
+        self.citation_backfiller = None
+        self.answer_verifier = None
+        try:
+            from .citation_backfiller import CitationBackfiller
+            from .output_sanitizer import AnswerVerifier
+            self.citation_backfiller = CitationBackfiller(embeddings=embeddings)
+            self.answer_verifier = AnswerVerifier(embeddings=embeddings, llm=self.llm)
+        except Exception as e:
+            logger.warning(f"引用补全器/答案校验器初始化失败，将跳过后处理: {e}")
+
+        # 初始化各独立服务（按职责拆分）
+        self.context_enhancer = ContextEnhancer(self.llm)
+        self.question_processor = QuestionProcessor(self.llm)
+        self.kb_comparator = KBComparator(self.llm, self)
+        self.document_analyzer = DocumentAnalyzer(self.llm, self)
+        self.kb_recommender = KBRecommender(self)
+        self.knowledge_graph_generator = KnowledgeGraphGenerator(self.llm, self)
 
     @classmethod
-    async def get_instance(cls, vector_store, strategy_manager=None) -> "RAGChain":
-        """单例获取入口，含加锁与初始化协调。"""
-        if cls._instance is None:
-            cls._instance = cls(vector_store, strategy_manager)
-        await cls._instance._async_init()
-        return cls._instance
+    async def get_instance(cls, vector_store=None, strategy_manager=None) -> "RAGChain":
+        """单例获取入口。
+
+        参数仅在首次创建实例时生效，后续调用会忽略参数并返回已有实例。
+        """
+        return await super().get_instance(vector_store, strategy_manager)
 
     def _init_similarity_model(self):
         """初始化语义相似度模型（延迟加载）"""
@@ -211,9 +222,9 @@ class RAGChain:
         获取上一次检索的相关性分数
         
         Returns:
-            float: 相关性分数
+            float: 相关性分数（请求级隔离，未经过检索时为 0.0）
         """
-        return self.last_retrieval_score
+        return _request_retrieval_score.get()
 
     def _get_retriever(self):
         """
@@ -260,13 +271,14 @@ class RAGChain:
     def get_last_strategy_confidences(self):
         """
         获取上一次策略判断的各策略置信度（保持向后兼容）
-        
+
         Returns:
-            Dict[str, float]: 各策略置信度字典
+            Dict[str, float]: 各策略置信度字典（请求级隔离，本请求未决策时为空）
         """
-        if self.last_decision:
-            return self.last_decision.strategy_results
-        return self.last_strategy_confidences
+        decision = _request_decision.get()
+        if decision:
+            return decision.strategy_results
+        return {}
 
     async def _make_decision(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
         """
@@ -283,21 +295,23 @@ class RAGChain:
         Returns:
             bool: True表示需要使用知识库，False表示直接回答
         """
-        self.last_decision = await self.decision_pipeline.decide(
+        decision = await self.decision_pipeline.decide(
             question, kb_ids, history, force_mode, use_web_search, search_mode
         )
-        # 保持向后兼容，更新 last_strategy_confidences
-        self.last_strategy_confidences = self.last_decision.strategy_results
-        return self.last_decision.should_use_kb
+        # 写入请求级 ContextVar：并发请求各自可见自己的决策结果
+        _request_decision.set(decision)
+        return decision.should_use_kb
 
     def get_last_decision(self):
         """
-        获取上一次的完整决策结果
-        
+        获取上一次的完整决策结果（请求级隔离）
+
+        注意：set 与 get 必须在同一 asyncio Task 内；跨 Task 读取将得到 None。
+
         Returns:
             DecisionResult or None: 决策结果
         """
-        return self.last_decision
+        return _request_decision.get()
 
     def get_last_reasoning(self) -> List[Dict[str, Any]]:
         """
@@ -967,7 +981,8 @@ class RAGChain:
 
             kb_search_duration = int((time.time() - kb_search_start) * 1000)
             if docs and len(docs) > 0:
-                self.last_retrieval_score, has_relevant = await self._calculate_relevance(resolved_question, docs)
+                _retrieval_score, has_relevant = await self._calculate_relevance(resolved_question, docs)
+                _request_retrieval_score.set(_retrieval_score)
 
                 if has_relevant:
                     doc_texts, doc_metadata = self._extract_source_info(docs)
@@ -1384,7 +1399,8 @@ class RAGChain:
             docs = await self._retrieve_documents(resolved_question, kb_ids)
 
             if docs and len(docs) > 0:
-                self.last_retrieval_score, has_relevant = await self._calculate_relevance(resolved_question, docs)
+                _retrieval_score, has_relevant = await self._calculate_relevance(resolved_question, docs)
+                _request_retrieval_score.set(_retrieval_score)
 
                 if has_relevant:
                     doc_texts, doc_metadata = self._extract_source_info(docs)

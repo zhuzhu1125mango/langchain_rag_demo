@@ -9,6 +9,7 @@
 import asyncio
 import uuid
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -17,6 +18,7 @@ from pymilvus.exceptions import MilvusException
 from langchain_ollama import OllamaEmbeddings
 from aiolimiter import AsyncLimiter
 from src.config import settings
+from src.utils.async_singleton import AsyncSingleton
 
 logger = logging.getLogger("milvus_service")
 
@@ -32,12 +34,8 @@ except Exception as _bm25_import_err:  # pragma: no cover - 依赖未安装时�
     logger.warning(f"pymilvus-model 未安装，知识库混合检索将降级为纯向量检索: {_bm25_import_err}")
 
 
-class MilvusService:
+class MilvusService(AsyncSingleton["MilvusService"]):
     """Milvus 客户端封装，管理集合生命周期与向量操作。"""
-
-    _instance = None
-    _lock = asyncio.Lock()
-    _initialized = False
 
     def __init__(self):
         self.client: AsyncMilvusClient | None = None
@@ -53,24 +51,23 @@ class MilvusService:
 
     async def _async_init(self):
         """异步初始化 Milvus 连接、Embedding 模型并确保集合就绪。"""
-        async with MilvusService._lock:
-            if MilvusService._initialized:
-                return
-            self.client = AsyncMilvusClient(
-                uri=f"http://{settings.milvus.MILVUS_HOST}:{settings.milvus.MILVUS_PORT}",
-                db_name=settings.milvus.MILVUS_DATABASE
-            )
-            self.embeddings = OllamaEmbeddings(model=settings.model.EMBEDDING_MODEL_NAME)
-            await self._ensure_collection()
-            MilvusService._initialized = True
+        self.client = AsyncMilvusClient(
+            uri=f"http://{settings.milvus.MILVUS_HOST}:{settings.milvus.MILVUS_PORT}",
+            db_name=settings.milvus.MILVUS_DATABASE
+        )
+        self.embeddings = OllamaEmbeddings(model=settings.model.EMBEDDING_MODEL_NAME)
+        await self._ensure_collection()
 
-    @classmethod
-    async def get_instance(cls) -> "MilvusService":
-        """获取 MilvusService 单例。"""
-        if cls._instance is None:
-            cls._instance = cls()
-        await cls._instance._async_init()
-        return cls._instance
+    async def _async_cleanup(self):
+        """关闭 Milvus 客户端连接。"""
+        if self.client is not None:
+            try:
+                await self.client.close()
+            except Exception as e:
+                logger.warning(f"关闭 Milvus 客户端失败: {e}")
+            finally:
+                self.client = None
+                self.embeddings = None
 
     async def _ensure_collection(self):
         """确保集合存在，schema 包含 dense + sparse 向量字段及对应索引。"""
@@ -140,52 +137,62 @@ class MilvusService:
             )
 
     async def _add_kb_id_field_if_missing(self):
-        """兼容旧集合：若缺少 kb_id 字段则删除重建集合。
+        """兼容旧集合：缺少 kb_id 字段时按 MILVUS_REBUILD_ON_MISMATCH 处理。
 
-        注意：旧数据会丢失，仅用于schema升级时的兼容处理。
+        默认 False：直接启动失败并提示，避免静默清空全部向量数据；
+        显式开启后删除重建（旧数据丢失，需重新导入或提前迁移）。
         """
-        try:
-            collection_info = await self.client.describe_collection(settings.milvus.MILVUS_COLLECTION_NAME)
-            field_names = [f["name"] for f in collection_info["fields"]]
-            if "kb_id" not in field_names:
-                await self.client.drop_collection(settings.milvus.MILVUS_COLLECTION_NAME)
-                schema = await self._build_schema()
-                await self.client.create_collection(
-                    collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
-                    schema=schema
+        collection_info = await self.client.describe_collection(settings.milvus.MILVUS_COLLECTION_NAME)
+        field_names = [f["name"] for f in collection_info["fields"]]
+        if "kb_id" not in field_names:
+            if not settings.milvus.MILVUS_REBUILD_ON_MISMATCH:
+                raise RuntimeError(
+                    "Milvus 集合缺少 kb_id 字段（schema 升级）。删除重建会丢失全部向量数据，"
+                    "默认已禁止。请先完成数据迁移/备份，再设置 MILVUS_REBUILD_ON_MISMATCH=true 重启，"
+                    "或运行迁移脚本重建集合并回填数据。"
                 )
-                await self._create_indexes()
-        except Exception:
-            pass
+            logger.warning(
+                "集合缺少 kb_id 字段且 MILVUS_REBUILD_ON_MISMATCH=true，执行删除重建，旧数据将丢失"
+            )
+            await self.client.drop_collection(settings.milvus.MILVUS_COLLECTION_NAME)
+            schema = await self._build_schema()
+            await self.client.create_collection(
+                collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+                schema=schema
+            )
+            await self._create_indexes()
 
     async def _ensure_dimension_match(self):
-        """兼容旧集合：若 embedding 字段维度与当前配置不一致则删除重建。
+        """兼容旧集合：embedding 维度与当前配置不一致时按 MILVUS_REBUILD_ON_MISMATCH 处理。
 
         切换 Embedding 模型（如 nomic-embed-text 768 维 → bge-m3 1024 维）
-        时，Milvus 不支持直接修改向量字段维度，因此需要重建集合。
-        旧数据会丢失，需通过重新上传文档或迁移脚本恢复。
+        时，Milvus 不支持直接修改向量字段维度。默认 False：不一致时启动失败，
+        避免静默清空数据；显式开启后才删除重建（旧数据丢失，需重新导入）。
         """
-        try:
-            collection_info = await self.client.describe_collection(settings.milvus.MILVUS_COLLECTION_NAME)
-            for field in collection_info["fields"]:
-                if field["name"] == "embedding" and field["type"] == DataType.FLOAT_VECTOR:
-                    current_dim = field.get("params", {}).get("dim")
-                    expected_dim = settings.model.EMBEDDING_DIMENSION
-                    if current_dim is not None and current_dim != expected_dim:
-                        logger.warning(
-                            f"集合 embedding 维度不一致: 当前 {current_dim}, 期望 {expected_dim}。"
-                            "将删除并重建集合，旧数据需要重新导入。"
+        collection_info = await self.client.describe_collection(settings.milvus.MILVUS_COLLECTION_NAME)
+        for field in collection_info["fields"]:
+            if field["name"] == "embedding" and field["type"] == DataType.FLOAT_VECTOR:
+                current_dim = field.get("params", {}).get("dim")
+                expected_dim = settings.model.EMBEDDING_DIMENSION
+                if current_dim is not None and current_dim != expected_dim:
+                    if not settings.milvus.MILVUS_REBUILD_ON_MISMATCH:
+                        raise RuntimeError(
+                            f"Milvus 集合 embedding 维度不一致: 当前 {current_dim}, 期望 {expected_dim}"
+                            "（通常是切换了 Embedding 模型）。删除重建会丢失全部向量数据，默认已禁止。"
+                            "请先完成数据迁移/备份，再设置 MILVUS_REBUILD_ON_MISMATCH=true 重启。"
                         )
-                        await self.client.drop_collection(settings.milvus.MILVUS_COLLECTION_NAME)
-                        schema = await self._build_schema()
-                        await self.client.create_collection(
-                            collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
-                            schema=schema
-                        )
-                        await self._create_indexes()
-                    break
-        except Exception:
-            pass
+                    logger.warning(
+                        f"集合 embedding 维度不一致: 当前 {current_dim}, 期望 {expected_dim}，"
+                        "MILVUS_REBUILD_ON_MISMATCH=true，执行删除重建，旧数据将丢失"
+                    )
+                    await self.client.drop_collection(settings.milvus.MILVUS_COLLECTION_NAME)
+                    schema = await self._build_schema()
+                    await self.client.create_collection(
+                        collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+                        schema=schema
+                    )
+                    await self._create_indexes()
+                break
 
     async def _add_sparse_field_if_missing(self):
         """兼容旧集合：缺少 sparse_embedding 字段时不删除数据，仅记录日志。
@@ -427,14 +434,34 @@ class MilvusService:
         reranked = await rerank_results(query, fused, top_k=k)
         return reranked
 
-    @staticmethod
-    def _build_filter_expr(document_ids=None, kb_ids=None):
+    # 过滤表达式仅接受 UUID 格式的 ID（防御表达式注入的兜底校验）
+    _UUID_RE = re.compile(
+        r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+    )
+
+    @classmethod
+    def _safe_id(cls, value: Any) -> str:
+        """校验 ID 为 UUID 后返回其字符串形式，非法输入直接拒绝。
+
+        Milvus filter 表达式无参数化机制，ID 一律先经此白名单校验再拼接，
+        防止构造恶意字符串篡改过滤语义。
+
+        Raises:
+            ValueError: ID 不符合 UUID 格式。
+        """
+        v = str(value)
+        if not cls._UUID_RE.match(v):
+            raise ValueError(f"非法 ID，已拒绝进入过滤表达式: {v[:64]}")
+        return v
+
+    @classmethod
+    def _build_filter_expr(cls, document_ids=None, kb_ids=None):
         """根据 document_ids 与 kb_ids 构建 Milvus filter 表达式。"""
         conditions = []
         if kb_ids and len(kb_ids) > 0:
-            conditions.append(f"kb_id in [{','.join([f'\"{kb}\"' for kb in kb_ids])}]")
+            conditions.append(f"kb_id in [{','.join([f'\"{cls._safe_id(kb)}\"' for kb in kb_ids])}]")
         if document_ids and len(document_ids) > 0:
-            conditions.append(f"document_id in [{','.join([f'\"{doc_id}\"' for doc_id in document_ids])}]")
+            conditions.append(f"document_id in [{','.join([f'\"{cls._safe_id(doc_id)}\"' for doc_id in document_ids])}]")
         return " && ".join(conditions) if conditions else None
 
     @staticmethod
@@ -458,7 +485,7 @@ class MilvusService:
 
     async def delete_by_document_id(self, document_id):
         """按文档 ID 删除其所有切片。"""
-        expr = f"document_id == '{document_id}'"
+        expr = f"document_id == '{self._safe_id(document_id)}'"
         await self.client.delete(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
             filter=expr
@@ -467,7 +494,7 @@ class MilvusService:
 
     async def delete_by_kb_id(self, kb_id):
         """按知识库 ID 删除其下所有切片。"""
-        expr = f"kb_id == '{kb_id}'"
+        expr = f"kb_id == '{self._safe_id(kb_id)}'"
         await self.client.delete(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
             filter=expr
@@ -482,7 +509,7 @@ class MilvusService:
         """
         if not kb_ids:
             return
-        expr = "kb_id in [" + ",".join(f"'{kb_id}'" for kb_id in kb_ids) + "]"
+        expr = "kb_id in [" + ",".join(f"'{self._safe_id(kb_id)}'" for kb_id in kb_ids) + "]"
         await self.client.delete(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
             filter=expr
@@ -495,7 +522,7 @@ class MilvusService:
 
     async def get_document_chunks(self, document_id):
         """获取指定文档的所有切片内容。"""
-        expr = f"document_id == '{document_id}'"
+        expr = f"document_id == '{self._safe_id(document_id)}'"
         results = await self.client.query(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
             filter=expr,
@@ -514,7 +541,7 @@ class MilvusService:
 
     async def count_by_kb(self, kb_id):
         """返回指定知识库下的切片数量。"""
-        expr = f"kb_id == '{kb_id}'"
+        expr = f"kb_id == '{self._safe_id(kb_id)}'"
         results = await self.client.query(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
             filter=expr,

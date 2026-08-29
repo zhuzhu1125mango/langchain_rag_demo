@@ -1,4 +1,5 @@
 from .document import router as document_router
+from .document import ws_router as document_ws_router
 from .chat import router as chat_router
 from .session import router as session_router
 from .category import router as category_router
@@ -14,6 +15,7 @@ from .evaluation import router as evaluation_router
 
 __all__ = [
     "document_router",
+    "document_ws_router",
     "chat_router",
     "session_router",
     "category_router",

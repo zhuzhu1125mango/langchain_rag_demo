@@ -27,7 +27,7 @@ import math
 import uuid
 from collections import Counter
 from src.database import get_db, async_session_maker
-from src.auth import get_current_user, CurrentUser, require_owner
+from src.auth import get_current_user, get_current_user_for_ws, CurrentUser, require_owner
 from src.models import Document, Category, KnowledgeBase
 
 logger = logging.getLogger("rag_system")
@@ -42,6 +42,7 @@ from src.services.vector_store import VectorStoreManager
 from src.services.rag_chain import RAGChain
 from src.services.document_analyzer import DocumentAnalyzer
 from src.schemas.document import DuplicateDetectionRequest, DocumentQualityResponse, DocumentClassificationResponse
+from src.api.knowledge_base import invalidate_kb_list_cache
 from src.services.progress_manager import (
     create_upload_progress,
     update_upload_progress,
@@ -59,6 +60,33 @@ from src.services.notification_service import (
 from src.config import settings
 
 router = APIRouter(prefix="/documents", tags=["documents"])
+
+# WebSocket 端点专用 router：不能挂 router 级 HTTP 认证依赖
+# （APIKeyHeader 在 WS 上下文中缺少 request 对象会抛 TypeError），
+# 认证在各 WS 端点内通过 get_current_user_for_ws 完成。
+ws_router = APIRouter(prefix="/documents", tags=["documents"])
+
+
+async def _get_owned_document(
+    db: AsyncSession, doc_id: str, current_user: CurrentUser
+) -> Document:
+    """按 ID 加载文档并校验归属，统一所有单文档端点的鉴权路径。
+
+    Raises:
+        HTTPException: 400(ID 非法) / 404(不存在) / 403(非所有者)
+    """
+    try:
+        doc_uuid = uuid.UUID(doc_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(status_code=400, detail="无效的文档ID")
+
+    result = await db.execute(select(Document).filter(Document.id == doc_uuid))
+    doc = result.scalar_one_or_none()
+    if not doc:
+        raise HTTPException(status_code=404, detail="文档不存在")
+
+    require_owner(doc.owner_id, current_user)
+    return doc
 
 
 class DocumentResponse(BaseModel):
@@ -115,14 +143,6 @@ class DocumentSourceResponse(BaseModel):
     highlight_length: int
 
 
-async def get_default_kb_id(db: AsyncSession) -> str:
-    result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.is_default == True))
-    kb = result.scalars().first()
-    if kb:
-        return str(kb.id)
-    return ""
-
-
 async def process_document_async(
     doc_id: str,
     file_path: str,
@@ -158,7 +178,8 @@ async def process_document_async(
             await db.commit()
             await notify_task_progress(task_upload_id, 10, "正在解析文档...")
 
-            chunks = process_document(file_path, chunk_size, chunk_overlap)
+            # 解析含 MinIO 下载与 PDF/Office 解析（同步阻塞），移入线程池避免阻塞事件循环
+            chunks = await asyncio.to_thread(process_document, file_path, chunk_size, chunk_overlap)
 
             # 为每个 chunk 补充 document_id 元数据，确保向量能正确关联到文档
             for chunk in chunks:
@@ -291,6 +312,12 @@ async def process_document_async(
             # 通知文档列表已更新
             await notify_doc_list_changed(kb_id, doc_id, "created")
 
+            # 使知识库列表缓存失效，确保文档数量实时更新
+            try:
+                await invalidate_kb_list_cache(doc.owner_id)
+            except Exception as exc:
+                logger.warning(f"文档处理完成后刷新知识库列表缓存失败: {exc}")
+
             logger.info(f"文档处理完成: {doc.filename}, 共{len(chunks)}个文本块")
 
         except Exception as e:
@@ -327,8 +354,8 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
             await notify_task_progress(task_id, 10, "正在删除文件...")
             if file_path.startswith("minio://"):
                 from src.services.minio_service import MinioService
-                minio_service = MinioService()
-                minio_service.delete_file(file_path)
+                minio_service = await MinioService.get_instance()
+                await minio_service.delete_file_async(file_path)
             elif os.path.exists(file_path):
                 os.remove(file_path)
 
@@ -345,6 +372,7 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
             # 阶段3：删除数据库记录 (70-100%)
             result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
             doc = result.scalars().first()
+            owner_id = doc.owner_id if doc else None
             if doc:
                 await db.delete(doc)
                 await db.commit()
@@ -359,6 +387,13 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
 
             # 通知文档列表已更新
             await notify_doc_list_changed(kb_id, doc_id, "deleted")
+
+            # 使知识库列表缓存失效，确保文档数量实时更新
+            if owner_id:
+                try:
+                    await invalidate_kb_list_cache(owner_id)
+                except Exception as exc:
+                    logger.warning(f"文档删除完成后刷新知识库列表缓存失败: {exc}")
 
             logger.info(f"文档删除完成: {doc_id}")
 
@@ -421,7 +456,7 @@ async def upload_document(
 
     try:
         from src.services.minio_service import MinioService
-        minio_service = MinioService()
+        minio_service = await MinioService.get_instance()
 
         # 更新状态：开始上传
         create_upload_progress(task_upload_id, file.filename, file.size)
@@ -446,8 +481,8 @@ async def upload_document(
         db.add(doc)
         await db.commit()
 
-        # 上传文件到 MinIO
-        file_path = minio_service.upload_file(file, doc_id)
+        # 上传文件到 MinIO（异步变体：网络 I/O 不阻塞事件循环）
+        file_path = await minio_service.upload_file_async(file, doc_id)
 
         # 更新文档记录
         doc.file_path = file_path
@@ -472,6 +507,12 @@ async def upload_document(
 
         # 通知文档列表即将更新
         await notify_doc_list_changed(str(kb_uuid), str(doc_id), "created")
+
+        # 使知识库列表缓存失效，确保文档数量实时更新
+        try:
+            await invalidate_kb_list_cache(current_user.user_id)
+        except Exception as exc:
+            logger.warning(f"文档上传后刷新知识库列表缓存失败: {exc}")
 
         return {
             "id": str(doc_id),
@@ -525,7 +566,7 @@ async def batch_upload(
     from src.services.minio_service import MinioService
 
     results = []
-    minio_service = MinioService()
+    minio_service = await MinioService.get_instance()
 
     for file in files:
         _, ext = os.path.splitext(file.filename)
@@ -535,7 +576,7 @@ async def batch_upload(
 
         try:
             doc_id = uuid.uuid4()
-            file_path = minio_service.upload_file(file, doc_id)
+            file_path = await minio_service.upload_file_async(file, doc_id)
 
             # 创建文档记录，标记为处理中
             doc = Document(
@@ -579,6 +620,12 @@ async def batch_upload(
             })
         except Exception as e:
             results.append({"filename": file.filename, "status": "failed", "reason": str(e)})
+
+    # 使知识库列表缓存失效，确保批量上传后文档数量实时更新
+    try:
+        await invalidate_kb_list_cache(current_user.user_id)
+    except Exception as exc:
+        logger.warning(f"批量上传后刷新知识库列表缓存失败: {exc}")
 
     return {"results": results}
 
@@ -625,7 +672,8 @@ async def search_documents(
     query: str = Query(..., description="搜索关键词"),
     kb_id: Optional[str] = Query(None, description="知识库ID，不传则搜索所有知识库"),
     limit: Optional[int] = Query(10, ge=1, le=100, description="返回结果数量"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
 ):
     if not query.strip():
         raise HTTPException(status_code=400, detail="搜索关键词不能为空")
@@ -636,9 +684,14 @@ async def search_documents(
     if kb_id:
         try:
             kb_uuid = uuid.UUID(kb_id)
-            kb_ids = [kb_id]
         except ValueError:
             raise HTTPException(status_code=400, detail="无效的知识库ID")
+        kb_result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid))
+        kb = kb_result.scalar_one_or_none()
+        if not kb:
+            raise HTTPException(status_code=404, detail="知识库不存在")
+        require_owner(kb.owner_id, current_user)
+        kb_ids = [kb_id]
 
     try:
         results = await vector_store.search(query, k=limit, kb_ids=kb_ids if kb_ids else None)
@@ -652,12 +705,16 @@ async def search_documents(
             if doc_id:
                 unique_doc_ids.add(doc_id)
 
+        # 仅映射当前用户拥有的文档（跨用户命中结果直接丢弃，防止内容泄露）
         doc_id_to_name = {}
         if unique_doc_ids:
             doc_result = await db.execute(
                 select(Document, KnowledgeBase.name.label("kb_name"))
                 .outerjoin(KnowledgeBase, Document.kb_id == KnowledgeBase.id)
-                .filter(Document.id.in_([uuid.UUID(did) for did in unique_doc_ids]))
+                .filter(
+                    Document.id.in_([uuid.UUID(did) for did in unique_doc_ids]),
+                    Document.owner_id == current_user.user_id
+                )
             )
             for row in doc_result.all():
                 document = row.Document
@@ -670,7 +727,10 @@ async def search_documents(
 
         for doc in results:
             doc_id = doc.metadata.get("document_id", "")
-            info = doc_id_to_name.get(doc_id, {})
+            info = doc_id_to_name.get(doc_id)
+            if info is None:
+                # 非当前用户的文档，跳过（不返回内容摘要）
+                continue
 
             content = doc.page_content
             highlight = None
@@ -771,37 +831,41 @@ async def list_documents(
 
 
 @router.put("/{doc_id}/status")
-async def update_status(doc_id: str, status: str, db: AsyncSession = Depends(get_db)):
-    try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
+async def update_status(
+    doc_id: str,
+    status: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    doc = await _get_owned_document(db, doc_id, current_user)
 
-        if status not in ["draft", "published", "archived"]:
-            raise HTTPException(status_code=400, detail="无效的状态值")
+    if status not in ["draft", "published", "archived"]:
+        raise HTTPException(status_code=400, detail="无效的状态值")
 
-        doc.status = status
-        await db.commit()
-        return {"message": "状态更新成功"}
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的文档ID")
+    doc.status = status
+    await db.commit()
+    return {"message": "状态更新成功"}
 
 
 @router.get("/{doc_id}/preview")
-async def preview_doc(doc_id: str, page: int = 1, page_size: int = 500, db: AsyncSession = Depends(get_db)):
+async def preview_doc(
+    doc_id: str,
+    page: int = 1,
+    page_size: int = 500,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    doc = await _get_owned_document(db, doc_id, current_user)
+
+    if page < 1:
+        page = 1
+    if page_size < 10 or page_size > 2000:
+        page_size = 500
+
     try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
-
-        if page < 1:
-            page = 1
-        if page_size < 10 or page_size > 2000:
-            page_size = 500
-
-        result = preview_document(doc.file_path, page=page, page_size=page_size)
+        result = await asyncio.to_thread(
+            preview_document, doc.file_path, page=page, page_size=page_size
+        )
         return {
             "doc_id": doc_id,
             "filename": doc.filename,
@@ -814,14 +878,15 @@ async def preview_doc(doc_id: str, page: int = 1, page_size: int = 500, db: Asyn
 
 
 @router.get("/{doc_id}/chunks")
-async def get_doc_chunks(doc_id: str, db: AsyncSession = Depends(get_db)):
-    try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
+async def get_doc_chunks(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    doc = await _get_owned_document(db, doc_id, current_user)
 
-        chunks = get_document_chunks(doc.file_path)
+    try:
+        chunks = await asyncio.to_thread(get_document_chunks, doc.file_path)
         return {
             "doc_id": doc_id,
             "filename": doc.filename,
@@ -839,27 +904,25 @@ async def get_document_source(
     doc_id: str,
     chunk_index: int = Path(..., ge=0, description="文本块索引"),
     context_chunks: int = Query(1, ge=0, le=5, description="前后上下文块数"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
 ):
     """
     获取文档特定文本块的内容（用于答案溯源）
-    
+
     Args:
         doc_id: 文档ID
         chunk_index: 文本块索引
         context_chunks: 前后上下文块数
-    
+
     Returns:
         DocumentSourceResponse: 包含文本块内容和上下文信息
     """
-    try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
+    doc = await _get_owned_document(db, doc_id, current_user)
 
-        chunks = get_document_chunks(doc.file_path)
-        
+    try:
+        chunks = await asyncio.to_thread(get_document_chunks, doc.file_path)
+
         if chunk_index < 0 or chunk_index >= len(chunks):
             raise HTTPException(status_code=400, detail="无效的文本块索引")
 
@@ -901,25 +964,23 @@ async def get_document_source(
 async def reprocess_document(
     doc_id: str,
     background_tasks: BackgroundTasks,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
 ):
     """
     重新处理文档（异步处理）
-    
+
     当文档处理失败时，允许重新处理
-    
+
     Args:
         doc_id: 文档ID
-        
+
     Returns:
         dict: 处理任务信息
     """
     try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
-        
+        doc = await _get_owned_document(db, doc_id, current_user)
+
         if not doc.file_path:
             raise HTTPException(status_code=400, detail="文档文件路径不存在")
         
@@ -973,29 +1034,33 @@ async def reprocess_document(
 
 
 @router.post("/{doc_id}/classify", response_model=DocumentClassificationResponse)
-async def classify_document(doc_id: str, db: AsyncSession = Depends(get_db)):
+async def classify_document(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
     """
     自动分类文档
-    
+
     Args:
         doc_id: 文档ID
-        
+
     Returns:
         DocumentClassificationResponse: 文档分类结果
     """
     try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
+        doc = await _get_owned_document(db, doc_id, current_user)
 
-        chunks = get_document_chunks(doc.file_path)
+        chunks = await asyncio.to_thread(get_document_chunks, doc.file_path)
         content = "\n\n".join(ch["content"] for ch in chunks)
-        
+
         if len(content) > 2000:
             content = content[:2000]
-        
-        document_type, topics, domain = DocumentAnalyzer.analyze_document_content(content)
+
+        # 同步分析（含 CPU 密集统计），移入线程池
+        document_type, topics, domain = await asyncio.to_thread(
+            DocumentAnalyzer.analyze_document_content, content
+        )
         
         type_labels = {
             "technical": "技术文档",
@@ -1035,26 +1100,27 @@ async def classify_document(doc_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{doc_id}/quality", response_model=DocumentQualityResponse)
-async def evaluate_document_quality(doc_id: str, db: AsyncSession = Depends(get_db)):
+async def evaluate_document_quality(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
+):
     """
     评估文档质量
-    
+
     Args:
         doc_id: 文档ID
-        
+
     Returns:
         DocumentQualityResponse: 文档质量评估结果
     """
     try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
+        doc = await _get_owned_document(db, doc_id, current_user)
 
-        chunks = get_document_chunks(doc.file_path)
+        chunks = await asyncio.to_thread(get_document_chunks, doc.file_path)
         content = "\n\n".join(ch["content"] for ch in chunks)
-        
-        result = DocumentAnalyzer.evaluate_quality(content)
+
+        result = await asyncio.to_thread(DocumentAnalyzer.evaluate_quality, content)
         
         return DocumentQualityResponse(**result)
     except ValueError as e:
@@ -1070,15 +1136,8 @@ async def get_document(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
-        require_owner(doc.owner_id, current_user)
-        return doc
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的文档ID")
+    doc = await _get_owned_document(db, doc_id, current_user)
+    return doc
 
 
 @router.put("/{doc_id}")
@@ -1089,11 +1148,7 @@ async def update_document(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
-        require_owner(doc.owner_id, current_user)
+        doc = await _get_owned_document(db, doc_id, current_user)
 
         if data.category_id:
             doc.category_id = uuid.UUID(data.category_id)
@@ -1130,11 +1185,7 @@ async def delete_document(
     3. 通过WebSocket实时推送删除进度
     """
     try:
-        result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
-        doc = result.scalar_one_or_none()
-        if not doc:
-            raise HTTPException(status_code=404, detail="文档不存在")
-        require_owner(doc.owner_id, current_user)
+        doc = await _get_owned_document(db, doc_id, current_user)
 
         kb_id = str(doc.kb_id)
         file_path = doc.file_path
@@ -1234,11 +1285,16 @@ def get_upload_progress_endpoint(upload_id: str):
     return progress.to_dict()
 
 
-@router.websocket("/upload/progress/ws/{upload_id}")
+@ws_router.websocket("/upload/progress/ws/{upload_id}")
 async def upload_progress_ws(websocket: WebSocket, upload_id: str):
-    """WebSocket 实时推送上传进度"""
+    """WebSocket 实时推送上传进度
+
+    认证方式：query parameter `api_key`（浏览器 WS 不支持自定义请求头）。
+    认证失败时在握手阶段以 1008 关闭连接。
+    """
+    await get_current_user_for_ws(websocket)
     await websocket.accept()
-    
+
     # 注册 WebSocket 连接
     register_ws_connection(upload_id, websocket)
     
@@ -1274,40 +1330,39 @@ class DuplicateDetectionResult(BaseModel):
 @router.post("/duplicate-detect", response_model=List[DuplicateDetectionResult])
 async def detect_duplicates(
     request: DuplicateDetectionRequest,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user)
 ):
     """
     检测重复或相似文档
-    
+
     Args:
         request: 重复检测请求（包含文档ID或内容、知识库ID、相似度阈值）
-        
+
     Returns:
         List[DuplicateDetectionResult]: 相似文档列表
     """
     try:
         if not request.doc_id and not request.content:
             raise HTTPException(status_code=400, detail="必须提供doc_id或content")
-        
+
         target_content = ""
-        
+
         if request.doc_id:
-            result = await db.execute(select(Document).filter(Document.id == uuid.UUID(request.doc_id)))
-            doc = result.scalar_one_or_none()
-            if not doc:
-                raise HTTPException(status_code=404, detail="目标文档不存在")
-            chunks = get_document_chunks(doc.file_path)
+            doc = await _get_owned_document(db, request.doc_id, current_user)
+            chunks = await asyncio.to_thread(get_document_chunks, doc.file_path)
             target_content = "\n\n".join(ch["content"] for ch in chunks)
         else:
             target_content = request.content or ""
-        
+
         if not target_content.strip():
             raise HTTPException(status_code=400, detail="文档内容不能为空")
 
         # 词频余弦相似度的默认阈值为 0.7（与 knowledge_base 端点的语义向量相似度 0.85 不同）
         threshold = request.threshold if request.threshold is not None else 0.7
-        
-        query = select(Document)
+
+        # 仅在当前用户的文档范围内查重
+        query = select(Document).filter(Document.owner_id == current_user.user_id)
         if request.kb_id:
             query = query.filter(Document.kb_id == uuid.UUID(request.kb_id))
         if request.doc_id:
@@ -1315,11 +1370,20 @@ async def detect_duplicates(
         
         result = await db.execute(query)
         candidates = result.scalars().all()
-        
+
+        # 候选数上限：每个候选都要下载+解析文档（同步阻塞），
+        # 不设上限时大库会放大为长时间占用线程池
+        max_candidates = 20
+        if len(candidates) > max_candidates:
+            logger.warning(
+                f"重复检测候选数 {len(candidates)} 超过上限 {max_candidates}，仅处理前 {max_candidates} 个"
+            )
+            candidates = candidates[:max_candidates]
+
         results = []
         for candidate in candidates:
             try:
-                chunks = get_document_chunks(candidate.file_path)
+                chunks = await asyncio.to_thread(get_document_chunks, candidate.file_path)
                 candidate_content = "\n\n".join(ch["content"] for ch in chunks)
                 
                 similarity = calculate_similarity(target_content, candidate_content)

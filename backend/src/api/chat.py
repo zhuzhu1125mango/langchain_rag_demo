@@ -12,7 +12,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel, Field
 from typing import List, Optional, Union, Annotated
 import asyncio
@@ -25,9 +24,11 @@ from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback, KnowledgeBase
 from src.services.rag_chain import RAGChain
 from src.services.vector_store import VectorStoreManager
+from src.services.session_service import append_session_message
 from src.services.learning_engine import learning_engine
-from src.services.title_generator import title_generator
+from src.services.title_generator import TitleGenerator
 from src.utils.sensitive_words import sensitive_filter
+from src.utils.validators import parse_uuid_list, validate_kb_ownership
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,10 @@ async def send_message(
     if detected:
         raise HTTPException(status_code=400, detail=f"输入包含敏感内容 [{category}]: {word}")
 
+    # 知识库 ID 校验：格式 + 归属
+    kb_ids = parse_uuid_list(request.kb_ids)
+    await validate_kb_ownership(db, kb_ids, current_user)
+
     # 加载向量库和RAG链
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
@@ -82,7 +87,7 @@ async def send_message(
             user_id=current_user.user_id,
             title=request.question[:50],
             messages=[],
-            kb_ids=request.kb_ids or [],
+            kb_ids=kb_ids,
             updated_at=datetime.now()
         )
         db.add(session)
@@ -95,19 +100,19 @@ async def send_message(
     assistant_message_id = str(uuid.uuid4())
 
     # 保存用户消息（在生成回答之前保存，以便后续历史记录完整）
-    session.messages = session.messages + [{
+    # 原子追加：并发写同一会话时由 PG 行锁串行化，不丢消息
+    user_msg_count = await append_session_message(db, session.id, {
         "id": user_message_id,
         "role": "user",
         "content": request.question,
         "timestamp": datetime.now().isoformat()
-    }]
-    flag_modified(session, "messages")
+    })
     await db.commit()
-    logger.info(f"用户消息保存成功: session={session.id}, message_id={user_message_id}, messages_count={len(session.messages)}")
+    logger.info(f"用户消息保存成功: session={session.id}, message_id={user_message_id}, messages_count={user_msg_count}")
 
     # 生成回答（传递历史消息和搜索参数）
     answer, sources, source_metadata, answer_type = await rag_chain.run(
-        request.question, request.kb_ids, history,
+        request.question, kb_ids, history,
         use_web_search=request.use_web_search,
         search_mode=request.search_mode or "simple"
     )
@@ -128,8 +133,8 @@ async def send_message(
     except Exception as e:
         logger.error(f"记录策略执行失败: {e}", exc_info=True)
 
-    # 保存助手消息（附带 execution_id 用于后续反馈关联）
-    session.messages = session.messages + [{
+    # 保存助手消息（附带 execution_id 用于后续反馈关联）；原子追加，理由同用户消息
+    assistant_msg_count = await append_session_message(db, session.id, {
         "id": assistant_message_id,
         "role": "assistant",
         "content": answer,
@@ -137,11 +142,11 @@ async def send_message(
         "source_metadata": source_metadata,
         "timestamp": datetime.now().isoformat(),
         "execution_id": execution_id
-    }]
-    flag_modified(session, "messages")
+    })
 
     # 若会话仍为默认标题，根据首条问题生成标题
     generated_title = None
+    title_generator = await TitleGenerator.get_instance()
     if title_generator.is_default_title(session.title):
         try:
             session.title = await title_generator.generate_title(request.question)
@@ -151,7 +156,7 @@ async def send_message(
             logger.warning(f"生成会话标题失败(非流式): {title_err}")
 
     await db.commit()
-    logger.info(f"助手消息保存成功(非流式): session={session.id}, message_id={assistant_message_id}, messages_count={len(session.messages)}")
+    logger.info(f"助手消息保存成功(非流式): session={session.id}, message_id={assistant_message_id}, messages_count={assistant_msg_count}")
 
     return {
         "session_id": str(session.id),
@@ -192,6 +197,12 @@ async def stream_answer(
             yield json.dumps({"type": "error", "error": f"输入包含敏感内容 [{category}]: {word}"})
         return StreamingResponse(error_generator(), media_type="text/event-stream")
 
+    # 知识库 ID 校验：格式 + 归属（在流式响应开始前完成，错误以 4xx 返回）
+    validated_kb_ids = parse_uuid_list(kb_ids)
+    async with async_session() as _vdb:
+        await validate_kb_ownership(_vdb, validated_kb_ids, current_user)
+    kb_ids = validated_kb_ids
+
     # 加载向量库和RAG链
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
@@ -226,16 +237,15 @@ async def stream_answer(
             await db.refresh(session)
             current_session_id = str(session.id)
 
-        # 保存用户消息
-        session.messages = session.messages + [{
+        # 保存用户消息（原子追加：并发写同一会话不丢消息）
+        await append_session_message(db, session.id, {
             "id": user_message_id,
             "role": "user",
             "content": question,
             "timestamp": datetime.now().isoformat()
-        }]
-        flag_modified(session, "messages")
+        })
         await db.commit()
-        logger.info(f"用户消息保存成功(流式): session={current_session_id}, message_id={user_message_id}, messages_count={len(session.messages)}")
+        logger.info(f"用户消息保存成功(流式): session={current_session_id}, message_id={user_message_id}")
 
     # 保存助手消息（流式生成结束或异常时调用）
     async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None):
@@ -274,10 +284,11 @@ async def stream_answer(
             }
             if reasoning:
                 message_payload["reasoning"] = reasoning
-            session.messages = session.messages + [message_payload]
-            flag_modified(session, "messages")
+            # 原子追加（服务端 jsonb 拼接）；此处的 SELECT 仍保留用于读取 title 判断
+            assistant_msg_count = await append_session_message(db, session.id, message_payload)
 
             # 若会话仍为默认标题，根据首条问题生成标题
+            title_generator = await TitleGenerator.get_instance()
             if title_generator.is_default_title(session.title):
                 try:
                     session.title = await title_generator.generate_title(question)
@@ -287,7 +298,7 @@ async def stream_answer(
                     logger.warning(f"生成会话标题失败(流式): {title_err}")
 
             await db.commit()
-            logger.info(f"助手消息保存成功: session={current_session_id}, message_id={assistant_message_id}, content_length={len(full_answer)}, messages_count={len(session.messages)}")
+            logger.info(f"助手消息保存成功: session={current_session_id}, message_id={assistant_message_id}, content_length={len(full_answer)}, messages_count={assistant_msg_count}")
         return generated_title
 
     # 流式生成回答
@@ -420,7 +431,11 @@ class SuggestionRequest(BaseModel):
 
 
 @router.post("/suggestions")
-async def get_suggestions(request: SuggestionRequest, db: AsyncSession = Depends(get_db)):
+async def get_suggestions(
+    request: SuggestionRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     获取基于上下文的智能推荐问题
 
@@ -429,16 +444,22 @@ async def get_suggestions(request: SuggestionRequest, db: AsyncSession = Depends
     Args:
         request: 请求数据（当前问题、会话ID、知识库ID列表）
         db: 数据库会话
+        current_user: 当前认证用户
 
     Returns:
         dict: {"suggestions": 推荐问题列表}
     """
+    # 知识库 ID 校验：格式 + 归属
+    kb_ids = parse_uuid_list(request.kb_ids)
+    await validate_kb_ownership(db, kb_ids, current_user)
+
     # 获取历史对话
     history = []
     if request.session_id:
         result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(request.session_id)))
         session = result.scalar_one_or_none()
         if session:
+            require_owner(session.user_id, current_user)
             history = session.messages.copy()
 
     # 构建历史上下文
@@ -451,7 +472,7 @@ async def get_suggestions(request: SuggestionRequest, db: AsyncSession = Depends
 
     try:
         suggestions = await rag_chain.generate_suggestions(
-            request.question, history_context, request.kb_ids
+            request.question, history_context, kb_ids
         )
         return {"suggestions": suggestions}
     except Exception as e:
@@ -489,13 +510,18 @@ class EnhanceContextRequest(BaseModel):
 
 
 @router.post("/enhance_context")
-async def enhance_context(request: EnhanceContextRequest, db: AsyncSession = Depends(get_db)):
+async def enhance_context(
+    request: EnhanceContextRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     增强上下文处理，包括指代消解和上下文优化
 
     Args:
         request: 请求数据（问题、会话ID）
         db: 数据库会话
+        current_user: 当前认证用户
 
     Returns:
         dict: 包含增强后的问题和上下文信息
@@ -505,6 +531,7 @@ async def enhance_context(request: EnhanceContextRequest, db: AsyncSession = Dep
         result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(request.session_id)))
         session = result.scalar_one_or_none()
         if session:
+            require_owner(session.user_id, current_user)
             history = session.messages.copy()
 
     vector_store = await VectorStoreManager.get_instance()
@@ -651,12 +678,17 @@ async def classify_question(request: ClassifyRequest):
 
 
 @router.post("/compare")
-async def compare_knowledge_bases(request: CompareRequest, db: AsyncSession = Depends(get_db)):
+async def compare_knowledge_bases(
+    request: CompareRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """
     对比多个知识库的答案差异
 
     Args:
         request: 请求数据（问题和知识库ID列表）
+        current_user: 当前认证用户
 
     Returns:
         dict: 各知识库的答案对比结果
@@ -664,19 +696,25 @@ async def compare_knowledge_bases(request: CompareRequest, db: AsyncSession = De
     if not request.kb_ids or len(request.kb_ids) < 2:
         raise HTTPException(status_code=400, detail="至少需要选择2个知识库进行对比")
 
+    # 知识库 ID 校验：格式 + 归属
+    kb_ids = parse_uuid_list(request.kb_ids)
+    if len(kb_ids) < 2:
+        raise HTTPException(status_code=400, detail="至少需要选择2个不同的知识库进行对比")
+    await validate_kb_ownership(db, kb_ids, current_user)
+
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
 
     try:
         # 查询知识库名称映射，避免在同步上下文中访问数据库
         kb_name_map = {}
-        for kb_id in request.kb_ids:
-            result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_id))
+        for kb_id in kb_ids:
+            result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == uuid.UUID(kb_id)))
             kb = result.scalar_one_or_none()
             kb_name_map[kb_id] = kb.name if kb else kb_id[:8]
 
         result = await rag_chain.compare_knowledge_bases(
-            request.question, request.kb_ids, kb_name_map
+            request.question, kb_ids, kb_name_map
         )
         return {"comparison": result, "question": request.question}
     except Exception as e:
