@@ -2,8 +2,9 @@
 # CI：后端单测 / 后端集成测试（服务容器）/ 前端构建
 # -----------------------------------------------------------------------------
 # - backend-unit:        纯单测，默认跳过 integration/e2e 标记，无需外部服务
-# - backend-integration: GitHub Actions services 挂起 PostgreSQL/Redis/MinIO/
-#                        etcd/Milvus 后运行 `pytest --run-integration`
+# - backend-integration: GitHub Actions services 挂起 PostgreSQL/Redis/MinIO/etcd，
+#                        Milvus 以 docker run 步骤启动（镜像无默认 CMD，见正文注释），
+#                        运行 `pytest --run-integration`
 # - frontend:            pnpm 安装 + 类型检查构建，保证前端可编译
 # =============================================================================
 
@@ -98,18 +99,10 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-      # Milvus 复用上方 minio/etcd（GHA services 同一网络内以服务名互访）
-      milvus:
-        image: milvusdb/milvus:v2.6.17
-        cmd: ["milvus", "run", "standalone"]
-        env:
-          ETCD_ENDPOINTS: etcd:2379
-          MINIO_ADDRESS: minio:9000
-          MINIO_ACCESS_KEY_ID: rag_ci_minio
-          MINIO_SECRET_ACCESS_KEY: rag_ci_minio_password
-        ports:
-          - 19530:19530
-          - 9091:9091
+    # Milvus 不能作为 GHA service 运行：其镜像只有 ENTRYPOINT /tini 而无默认 CMD
+    # （PR #47527 未合并），而 services 语法不支持自定义启动命令，容器会立即退出。
+    # 改为在步骤中手动 docker run（见下方 "Start Milvus standalone"），
+    # 经 host.docker.internal:host-gateway 访问上方 service 映射到宿主机的 etcd/MinIO。
 
     env:
       # 与 services 容器对齐（pydantic-settings 直接读环境变量，优先级高于 .env 文件）
@@ -141,6 +134,19 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # 手动启动 Milvus standalone（原因见 services 上方注释）：
+      # etcd/MinIO 走 host.docker.internal（service 端口已映射到 runner 宿主机）
+      - name: Start Milvus standalone
+        run: |
+          docker run -d --name milvus-standalone \
+            --add-host=host.docker.internal:host-gateway \
+            -e ETCD_ENDPOINTS=host.docker.internal:2379 \
+            -e MINIO_ADDRESS=host.docker.internal:9000 \
+            -e MINIO_ACCESS_KEY_ID=rag_ci_minio \
+            -e MINIO_SECRET_ACCESS_KEY=rag_ci_minio_password \
+            -p 19530:19530 -p 9091:9091 \
+            milvusdb/milvus:v2.6.17 milvus run standalone
+
       # Milvus 无官方 health check 镜像选项，轮询 9091/healthz 就绪
       - name: Wait for Milvus ready
         run: |
@@ -149,9 +155,11 @@ jobs:
               echo "Milvus ready after ${i} attempts"
               exit 0
             fi
+            if [ $i -eq 1 ]; then docker logs milvus-standalone | tail -n 50; fi
             sleep 5
           done
           echo "Milvus failed to become ready in 300s"
+          docker logs milvus-standalone | tail -n 100
           exit 1
 
       - name: Run integration tests
