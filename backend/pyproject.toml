@@ -1,137 +1,110 @@
-# =============================================================================
-# 项目元数据：RAG 知识库问答系统后端
-# =============================================================================
-[tool.poetry]
-name = "rag-backend"                                      # 项目名称
-version = "0.1.0"                                         # 项目版本
-description = "RAG Knowledge Base QA System Backend"       # 项目描述
-authors = ["Developer <dev@example.com>"]                  # 作者信息
-package-mode = false                                      # 非包模式（应用而非库）
+[project]
+name = "rag-backend"
+version = "0.1.0"
+description = "RAG Knowledge Base QA System Backend"
+authors = [{ name = "Developer", email = "dev@example.com" }]
+requires-python = ">=3.12,<3.14"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "fastapi==0.136.3",
+    "uvicorn==0.49.0",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.1",
+    "python-multipart==0.0.32",
+    "PyYAML==6.0.3",
+    "click==8.4.1",
+    "colorama==0.4.6",
+    "SQLAlchemy==2.0.50",
+    "psycopg2-binary==2.9.12",
+    "asyncpg==0.31.0",
+    "alembic==1.18.4",
+    "langchain==1.3.4",
+    "langchain-community==0.4.2",
+    "langchain-core==1.4.1",
+    "langchain-text-splitters==1.1.2",
+    "langchain-ollama==1.1.0",
+    "langsmith==0.8.9",
+    "pymilvus==3.0.0",
+    "pymilvus-model==0.3.2",
+    "minio==7.2.20",
+    "pypdf==6.13.0",
+    "python-docx==1.2.0",
+    "openpyxl==3.1.5",
+    "python-pptx==1.0.2",
+    "pdfminer.six==20260107",
+    "beautifulsoup4==4.15.0",
+    "lxml==6.1.1",
+    "trafilatura==2.1.0",
+    "markdown==3.10.2",
+    "unstructured==0.23.1",
+    "ollama==0.6.2",
+    "sentence-transformers==5.5.1",
+    "httpx==0.28.1",
+    "httpx-sse==0.4.3",
+    "aiohttp==3.14.1",
+    "requests==2.34.2",
+    "websockets==15.0.1",
+    "prometheus-client==0.25.0",
+    "prometheus-fastapi-instrumentator==8.0.0",
+    "redis==8.0.0",
+    "aiolimiter==1.2.1",
+    "tenacity==9.1.4",
+    "backoff==2.2.1",
+    "aiofiles==25.1.0",
+    "cachetools==7.1.4",
+    "python-dateutil==2.9.0.post0",
+    "pytz==2026.2",
+    "certifi==2026.5.20",
+    "charset-normalizer==3.4.7",
+    "filelock==3.29.1",
+    "fsspec==2026.4.0",
+    "huggingface_hub==1.18.0",
+    "safetensors==0.7.0",
+    "tokenizers==0.22.2",
+    "cryptography==48.0.0",
+    "grpcio==1.81.0",
+    "protobuf==7.35.0",
+    "rich==15.0.0",
+    "markdown-it-py==4.2.0",
+    "Pygments==2.20.0",
+    "typer==0.25.1",
+    "tqdm==4.68.1",
+    "pandas==3.0.3",
+    "joblib==1.5.3",
+    "packaging==26.2",
+    "dataclasses-json==0.6.7",
+    "marshmallow==3.26.2",
+    "duckduckgo-search==8.1.1",
+]
 
-# =============================================================================
-# 生产依赖：运行时必需的依赖，按功能分组
-# =============================================================================
-[tool.poetry.dependencies]
-python = "^3.12"                                          # Python 版本约束
-
-# 基础框架
-fastapi = "*"
-uvicorn = "*"
-pydantic = "*"
-pydantic-settings = "*"
-python-multipart = "*"
-PyYAML = "*"
-click = "*"
-colorama = "*"
-
-# 数据库
-SQLAlchemy = "*"
-psycopg2-binary = "*"
-asyncpg = "*"
-alembic = "*"
-
-# LangChain
-langchain = "*"
-langchain-community = "*"
-langchain-core = "*"
-langchain-text-splitters = "*"
-langchain-ollama = "*"
-langsmith = "*"
-
-# 向量数据库
-pymilvus = "*"
-pymilvus-model = ">=0.3.0"
-
-# 对象存储
-minio = "*"
-
-# 文档解析
-pypdf = "*"
-python-docx = "*"
-openpyxl = "*"
-python-pptx = "*"
-"pdfminer.six" = "*"
-beautifulsoup4 = "*"
-lxml = "*"
-trafilatura = "*"
-markdown = "*"
-unstructured = "*"
-
-# AI/LLM
-ollama = "*"
-sentence-transformers = "*"
-
-# 网络
-httpx = "*"
-httpx-sse = "*"
-aiohttp = "*"
-requests = "*"
-websockets = "*"
-
-# 监控
-prometheus-client = "*"
-prometheus-fastapi-instrumentator = "*"
-
-# 缓存
-redis = "*"
-aiolimiter = "*"
-
-# 工具库
-tenacity = "*"
-backoff = "*"
-aiofiles = "*"
-cachetools = "*"
-python-dateutil = "*"
-pytz = "*"
-certifi = "*"
-charset-normalizer = "*"
-filelock = "*"
-fsspec = "*"
-huggingface_hub = "*"
-safetensors = "*"
-tokenizers = "*"
-cryptography = "*"
-grpcio = "*"
-protobuf = "*"
-rich = "*"
-markdown-it-py = "*"
-Pygments = "*"
-typer = "*"
-tqdm = "*"
-pandas = "*"
-joblib = "*"
-packaging = "*"
-dataclasses-json = "*"
-marshmallow = "*"
-
-# 联网搜索
-duckduckgo-search = "*"
-
-# =============================================================================
-# 开发依赖：仅开发环境使用（测试、代码格式化、lint）
-# 通过 `poetry install --without dev` 在生产环境跳过
-# =============================================================================
-[tool.poetry.group.dev.dependencies]
-pytest = "*"
-pytest-asyncio = "*"
-pytest-cov = "*"
-pytest-mock = "*"
-black = "*"
-isort = "*"
-flake8 = "*"
-
-# =============================================================================
-# Demo 依赖：Gradio 演示界面相关
-# =============================================================================
-[tool.poetry.group.demo.dependencies]
-gradio = "*"
-gradio-client = "*"
-
-# =============================================================================
-# CLI 入口：通过 `poetry run start` 启动应用
-# =============================================================================
-[tool.poetry.scripts]
+[project.scripts]
 start = "start:main"
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "pytest-mock==3.15.1",
+    "black==26.5.1",
+    "isort==8.0.1",
+    "flake8==7.3.0",
+]
+demo = [
+    "gradio",
+    "gradio-client",
+]
+
+[tool.uv]
+package = false
+
+[build-system]
+requires = ["uv_build>=0.11.26,<0.12.0"]
+build-backend = "uv_build"
 
 # =============================================================================
 # pytest 测试配置
@@ -142,10 +115,3 @@ asyncio_default_fixture_loop_scope = "session" # 事件循环作用域为整个�
 markers = [
     "e2e: 端到端测试，需要外部服务（Ollama/Milvus/SearXNG/PostgreSQL）",
 ]
-
-# =============================================================================
-# 构建系统配置
-# =============================================================================
-[build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"

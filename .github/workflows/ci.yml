@@ -2,8 +2,9 @@
 # CI：后端单测 / 后端集成测试（服务容器）/ 前端构建
 # -----------------------------------------------------------------------------
 # - backend-unit:        纯单测，默认跳过 integration/e2e 标记，无需外部服务
-# - backend-integration: GitHub Actions services 挂起 PostgreSQL/Redis/MinIO/etcd，
-#                        Milvus 以 docker run 步骤启动（镜像无默认 CMD，见正文注释），
+# - backend-integration: services 挂起 PostgreSQL/Redis（默认 CMD 正常）；
+#                        etcd/MinIO/Milvus 以 docker run 步骤手动启动
+#                        （三者镜像默认 CMD 不满足 services 要求，见正文注释），
 #                        运行 `pytest --run-integration`
 # - frontend:            pnpm 安装 + 类型检查构建，保证前端可编译
 # =============================================================================
@@ -73,39 +74,13 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-      minio:
-        # 开源社区版最终发行 tag（此后 MinIO 社区版归档）；该 tag 需真实存在于
-        # Docker Hub，写错 tag 会导致 service 初始化 docker pull 失败、整个 job 挂掉
-        image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-        env:
-          MINIO_ROOT_USER: rag_ci_minio
-          MINIO_ROOT_PASSWORD: rag_ci_minio_password
-        ports:
-          - 9000:9000
-        options: >-
-          --health-cmd "curl -f http://localhost:9000/minio/health/live"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-      etcd:
-        image: quay.io/coreos/etcd:v3.5.30
-        env:
-          ETCD_AUTO_COMPACTION_MODE: revision
-          ETCD_AUTO_COMPACTION_RETENTION: "1000"
-          ETCD_QUOTA_BACKEND_BYTES: "4294967296"
-        ports:
-          - 2379:2379
-        options: >-
-          --health-cmd "etcdctl --endpoints=http://localhost:2379 endpoint health"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
-
-    # Milvus 不能作为 GHA service 运行：其镜像只有 ENTRYPOINT /tini 而无默认 CMD
-    # （PR #47527 未合并），而 services 语法不支持自定义启动命令，容器会立即退出。
-    # 改为在步骤中手动 docker run（见下方 "Start Milvus standalone"），
-    # 经 host.docker.internal:host-gateway 访问上方 service 映射到宿主机的 etcd/MinIO。
+    # minio / etcd / milvus 均不能作为 GHA service 运行（services 语法无法传
+    # 容器启动参数，仅 image/env/ports/volumes/options）：
+    # - minio 镜像 CMD 仅为 "minio"，缺 "server /data" 参数会打印 usage 并退出
+    #   （已用 registry API 核实：Entrypoint=/usr/bin/docker-entrypoint.sh, Cmd=minio）
+    # - etcd 默认只监听 localhost:2379，需显式 0.0.0.0 才能被其他容器访问
+    # - milvus 镜像仅有 ENTRYPOINT /tini，无默认 CMD（PR #47527 未合并）
+    # 三者统一在 "Start storage services" 步骤手动 docker run 于自建网络。
 
     env:
       # 与 services 容器对齐（pydantic-settings 直接读环境变量，优先级高于 .env 文件）
@@ -138,32 +113,47 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      # 手动启动 Milvus standalone（原因见 services 上方注释）：
-      # etcd/MinIO 走 host.docker.internal（service 端口已映射到 runner 宿主机）
-      - name: Start Milvus standalone
+      # etcd / MinIO / Milvus 手动启动（原因见 services 下方注释），自建网络互访；
+      # 端口仅 milvus(19530/9091) 与 minio(9000) 映射到宿主机供 pytest 连接
+      - name: Start storage services
         run: |
-          docker run -d --name milvus-standalone \
-            --add-host=host.docker.internal:host-gateway \
-            -e ETCD_ENDPOINTS=host.docker.internal:2379 \
-            -e MINIO_ADDRESS=host.docker.internal:9000 \
+          docker network create rag-ci
+          docker run -d --name etcd --network rag-ci \
+            quay.io/coreos/etcd:v3.5.30 \
+            etcd -advertise-client-urls=http://etcd:2379 \
+                 -listen-client-urls=http://0.0.0.0:2379 \
+                 --data-dir /etcd
+          docker run -d --name minio --network rag-ci \
+            -e MINIO_ROOT_USER=rag_ci_minio \
+            -e MINIO_ROOT_PASSWORD=rag_ci_minio_password \
+            -p 9000:9000 \
+            minio/minio:RELEASE.2025-09-07T16-13-09Z \
+            server /data --console-address ":9001"
+          docker run -d --name milvus --network rag-ci \
+            -e ETCD_ENDPOINTS=etcd:2379 \
+            -e MINIO_ADDRESS=minio:9000 \
             -e MINIO_ACCESS_KEY_ID=rag_ci_minio \
             -e MINIO_SECRET_ACCESS_KEY=rag_ci_minio_password \
             -p 19530:19530 -p 9091:9091 \
             milvusdb/milvus:v2.6.17 milvus run standalone
 
-      # Milvus 无官方 health check 镜像选项，轮询 9091/healthz 就绪
-      - name: Wait for Milvus ready
+      # 轮询三个服务就绪；失败时输出容器日志便于排查
+      - name: Wait for storage services
         run: |
           for i in $(seq 1 60); do
-            if curl -sf http://localhost:9091/healthz > /dev/null; then
-              echo "Milvus ready after ${i} attempts"
+            ok=1
+            docker exec etcd etcdctl --endpoints=http://localhost:2379 endpoint health >/dev/null 2>&1 || ok=0
+            curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1 || ok=0
+            curl -sf http://localhost:9091/healthz >/dev/null 2>&1 || ok=0
+            if [ $ok -eq 1 ]; then
+              echo "All storage services ready after $((i * 5))s"
               exit 0
             fi
-            if [ $i -eq 1 ]; then docker logs milvus-standalone | tail -n 50; fi
             sleep 5
           done
-          echo "Milvus failed to become ready in 300s"
-          docker logs milvus-standalone | tail -n 100
+          echo "--- etcd logs ---"; docker logs etcd 2>&1 | tail -n 30
+          echo "--- minio logs ---"; docker logs minio 2>&1 | tail -n 30
+          echo "--- milvus logs ---"; docker logs milvus 2>&1 | tail -n 100
           exit 1
 
       - name: Run integration tests
