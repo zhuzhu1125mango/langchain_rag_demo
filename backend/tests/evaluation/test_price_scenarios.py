@@ -7,6 +7,7 @@
 
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -204,11 +205,16 @@ class TestGoldPriceToolExecute:
     @pytest.mark.asyncio
     @pytest.mark.integration  # execute 成功路径会写价格历史到 PostgreSQL
     async def test_execute_gold_cny_gram(self):
-        """mock 数据源后 execute 应返回成功结果。"""
+        """mock 数据源后 execute 应返回成功结果。
+
+        时间戳必须动态生成：新鲜度是置信度因子之一，硬编码日期会随时间
+        腐烂导致置信度跌破 0.4 成功阈值（时间炸弹）。
+        """
+        recent_ts = (datetime.now(timezone.utc) - timedelta(seconds=30)).isoformat()
         mock_resp = MockResponse(
             {
                 "xau": {"price": 780.5, "currency": "CNY", "unit": "gram"},
-                "updated_at": "2026-06-27T14:32:00Z",
+                "updated_at": recent_ts,
             }
         )
         with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
@@ -294,11 +300,15 @@ class TestExchangeRateToolExecute:
     @pytest.mark.asyncio
     @pytest.mark.integration  # execute 成功路径会写价格历史到 PostgreSQL
     async def test_execute_usd_to_cny(self):
-        """mock 数据源后 execute 应返回成功结果。"""
+        """mock 数据源后 execute 应返回成功结果。
+
+        日期必须动态生成：新鲜度是置信度因子之一，硬编码日期会随时间
+        腐烂导致置信度跌破 0.4 成功阈值（时间炸弹）。
+        """
         mock_resp = MockResponse(
             {
                 "rates": {"CNY": Decimal("7.25")},
-                "date": "2026-06-27",
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             }
         )
         with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
@@ -316,7 +326,7 @@ class TestExchangeRateToolExecute:
         mock_resp = MockResponse(
             {
                 "rates": {"CNY": Decimal("7.25")},
-                "date": "2026-06-27",
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             }
         )
         with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):

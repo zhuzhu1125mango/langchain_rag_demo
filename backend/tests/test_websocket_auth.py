@@ -120,23 +120,29 @@ class TestWebSocketDocsPermission:
         settings.IN_DOCKER = True
 
     def test_ws_docs_invalid_kb_id_rejected(self, client):
-        """无效的知识库 ID 应被拒绝。"""
+        """无效的知识库 ID 应被拒绝。
+
+        首帧鉴权通过后服务端回发 auth_ok，随后才校验知识库 ID 并以 1008 关闭；
+        故先消费 auth_ok 帧，再期待下一次接收时连接被关闭。
+        """
         self._configure_production_mode()
 
-        with pytest.raises(Exception):
-            with client.websocket_connect("/api/ws/docs/not-a-uuid") as websocket:
-                websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
+        with client.websocket_connect("/api/ws/docs/not-a-uuid") as websocket:
+            websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
+            assert websocket.receive_json() == {"type": "auth_ok"}
+            with pytest.raises(Exception):
                 websocket.receive_json()
 
     def test_ws_docs_nonexistent_kb_rejected(self, client):
         """不存在的知识库 ID 应被拒绝。"""
         self._configure_production_mode()
 
-        with pytest.raises(Exception):
-            with client.websocket_connect(
-                f"/api/ws/docs/{uuid.uuid4()}"
-            ) as websocket:
-                websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
+        with client.websocket_connect(
+            f"/api/ws/docs/{uuid.uuid4()}"
+        ) as websocket:
+            websocket.send_json(_auth_ok_frame("test-api-key-for-websocket"))
+            assert websocket.receive_json() == {"type": "auth_ok"}
+            with pytest.raises(Exception):
                 websocket.receive_json()
 
 

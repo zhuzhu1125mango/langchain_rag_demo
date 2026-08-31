@@ -6,12 +6,43 @@ import pytest
 
 # 依赖真实 PostgreSQL（实验记录读写），默认跳过；与 asyncio 标记合并
 import asyncio
+from contextlib import asynccontextmanager
+
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
+
 from src.services.experiment_manager import ExperimentManager
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.asyncio(loop_scope="session"),
 ]
+
+
+@pytest.fixture(autouse=True)
+async def _isolated_experiment_db(monkeypatch):
+    """为 ExperimentManager 提供绑定当前事件循环的独立数据库引擎。
+
+    全局 src.database 连接池绑定在共享 TestClient 的事件循环上，而本文件的
+    async 测试运行在 pytest-asyncio 会话循环上，直接复用池中连接会触发
+    "Future attached to a different loop"。NullPool 每次会话新建连接、
+    不跨循环复用，规避该问题。
+    """
+    from src.database import SQLALCHEMY_ASYNC_DATABASE_URL
+
+    import src.services.experiment_manager as em
+
+    engine = create_async_engine(SQLALCHEMY_ASYNC_DATABASE_URL, poolclass=NullPool)
+    maker = async_sessionmaker(engine, expire_on_commit=False)
+
+    @asynccontextmanager
+    async def _session():
+        async with maker() as session:
+            yield session
+
+    monkeypatch.setattr(em, "async_session", _session)
+    yield
+    await engine.dispose()
 
 
 class TestExperimentManager:

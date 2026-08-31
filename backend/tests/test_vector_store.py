@@ -4,14 +4,33 @@
 
 import asyncio
 
+import httpx
 import pytest
 
-# 依赖真实 Milvus 服务（向量插入/检索/计数），默认跳过
+# 依赖真实 Milvus 服务（向量插入/检索/计数）与 Ollama Embedding 服务，默认跳过
 pytestmark = pytest.mark.integration
 from langchain_core.documents import Document
 
+from src.config import settings
 from src.services.milvus_service import MilvusService
 from src.services.vector_store import VectorStoreManager
+
+
+def _ollama_available() -> bool:
+    """探测 Ollama 服务是否可达（create_vector_store 内部走真实 Embedding）。"""
+    host = (settings.model.OLLAMA_HOST or "http://localhost:11434").rstrip("/")
+    try:
+        return httpx.get(f"{host}/api/version", timeout=3.0).status_code == 200
+    except Exception:
+        return False
+
+
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.skipif(
+        not _ollama_available(), reason="Ollama 服务不可用，无法执行真实 Embedding"
+    ),
+]
 
 
 class TestVectorStore:

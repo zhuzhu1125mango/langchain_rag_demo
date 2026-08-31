@@ -14,17 +14,31 @@ from src.services.intent_router.models import PrimaryMode
 
 
 class MockEmbeddings:
-    """模拟 Embedding 模型：将文本映射为确定性低维向量。"""
+    """模拟 Embedding 模型：确定性关键词 bag 向量。
+
+    不能用 hash/random 生成向量——那不具备语义相似性，相似度结果是随机的。
+    关键词 bag 向量保证：共享关键词的文本相似度高，无关键词的文本相似度为 0，
+    使分类测试可确定性断言。
+    """
+
+    # 关键词 → 向量维度映射（dim=8）
+    KEYWORD_DIMS = {
+        "你好": 0, "hello": 0,
+        "文档": 1, "说的": 2, "制度": 3, "查阅": 4,
+        "天气": 5, "新闻": 5, "金价": 5,
+        "北京": 6,
+        "几点": 7, "现在": 7,
+    }
 
     def __init__(self, dim: int = 8):
         self.dim = dim
 
     def _vec(self, text: str) -> list:
-        # 为相同文本生成确定性向量，并保留部分相似结构
-        seed = hash(text.strip()) % 10000
-        import random
-        rng = random.Random(seed)
-        return [rng.random() for _ in range(self.dim)]
+        vec = [0.0] * self.dim
+        for kw, idx in self.KEYWORD_DIMS.items():
+            if kw in text:
+                vec[idx % self.dim] += 1.0
+        return vec
 
     async def aembed_query(self, text: str) -> list:
         return self._vec(text)

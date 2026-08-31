@@ -62,6 +62,9 @@ class EmbeddingIntentClassifier:
 
     def _get_embeddings(self) -> Optional[Any]:
         """获取或初始化 OllamaEmbeddings 实例。"""
+        # 外部注入的实例（如测试 mock）直接复用，不被默认模型覆盖
+        if self.embeddings is not None and self._model_name is None:
+            return self.embeddings
         current_model = settings.model.EMBEDDING_MODEL_NAME
         if self.embeddings is None or self._model_name != current_model:
             try:

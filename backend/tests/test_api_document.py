@@ -8,6 +8,7 @@ import pytest
 pytestmark = pytest.mark.integration
 import tempfile
 import os
+import uuid
 
 # 历史上此处为模块级 `client = TestClient(app)`：无 lifespan 且每次请求使用
 # 独立临时事件循环，asyncpg 连接跨循环复用导致 "Event loop is closed"。
@@ -19,6 +20,25 @@ client = None
 def _shared_client(integration_client):
     global client
     client = integration_client
+
+
+@pytest.fixture(autouse=True)
+def _ensure_default_kb(client):
+    """确保当前用户存在默认知识库。
+
+    上传接口在未指定 kb_id 时使用「当前用户的默认知识库」，不存在时返回
+    400（"没有找到默认知识库"）。全新数据库（如 CI 环境）中没有任何知识库，
+    需先创建并设为默认，否则所有上传依赖测试级联失败。
+    """
+    resp = client.get("/api/knowledge_bases/", params={"page": 1, "page_size": 1000})
+    items = resp.json().get("items", []) if resp.status_code == 200 else []
+    if not any(kb.get("is_default") for kb in items):
+        create = client.post(
+            "/api/knowledge_bases/",
+            json={"name": f"文档测试默认库-{uuid.uuid4().hex[:8]}"},
+        )
+        if create.status_code == 200:
+            client.post(f"/api/knowledge_bases/{create.json()['id']}/set_default")
 
 
 class TestDocumentAPI:
@@ -145,11 +165,12 @@ class TestDocumentAPI:
         
         try:
             for i in range(3):
-                tf = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
-                tf.write(f"文档{i}内容")
+                # httpx 要求 multipart 文件必须以二进制模式打开
+                tf = tempfile.NamedTemporaryFile(mode='w+b', suffix='.txt', delete=False)
+                tf.write(f"文档{i}内容".encode("utf-8"))
                 temp_files.append(tf)
                 tf.seek(0)
-                files.append(("files", (f"doc{i}.txt", tf.file, "text/plain")))
+                files.append(("files", (f"doc{i}.txt", tf, "text/plain")))
             
             response = client.post(
                 "/api/documents/batch",

@@ -65,6 +65,7 @@ dependencies = [
     "huggingface_hub==1.18.0",
     "safetensors==0.7.0",
     "tokenizers==0.22.2",
+    "jieba==0.42.1",
     "cryptography==48.0.0",
     "grpcio==1.81.0",
     "protobuf==7.35.0",
