@@ -23,22 +23,22 @@ def _shared_client(integration_client):
 
 
 @pytest.fixture(autouse=True)
-def _ensure_default_kb(client):
+def _ensure_default_kb(integration_client):
     """确保当前用户存在默认知识库。
 
     上传接口在未指定 kb_id 时使用「当前用户的默认知识库」，不存在时返回
     400（"没有找到默认知识库"）。全新数据库（如 CI 环境）中没有任何知识库，
     需先创建并设为默认，否则所有上传依赖测试级联失败。
     """
-    resp = client.get("/api/knowledge_bases/", params={"page": 1, "page_size": 1000})
+    resp = integration_client.get("/api/knowledge_bases/", params={"page": 1, "page_size": 1000})
     items = resp.json().get("items", []) if resp.status_code == 200 else []
     if not any(kb.get("is_default") for kb in items):
-        create = client.post(
+        create = integration_client.post(
             "/api/knowledge_bases/",
             json={"name": f"文档测试默认库-{uuid.uuid4().hex[:8]}"},
         )
         if create.status_code == 200:
-            client.post(f"/api/knowledge_bases/{create.json()['id']}/set_default")
+            integration_client.post(f"/api/knowledge_bases/{create.json()['id']}/set_default")
 
 
 class TestDocumentAPI:
@@ -46,10 +46,11 @@ class TestDocumentAPI:
     
     def test_upload_document(self):
         """测试上传文档"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        # 显式 UTF-8：Windows 默认 GBK 会导致后台解析解码失败
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             f.write("测试文档内容")
             temp_path = f.name
-        
+
         try:
             with open(temp_path, 'rb') as file:
                 response = client.post(
@@ -59,7 +60,8 @@ class TestDocumentAPI:
             assert response.status_code == 200
             data = response.json()
             assert "id" in data
-            assert data["message"] == "文件上传成功，共1个文本块"
+            # 上传接口已改为后台异步处理，仅断言公共前缀
+            assert data["message"].startswith("文件上传成功")
         finally:
             os.unlink(temp_path)
     
@@ -196,7 +198,7 @@ class TestDocumentAPI:
     
     def test_preview_document(self):
         """测试预览文档"""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as f:
             f.write("测试预览内容" * 100)
             temp_path = f.name
         

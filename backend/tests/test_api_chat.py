@@ -8,6 +8,7 @@ import pytest
 pytestmark = pytest.mark.integration
 import tempfile
 import os
+import uuid
 
 # 历史上此处为模块级 `client = TestClient(app)`：无 lifespan 且每次请求使用
 # 独立临时事件循环，asyncpg 连接跨循环复用导致 "Event loop is closed"。
@@ -57,7 +58,7 @@ class TestChatAPI:
         """测试指定知识库发送消息"""
         kb_response = client.post(
             "/api/knowledge_bases/",
-            json={"name": "测试KB"}
+            json={"name": f"测试KB-{uuid.uuid4().hex[:8]}"}
         )
         kb_id = kb_response.json()["id"]
         
@@ -82,7 +83,8 @@ class TestChatAPI:
             json={"question": "你好"}
         )
         assert response.status_code == 200
-        assert response.headers["content-type"] == "text/event-stream"
+        # Starlette 会给 text/* 媒体类型追加 "; charset=utf-8"
+        assert response.headers["content-type"].startswith("text/event-stream")
     
     def test_submit_feedback(self):
         """测试提交反馈"""
