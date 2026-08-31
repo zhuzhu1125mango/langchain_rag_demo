@@ -2,9 +2,10 @@
 # CI：后端单测 / 后端集成测试（服务容器）/ 前端构建
 # -----------------------------------------------------------------------------
 # - backend-unit:        纯单测，默认跳过 integration/e2e 标记，无需外部服务
-# - backend-integration: services 挂起 PostgreSQL/Redis（默认 CMD 正常）；
-#                        etcd/MinIO/Milvus 以 docker run 步骤手动启动
-#                        （三者镜像默认 CMD 不满足 services 要求，见正文注释），
+# - backend-integration: services 挂起 PostgreSQL（默认 CMD 正常）；
+#                        Redis/etcd/MinIO/Milvus 以 docker run 步骤手动启动
+#                        （redis 需 --requirepass，其余三者镜像默认 CMD 不满足
+#                        services 要求，见正文注释），
 #                        运行 `pytest --run-integration`
 # - frontend:            pnpm 安装 + 类型检查构建，保证前端可编译
 # =============================================================================
@@ -64,15 +65,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
-      redis:
-        image: redis:7.2-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 10
+    # redis 也手动启动：CacheService 硬性要求 REDIS_PASSWORD（P2 安全加固），
+    # 而 GHA services 语法无法给 redis-server 追加 --requirepass 参数。
 
     # minio / etcd / milvus 均不能作为 GHA service 运行（services 语法无法传
     # 容器启动参数，仅 image/env/ports/volumes/options）：
@@ -91,6 +85,7 @@ jobs:
       POSTGRES_DB: rag_ci_db
       REDIS_HOST: localhost
       REDIS_PORT: "6379"
+      REDIS_PASSWORD: rag_ci_password
       MINIO_ENDPOINT: localhost:9000
       MINIO_ACCESS_KEY: rag_ci_minio
       MINIO_SECRET_KEY: rag_ci_minio_password
@@ -113,16 +108,23 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      # etcd / MinIO / Milvus 手动启动（原因见 services 下方注释），自建网络互访；
-      # 端口仅 milvus(19530/9091) 与 minio(9000) 映射到宿主机供 pytest 连接
+      # Redis / etcd / MinIO / Milvus 手动启动（原因见 services 下方注释），自建网络互访；
+      # 端口映射到宿主机供 pytest 连接：redis(6379)、minio(9000)、milvus(19530/9091)
       - name: Start storage services
         run: |
           docker network create rag-ci
+          docker run -d --name redis --network rag-ci \
+            -p 6379:6379 \
+            redis:7.2-alpine \
+            redis-server --requirepass rag_ci_password
           docker run -d --name etcd --network rag-ci \
             quay.io/coreos/etcd:v3.5.30 \
             etcd -advertise-client-urls=http://etcd:2379 \
                  -listen-client-urls=http://0.0.0.0:2379 \
-                 --data-dir /etcd
+                 --data-dir /etcd \
+                 --auto-compaction-retention=1h \
+                 --auto-compaction-mode=periodic \
+                 --snapshot-count=10000
           docker run -d --name minio --network rag-ci \
             -e MINIO_ROOT_USER=rag_ci_minio \
             -e MINIO_ROOT_PASSWORD=rag_ci_minio_password \
@@ -137,11 +139,12 @@ jobs:
             -p 19530:19530 -p 9091:9091 \
             milvusdb/milvus:v2.6.17 milvus run standalone
 
-      # 轮询三个服务就绪；失败时输出容器日志便于排查
+      # 轮询四个服务就绪；失败时输出容器日志便于排查
       - name: Wait for storage services
         run: |
           for i in $(seq 1 60); do
             ok=1
+            docker exec redis redis-cli -a rag_ci_password ping >/dev/null 2>&1 || ok=0
             docker exec etcd etcdctl --endpoints=http://localhost:2379 endpoint health >/dev/null 2>&1 || ok=0
             curl -sf http://localhost:9000/minio/health/live >/dev/null 2>&1 || ok=0
             curl -sf http://localhost:9091/healthz >/dev/null 2>&1 || ok=0

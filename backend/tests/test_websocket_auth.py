@@ -24,10 +24,9 @@ def _auth_ok_frame(api_key: str) -> dict:
 
 
 @pytest.fixture
-def client():
-    """每个测试函数使用独立的 TestClient。"""
-    with TestClient(app) as c:
-        yield c
+def client(integration_client):
+    """委托进程级共享 TestClient（见 conftest.integration_client）。"""
+    return integration_client
 
 
 @pytest.fixture(autouse=True)

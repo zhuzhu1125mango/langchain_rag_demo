@@ -19,6 +19,32 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 
+# 共享 TestClient 是否存活。存活期间跳过 engine.dispose：
+# 此时 asyncpg 连接始终绑定在共享 TestClient 的事件循环上，跨循环 dispose
+# 反而会污染连接池（dispose 在临时循环中执行会抛异常被吞，残留半关闭连接）。
+_shared_client_active = False
+
+
+@pytest.fixture(scope="session")
+def integration_client():
+    """进程级共享 TestClient（集成测试统一入口）。
+
+    TestClient 自带独立事件循环线程，而 CacheService（Redis 客户端）、
+    DB 引擎等进程级异步单例绑定在首次初始化它们的事件循环上；若每个测试
+    新建 TestClient，后续测试的新循环复用这些单例就会触发
+    "Event loop is closed" / 连接超时。故所有集成测试共享同一个 TestClient，
+    让单例生命周期与单一事件循环保持一致。
+    """
+    global _shared_client_active
+    from fastapi.testclient import TestClient
+    from src.main import app
+
+    with TestClient(app) as c:
+        _shared_client_active = True
+        yield c
+    _shared_client_active = False
+
+
 @pytest.fixture(autouse=True)
 def _reset_async_engine():
     """在每个测试函数结束后释放异步数据库连接池。
@@ -26,8 +52,12 @@ def _reset_async_engine():
     TestClient 每次创建独立的事件循环线程，asyncpg 连接会绑定到特定事件循环。
     若不在 teardown 时清空连接池，后续测试会复用绑定到已关闭事件循环的连接，
     导致 "cannot perform operation: another operation is in progress" 等错误。
+
+    共享 TestClient 存活期间跳过（见 _shared_client_active 注释）。
     """
     yield
+    if _shared_client_active:
+        return
     try:
         from src.database import async_engine
         asyncio.run(async_engine.dispose())

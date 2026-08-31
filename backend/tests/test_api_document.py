@@ -6,12 +6,19 @@ import pytest
 
 # 依赖真实 PostgreSQL（TestClient 触发 app lifespan + DB 读写），默认跳过
 pytestmark = pytest.mark.integration
-from fastapi.testclient import TestClient
-from src.main import app
 import tempfile
 import os
 
-client = TestClient(app)
+# 历史上此处为模块级 `client = TestClient(app)`：无 lifespan 且每次请求使用
+# 独立临时事件循环，asyncpg 连接跨循环复用导致 "Event loop is closed"。
+# 改为每测试把模块全局 client 指向进程级共享 TestClient（见 conftest.integration_client）。
+client = None
+
+
+@pytest.fixture(autouse=True)
+def _shared_client(integration_client):
+    global client
+    client = integration_client
 
 
 class TestDocumentAPI:

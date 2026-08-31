@@ -4,16 +4,13 @@ import pytest
 
 # 依赖真实 PostgreSQL（TestClient 触发 app lifespan + DB 读写；Redis 已 mock），默认跳过
 pytestmark = pytest.mark.integration
-from fastapi.testclient import TestClient
-from src.main import app
 import uuid
 
 
 @pytest.fixture
-def client():
-    """每个测试函数使用独立的 TestClient。"""
-    with TestClient(app) as c:
-        yield c
+def client(integration_client):
+    """委托进程级共享 TestClient（见 conftest.integration_client）。"""
+    return integration_client
 
 
 @pytest.fixture
