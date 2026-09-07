@@ -392,7 +392,7 @@ class FunctionCallingHandler(BaseSearchAgent):
             logger.warning(f"Function Calling 最终生成失败: {e}")
             answer = ""
 
-        # deepseek-r1 等推理模型容易把工具调用 JSON 直接输出为回答。
+        # 推理模型容易把工具调用 JSON 直接输出为回答。
         # 若检测到这种污染，视为回答无效，返回空 answer 触发 RAGChain 降级到 Phase 2 搜索。
         if looks_like_tool_call(answer):
             logger.warning(f"Function Calling 最终回答被工具 JSON 污染，触发降级: {answer[:200]}")

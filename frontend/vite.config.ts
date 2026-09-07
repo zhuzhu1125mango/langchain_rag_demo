@@ -24,6 +24,11 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Docker Desktop（Windows）挂载卷的 inotify 事件不可靠，需轮询才能让 HMR 感知文件变化
+    watch: {
+      usePolling: true,
+      interval: 1000
+    },
     proxy: {
       '/api': {
         target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',

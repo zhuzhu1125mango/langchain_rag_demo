@@ -28,6 +28,7 @@ from collections import Counter
 from src.database import get_db, async_session_maker
 from src.auth import get_current_user, get_current_user_for_ws, CurrentUser, require_owner
 from src.models import Document, Category, KnowledgeBase
+from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
 
 # 复用全局 "rag_system" logger，级别与处理器由应用启动配置统一管理，
 # 模块内不得自行调整级别或追加输出处理器（会导致日志重复输出）
@@ -158,6 +159,10 @@ class DocumentSourceResponse(BaseModel):
     surrounding_content: str
     highlight_offset: int
     highlight_length: int
+
+
+# P1-3 语义缓存：内容变更后的失效调度器（fire-and-forget，见 semantic_cache_service）
+from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
 
 
 async def process_document_async(
@@ -413,6 +418,9 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
                     await invalidate_kb_list_cache(owner_id)
                 except Exception as exc:
                     logger.warning(f"文档删除完成后刷新知识库列表缓存失败: {exc}")
+
+            # P1-3：知识库内容已变更，失效相关语义缓存
+            _schedule_semantic_cache_invalidation(kb_id)
 
             logger.info(f"文档删除完成: {doc_id}")
 

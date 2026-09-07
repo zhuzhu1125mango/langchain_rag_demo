@@ -16,8 +16,7 @@ ENV/
 virtualenv/
 .venv/
 
-# =============== Poetry / PDM ===============
-.poetry/
+# =============== PDM ===============
 .pdm-python
 .pdm-build/
 

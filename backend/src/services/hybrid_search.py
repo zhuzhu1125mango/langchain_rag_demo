@@ -81,10 +81,24 @@ class KBReranker:
         self.provider = (provider or settings.processing.KB_RERANK_PROVIDER).lower()
 
     @classmethod
+    def _enabled(cls) -> bool:
+        """rerank 是否可用（C1：开关关闭或未配置模型时不加载模型）。"""
+        return bool(settings.processing.KB_RERANK_ENABLED and settings.processing.KB_RERANK_MODEL)
+
+    @classmethod
+    def model_loaded(cls) -> bool:
+        """模型是否已成功加载（C8：此时 rerank_score 才是真实相关性分数，
+        可用于阈值过滤；未加载时 rerank_score 为 RRF 排序分，不可作相关性依据）。"""
+        return cls._model_loaded
+
+    @classmethod
     async def get_instance(cls) -> "KBReranker":
         """获取重排序器单例，避免重复加载模型。"""
         if cls._instance is None:
             cls._instance = cls()
+        if not cls._enabled():
+            # rerank 关闭：不加载模型，rerank() 走 RRF 截断路径
+            return cls._instance
         if not cls._model_loaded and not cls._model_failed:
             await cls._instance._load_model()
         return cls._instance

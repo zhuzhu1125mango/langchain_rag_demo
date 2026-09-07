@@ -5,7 +5,7 @@
 确保现有数据在启用 auth 后仍可被默认用户访问。
 
 用法：
-    poetry run python scripts/migrate_owner_id.py
+    uv run python scripts/migrate_owner_id.py
 """
 
 import asyncio

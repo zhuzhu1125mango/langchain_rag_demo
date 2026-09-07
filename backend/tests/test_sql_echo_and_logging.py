@@ -22,9 +22,10 @@ DOCUMENT_API = (
 class TestSqlEchoConfig:
     """SQL_ECHO 配置项与引擎行为。"""
 
-    def test_default_is_off(self):
-        """SQL_ECHO 默认关闭。"""
-        assert DatabaseSettings().SQL_ECHO is False
+    def test_default_is_off(self, monkeypatch):
+        """SQL_ECHO 代码默认关闭（排除环境变量与 .env 文件干扰）。"""
+        monkeypatch.delenv("SQL_ECHO", raising=False)
+        assert DatabaseSettings(_env_file=None).SQL_ECHO is False
 
     def test_engine_echo_follows_settings(self):
         """async_engine 的 echo 与配置一致（不再硬编码 True）。"""

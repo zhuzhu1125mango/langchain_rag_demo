@@ -5,6 +5,9 @@
 
 import logging
 
+from src.config import settings
+from src.services.intent_router.constants import PRONOUN_PATTERN
+
 logger = logging.getLogger("rag_system")
 
 
@@ -91,6 +94,10 @@ class ContextEnhancer:
         """
         指代消解：将问题中的代词替换为具体指代内容
 
+        C3 规则前置：无历史或问题不含指代词时直接返回原问题（零 LLM 调用）；
+        LLM 消解降级为兜底（CONTEXT_RESOLVE_USE_LLM，默认关闭——
+        历史上下文已随提示词携带，规则前置可省去每轮一次的 LLM 调用）。
+
         Args:
             question: 当前问题
             history: 历史对话列表
@@ -99,6 +106,14 @@ class ContextEnhancer:
             str: 消解后的完整问题
         """
         if not history or len(history) == 0:
+            return question
+
+        # 规则前置：问题不含指代词（它/这个/那个/该/上面/刚才…）时无需消解
+        if not (question and PRONOUN_PATTERN.search(question)):
+            return question
+
+        # LLM 兜底开关关闭：保留原问题（历史对话已在提示词中提供，无错误改写风险）
+        if not settings.processing.CONTEXT_RESOLVE_USE_LLM:
             return question
 
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in history[-5:]])

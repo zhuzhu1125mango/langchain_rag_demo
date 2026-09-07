@@ -11,7 +11,7 @@
 
 运行方式：
     cd backend
-    poetry run python scripts/migrate_hybrid_index.py
+    uv run python scripts/migrate_hybrid_index.py
 
 环境要求：
     - Milvus 服务已启动并可连接。
@@ -43,7 +43,7 @@ try:
     from pymilvus.model.sparse import BM25EmbeddingFunction
     from pymilvus.model.sparse.bm25.tokenizers import build_default_analyzer
 except ImportError:
-    logger.error("未安装 pymilvus-model，请先执行: poetry add pymilvus-model")
+    logger.error("未安装 pymilvus-model，请先执行: uv sync")
     sys.exit(1)
 
 

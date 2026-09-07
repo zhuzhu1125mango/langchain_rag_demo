@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.config import settings
+from src.services.model_manager import model_manager
 from src.services.intent_router.intent_examples import IntentExampleStore
 from src.services.intent_router.models import (
     FallbackStrategy,
@@ -61,17 +62,15 @@ class EmbeddingIntentClassifier:
         self._feedback_buffer: List[Dict[str, Any]] = []
 
     def _get_embeddings(self) -> Optional[Any]:
-        """获取或初始化 OllamaEmbeddings 实例。"""
+        """获取或初始化 OllamaEmbeddings 实例（B2 共享单例）。"""
         # 外部注入的实例（如测试 mock）直接复用，不被默认模型覆盖
         if self.embeddings is not None and self._model_name is None:
             return self.embeddings
         current_model = settings.model.EMBEDDING_MODEL_NAME
         if self.embeddings is None or self._model_name != current_model:
             try:
-                from langchain_ollama import OllamaEmbeddings
-
                 logger.info(f"初始化意图分类 Embedding 模型: {current_model}")
-                self.embeddings = OllamaEmbeddings(model=current_model)
+                self.embeddings = model_manager.get_embeddings()
                 self._model_name = current_model
             except Exception as e:
                 logger.warning(f"意图分类 Embedding 模型初始化失败: {e}")

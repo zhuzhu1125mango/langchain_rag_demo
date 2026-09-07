@@ -137,6 +137,18 @@ class DecisionPipeline:
                 reasoning="强制使用知识库模式"
             )
 
+        # C5：用户显式勾选知识库且未强制指定模式时，跳过多策略投票直接检索。
+        # 回答模板已保证"参考信息不足时结合模型自身知识回答"，跳过投票不改变回答质量约束，
+        # 仅省去首字前的 LLM 投票耗时；策略投票结果与用户显式意图相悖时反而造成困惑。
+        if kb_ids and len(kb_ids) > 0 and not settings.decision.DECISION_VOTE_WHEN_KB_SELECTED:
+            return DecisionResult(
+                should_use_kb=True,
+                confidence=1.0,
+                mode=QAMode.HYBRID_INTELLIGENT,
+                strategy_results={},
+                reasoning="用户显式选择知识库，跳过策略投票直接检索"
+            )
+
         # 兜末级：交给策略管理器多策略投票决策
         use_kb, confidence, strategy_results = await self.strategy_manager.should_use_knowledge_base(question, history)
         reasoning = "混合智能模式判断：" + ("需要使用知识库" if use_kb else "直接回答更合适")

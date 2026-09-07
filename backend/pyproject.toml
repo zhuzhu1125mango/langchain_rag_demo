@@ -15,7 +15,7 @@ dependencies = [
     "pydantic==2.13.4",
     "pydantic-settings==2.14.1",
     "python-multipart==0.0.32",
-    "PyYAML==6.0.3",
+    "PyYAML>=6.0.2,<7",
     "click==8.4.1",
     "colorama==0.4.6",
     "SQLAlchemy==2.0.50",
@@ -43,6 +43,11 @@ dependencies = [
     "unstructured==0.23.1",
     "ollama==0.6.2",
     "sentence-transformers==5.5.1",
+    # torch 原为 sentence-transformers 的传递依赖；提升为直接依赖是因为
+    # uv 对「按平台切换 index」(tool.uv.sources + marker) 仅对直接依赖生效：
+    # 声明后 Linux 容器走 pytorch-cpu 源（避免拉取 ~2.5GB CUDA 依赖），
+    # Windows/macOS 仍走默认镜像源（其 wheel 本身不含 CUDA）
+    "torch>=2.13",
     "httpx==0.28.1",
     "httpx-sse==0.4.3",
     "aiohttp==3.14.1",
@@ -62,7 +67,7 @@ dependencies = [
     "charset-normalizer==3.4.7",
     "filelock==3.29.1",
     "fsspec==2026.4.0",
-    "huggingface_hub==1.18.0",
+    "huggingface_hub>=0.34.0,<2.0",
     "safetensors==0.7.0",
     "tokenizers==0.22.2",
     "jieba==0.42.1",
@@ -81,6 +86,9 @@ dependencies = [
     "dataclasses-json==0.6.7",
     "marshmallow==3.26.2",
     "duckduckgo-search==8.1.1",
+    # P1-1 JWT 多用户认证
+    "pyjwt>=2.8,<3",
+    "bcrypt>=4.0,<5",
 ]
 
 [project.scripts]
@@ -100,9 +108,45 @@ demo = [
     "gradio",
     "gradio-client",
 ]
+# P0-2b OCR 深度解析可选依赖组（重依赖，默认不安装，CI 不装）：
+#   uv sync --group ocr-mineru   # MinerU pipeline 后端（torch，约 2GB）
+#   uv sync --group ocr-paddle   # PaddleOCR PP-StructureV3（paddlepaddle，约 1GB）
+# 未安装时 OCR 分流自动回退内置 PyPDF 解析，不影响其他功能。
+ocr-mineru = [
+    # 用 [pipeline] 而非 [core]：[core] 附带 gradio（要求 aiofiles<25），与主依赖冲突
+    # >=3.2.0：3.1.x 及更早要求 pandas<3，与主依赖 pandas==3.0.3 冲突
+    "mineru[pipeline]>=3.2.0,<4",
+]
+ocr-paddle = [
+    # paddleocr 3.x 不自动携带 paddle 框架，需显式声明
+    "paddlepaddle>=3.0,<4 ; python_full_version < '3.13'",
+    "paddleocr>=3.0,<4 ; python_full_version < '3.13'",
+    # PP-StructureV3 需 paddlex[ocr] 附加依赖（scikit-learn / pypdfium2 等），
+    # paddleocr 3.x 只带 paddlex 基础依赖
+    "paddlex[ocr]>=3.0,<4 ; python_full_version < '3.13'",
+]
 
 [tool.uv]
 package = false
+
+# 镜像源配置：
+# - 默认 index 用清华 PyPI 镜像（国内下载稳定）
+# - torch 在 Linux 平台锁定 PyTorch 官方 CPU 源：
+#   容器内无需 GPU（LLM 推理走宿主机 Ollama），CPU 版可避免拉取
+#   torch + nvidia-* CUDA 全家桶（约 2.5GB），Windows/macOS 不受影响
+[[tool.uv.index]]
+name = "tuna"
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [build-system]
 requires = ["uv_build>=0.11.26,<0.12.0"]

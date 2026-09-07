@@ -66,36 +66,35 @@ SKIP_ENV_CHECK = os.getenv("SKIP_ENV_CHECK", "false").lower() == "true"
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "localhost")
 
 
-def check_poetry_env():
+def check_uv_env():
     """
-    检查是否在 Poetry 虚拟环境中运行
-    
+    检查是否在 uv 创建的虚拟环境中运行
+
     Returns:
         bool: True表示在正确环境中
     """
     if SKIP_ENV_CHECK:
         return True
-    
+
     import sys
     if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
-        if "pypoetry" in sys.prefix or "virtualenvs" in sys.prefix:
+        if ".venv" in sys.prefix or "pypoetry" in sys.prefix or "virtualenvs" in sys.prefix:
             return True
         else:
-            print("[WARNING] 检测到虚拟环境，但不确定是否为 Poetry 环境")
+            print("[WARNING] 检测到虚拟环境，但不确定是否为 uv 虚拟环境")
             return True
     else:
-        print("[ERROR] 请在 Poetry 虚拟环境中运行本脚本")
+        print("[ERROR] 请在 uv 虚拟环境中运行本脚本")
         print("")
         print("正确的启动方式：")
-        print("  方式一：先激活虚拟环境")
-        print("    poetry shell")
+        print("  方式一：直接使用 uv run（推荐）")
+        print("    uv run python start.py")
+        print("")
+        print("  方式二：先同步依赖并激活虚拟环境")
+        print("    uv sync")
+        print("    .venv\\Scripts\\activate    # Windows PowerShell")
+        print("    source .venv/bin/activate  # Linux/Mac")
         print("    python start.py")
-        print("")
-        print("  方式二：直接使用 poetry run")
-        print("    poetry run python start.py")
-        print("")
-        print("  方式三：使用 Poetry 脚本（推荐）")
-        print("    poetry run start")
         print("")
         return False
 
@@ -376,7 +375,7 @@ def check_postgresql(logger):
         conn.close()
         return True
     except ImportError:
-        logger.error("psycopg2 未安装，请安装依赖: pip install psycopg2-binary")
+        logger.error("psycopg2 未安装，请先同步依赖: uv sync")
         return False
     except UnicodeDecodeError:
         # Windows系统下的编码问题，psycopg2错误消息编码不兼容
@@ -415,7 +414,7 @@ def check_minio(logger):
         client.list_buckets()
         return True
     except ImportError:
-        logger.error("minio SDK 未安装，请安装依赖: pip install minio")
+        logger.error("minio SDK 未安装，请先同步依赖: uv sync")
         return False
     except Exception as e:
         logger.error(f"MinIO 连接失败: {_safe_error_msg(e)}")
@@ -442,7 +441,7 @@ def check_milvus(logger):
             client.list_collections()
             return True
         except ImportError:
-            logger.error("pymilvus 未安装，请安装依赖: pip install pymilvus")
+            logger.error("pymilvus 未安装，请先同步依赖: uv sync")
             return False
         except Exception as e:
             error_msg = _safe_error_msg(e)
@@ -463,7 +462,7 @@ def main():
     """
     启动主函数
     """
-    if not check_poetry_env():
+    if not check_uv_env():
         sys.exit(1)
     
     # 配置日志

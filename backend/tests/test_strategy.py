@@ -98,9 +98,21 @@ class TestStrategyManager:
         assert new_weight != initial_weight, "权重应该被调整"
 
     async def test_default_manager_creation(self):
-        """测试默认策略管理器创建"""
+        """测试默认策略管理器创建（C8：语义策略默认关闭，默认注册 3 个策略）"""
         manager = await create_default_strategy_manager()
-        assert len(manager.strategies) == 4, "默认策略管理器应该包含4个策略"
+        assert len(manager.strategies) == 3, "默认策略管理器应该包含3个策略（语义策略默认关闭）"
+        assert "semantic" not in manager.strategies
+
+    async def test_semantic_strategy_toggle(self):
+        """C8：开启 STRATEGY_SEMANTIC_ENABLED 后默认管理器注册语义策略"""
+        from unittest.mock import patch
+
+        from src.config import settings
+
+        with patch.object(settings.decision, "STRATEGY_SEMANTIC_ENABLED", True):
+            manager = await create_default_strategy_manager()
+        assert len(manager.strategies) == 4
+        assert "semantic" in manager.strategies
 
     def test_decision_threshold(self):
         """测试决策阈值设置"""

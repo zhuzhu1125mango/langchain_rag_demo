@@ -19,6 +19,7 @@ from pymilvus.exceptions import MilvusException
 from langchain_ollama import OllamaEmbeddings
 from aiolimiter import AsyncLimiter
 from src.config import settings, DATA_DIR
+from src.services.model_manager import model_manager
 from src.utils.async_singleton import AsyncSingleton
 
 logger = logging.getLogger("milvus_service")
@@ -49,6 +50,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         # 因此将 QPS 转换为 max_rate=1, time_period=1/QPS，确保 async with 获取 1 容量合法。
         flush_interval = max(1.0, 1.0 / settings.milvus.MILVUS_FLUSH_RATE_LIMIT)
         self._flush_limiter = AsyncLimiter(1, flush_interval)
+        # schema 是否含 heading_path 字段（P0-2a 结构化分块），决定插入/查询是否携带
+        self._has_heading_path: bool = False
 
     async def _async_init(self):
         """异步初始化 Milvus 连接、Embedding 模型并确保集合就绪。"""
@@ -56,7 +59,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             uri=f"http://{settings.milvus.MILVUS_HOST}:{settings.milvus.MILVUS_PORT}",
             db_name=settings.milvus.MILVUS_DATABASE
         )
-        self.embeddings = OllamaEmbeddings(model=settings.model.EMBEDDING_MODEL_NAME)
+        # B2：embeddings 走 model_manager 共享单例，避免各服务重复构造
+        self.embeddings = model_manager.get_embeddings()
         await self._ensure_collection()
         # 启动时加载与 collection 绑定的持久化 BM25 词表，
         # 保证查询编码空间与历史 sparse 向量一致（不依赖"先插入过文档"）
@@ -86,6 +90,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             )
             await self._create_indexes()
         else:
+            await self._add_heading_path_field_if_missing()
             await self._add_kb_id_field_if_missing()
             await self._ensure_dimension_match()
             await self._add_sparse_field_if_missing()
@@ -106,10 +111,47 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=settings.model.EMBEDDING_DIMENSION)
         schema.add_field("source", DataType.VARCHAR, max_length=512)
         schema.add_field("chunk_index", DataType.INT64)
+        # P0-2a：结构化分块的标题路径（"A > B > C"），旧集合通过 add_collection_field 兼容
+        schema.add_field("heading_path", DataType.VARCHAR, max_length=512, default_value="")
+        self._has_heading_path = True
         # 阶段一：BM25 sparse vector，维度由 BM25 词表动态决定
         if self._sparse_enabled:
             schema.add_field("sparse_embedding", DataType.SPARSE_FLOAT_VECTOR)
         return schema
+
+    async def _add_heading_path_field_if_missing(self):
+        """兼容旧集合：heading_path 字段缺失时在线补加（Milvus 2.6 add_collection_field）。
+
+        补加失败（如服务端版本过旧）仅告警，插入/查询自动降级不携带该字段，
+        不阻断启动；结构化分块的其他收益（内容前置标题路径）不受影响。
+        """
+        collection_info = await self.client.describe_collection(settings.milvus.MILVUS_COLLECTION_NAME)
+        field_names = [f["name"] for f in collection_info["fields"]]
+        if "heading_path" in field_names:
+            self._has_heading_path = True
+            return
+        try:
+            await self.client.add_collection_field(
+                collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+                field_name="heading_path",
+                data_type=DataType.VARCHAR,
+                desc="结构化分块的标题路径（A > B > C）",
+                max_length=512,
+                nullable=True,
+                default_value="",
+            )
+            self._has_heading_path = True
+            logger.info("已为现有集合在线补加 heading_path 字段")
+        except Exception as e:
+            self._has_heading_path = False
+            logger.warning(f"在线补加 heading_path 字段失败，插入/查询将不携带该字段: {e}")
+
+    def _base_output_fields(self) -> list:
+        """检索/查询的基础 output_fields，heading_path 视 schema 能力动态附加。"""
+        fields = ["kb_id", "document_id", "content", "source", "chunk_index"]
+        if self._has_heading_path:
+            fields.append("heading_path")
+        return fields
 
     async def _create_indexes(self):
         """创建 dense HNSW 索引与 sparse 索引。"""
@@ -304,6 +346,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                 "source": doc.metadata.get("source", ""),
                 "chunk_index": doc.metadata.get("chunk_index", 0)
             }
+            if self._has_heading_path:
+                item["heading_path"] = doc.metadata.get("heading_path", "")
             if sparse_embeddings and i < len(sparse_embeddings):
                 item["sparse_embedding"] = sparse_embeddings[i]
             data.append(item)
@@ -434,7 +478,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             search_params=search_params,
             limit=k,
             filter=filter_expr,
-            output_fields=["kb_id", "document_id", "content", "source", "chunk_index"]
+            output_fields=self._base_output_fields()
         )
         return self._parse_search_results(results)
 
@@ -470,7 +514,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                 search_params=search_params,
                 limit=k,
                 filter=filter_expr,
-                output_fields=["kb_id", "document_id", "content", "source", "chunk_index"]
+                output_fields=self._base_output_fields()
             )
             return self._parse_search_results(results)
         except Exception as e:
@@ -501,7 +545,17 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             k=settings.processing.KB_RRF_K,
         )
 
-        reranked = await rerank_results(query, fused, top_k=k)
+        # C1：rerank 关闭或未配置模型时，直接按 RRF 分数截断，不加载/调用 reranker
+        if (
+            not settings.processing.KB_RERANK_ENABLED
+            or not settings.processing.KB_RERANK_MODEL
+        ):
+            ranked = sorted(fused, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
+            return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in ranked[:k]]
+
+        # C1：RRF 融合后先截断到 rerank 候选数再送打分，避免对全部融合候选逐条调用重排序
+        rerank_n = max(k, settings.processing.KB_HYBRID_RERANK_TOP_K)
+        reranked = await rerank_results(query, fused[:rerank_n], top_k=k)
         return reranked
 
     # 过滤表达式仅接受 UUID 格式的 ID（防御表达式注入的兜底校验）
@@ -547,6 +601,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                 "document_id": hit["entity"].get("document_id"),
                 "content": hit["entity"].get("content"),
                 "source": hit["entity"].get("source"),
+                "heading_path": hit["entity"].get("heading_path", ""),
                 "chunk_index": hit["entity"].get("chunk_index"),
                 "score": hit["distance"]
             }
@@ -596,7 +651,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         results = await self.client.query(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
             filter=expr,
-            output_fields=["id", "kb_id", "content", "chunk_index", "source"]
+            output_fields=self._base_output_fields()
         )
         return results
 

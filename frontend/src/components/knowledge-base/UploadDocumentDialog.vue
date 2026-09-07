@@ -244,7 +244,9 @@ function setupProgressWebSocket(uploadId: string): Promise<void> {
     wsConnections.value.set(uploadId, ws)
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: 'auth', api_key: apiKey || '' }))
+      // token 与 api_key 二选一（后端先校验 api_key，再校验 JWT token）
+      const token = localStorage.getItem('token')
+      ws.send(JSON.stringify({ type: 'auth', token: token || undefined, api_key: apiKey || '' }))
     }
 
     ws.onmessage = (event) => {

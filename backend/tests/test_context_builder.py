@@ -3,6 +3,8 @@
 覆盖去重、预算管理、Lost in the Middle 重排序、统一编号、多源融合等场景。
 """
 
+import sys
+
 import pytest
 from langchain_core.documents import Document
 
@@ -11,6 +13,11 @@ from src.services.context_builder import ContextBuilder, estimate_token_count
 
 class TestEstimateTokenCount:
     """token 估算测试。"""
+
+    @pytest.fixture(autouse=True)
+    def _force_fallback(self, monkeypatch):
+        """屏蔽 tiktoken，固定测试字符启发式估算分支（tiktoken 是否安装因环境而异）。"""
+        monkeypatch.setitem(sys.modules, "tiktoken", None)
 
     def test_chinese_text(self):
         """中文文本按字符估算。"""

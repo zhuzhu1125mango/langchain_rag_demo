@@ -8,9 +8,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Dict, List, Optional
-
-from langchain_ollama import ChatOllama
+from typing import Any, Dict, List, Optional
 
 from src.config import settings
 from src.services.model_manager import model_manager
@@ -97,13 +95,9 @@ class LLMRouter:
             self._context_builder = get_default_conversation_context_builder()
         return self._context_builder
 
-    async def _get_llm(self) -> Optional[ChatOllama]:
-        """获取或初始化 ChatOllama 实例，失败时返回 None。"""
-        preferred_model = (
-            settings.intent_router.INTENT_ROUTER_LLM_MODEL
-            or settings.model.FAST_LLM_MODEL_NAME
-            or settings.model.OLLAMA_MODEL_NAME
-        )
+    async def _get_llm(self) -> Optional[Any]:
+        """获取或初始化 LLM 实例（B1 工厂：think=False），失败时返回 None。"""
+        preferred_model = settings.intent_router.INTENT_ROUTER_LLM_MODEL or None
         # 通过模型管理器检查可用性并自动降级
         current_model = await model_manager.get_model_for_task(
             "intent_router",
@@ -112,9 +106,10 @@ class LLMRouter:
         if self._llm is None or self._model_name != current_model:
             try:
                 logger.info(f"初始化意图路由 LLM: {current_model}")
-                self._llm = ChatOllama(
-                    model=current_model,
-                    streaming=False,
+                # B1 工厂：统一走 fast 任务角色；JSON 分类小任务关闭思考链
+                self._llm = await model_manager.get_chat_llm(
+                    "intent_router",
+                    think=False,
                     timeout=settings.intent_router.INTENT_ROUTER_LLM_TIMEOUT,
                 )
                 self._model_name = current_model

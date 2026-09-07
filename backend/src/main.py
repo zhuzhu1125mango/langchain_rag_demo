@@ -45,6 +45,8 @@ from src.api import (
     notification_router,
     badcase_router,
     evaluation_router,
+    auth_router,
+    trace_router,
 )
 from src.middleware.metrics import MetricsMiddleware, get_metrics, reset_metrics
 
@@ -124,6 +126,63 @@ async def _periodic_learning_task():
         await asyncio.sleep(3600)
 
 
+async def _validate_model_config() -> None:
+    """启动前校验模型配置（A2 去硬编码配套）。
+
+    模型是核心依赖（开发/生产一致执行）：三项模型名必填，且必须已存在于本地
+    Ollama（/api/tags）；缺失或不可用时拒绝启动，避免配错模型在首次调用才暴露。
+    """
+    import ollama
+
+    m = settings.model
+    required = {
+        "OLLAMA_MODEL_NAME": m.OLLAMA_MODEL_NAME,
+        "FAST_LLM_MODEL_NAME": m.FAST_LLM_MODEL_NAME,
+        "EMBEDDING_MODEL_NAME": m.EMBEDDING_MODEL_NAME,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise RuntimeError(
+            f"启动失败: 模型配置缺失 {', '.join(missing)}，请在 .env 中填写对应模型名（无内置默认）"
+        )
+
+    try:
+        client = ollama.Client(host=m.OLLAMA_HOST) if m.OLLAMA_HOST else ollama.Client()
+        response = await asyncio.to_thread(client.list)
+    except Exception as e:
+        raise RuntimeError(
+            f"启动失败: 无法连接 Ollama({m.OLLAMA_HOST or '默认地址'})，请先启动 Ollama 服务: {e}"
+        )
+
+    available = set()
+    for item in response.get("models", []):
+        available.add(item.get("name", ""))
+        available.add(item.get("model", ""))
+
+    to_check = [
+        ("OLLAMA_MODEL_NAME", m.OLLAMA_MODEL_NAME),
+        ("FAST_LLM_MODEL_NAME", m.FAST_LLM_MODEL_NAME),
+        ("EMBEDDING_MODEL_NAME", m.EMBEDDING_MODEL_NAME),
+    ]
+    if m.OLLAMA_DIRECT_MODEL_NAME:
+        to_check.append(("OLLAMA_DIRECT_MODEL_NAME", m.OLLAMA_DIRECT_MODEL_NAME))
+    # rerank 模型仅在启用且由 Ollama 加载时校验（sentence_transformers 走 HF 本地缓存，不在 /api/tags）
+    p = settings.processing
+    if p.KB_RERANK_ENABLED and p.KB_RERANK_MODEL and p.KB_RERANK_PROVIDER.lower() == "ollama":
+        to_check.append(("KB_RERANK_MODEL", p.KB_RERANK_MODEL))
+    s = settings.search
+    if s.SEARCH_ENABLE_RERANK and s.SEARCH_RERANK_MODEL and s.SEARCH_RERANK_PROVIDER.lower() == "ollama":
+        to_check.append(("SEARCH_RERANK_MODEL", s.SEARCH_RERANK_MODEL))
+
+    absent = [f"{key}={value}" for key, value in to_check if value not in available]
+    if absent:
+        raise RuntimeError(
+            "启动失败: 以下模型未在本地 Ollama 中找到，请先 ollama pull 或修正 .env 配置: "
+            + ", ".join(absent)
+        )
+    logger.info("模型配置校验通过: " + ", ".join(f"{k}={v}" for k, v in to_check))
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -159,6 +218,9 @@ async def lifespan(app: FastAPI):
                 "SECRET_KEY 未设置，已生成临时随机密钥（仅限开发环境，重启后旧签名失效）；"
                 "生产部署必须设置强密钥或 APP_ENV=production"
             )
+
+    # 模型配置校验（A2）：模型名必填且存在于本地 Ollama，缺失即启动失败
+    await _validate_model_config()
 
     await init_db()
     logger.info("Database tables created successfully")
@@ -283,6 +345,9 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 app.include_router(document_router, prefix="/api", dependencies=[Depends(get_current_user)])
+# 认证路由：login/register 匿名可用，不挂全局鉴权依赖
+app.include_router(auth_router, prefix="/api")
+app.include_router(trace_router, prefix="/api", dependencies=[Depends(get_current_user)])
 # document_ws_router 仅包含 WebSocket 端点，认证在端点内通过 get_current_user_for_ws 处理，
 # 原因同 notification_router：router 级 HTTP 依赖在 WebSocket 上下文中缺少 request 对象会失败。
 app.include_router(document_ws_router, prefix="/api")

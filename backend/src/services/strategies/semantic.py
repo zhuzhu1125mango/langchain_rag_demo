@@ -1,27 +1,20 @@
-import asyncio
+import math
 from typing import List, Dict, Optional
 from .base import Strategy
 from .constants import GREETING_KEYWORDS
-
-# 全局模型缓存，避免每次请求重复加载
-_model_cache = {
-    'model': None,
-    'util': None,
-    'greeting_embeddings': None,
-    'knowledge_embeddings': None
-}
+from src.services.model_manager import model_manager
 
 
 class SemanticStrategy(Strategy):
     """
     语义相似度策略
-    
-    使用Sentence-BERT进行语义相似度计算，判断问题意图
+
+    使用共享 Ollama embeddings（C8：移除 sentence-transformers MiniLM 依赖路径）
+    对问题与问候/知识示例做相似度比对，判断问题意图。
     """
-    
+
     def __init__(self):
         self.confidence = 0.0
-        self.model = None
         self.greeting_examples = list(GREETING_KEYWORDS) + [
             "早上好", "下午好", "晚上好", "晚安"
         ]
@@ -31,61 +24,52 @@ class SemanticStrategy(Strategy):
         ]
         self.threshold = 0.75
         self.knowledge_threshold = 0.65
-    
+        # 示例向量（initialize 时预计算；失败时为 None，策略按低置信度弃权）
+        self._greeting_embeddings: Optional[List[List[float]]] = None
+        self._knowledge_embeddings: Optional[List[List[float]]] = None
+
+    @staticmethod
+    def _cosine(vec_a: List[float], vec_b: List[float]) -> float:
+        """余弦相似度。"""
+        dot = sum(a * b for a, b in zip(vec_a, vec_b))
+        norm_a = math.sqrt(sum(a * a for a in vec_a))
+        norm_b = math.sqrt(sum(b * b for b in vec_b))
+        if norm_a == 0 or norm_b == 0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
     async def initialize(self):
-        global _model_cache
-        if _model_cache['model'] is not None:
-            self.model = _model_cache['model']
-            self.util = _model_cache['util']
-            self.greeting_embeddings = _model_cache['greeting_embeddings']
-            self.knowledge_embeddings = _model_cache['knowledge_embeddings']
-            return
+        """预计算问候/知识示例向量（embedding 失败时策略降级弃权）。"""
         try:
-            from sentence_transformers import SentenceTransformer, util
-            loop = asyncio.get_running_loop()
-            self.model = await loop.run_in_executor(
-                None, lambda: SentenceTransformer('all-MiniLM-L6-v2')
-            )
-            self.util = util
-            self.greeting_embeddings = await loop.run_in_executor(
-                None, lambda: self.model.encode(self.greeting_examples)
-            )
-            self.knowledge_embeddings = await loop.run_in_executor(
-                None, lambda: self.model.encode(self.knowledge_examples)
-            )
-            _model_cache['model'] = self.model
-            _model_cache['util'] = self.util
-            _model_cache['greeting_embeddings'] = self.greeting_embeddings
-            _model_cache['knowledge_embeddings'] = self.knowledge_embeddings
-        except ImportError:
-            self.model = None
-    
+            embeddings = model_manager.get_embeddings()
+            self._greeting_embeddings = await embeddings.aembed_documents(self.greeting_examples)
+            self._knowledge_embeddings = await embeddings.aembed_documents(self.knowledge_examples)
+        except Exception:
+            self._greeting_embeddings = None
+            self._knowledge_embeddings = None
+
     async def should_use_knowledge_base(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> bool:
         """按语义相似度判断是否需要使用知识库。"""
-        if self.model is None:
+        if self._greeting_embeddings is None or self._knowledge_embeddings is None:
             self.confidence = 0.3
             return False
 
-        loop = asyncio.get_running_loop()
-        question_embedding = await loop.run_in_executor(
-            None, lambda: self.model.encode(question)
-        )
+        embeddings = model_manager.get_embeddings()
+        question_embedding = await embeddings.aembed_query(question)
 
         # 与问候示例比对，命中高则判定为闲聊
-        greeting_scores = await loop.run_in_executor(
-            None, lambda: self.util.cos_sim(question_embedding, self.greeting_embeddings)
+        max_greeting_score = max(
+            self._cosine(question_embedding, vec) for vec in self._greeting_embeddings
         )
-        max_greeting_score = float(greeting_scores.max())
 
         if max_greeting_score >= self.threshold:
             self.confidence = min(max_greeting_score, 0.95)
             return False
 
         # 与知识示例比对，命中高则判定为需要知识库
-        knowledge_scores = await loop.run_in_executor(
-            None, lambda: self.util.cos_sim(question_embedding, self.knowledge_embeddings)
+        max_knowledge_score = max(
+            self._cosine(question_embedding, vec) for vec in self._knowledge_embeddings
         )
-        max_knowledge_score = float(knowledge_scores.max())
 
         if max_knowledge_score >= self.knowledge_threshold:
             self.confidence = min(max_knowledge_score + 0.2, 0.95)
@@ -104,27 +88,26 @@ class SemanticStrategy(Strategy):
         return "semantic"
 
     async def cleanup(self):
-        """释放模型资源。"""
-        if self.model is not None:
-            del self.model
-            self.model = None
+        """释放示例向量。"""
+        self._greeting_embeddings = None
+        self._knowledge_embeddings = None
 
     def set_threshold(self, threshold: float):
         """设置相似度阈值。"""
         self.threshold = threshold
 
     async def add_example(self, text: str, is_greeting: bool):
-        """追加问候/知识示例向量。"""
+        """追加问候/知识示例并重算对应示例向量。"""
         if is_greeting:
             self.greeting_examples.append(text)
         else:
             self.knowledge_examples.append(text)
 
-        if self.model is not None:
-            loop = asyncio.get_running_loop()
-            self.greeting_embeddings = await loop.run_in_executor(
-                None, lambda: self.model.encode(self.greeting_examples)
-            )
-            self.knowledge_embeddings = await loop.run_in_executor(
-                None, lambda: self.model.encode(self.knowledge_examples)
-            )
+        if self._greeting_embeddings is not None and self._knowledge_embeddings is not None:
+            try:
+                embeddings = model_manager.get_embeddings()
+                self._greeting_embeddings = await embeddings.aembed_documents(self.greeting_examples)
+                self._knowledge_embeddings = await embeddings.aembed_documents(self.knowledge_examples)
+            except Exception:
+                self._greeting_embeddings = None
+                self._knowledge_embeddings = None

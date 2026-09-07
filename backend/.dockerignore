@@ -14,7 +14,6 @@ venv-new/
 env/
 ENV/
 .venv/
-.poetry/
 
 # =============== Python Cache ===============
 __pycache__/

@@ -168,9 +168,24 @@ class ReasoningCollector:
 
 # 标准步骤类型常量
 REASONING_STEP_INTENT = "intent_routing"
+
+
+def dedupe_steps(steps: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """按 step 去重事件列表：同一阶段保留最后一次出现的事件。
+
+    与 ReasoningCollector 的 upsert 语义一致（新事件替换旧事件），
+    用于 SSE end 负载与持久化前清理逐事件累积产生的 running/done 重复条目。
+    """
+    deduped: Dict[str, Dict[str, Any]] = {}
+    for s in steps:
+        deduped[s.get("step", "")] = s
+    return list(deduped.values())
+
+
 REASONING_STEP_CONTEXT_REWRITE = "context_rewrite"
 REASONING_STEP_WEB_SEARCH = "web_search"
 REASONING_STEP_KB_RETRIEVE = "kb_retrieve"
 REASONING_STEP_TOOL_EXECUTE = "tool_execute"
 REASONING_STEP_ANSWER_GENERATE = "answer_generate"
+REASONING_STEP_CACHE_HIT = "cache_hit"
 REASONING_STEP_FALLBACK = "fallback"

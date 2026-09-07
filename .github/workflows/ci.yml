@@ -7,7 +7,7 @@
 #                        （redis 需 --requirepass，其余三者镜像默认 CMD 不满足
 #                        services 要求，见正文注释），
 #                        运行 `pytest --run-integration`
-# - frontend:            pnpm 安装 + 类型检查构建，保证前端可编译
+# - frontend:            pnpm 安装 + 单测 + 类型检查构建 + E2E（Playwright route mock）
 # =============================================================================
 
 name: CI
@@ -162,8 +162,40 @@ jobs:
       - name: Run integration tests
         run: uv run pytest --run-integration -q
 
+  rag-eval:
+    name: RAG Retrieval Eval
+    runs-on: ubuntu-latest
+    needs: backend-unit
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        # 注意：setup-uv 自 v9 起无 v10/v9 主版本别名 tag，只能用完整版本 tag
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # 全离线检索质量评估：BM25 栈 + 评估语料，无需 Milvus/Ollama；
+      # 指标低于阈值（EVAL_MIN_HIT_RATE / EVAL_MIN_MRR / EVAL_MIN_RECALL）时非零退出卡点
+      - name: Run retrieval eval
+        run: uv run python scripts/run_eval.py --report eval_report.json
+
+      - name: Upload eval report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: backend/eval_report.json
+
   frontend:
-    name: Frontend Build
+    name: Frontend Build & Tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -184,6 +216,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # 单元测试：utils / store / 组件冒烟（vitest + jsdom）
+      - name: Run unit tests
+        run: pnpm run test:unit
+
       # build 脚本本身包含 vue-tsc -b 类型检查
       - name: Build
         run: pnpm build
+
+      # E2E：三条核心链路（route mock，不依赖真实后端）。
+      # CI 模式下 playwright.config 走 preview 分支伺服上述构建产物（端口 4173）。
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        run: pnpm run test:e2e
+
+      - name: Upload E2E report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7

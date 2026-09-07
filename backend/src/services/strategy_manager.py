@@ -1,4 +1,7 @@
 from typing import List, Dict, Optional, Tuple
+
+from src.config import settings
+
 from .strategies.base import Strategy
 from .strategies.keyword import KeywordStrategy
 from .strategies.semantic import SemanticStrategy
@@ -250,9 +253,12 @@ async def create_default_strategy_manager() -> StrategyManager:
         StrategyManager: 配置好的策略管理器
     """
     manager = StrategyManager()
-    
+
     manager.register_strategy(KeywordStrategy())
-    manager.register_strategy(SemanticStrategy())
+    # C8：语义策略默认关闭——依赖 sentence-transformers MiniLM，离线环境加载失败时
+    # 会永久弃权；关闭后投票权重自然归一到其余策略
+    if settings.decision.STRATEGY_SEMANTIC_ENABLED:
+        manager.register_strategy(SemanticStrategy())
     manager.register_strategy(LLMInferenceStrategy())
     manager.register_strategy(ContextStrategy())
     

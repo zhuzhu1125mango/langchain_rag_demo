@@ -29,6 +29,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from src.config import settings
+from src.services.model_manager import model_manager
 from .search_postprocessor import SearchPostprocessor
 from .search_types import SearchResult
 
@@ -313,8 +314,8 @@ class WebReranker:
             return
         self._fallback_loaded = True
         try:
-            from langchain_ollama import OllamaEmbeddings
-            self._embeddings = OllamaEmbeddings(model=settings.model.EMBEDDING_MODEL_NAME)
+            # B2：走 model_manager 共享 OllamaEmbeddings 单例
+            self._embeddings = model_manager.get_embeddings()
             logger.info("rerank 嵌入兜底已加载")
         except Exception as e:
             logger.warning(f"rerank 嵌入兜底加载失败: {e}")
@@ -347,13 +348,17 @@ class WebReranker:
         if not contents:
             return []
 
-        if not settings.search.SEARCH_ENABLE_RERANK:
+        # C1：重排关闭或未配置模型时按原文顺序截断
+        if not settings.search.SEARCH_ENABLE_RERANK or not self.model_name:
             return contents[:top_k]
 
         self._load_model()
+        # C1：与知识库 rerank 对齐——先截断候选再打分，减少打分次数
+        rerank_n = max(top_k, settings.search.SEARCH_RERANK_TOP_K)
+        candidates = contents[:rerank_n]
         # Ollama 或 Cross-Encoder 可用：优先使用
         try:
-            pairs = [(query, c.content) for c in contents]
+            pairs = [(query, c.content) for c in candidates]
             if self.provider == "ollama" and self._ollama_reranker is not None:
                 scores = await self._ollama_reranker.predict(pairs)
             elif self._model is not None:
@@ -361,16 +366,16 @@ class WebReranker:
             else:
                 raise RuntimeError("无可用重排序模型")
 
-            for content, score in zip(contents, scores):
+            for content, score in zip(candidates, scores):
                 content.score = float(score)
 
-            ranked = sorted(contents, key=lambda x: x.score, reverse=True)
+            ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
             return ranked[:top_k]
         except Exception as e:
             logger.warning(f"语义重排失败: {e}，降级为嵌入兜底")
 
         # 增强4：主重排模型不可用时，用 OllamaEmbeddings 嵌入兜底
-        return await self._rerank_by_embeddings(query, contents, top_k)
+        return await self._rerank_by_embeddings(query, candidates, top_k)
 
 
 class WebSearchService:

@@ -12,6 +12,8 @@ from .config import router as config_router
 from .notification import router as notification_router
 from .badcase import router as badcase_router
 from .evaluation import router as evaluation_router
+from .auth import router as auth_router
+from .trace import router as trace_router
 
 __all__ = [
     "document_router",
@@ -28,4 +30,6 @@ __all__ = [
     "notification_router",
     "badcase_router",
     "evaluation_router",
+    "auth_router",
+    "trace_router",
 ]

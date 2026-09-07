@@ -26,11 +26,11 @@ class ProcessingConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    """模型配置数据模型"""
-    embedding_model_name: str = "bge-m3:latest"
-    embedding_dimension: int = 1024
-    ollama_model_name: str = "deepseek-r1:7b-qwen-distill-q4_K_M"
-    fast_llm_model_name: str = "qwen2.5:7b"
+    """模型配置数据模型（值始终由 settings 填充，无内置默认）"""
+    embedding_model_name: str = ""
+    embedding_dimension: int = 0
+    ollama_model_name: str = ""
+    fast_llm_model_name: str = ""
 
 
 class SystemConfigResponse(BaseModel):

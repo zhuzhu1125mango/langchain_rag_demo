@@ -3,16 +3,17 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  --color-primary-50: #e6f7ff;
-  --color-primary-100: #b3e5fc;
-  --color-primary-200: #81d4fa;
-  --color-primary-300: #4fc3f7;
-  --color-primary-400: #29b6f6;
-  --color-primary-500: #1890ff;
-  --color-primary-600: #0d47a1;
-  --color-primary-700: #0a2351;
-  --color-primary-800: #061634;
-  --color-primary-900: #030d1a;
+  /* 主色：Tailwind blue-600 体系，500 为主操作色，600 为 hover，过渡平滑 */
+  --color-primary-50: #eff6ff;
+  --color-primary-100: #dbeafe;
+  --color-primary-200: #bfdbfe;
+  --color-primary-300: #93c5fd;
+  --color-primary-400: #60a5fa;
+  --color-primary-500: #2563eb;
+  --color-primary-600: #1d4ed8;
+  --color-primary-700: #1e40af;
+  --color-primary-800: #1e3a8a;
+  --color-primary-900: #172554;
 
   --color-dark-900: #0a0a0f;
   --color-dark-800: #12121a;
@@ -24,14 +25,34 @@
 }
 
 :root {
-  --primary-color: #1890ff;
-  --primary-dark: #0d47a1;
+  --primary-color: #2563eb;
+  --primary-dark: #1d4ed8;
   --bg-light: #f5f7fa;
   --bg-dark: #0a0a0f;
   --accent-color: #52c41a;
   --warning-color: #faad14;
   --error-color: #f5222d;
   --success-color: #52c41a;
+
+  /* Element Plus 品牌色同步（浅色）：登录/设置等 EP 组件页与整体主色保持一致 */
+  --el-color-primary: #2563eb;
+  --el-color-primary-dark-2: #1d4ed8;
+  --el-color-primary-light-3: #60a5fa;
+  --el-color-primary-light-5: #93c5fd;
+  --el-color-primary-light-7: #bfdbfe;
+  --el-color-primary-light-8: #dbeafe;
+  --el-color-primary-light-9: #eff6ff;
+}
+
+/* Element Plus 品牌色同步（深色）：EP 的 dark css-vars 会重定义调色板，需覆盖回品牌色 */
+.dark {
+  --el-color-primary: #3b82f6;
+  --el-color-primary-dark-2: #60a5fa;
+  --el-color-primary-light-3: #1d4ed8;
+  --el-color-primary-light-5: #1e40af;
+  --el-color-primary-light-7: #1e3a8a;
+  --el-color-primary-light-8: #172554;
+  --el-color-primary-light-9: #142246;
 }
 
 body {
@@ -71,8 +92,8 @@ body {
 }
 
 .markdown-body {
-  font-size: 14px;
-  line-height: 1.6;
+  font-size: 15px;
+  line-height: 1.7;
 }
 
 .markdown-body h1 {
@@ -193,18 +214,29 @@ body {
   border-left-color: #32324a;
 }
 
+/* 助手消息：白底卡片（主流 AI 产品风格），长文 Markdown 可读性优于蓝底白字 */
 .chat-bubble-assistant {
-  background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
-  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+  background-color: #ffffff;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
 }
 
+.dark .chat-bubble-assistant {
+  background-color: #12121a;
+  border-color: #252532;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* 用户消息：品牌色浅底 + 同色系描边 */
 .chat-bubble-user {
-  background: linear-gradient(135deg, #f0f5ff 0%, #e6f0ff 100%);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  background-color: #eff6ff;
+  border: 1px solid #dbeafe;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
 .dark .chat-bubble-user {
-  background: linear-gradient(135deg, #1a1a25 0%, #252532 100%);
+  background-color: #1a1a25;
+  border-color: #252532;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
@@ -325,10 +357,10 @@ body {
 
 @keyframes glow {
   0%, 100% {
-    box-shadow: 0 0 5px rgba(24, 144, 255, 0.3);
+    box-shadow: 0 0 5px rgba(37, 99, 235, 0.3);
   }
   50% {
-    box-shadow: 0 0 20px rgba(24, 144, 255, 0.6);
+    box-shadow: 0 0 20px rgba(37, 99, 235, 0.6);
   }
 }
 
@@ -338,7 +370,7 @@ body {
 
 .btn-primary {
   padding: 8px 16px;
-  background-color: #1890ff;
+  background-color: #2563eb;
   color: white;
   border-radius: 8px;
   font-weight: 500;
@@ -346,7 +378,7 @@ body {
 }
 
 .btn-primary:hover {
-  background-color: #0d47a1;
+  background-color: #1d4ed8;
 }
 
 .btn-secondary {
@@ -398,7 +430,7 @@ body {
 
 .card-hover:hover {
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  border-color: #1890ff;
+  border-color: #2563eb;
 }
 
 .input-field {
@@ -438,12 +470,12 @@ body {
 }
 
 .badge-primary {
-  background-color: #e6f7ff;
-  color: #0d47a1;
+  background-color: #dbeafe;
+  color: #1d4ed8;
 }
 
 .dark .badge-primary {
-  background-color: rgba(24, 144, 255, 0.15);
+  background-color: rgba(37, 99, 235, 0.15);
   color: #60a5fa;
 }
 

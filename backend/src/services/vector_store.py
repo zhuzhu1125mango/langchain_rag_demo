@@ -77,6 +77,7 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
                     "kb_id": result.get("kb_id", ""),
                     "document_id": result.get("document_id", ""),
                     "source": result.get("source", ""),
+                    "heading_path": result.get("heading_path", ""),
                     "chunk_index": result.get("chunk_index", 0),
                     "score": result.get("rerank_score", result.get("rrf_score", result.get("score", 0.0))),
                     "dense_score": result.get("dense_score", 0.0),

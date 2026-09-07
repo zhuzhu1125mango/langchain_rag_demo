@@ -50,10 +50,8 @@ class GenerationEvaluator:
         if self.llm is not None:
             return self.llm
         try:
-            from langchain_ollama import ChatOllama
-
-            model_name = await model_manager.get_model_for_task("fast")
-            self.llm = ChatOllama(model=model_name, temperature=0.0)
+            # B1 工厂：fast 角色 + temperature=0 + think=False（评分任务无需思考链）
+            self.llm = await model_manager.get_chat_llm("fast", think=False, temperature=0.0)
         except Exception as e:
             logger.warning(f"生成评估器 LLM 初始化失败: {e}")
         return self.llm

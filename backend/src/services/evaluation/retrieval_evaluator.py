@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 from src.config import settings
+from src.services.model_manager import model_manager
 
 logger = logging.getLogger(__name__)
 
@@ -55,13 +56,11 @@ class RetrievalEvaluator:
         self._embedding_model_name: Optional[str] = None
 
     def _get_embeddings(self) -> Optional[Any]:
-        """延迟初始化 embedding 模型。"""
+        """延迟初始化 embedding 模型（B2 共享单例）。"""
         current_model = settings.model.EMBEDDING_MODEL_NAME
         if self.embeddings is None or self._embedding_model_name != current_model:
             try:
-                from langchain_ollama import OllamaEmbeddings
-
-                self.embeddings = OllamaEmbeddings(model=current_model)
+                self.embeddings = model_manager.get_embeddings()
                 self._embedding_model_name = current_model
             except Exception as e:
                 logger.warning(f"检索评估器 embedding 模型初始化失败: {e}")

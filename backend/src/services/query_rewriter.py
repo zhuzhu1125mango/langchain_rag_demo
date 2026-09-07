@@ -6,7 +6,7 @@
 3. LLM fallback（规则未命中时用 LLM 生成多角度 query）
 4. 保底策略（始终包含原始问题作为第一个元素）
 
-设计文档见 docs/design_search_optimization.md 第 3.1 节。
+设计文档见 docs/design/search-optimization.md 第 3.1 节。
 """
 
 import json
@@ -16,14 +16,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from src.config import settings
+from src.services.model_manager import model_manager
 from src.services.prompts.prompt_loader import PromptLoader
-
-try:
-    from langchain_ollama import ChatOllama
-    _CHAT_OLLAMA_AVAILABLE = True
-except Exception:  # pragma: no cover
-    ChatOllama = None  # type: ignore
-    _CHAT_OLLAMA_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -88,24 +82,22 @@ class QueryRewriter:
             num_queries: 改写后最多保留的 query 数，None 时读取配置。
         """
         if llm is self._UNSET:
-            self.llm = self._build_default_llm()
+            # B3：默认 LLM 延迟到首次 rewrite 时经模型工厂异步构造
+            self.llm = self._UNSET
         else:
             self.llm = llm
         self.num_queries = num_queries or settings.search.QUERY_REWRITE_MAX_QUERIES
         self.prompt_loader = PromptLoader()
 
     @staticmethod
-    def _build_default_llm() -> Optional[Any]:
-        """根据配置构造默认的轻量 LLM 实例。"""
-        if not _CHAT_OLLAMA_AVAILABLE:
-            return None
-        model_name = (
-            settings.search.QUERY_REWRITE_MODEL
-            or settings.model.FAST_LLM_MODEL_NAME
-            or settings.model.OLLAMA_MODEL_NAME
-        )
+    async def _build_default_llm() -> Optional[Any]:
+        """经模型工厂异步构造默认轻量 LLM（query_rewrite 角色 + think=False）。"""
         try:
-            return ChatOllama(model=model_name, streaming=False)
+            return await model_manager.get_chat_llm(
+                "query_rewrite",
+                think=False,
+                preferred=settings.search.QUERY_REWRITE_MODEL or None,
+            )
         except Exception as e:
             logger.warning(f"QueryRewriter 默认 LLM 初始化失败: {e}")
             return None
@@ -128,6 +120,10 @@ class QueryRewriter:
             return [question] if question else []
 
         question = question.strip()
+
+        # B3：默认 LLM 懒加载（首次调用时经模型工厂异步构造）
+        if self.llm is self._UNSET:
+            self.llm = await self._build_default_llm()
 
         # 1. 上下文补全
         resolved_question = self._resolve_context(question, conversation_context)

@@ -29,6 +29,7 @@ from src.models import KnowledgeBase, Document
 from src.services.vector_store import VectorStoreManager
 from src.services.cache_service import CacheService
 from src.services.rag_chain import RAGChain
+from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
 
 logger = logging.getLogger("knowledge_base_api")
 
@@ -476,6 +477,9 @@ async def delete_knowledge_base(
 
         await invalidate_kb_list_cache(current_user.user_id)
 
+        # P1-3：知识库内容已清空，失效相关语义缓存
+        _schedule_semantic_cache_invalidation(str(kb.id))
+
         return {"message": "知识库已删除"}
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的知识库ID")
@@ -597,6 +601,10 @@ async def batch_delete_knowledge_bases(
     await db.commit()
 
     await invalidate_kb_list_cache(current_user.user_id)
+
+    # P1-3：知识库内容已清空，失效相关语义缓存
+    for kb in kbs:
+        _schedule_semantic_cache_invalidation(str(kb.id))
 
     logger.info(
         "批量删除知识库成功: 用户=%s 删除数量=%d 跳过数量=%d",

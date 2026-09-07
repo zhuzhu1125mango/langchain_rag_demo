@@ -7,7 +7,7 @@ Milvus 不支持直接修改已有集合的向量字段维度。本脚本删除�
 
 运行方式：
     cd backend
-    poetry run python scripts/migrate_embedding_model.py [--backup]
+    uv run python scripts/migrate_embedding_model.py [--backup]
 
 参数：
     --backup: 迁移前将旧集合重命名为 {collection}_backup，默认直接删除。

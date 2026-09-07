@@ -62,6 +62,8 @@ class ModelManager:
         self.ollama_host = ollama_host or settings.model.OLLAMA_HOST
         self._availability_cache: Dict[str, bool] = {}
         self._cache_lock = asyncio.Lock()
+        # 共享 OllamaEmbeddings 单例缓存（键为模型名，B2）
+        self._embeddings_cache: Dict[str, object] = {}
 
     @classmethod
     def _load_task_roles_from_settings(cls) -> Dict[str, str]:
@@ -180,6 +182,67 @@ class ModelManager:
             except Exception as e:
                 result.append(ModelInfo(name=model_name, task=task, available=False, error=str(e)))
         return result
+
+    async def get_chat_llm(
+        self,
+        task: str,
+        *,
+        streaming: bool = False,
+        think: bool = False,
+        num_ctx: Optional[int] = None,
+        temperature: Optional[float] = None,
+        timeout: Optional[float] = None,
+        preferred: Optional[str] = None,
+    ):
+        """按任务角色构造 ChatOllama 实例（B1 统一模型工厂）。
+
+        模型名走现有 task role + fallback 链解析；统一注入 num_ctx；
+        think 显式绑定 reasoning（与主回答链写法一致）——OLLAMA_SUPPORTS_THINKING=true
+        时按 think 值绑定，避免混合思考模型在结构化小任务上空烧思考链；
+        辅助任务一律 think=False，主回答任务由 should_think() 结果传入。
+
+        Args:
+            task: 任务名称（answer/fast/intent_router/title_generation/query_rewrite 等）。
+            streaming: 是否流式。
+            think: 是否绑定 reasoning=think（None 表示不干预，用模型默认行为）。
+            num_ctx: 上下文窗口，None 时使用 OLLAMA_NUM_CTX。
+            temperature: 采样温度，None 时使用 ChatOllama 默认值。
+            timeout: 请求超时（秒），None 时不设置。
+            preferred: 优先使用的模型名（可选，优先于任务 fallback 链）。
+
+        Returns:
+            ChatOllama（或绑定 reasoning 后的 Runnable）实例。
+        """
+        from langchain_ollama import ChatOllama
+
+        model_name = await self.get_model_for_task(task, preferred=preferred)
+        kwargs = {
+            "model": model_name,
+            "streaming": streaming,
+            "num_ctx": num_ctx if num_ctx is not None else settings.model.OLLAMA_NUM_CTX,
+        }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        llm = ChatOllama(**kwargs)
+        if think is not None and settings.model.OLLAMA_SUPPORTS_THINKING:
+            return llm.bind(reasoning=think)
+        return llm
+
+    def get_embeddings(self):
+        """获取共享 OllamaEmbeddings 单例（B2，按模型名缓存，模型名变化时重建）。
+
+        Embedding 任务在 fallback 链中只有单一模型（启动校验强制其存在），
+        因此同步构造即可；业务侧避免各自重复创建实例。
+        """
+        from langchain_ollama import OllamaEmbeddings
+
+        model_ref = self.task_roles.get("embedding", "EMBEDDING_MODEL_NAME")
+        model_name = self._resolve_model_name(model_ref)
+        if model_name not in self._embeddings_cache:
+            self._embeddings_cache[model_name] = OllamaEmbeddings(model=model_name)
+        return self._embeddings_cache[model_name]
 
 
 # 全局默认模型管理器

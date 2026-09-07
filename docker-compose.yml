@@ -87,13 +87,14 @@ services:
       MILVUS_HOST: milvus-standalone
       MILVUS_PORT: 19530
       MILVUS_DATABASE: ${MILVUS_DATABASE}              # Milvus 数据库实例
-      MILVUS_COLLECTION_NAME: ${MILVUS_COLLECTION_NAME}# 向量集合名
+      MILVUS_COLLECTION_NAME: ${MILVUS_COLLECTION_NAME}  # 向量集合名
       MILVUS_INDEX_NAME: ${MILVUS_INDEX_NAME}          # 向量索引名
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DB: ${REDIS_DB}                            # Redis 逻辑库编号
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME}          # 对话使用的大模型
+      OLLAMA_DIRECT_MODEL_NAME: ${OLLAMA_DIRECT_MODEL_NAME}  # 深度思考关闭时的非思考专用模型
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}    # 向量化使用的模型
       SKIP_OLLAMA_CHECK: "true"
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问 Ollama
@@ -123,6 +124,11 @@ services:
       TITLE_FALLBACK_LENGTH: ${TITLE_FALLBACK_LENGTH}
       TITLE_GENERATION_MODEL: ${TITLE_GENERATION_MODEL}
       SECRET_KEY: ${SECRET_KEY}                        # 应用签名密钥（JWT/Session）
+      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED}                      # P1-3 语义缓存总开关
+      SEMANTIC_CACHE_SIMILARITY_THRESHOLD: ${SEMANTIC_CACHE_SIMILARITY_THRESHOLD}  # 语义命中相似度阈值
+      SEMANTIC_CACHE_TTL_HOURS: ${SEMANTIC_CACHE_TTL_HOURS}                  # 条目过期时间（小时）
+      SEMANTIC_CACHE_MAX_ENTRIES: ${SEMANTIC_CACHE_MAX_ENTRIES}              # 单范围条目上限
+      SEMANTIC_CACHE_REPLAY_CHUNK_CHARS: ${SEMANTIC_CACHE_REPLAY_CHUNK_CHARS}  # 命中回放切片长度
     volumes:
       - ./backend/data:/app/data
     networks:

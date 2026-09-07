@@ -78,11 +78,14 @@ class RedisSettings(BaseSettings):
 class SecuritySettings(BaseSettings):
     # 无默认值：生产模式缺失/弱值时启动失败；开发模式由启动逻辑生成临时随机密钥
     SECRET_KEY: str = ""
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    # JWT access token 有效期（分钟），P1-1 多用户认证使用
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     API_KEY: Optional[str] = None  # 全局 API Key（自托管单实例认证）
     # 管理操作密钥（全局配置修改、/metrics/reset 等）。
     # 生产模式未设置时管理接口一律 403；设置后请求须携带匹配的 X-Admin-Key 头。
     ADMIN_KEY: Optional[str] = None
+    # 是否开放 /api/auth/register 注册接口（关闭后仅能由已有账号或直接写库建号）
+    AUTH_ALLOW_REGISTRATION: bool = True
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
@@ -97,14 +100,24 @@ class CorsSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 class ModelSettings(BaseSettings):
-    EMBEDDING_MODEL_NAME: str = "bge-m3:latest"
+    # 模型名一律由 .env 提供（无内置默认，A1 去硬编码），启动时经 /api/tags 校验存在性
+    EMBEDDING_MODEL_NAME: Optional[str] = None
     # Embedding 向量维度，需与 EMBEDDING_MODEL_NAME 对应。bge-m3 为 1024，nomic-embed-text 为 768。
     EMBEDDING_DIMENSION: int = 1024
-    OLLAMA_MODEL_NAME: str = "deepseek-r1:7b-qwen-distill-q4_K_M"
+    OLLAMA_MODEL_NAME: Optional[str] = None
+    # 深度思考关闭时使用的非思考专用模型（如 Qwen3-2507 指令版，从不生成思考块）。
+    # 混合思考模型（如 qwen3:4b）无法通过提示词真正跳过思考；留空时回退主模型并绑定 reasoning=False。
+    OLLAMA_DIRECT_MODEL_NAME: Optional[str] = None
     # 用于意图路由、标题生成、Query改写等轻量/结构化任务
-    FAST_LLM_MODEL_NAME: str = "qwen2.5:7b"
+    FAST_LLM_MODEL_NAME: Optional[str] = None
     # Ollama 服务地址，None 时使用 ollama 包默认行为
     OLLAMA_HOST: Optional[str] = None
+    # 模型是否支持思考模式（qwen3、deepseek-r1 等思考类模型设 true；qwen2.5 等设 false）。
+    # 设 false 时不向模型传递 think/reasoning 参数（否则触发 Ollama 400 错误）。
+    OLLAMA_SUPPORTS_THINKING: bool = True
+    # Ollama 上下文窗口（num_ctx）。RAG 单次请求 = 检索片段 + 历史对话 + 回答预留，
+    # Ollama 默认约 4096 易截断检索内容；4GB 显存 + q8_0 KV cache 下 6144 为稳妥值。
+    OLLAMA_NUM_CTX: int = 6144
     
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
@@ -122,13 +135,21 @@ class ProcessingSettings(BaseSettings):
     KB_HYBRID_RERANK_TOP_K: int = 5
     KB_RRF_K: int = 60
     KB_RERANK_MIN_SCORE: float = 0.0  # 重排序最低置信度，低于此值的结果将被过滤
+    # 是否启用知识库重排序（C1）：关闭或未配置模型时按 RRF 分数直接截断，不加载 reranker
+    KB_RERANK_ENABLED: bool = True
     # 知识库重排序模型及加载方式：sentence_transformers | ollama
-    KB_RERANK_MODEL: str = "qllama/bge-reranker-v2-m3:latest"
+    # 留空/None 时自动关闭 rerank（按 RRF 截断），不隐式拉取用户未声明的模型
+    KB_RERANK_MODEL: Optional[str] = None
     KB_RERANK_PROVIDER: str = "ollama"
+    # rerank 分数相关性阈值（C8）：所有检索结果分数均低于此值时判定"无高度相关内容"
+    KB_RELEVANCE_SCORE_THRESHOLD: float = 0.3
 
     # 上下文构建相关配置
     CONTEXT_TOKEN_BUDGET: int = 4000
     CONTEXT_COMPRESSION_ENABLED: bool = False
+    # 指代消解 LLM 兜底开关（C3）：false 时仅做规则前置（问题不含指代词零 LLM 调用），
+    # 历史上下文仍随提示词携带；true 时含指代词的问题走 LLM 消解
+    CONTEXT_RESOLVE_USE_LLM: bool = False
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
@@ -146,8 +167,8 @@ class IntentRouterSettings(BaseSettings):
 
     # 是否启用 LLM 语义路由层
     INTENT_ROUTER_USE_LLM: bool = True
-    # LLM 路由超时时间（秒），超时自动降级到规则路由
-    INTENT_ROUTER_LLM_TIMEOUT: float = 3.0
+    # LLM 路由超时时间（秒），超时自动降级到规则路由（C6：3.0→5.0，为冷启动留余量）
+    INTENT_ROUTER_LLM_TIMEOUT: float = 5.0
     # 最低置信度阈值，低于此值走 DIRECT_LLM
     INTENT_ROUTER_CONFIDENCE_THRESHOLD: float = 0.4
     # 两意图最高分差小于此值时触发澄清
@@ -186,6 +207,32 @@ class EvaluationSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 
+class OcrSettings(BaseSettings):
+    """OCR 深度解析配置（P0-2b：扫描版 PDF 走 OCR 分流管线）。
+
+    两个后端均为可选依赖（uv group: ocr-mineru / ocr-paddle），懒导入；
+    未安装或解析失败时由 load_document 回退内置 PyPDF 解析，不阻断上传。
+    """
+
+    # 是否启用扫描版 PDF 的 OCR 深度解析；关闭即整体回退旧解析管线（回退开关）
+    DEEP_PARSING_ENABLED: bool = True
+    # OCR 后端：auto（按已安装后端自动选择）| mineru | paddle
+    OCR_BACKEND: str = "auto"
+    # 推理设备：auto | cpu | cuda（paddle 后端将 cuda 映射为 gpu:0）
+    OCR_DEVICE: str = "auto"
+    # 扫描版判定阈值：平均每页可抽取字符数低于该值视为扫描版
+    OCR_SCANNED_CHAR_THRESHOLD: int = 10
+    # 扫描版判定采样的最大页数（大文件只读前 N 页）
+    OCR_DETECT_MAX_PAGES: int = 20
+    # mineru 子进程超时（秒）；paddle 为进程内调用，不受此项控制
+    MINERU_TIMEOUT_SECONDS: int = 600
+    # 模型下载源：modelscope | huggingface（离线部署先跑 scripts/download_ocr_models.py 预热缓存）
+    MINERU_MODEL_SOURCE: str = "modelscope"
+    PADDLE_MODEL_SOURCE: str = "modelscope"
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+
+
 class SearchSettings(BaseSettings):
     SEARCH_PROVIDER: str = "searxng"
     SEARCH_API_KEY: Optional[str] = None
@@ -198,7 +245,8 @@ class SearchSettings(BaseSettings):
     SEARCH_ENABLE_MULTI_QUERY: bool = True
     SEARCH_NUM_QUERIES: int = 3
     SEARCH_ENABLE_RERANK: bool = True
-    SEARCH_RERANK_MODEL: str = "qllama/bge-reranker-v2-m3:latest"
+    # 留空/None 时自动关闭搜索结果重排（按原文顺序截断），不隐式拉取用户未声明的模型
+    SEARCH_RERANK_MODEL: Optional[str] = None
     SEARCH_RERANK_PROVIDER: str = "ollama"  # sentence_transformers | ollama
     SEARCH_RERANK_TOP_K: int = 5
     # 注入 LLM 上下文的最终搜索结果条数（与 SEARCH_MAX_RESULTS 区分：
@@ -229,6 +277,37 @@ class SearchSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
+class DecisionSettings(BaseSettings):
+    """问答决策与策略投票配置。"""
+
+    # 用户显式勾选知识库时是否仍走多策略投票（C5）。
+    # false：直接检索知识库（回答模板已保证结合模型自身知识），跳过投票以降低首字延迟。
+    DECISION_VOTE_WHEN_KB_SELECTED: bool = False
+    # 语义相似度策略开关（C8）：默认关闭——该策略依赖 sentence-transformers MiniLM，
+    # 离线环境加载失败时会永久弃权，关闭后投票权重自然归一到其余策略
+    STRATEGY_SEMANTIC_ENABLED: bool = False
+    # 策略投票 LLM 调用超时（秒，C4）：超时按弃权处理（低置信度），不阻塞决策
+    STRATEGY_LLM_TIMEOUT: float = 5.0
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+
+
+class SemanticCacheSettings(BaseSettings):
+    """语义缓存配置（P1-3）。仅纯知识库问答参与读写，Redis 不可用时 fail-open。"""
+
+    # 总开关（false 时查找/写入全部跳过）
+    SEMANTIC_CACHE_ENABLED: bool = True
+    # 语义命中相似度阈值（bge-m3 余弦）
+    SEMANTIC_CACHE_SIMILARITY_THRESHOLD: float = 0.92
+    # 条目过期时间（小时），读取时惰性过滤
+    SEMANTIC_CACHE_TTL_HOURS: int = 24
+    # 单缓存范围（user + kb 范围）条目上限，超限删最旧
+    SEMANTIC_CACHE_MAX_ENTRIES: int = 200
+    # 命中回放切片长度（字符）
+    SEMANTIC_CACHE_REPLAY_CHUNK_CHARS: int = 120
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+
 class Settings(BaseSettings):
     """聚合所有子配置的根配置类。"""
 
@@ -243,7 +322,10 @@ class Settings(BaseSettings):
     title_generation: TitleGenerationSettings = TitleGenerationSettings()
     intent_router: IntentRouterSettings = IntentRouterSettings()
     search: SearchSettings = SearchSettings()
+    semantic_cache: SemanticCacheSettings = SemanticCacheSettings()
+    decision: DecisionSettings = DecisionSettings()
     evaluation: EvaluationSettings = EvaluationSettings()
+    ocr: OcrSettings = OcrSettings()
 
     IN_DOCKER: bool = False
     # 显式环境标记：dev | production。未设置时按 IN_DOCKER 推断。

@@ -10,23 +10,25 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # 安装系统依赖（build-essential/gcc 用于编译 Python 扩展，curl 用于健康检查）
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# 先将 Debian 官方源替换为清华镜像源（规避代理/网络导致的 404）
+RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     gcc \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 安装 Poetry（依赖管理工具，锁定版本 2.1.3）
-RUN pip install --no-cache-dir poetry==2.1.3
+# 安装 uv（直接从官方镜像复制二进制，无需容器内 pip 下载）
+# pypi 源已在 pyproject.toml/uv.lock 中锁定为清华镜像，无需环境变量
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-# 配置 Poetry：在容器中不创建虚拟环境（直接安装到系统 Python）
-RUN poetry config virtualenvs.create false
+# 复制依赖清单（利用 Docker 缓存层，依赖不变时跳过后续安装）
+COPY pyproject.toml uv.lock ./
 
-# 复制 Poetry 配置文件（利用 Docker 缓存层，依赖不变时跳过后续安装）
-COPY pyproject.toml poetry.lock* ./
+# 同步依赖（--frozen 严格按锁文件；默认含 dev 组，供开发环境 pytest 等使用）
+RUN uv sync --frozen
 
-# 安装依赖（包括开发依赖用于开发环境：pytest/black/isort 等）
-RUN poetry install --no-interaction --no-ansi --no-root
+ENV PATH="/app/.venv/bin:$PATH"
 
 # 复制项目代码（开发环境主要靠卷挂载，此处复制保证镜像可独立运行）
 COPY . .

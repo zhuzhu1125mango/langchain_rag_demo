@@ -6,7 +6,7 @@
 
 import logging
 import re
-from typing import Optional
+from typing import Any, Optional
 
 from langchain_ollama import ChatOllama
 
@@ -37,7 +37,7 @@ class TitleGenerator(AsyncSingleton["TitleGenerator"]):
                     "title_generation",
                     preferred=preferred_model,
                 )
-                self._llm = ChatOllama(model=model_name, streaming=False)
+                self._llm = ChatOllama(model=model_name, streaming=False, num_ctx=settings.model.OLLAMA_NUM_CTX)
             except Exception as e:
                 logger.warning(f"标题生成 LLM 初始化失败: {e}")
                 self._llm = None

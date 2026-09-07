@@ -1,6 +1,7 @@
+import asyncio
 from typing import List, Dict, Optional
-from langchain_ollama import ChatOllama
 from src.config import settings
+from src.services.model_manager import model_manager
 from .base import Strategy
 
 
@@ -33,8 +34,8 @@ class LLMInferenceStrategy(Strategy):
     
     async def initialize(self):
         try:
-            model_name = settings.model.FAST_LLM_MODEL_NAME or settings.model.OLLAMA_MODEL_NAME
-            self.llm = ChatOllama(model=model_name, streaming=False)
+            # B1 工厂：fast 模型 + think=False（YES/NO 结构化小任务无需思考链）
+            self.llm = await model_manager.get_chat_llm("fast", think=False)
         except Exception:
             self.llm = None
     
@@ -76,7 +77,11 @@ class LLMInferenceStrategy(Strategy):
         prompt = template.format(question=question)
 
         try:
-            response = await self.llm.ainvoke(prompt)
+            # C4：包装 wait_for 超时，模型异常/超时时按弃权处理（低置信度），不阻塞决策
+            response = await asyncio.wait_for(
+                self.llm.ainvoke(prompt),
+                timeout=settings.decision.STRATEGY_LLM_TIMEOUT,
+            )
             result = response.content.strip().upper()
 
             # 三态解析：YES 走知识库、NO 走纯 LLM、未识别默认走知识库并降置信度

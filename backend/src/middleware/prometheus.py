@@ -121,6 +121,34 @@ STRATEGY_DECISIONS = Counter(
     registry=registry
 )
 
+# ==================== 语义缓存指标 ====================
+
+SEMANTIC_CACHE_HITS = Counter(
+    "semantic_cache_hits_total",
+    "Total number of semantic cache hits",
+    ["match_type"],
+    registry=registry
+)
+
+SEMANTIC_CACHE_MISSES = Counter(
+    "semantic_cache_misses_total",
+    "Total number of semantic cache lookups that missed",
+    registry=registry
+)
+
+SEMANTIC_CACHE_STORES = Counter(
+    "semantic_cache_stores_total",
+    "Total number of semantic cache stores",
+    ["result"],
+    registry=registry
+)
+
+SEMANTIC_CACHE_LOOKUP_LATENCY = Histogram(
+    "semantic_cache_lookup_seconds",
+    "Semantic cache lookup latency in seconds (including embedding)",
+    registry=registry
+)
+
 
 def get_prometheus_metrics():
     """
@@ -208,9 +236,42 @@ def record_kb_query(answer_type):
 def record_strategy_decision(strategy_name, result):
     """
     记录策略决策
-    
+
     Args:
         strategy_name: 策略名称
         result: 决策结果（use_kb 或 direct）
     """
     STRATEGY_DECISIONS.labels(strategy_name=strategy_name, result=result).inc()
+
+
+def record_semantic_cache_hit(match_type, duration):
+    """
+    记录语义缓存命中
+
+    Args:
+        match_type: 命中类型（exact 或 semantic）
+        duration: 查找耗时（秒）
+    """
+    SEMANTIC_CACHE_HITS.labels(match_type=match_type).inc()
+    SEMANTIC_CACHE_LOOKUP_LATENCY.observe(duration)
+
+
+def record_semantic_cache_miss(duration):
+    """
+    记录语义缓存未命中
+
+    Args:
+        duration: 查找耗时（秒）
+    """
+    SEMANTIC_CACHE_MISSES.inc()
+    SEMANTIC_CACHE_LOOKUP_LATENCY.observe(duration)
+
+
+def record_semantic_cache_store(result):
+    """
+    记录语义缓存写入
+
+    Args:
+        result: 写入结果（success 或 failed）
+    """
+    SEMANTIC_CACHE_STORES.labels(result=result).inc()
