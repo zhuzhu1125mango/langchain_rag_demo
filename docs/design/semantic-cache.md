@@ -187,3 +187,14 @@ SEMANTIC_CACHE_LOOKUP_LATENCY = Histogram("semantic_cache_lookup_seconds", "语�
 - llm_direct（无知识库闲聊）答案缓存——通用开放域对话误命中代价高且收益低（生成快），与 roadmap「仅纯知识库问答」一致。
 - Milvus 独立缓存集合 / 近似最近邻检索（条目规模小，暴力余弦足够）。
 - 缓存命中答案的「来源重合度」二次校验、命中率管理后台 UI。
+
+## 8. 实施记录（2026-09-07）
+
+- 与设计稿的差异：
+  - 回放切片配置项命名调整为 `SEMANTIC_CACHE_REPLAY_CHUNK_CHARS`（设计稿中的 `SEMANTIC_CACHE_EMBED_BATCH_CHARS` 语义不清），默认值 120 不变。
+  - `lookup` 返回 `(SemanticCacheHit | None, embedding | None)` 元组：未命中时回传本次 embedding，`store` 复用后可省一次 `aembed_query`（§3.8 Embedding 复用的落地形式）。
+  - `store` 采用显式参数签名（`user_id, kb_ids, question, answer, source_texts, source_metadata, embedding=None`）而非 entry 对象。
+  - 新增模块级 `schedule_invalidation(kb_id)` 辅助函数（fire-and-forget + 超时保护），document.py / knowledge_base.py 失效钩子统一复用。
+- 落地文件与设计稿 §4 清单一致；`_PipelineState` 新增 `semantic_cache_hit` / `semantic_cache_embedding` 字段。
+- 测试：`test_semantic_cache_service.py` + `test_semantic_cache_pipeline.py` 共 45 个用例（命中回放短路、各排除分支、TTL/容量淘汰、失效匹配含 all 通配、fail-open、cosine 边界）；全套 **688 passed / 100 skipped** 无回归。
+- 顺带修正 `test_sql_echo_and_logging.py::test_default_is_off`：默认值断言改为隔离环境（`delenv` + `_env_file=None`），不再受根目录 `.env` 中开发期 `SQL_ECHO=True` 干扰。

@@ -27,7 +27,7 @@
 | P0-2 | 深度文档解析 + 结构化分块 | 高 | 建议在 P0-1 之后（有度量基线） |
 | P1-1 | JWT 多用户认证落地（✅ 2026-09-02 完成，含数据隔离复核） | 高 | 无 |
 | P1-2 | 全链路 Trace 可视化（✅ 2026-09-02 完成） | 中 | 无（Trace 已带 user_id，查询 API 按用户过滤） |
-| P1-3 | 语义缓存 | 中 | 无 |
+| P1-3 | 语义缓存（✅ 2026-09-07 完成） | 中 | 无 |
 | P2-1 | GraphRAG 检索增强（轻量版） | 中 | P0-1 |
 | P2-2 | 多查询并行检索 + RRF 融合 | 中 | P0-1（需评估验证增益） |
 | P2-3 | 引用溯源到原文高亮 | 中 | 无 |
@@ -149,15 +149,23 @@
 5. 测试：`tests/test_trace_api.py`（过滤条件/列表序列化/详情 404/NULL 归属可见性）+ `tests/test_trace_ownership.py` 扩展（add_stage/set_token_usage）。
 6. **注意**：部署时需执行 `cd backend && uv run python scripts/migrate_traces.py`。
 
-### P1-3 语义缓存
+### P1-3 语义缓存（✅ 已完成 2026-09-07）
 
 **目标**：相似问题命中缓存，降本提速。
 
-**现状**：`cache_service.py` 为精确匹配缓存；已有 `test_quick_questions_cache.py`。
+**现状**：~~`cache_service.py` 为精确匹配缓存~~（实施前盘点修正：项目实际**没有答案级缓存**，`cache_service.py` 仅服务联网搜索与 KB 列表缓存；详见设计文档 §1）。
 
 **方案**：在精确命中未命中后，计算查询 embedding 与缓存问题向量做相似度匹配（阈值可配，默认 0.92），命中则返回缓存答案并标记「来自相似问题」。仅对纯知识库问答启用，工具调用/时效性问题不缓存（沿用现有时间敏感判断）。
 
 **风险**：相似但不等价的问题返回错误缓存；通过阈值 + 仅知识库域 + 后台过期刷新控制。
+
+**完成记录**（设计详情见 `docs/design/semantic-cache.md`）：
+
+1. 新增 `src/services/semantic_cache_service.py`：`lookup`（精确匹配快路径 + 余弦语义匹配）/ `store` / `invalidate_kb` / `schedule_invalidation`；Redis HASH 按 scope 存储（key 含 user_id 与 kb_scope，跨用户不共享），TTL 惰性过滤 + 单 scope 200 条容量淘汰，Redis 异常 fail-open。
+2. `rag_chain.py` 管线插桩：KB 决策后缓存查找，命中发 `cache_hit` reasoning 步骤并流式回放缓存答案后短路（不触发检索与生成，零 token 消耗）；finalize 前仅对纯 KB 答案（knowledge_base 类型、无联网来源、deep_thinking=off、非时效性、有来源文档）异步后台写入。
+3. 失效钩子：文档上传/删除/重建与知识库删除/批量删除后 `invalidate_kb`（匹配该 kb_id 或 all 全域条目）。
+4. 配置 `SemanticCacheSettings`（5 项）入 `.env` / `.env.dev` / 两份 compose；Prometheus 新增 hits/misses/stores 计数与 lookup 耗时直方图；Trace 落 `semantic_cache_hit` 数据。
+5. 测试：服务级 + 管线级共 45 个用例；全套 688 passed / 100 skipped 无回归。
 
 ### P2-1 GraphRAG 检索增强（轻量版）
 
