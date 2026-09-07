@@ -2,7 +2,7 @@
 
 验证天气、时间、联网搜索等工具在真实环境下的可用性。
 运行方式：
-    cd backend && poetry run python tests/evaluation/verify_e2e.py
+    cd backend && uv run python tests/evaluation/verify_e2e.py
 """
 
 import asyncio

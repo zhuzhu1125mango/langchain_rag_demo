@@ -307,7 +307,7 @@ class TestSearchOptimizationE2E:
     """联网搜索优化全链路 e2e 测试（需 Ollama/SearXNG/Milvus）。
 
     默认跳过，传入 --run-e2e 选项时运行：
-    poetry run python -m pytest tests/evaluation/test_search_optimization.py::TestSearchOptimizationE2E --run-e2e
+    uv run python -m pytest tests/evaluation/test_search_optimization.py::TestSearchOptimizationE2E --run-e2e
     """
 
     @pytest.mark.asyncio
