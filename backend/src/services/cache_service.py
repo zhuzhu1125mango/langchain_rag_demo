@@ -56,7 +56,7 @@ class CacheService(AsyncSingleton["CacheService"]):
         # 先清理可能存在的旧客户端，避免重复初始化时残留坏连接
         if self.client is not None:
             try:
-                await self.client.close()
+                await self.client.aclose()
             except Exception:
                 pass
             self.client = None
