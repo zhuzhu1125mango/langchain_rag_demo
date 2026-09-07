@@ -8,9 +8,13 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 
 from src.database import Base
+
+# PG 上使用 JSONB（支持 jsonb 运算符/函数），其他方言（如测试用 SQLite）回退 JSON
+JSONType = JSON().with_variant(JSONB(), "postgresql")
 
 
 class RequestTrace(Base):
@@ -38,5 +42,9 @@ class RequestTrace(Base):
 
     final_answer = Column(Text, nullable=True)
     total_latency_ms = Column(Integer, nullable=True)
+
+    # P1-2：分阶段耗时明细与 token 用量（可观测性）
+    stages = Column(JSONType, nullable=True)
+    token_usage = Column(JSONType, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

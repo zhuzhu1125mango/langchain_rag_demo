@@ -35,6 +35,32 @@ class TraceCollector:
         self.data["session_id"] = session_id
         self.data["user_id"] = user_id
 
+    def add_stage(self, name: str, status: str = "done", latency_ms: int = 0, detail: Optional[Dict[str, Any]] = None) -> None:
+        """记录一个执行阶段的耗时明细（P1-2 可观测性）。"""
+        if "stages" not in self.data:
+            self.data["stages"] = []
+        entry: Dict[str, Any] = {
+            "name": name,
+            "status": status,
+            "latency_ms": latency_ms,
+        }
+        if detail:
+            entry["detail"] = detail
+        self.data["stages"].append(entry)
+
+    def set_token_usage(
+        self,
+        prompt_tokens: Optional[int],
+        completion_tokens: Optional[int],
+        estimated: bool = False,
+    ) -> None:
+        """记录 token 用量（模型元数据缺失时可用字符估算并标记 estimated）。"""
+        self.data["token_usage"] = {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "estimated": estimated,
+        }
+
     def set_intent(self, intent_decision) -> None:
         """设置意图决策。"""
         self.data["intent_decision"] = intent_decision.to_dict()
