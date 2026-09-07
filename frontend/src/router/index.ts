@@ -10,6 +10,12 @@ import type { RouteRecordRaw } from 'vue-router'
 
 const routes: RouteRecordRaw[] = [
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { title: '登录', public: true }
+  },
+  {
     path: '/',
     name: 'Chat',
     component: () => import('@/views/ChatView.vue'),
@@ -26,6 +32,12 @@ const routes: RouteRecordRaw[] = [
     name: 'History',
     component: () => import('@/views/HistoryView.vue'),
     meta: { title: '历史对话' }
+  },
+  {
+    path: '/traces',
+    name: 'Traces',
+    component: () => import('@/views/TraceView.vue'),
+    meta: { title: '链路追踪' }
   },
   {
     path: '/settings',
@@ -78,10 +90,25 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to, _from) => {
+router.beforeEach(async (to) => {
   if (to.meta.title) {
     document.title = `${to.meta.title} - RAG 知识库问答系统`
   }
+
+  // 认证守卫：公开页面直接放行；业务页面要求存在 JWT token 或 API Key。
+  // 已登录用户访问 /login 时回跳对话页。
+  if (to.meta.public) {
+    if (to.name === 'Login' && localStorage.getItem('token')) {
+      return { name: 'Chat' }
+    }
+    return true
+  }
+  const hasToken = !!localStorage.getItem('token')
+  const hasApiKey = !!localStorage.getItem('api_key') || !!import.meta.env.VITE_API_KEY
+  if (!hasToken && !hasApiKey) {
+    return { name: 'Login' }
+  }
+  return true
 })
 
 export default router

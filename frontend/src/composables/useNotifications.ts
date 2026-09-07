@@ -73,9 +73,14 @@ export function useWebSocketNotifications() {
       ws.onopen = () => {
         console.log('[WebSocket] Connected, sending auth frame')
         // 首帧鉴权：api_key 不再走 URL query（避免进反向代理访问日志），
-        // 连接建立后立即发送 auth 帧；开发模式（后端未配置 API_KEY）服务端
-        // 会不经校验直接回发 auth_ok。
-        ws?.send(JSON.stringify({ type: 'auth', api_key: apiKey || '' }))
+        // 连接建立后立即发送 auth 帧（token 与 api_key 二选一，均空时
+        // 开发模式服务端会不经校验直接回发 auth_ok）。
+        const token = localStorage.getItem('token')
+        ws?.send(JSON.stringify({
+          type: 'auth',
+          token: token || undefined,
+          api_key: apiKey || ''
+        }))
       }
 
       ws.onmessage = (event) => {

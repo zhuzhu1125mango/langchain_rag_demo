@@ -184,7 +184,7 @@
  * 以表格展示分类列表，支持多级分类结构（通过父分类关联），
  * 提供新建/编辑/删除能力，删除前进行二次确认。
  */
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
 import { Plus, Edit, Trash2, Folder, FolderX } from '@lucide/vue'
 import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory, type Category, type CategoryCreateRequest } from '@/queries/kb'
 import { useCrudModal } from '@/composables/useCrudModal'

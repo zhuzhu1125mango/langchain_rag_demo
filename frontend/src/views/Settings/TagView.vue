@@ -166,7 +166,6 @@ import { ref, computed } from 'vue'
 import { Plus, Edit, Trash2, Tags } from '@lucide/vue'
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag, type Tag, type TagCreateRequest } from '@/queries/kb'
 import { useToast } from '@/composables/useToast'
-import { useCrudModal } from '@/composables/useCrudModal'
 
 const toast = useToast()
 

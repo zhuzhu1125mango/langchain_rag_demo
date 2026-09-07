@@ -50,8 +50,12 @@ api.interceptors.response.use(
     const { config, response, code } = error
 
     if (response?.status === 401) {
-      localStorage.removeItem('token')
-      window.location.href = '/'
+      // 登录/注册接口自身的 401（用户名或密码错误）不触发清理与跳转
+      const url: string = config?.url || ''
+      if (!url.startsWith('/auth/login') && !url.startsWith('/auth/register')) {
+        localStorage.removeItem('token')
+        window.location.href = '/login'
+      }
       return Promise.reject(error)
     }
 

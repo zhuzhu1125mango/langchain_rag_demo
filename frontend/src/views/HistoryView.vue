@@ -11,7 +11,7 @@
           :disabled="!sessionsData?.length"
           :class="[
             'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
-            sessionsData?.length ? sessionsData.length > 0 : false
+            sessionsData?.length
               ? 'bg-red-500 text-white hover:bg-red-600'
               : 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
           ]"
@@ -78,6 +78,13 @@
             重命名
           </button>
           <button
+            @click="viewTraces"
+            class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+          >
+            <Activity class="w-4 h-4 inline mr-1" />
+            链路追踪
+          </button>
+          <button
             @click="continueSession"
             class="px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
           >
@@ -101,7 +108,7 @@ import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import { useSessions, useDeleteSession, useBatchDeleteSessions, useUpdateSession } from '@/queries/chat'
 import type { Session } from '@/queries/chat'
-import { Trash2, X, MessageCircle, Edit3, MessageSquare } from '@lucide/vue'
+import { Trash2, X, MessageCircle, Edit3, MessageSquare, Activity } from '@lucide/vue'
 import { formatDate } from '@/utils/format'
 import { useToast } from '@/composables/useToast'
 
@@ -124,6 +131,12 @@ function continueSession(): void {
   if (!selectedSession.value) return
   router.push(`/?session=${selectedSession.value.id}`)
   selectedSession.value = null
+}
+
+/** 跳转链路追踪页并按当前会话过滤。 */
+function viewTraces(): void {
+  if (!selectedSession.value) return
+  router.push(`/traces?session_id=${selectedSession.value.id}`)
 }
 
 async function renameSession(): Promise<void> {
