@@ -223,9 +223,6 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         self.retriever = None
         self.strategy_manager = strategy_manager
         self.decision_pipeline = None
-        # MiniLM 相似度模型：主问答链路已改用检索分数判定相关性（C8），
-        # 仅 kb_comparator / document_analyzer / knowledge_graph_generator 等
-        # 低频功能经 _init_similarity_model 惰性加载使用，主链路不再触发加载
         self.similarity_threshold = 0.4
         self.sentence_transformer = None
         self.last_reasoning: List[Dict[str, Any]] = []
@@ -328,8 +325,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         return await super().get_instance(vector_store, strategy_manager)
 
     def _init_similarity_model(self):
-        """初始化 MiniLM 相似度模型（仅 kb_comparator / document_analyzer /
-        knowledge_graph_generator 等低频功能使用；主问答链路已改用检索分数，C8）"""
+        """初始化语义相似度模型（延迟加载）"""
         if self.sentence_transformer is None:
             try:
                 from sentence_transformers import SentenceTransformer, util
@@ -340,18 +336,12 @@ class RAGChain(AsyncSingleton["RAGChain"]):
 
     async def _calculate_relevance(self, question, docs):
         """
-        计算检索文档与问题的相关性（C8：复用检索阶段分数，移除 MiniLM 重复编码）
-
-        - rerank 开启且模型加载成功时，rerank_score 为 Cross-Encoder 相关性
-          （0~1），按 KB_RELEVANCE_SCORE_THRESHOLD 判定"是否有高度相关内容"；
-        - rerank 关闭/未配置/模型加载失败时，rerank_score 退化为 RRF 排序分
-          （无量纲，约 0.01~0.03），不可作相关性依据——保守认为检索结果相关
-          （与原 MiniLM 不可用时的降级行为一致），避免误丢检索结果。
-
+        计算检索文档与问题的相关性
+        
         Args:
-            question: 用户问题（保留签名兼容，分数判定不再使用）
-            docs: 检索到的文档列表（Document.metadata 携带检索分数）
-
+            question: 用户问题
+            docs: 检索到的文档列表
+            
         Returns:
             tuple: (avg_score, has_relevant)
                 - avg_score: 平均相关度分数
@@ -359,32 +349,28 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         """
         if not docs or len(docs) == 0:
             return 0.0, False
-
-        def _meta_score(doc, key):
-            meta = getattr(doc, "metadata", None) or {}
-            return float(meta.get(key, 0.0) or 0.0)
-
-        from src.services.hybrid_search import KBReranker
-
-        if (
-            settings.processing.KB_RERANK_ENABLED
-            and settings.processing.KB_RERANK_MODEL
-            and KBReranker.model_loaded()
-        ):
-            scores = [_meta_score(doc, "rerank_score") for doc in docs]
-            if not any(s > 0.0 for s in scores):
-                # 文档未经 rerank 打分（如混合检索失败回退 dense）：无相关性分数，
-                # 保守视为相关，避免误丢结果
-                avg = sum(_meta_score(doc, "score") for doc in docs) / len(docs)
-                return avg, True
-            threshold = settings.processing.KB_RELEVANCE_SCORE_THRESHOLD
-            avg_score = sum(scores) / len(scores)
-            has_relevant = any(s >= threshold for s in scores)
-            return avg_score, has_relevant
-
-        # rerank 未参与：以 metadata.score（rerank_score 或 dense 余弦）均值作参考分
-        avg = sum(_meta_score(doc, "score") for doc in docs) / len(docs)
-        return avg, True
+        
+        self._init_similarity_model()
+        
+        if self.sentence_transformer is None:
+            return 0.6, True
+        
+        question_embedding = await asyncio.to_thread(self.sentence_transformer.encode, question)
+        total_score = 0.0
+        relevant_count = 0
+        
+        for doc in docs:
+            doc_content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
+            doc_embedding = await asyncio.to_thread(self.sentence_transformer.encode, doc_content)
+            score = float(self.similarity_util.cos_sim(question_embedding, doc_embedding))
+            total_score += score
+            if score >= self.similarity_threshold:
+                relevant_count += 1
+        
+        avg_score = total_score / len(docs)
+        has_relevant = relevant_count > 0 or avg_score >= self.similarity_threshold
+        
+        return avg_score, has_relevant
 
     def get_last_retrieval_score(self):
         """
