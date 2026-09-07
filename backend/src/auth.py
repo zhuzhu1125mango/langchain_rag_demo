@@ -1,13 +1,18 @@
 """认证与授权模块。
 
 提供基于 API Key 和 JWT 的用户认证能力，以及对象级权限校验辅助函数。
-当前阶段以 API Key 认证为主（适合自托管单实例），JWT 接口预留以便后续扩展多用户。
+API Key 适合自托管单实例；JWT（P1-1）支持多用户注册/登录与 owner_id 隔离。
 """
 
 import asyncio
+import datetime
 import hmac
 import logging
 from typing import Optional
+import uuid
+
+import bcrypt
+import jwt as pyjwt
 from fastapi import Depends, HTTPException, Security, status, WebSocket, WebSocketDisconnect
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
 from starlette.exceptions import WebSocketException
@@ -19,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 # WS 首帧鉴权等待时长：超时未发 auth 帧视为无效客户端
 WS_AUTH_TIMEOUT_SECONDS = 10.0
+
+# JWT 算法（HS256 对称签名，SECRET_KEY 即密钥）
+JWT_ALGORITHM = "HS256"
 
 # 认证方式声明
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -45,13 +53,94 @@ def _verify_api_key(api_key: Optional[str]) -> bool:
     return hmac.compare_digest((api_key or "").encode(), configured_key.encode())
 
 
-def _extract_user_from_jwt(credentials: HTTPAuthorizationCredentials) -> Optional[CurrentUser]:
-    """从 JWT token 中提取用户信息（预留接口）。
+def _get_secret_key() -> str:
+    """获取 JWT 签名密钥（未配置返回空串）。"""
+    return getattr(settings, "SECRET_KEY", "") or getattr(settings.security, "SECRET_KEY", "")
 
-    当前未启用完整 JWT 签发/校验逻辑，仅做占位；后续可接入 python-jose。
+
+def hash_password(plain_password: str) -> str:
+    """bcrypt 哈希明文密码。"""
+    return bcrypt.hashpw(plain_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    """校验明文密码与 bcrypt 哈希是否匹配。"""
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), password_hash.encode("utf-8"))
+    except (ValueError, TypeError):
+        return False
+
+
+def create_access_token(user_id: str) -> str:
+    """为指定用户签发 JWT access token。
+
+    Args:
+        user_id: 用户 ID（即资源 owner_id）。
+
+    Returns:
+        编码后的 JWT 字符串。
+
+    Raises:
+        ValueError: SECRET_KEY 未配置时抛出。
     """
-    # TODO: 实现 JWT 校验
-    return None
+    secret = _get_secret_key()
+    if not secret:
+        raise ValueError("SECRET_KEY 未配置，无法签发 JWT")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    expire_minutes = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", None) or getattr(
+        settings.security, "ACCESS_TOKEN_EXPIRE_MINUTES", 1440
+    )
+    payload = {
+        "sub": user_id,
+        "iat": now,
+        "exp": now + datetime.timedelta(minutes=expire_minutes),
+    }
+    return pyjwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
+
+
+def _extract_user_from_jwt(credentials: HTTPAuthorizationCredentials) -> Optional[CurrentUser]:
+    """从 JWT token 中提取用户信息。
+
+    校验签名与有效期；不查库（无会话表，删号后 token 自然过期失效）。
+
+    Returns:
+        CurrentUser: 校验通过时返回；无效/过期/SECRET_KEY 未配置时返回 None。
+    """
+    secret = _get_secret_key()
+    if not secret:
+        return None
+    try:
+        payload = pyjwt.decode(credentials.credentials, secret, algorithms=[JWT_ALGORITHM])
+    except pyjwt.PyJWTError:
+        return None
+    sub = payload.get("sub")
+    if not sub:
+        return None
+    return CurrentUser(user_id=str(sub), is_authenticated=True)
+
+
+def verify_jwt_token(token: str) -> Optional[CurrentUser]:
+    """校验裸 token 字符串（WebSocket 首帧鉴权用）。"""
+    secret = _get_secret_key()
+    if not secret:
+        return None
+    try:
+        payload = pyjwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+    except pyjwt.PyJWTError:
+        return None
+    sub = payload.get("sub")
+    if not sub:
+        return None
+    return CurrentUser(user_id=str(sub), is_authenticated=True)
+
+
+def validate_uuid_user_id(user_id: str) -> bool:
+    """校验 user_id 是否为合法 UUID（JWT 用户应来自 users 表主键）。"""
+    try:
+        uuid.UUID(user_id)
+        return True
+    except (ValueError, AttributeError):
+        return False
 
 
 async def get_current_user(
@@ -62,10 +151,10 @@ async def get_current_user(
 
     校验顺序：
     1. X-API-Key 头；
-    2. Authorization: Bearer <JWT>；
-    3. 未配置 API_KEY 且非 Docker 环境时，返回默认用户（开发模式）。
+    2. Authorization: Bearer <JWT>（有效则返回对应用户）；
+    3. 未配置 API_KEY 且非 Docker 环境时，返回默认用户（开发模式匿名放行）。
 
-    Docker 生产环境必须配置 API_KEY，否则拒绝所有请求。
+    Docker 生产环境必须配置 API_KEY，否则除有效 JWT 外拒绝所有请求。
 
     Args:
         api_key: API Key 头内容。
@@ -79,10 +168,6 @@ async def get_current_user(
     """
     configured_key = getattr(settings, "API_KEY", None) or getattr(settings.security, "API_KEY", None)
 
-    # 未配置 API_KEY 且非 Docker 环境：开发模式允许匿名访问
-    if not configured_key and not settings.IN_DOCKER:
-        return _DEFAULT_USER
-
     if api_key and _verify_api_key(api_key):
         return CurrentUser(user_id="api_key_user", is_authenticated=True)
 
@@ -90,6 +175,11 @@ async def get_current_user(
         user = _extract_user_from_jwt(jwt_credentials)
         if user:
             return user
+
+    # 未配置 API_KEY 且非 Docker 环境：开发模式允许匿名访问。
+    # 注意置于 JWT 校验之后，避免已登录 JWT 用户被并入默认用户。
+    if not configured_key and not settings.IN_DOCKER:
+        return _DEFAULT_USER
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -149,6 +239,14 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
     if api_key and _verify_api_key(api_key):
         await websocket.send_json({"type": "auth_ok"})
         return CurrentUser(user_id="api_key_user", is_authenticated=True)
+
+    # JWT 用户：首帧 {"type": "auth", "token": "<access_token>"}
+    token = first_frame.get("token") if isinstance(first_frame, dict) else None
+    if token:
+        user = verify_jwt_token(token)
+        if user:
+            await websocket.send_json({"type": "auth_ok"})
+            return user
 
     await websocket.close(code=1008, reason="无效的认证凭据")
     raise WebSocketException(code=1008, reason="无效的认证凭据")

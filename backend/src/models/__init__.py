@@ -14,6 +14,7 @@ from .experiment import (
     ExperimentResult,
 )
 from .badcase import Badcase
+from .user import User
 
 __all__ = [
     "Document",
@@ -32,4 +33,5 @@ __all__ = [
     "ExperimentMetric",
     "ExperimentResult",
     "Badcase",
+    "User",
 ]
