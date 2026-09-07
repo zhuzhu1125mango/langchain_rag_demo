@@ -1,0 +1,29 @@
+# Alembic 数据库迁移
+
+基于 async 模板（与 src/database.py 的 asyncpg 引擎一致）。连接串默认取自应用配置
+（src/config → .env 的 PostgreSQL 设置），可用环境变量 `ALEMBIC_DATABASE_URL` 覆盖
+（例如对临时库生成/验证迁移时）。
+
+## 常用命令（在 backend/ 目录下执行）
+
+```bash
+# 依据模型变更生成迁移（生成后请人工检查 versions/ 下的脚本）
+uv run alembic revision --autogenerate -m "描述变更"
+
+# 应用全部未执行迁移
+uv run alembic upgrade head
+
+# 回退一个版本
+uv run alembic downgrade -1
+
+# 已有存量数据库接入迁移体系（只登记版本，不执行 DDL）
+uv run alembic stamp head
+```
+
+## 基线说明
+
+- `versions/27af4193802c_baseline_current_schema.py` 是全量基线（18 张表），
+  由模型 autogenerate 生成，并已在空库上验证 `upgrade head` 与模型零差异。
+- 存量库（app_dev 等）首次接入时执行一次 `uv run alembic stamp head` 即可，
+  之后的新表结构变更一律走 alembic，不再新增 scripts/migrate_*.py 手写脚本。
+- 旧的 scripts/migrate_*.py 为历史一次性迁移，保留作参考，不再维护。

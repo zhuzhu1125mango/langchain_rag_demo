@@ -15,6 +15,7 @@ from .experiment import (
 )
 from .badcase import Badcase
 from .user import User
+from .request_trace import RequestTrace
 
 __all__ = [
     "Document",
