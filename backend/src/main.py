@@ -19,6 +19,7 @@ import os
 import secrets
 import time
 import asyncio
+from logging.handlers import RotatingFileHandler
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,7 +60,16 @@ except ImportError:
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.FileHandler(os.path.join(LOG_DIR, "app.log")), logging.StreamHandler()]
+    handlers=[
+        logging.StreamHandler(),
+        # 根日志轮转：单文件 10MB、保留 5 份，与 start.py 的 rag_system.log 策略一致
+        RotatingFileHandler(
+            os.path.join(LOG_DIR, "app.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
+        ),
+    ]
 )
 logger = logging.getLogger("rag_system")
 
