@@ -6,7 +6,7 @@
 - **文档地址**: `http://localhost:8000/docs` (Swagger UI)
 - **健康检查**: `GET /health`
 - **版本**: v1.0
-- **依赖管理**: Poetry
+- **依赖管理**: uv（uv.lock 锁定版本）
 
 ### API 使用示例
 
@@ -14,18 +14,22 @@
 # 发送消息（非流式）
 curl -X POST http://localhost:8000/api/chat/messages \
   -H "Content-Type: application/json" \
-  -d '{"question": "什么是 RAG？", "stream": false}'
+  -d '{"question": "什么是 RAG？"}'
 
 # 发送消息并启用联网搜索
 curl -X POST http://localhost:8000/api/chat/messages \
   -H "Content-Type: application/json" \
   -d '{"question": "2025 年最新的大模型进展", "use_web_search": true, "search_mode": "simple"}'
 
-# 流式回答
-curl -N "http://localhost:8000/api/chat/stream?question=什么是RAG"
+# 流式回答（SSE，POST body 传参）
+curl -N -X POST http://localhost:8000/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"question": "什么是RAG"}'
 
 # 流式回答并启用联网搜索
-curl -N "http://localhost:8000/api/chat/stream?question=2025年AI趋势&use_web_search=true&search_mode=simple"
+curl -N -X POST http://localhost:8000/api/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"question": "2025年AI趋势", "use_web_search": true, "search_mode": "simple"}'
 
 # 创建知识库
 curl -X POST http://localhost:8000/api/knowledge_bases \
@@ -54,6 +58,8 @@ curl -X POST http://localhost:8000/api/documents/upload \
 10. [系统配置接口](#10-系统配置接口)
 11. [实时通知接口](#11-实时通知接口)（WebSocket）
 12. [错误响应格式](#12-错误响应格式)
+13. [坏例管理接口](#13-坏例管理接口)
+14. [RAG 评估接口](#14-rag-评估接口)
 
 ---
 
@@ -138,17 +144,17 @@ curl -X POST http://localhost:8000/api/documents/upload \
 
 ### 1.2 流式回答（SSE）
 
-**GET** `/api/chat/stream`
+**POST** `/api/chat/stream`
 
-流式获取回答（Server-Sent Events）
+流式获取回答（Server-Sent Events）。采用 POST body 传参而非 GET query：question 走 GET query 会进入 nginx 访问日志与浏览器历史，存在泄露面；且 EventSource 无法携带认证头，POST + fetch 可统一走认证。
 
-**查询参数**:
+**请求体**:
 
-| 参数 | 类型 | 必填 | 说明 |
+| 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | question | string | 是 | 用户问题 |
 | session_id | string | 否 | 会话ID |
-| kb_ids | string[] | 否 | 知识库ID列表（逗号分隔） |
+| kb_ids | string[] | 否 | 知识库ID列表 |
 | use_web_search | boolean | 否 | 是否启用联网搜索，默认false |
 | search_mode | string | 否 | 搜索模式：`simple` / `function_calling` / `agent`，默认 `simple` |
 
@@ -433,12 +439,23 @@ data: {"type": "error", "error": "错误信息"}
 
 ### 3.6 批量删除文档
 
-**DELETE** `/api/documents/batch`
+**POST** `/api/documents/batch/delete`
+
+异步处理：立即返回确认消息，后台删除文档，并通过 WebSocket 实时推送删除进度。
 
 **请求体**:
 ```json
 {
   "ids": ["文档ID1", "文档ID2"]
+}
+```
+
+**成功响应** (200):
+```json
+{
+  "message": "已提交2个删除任务",
+  "deleted_count": 2,
+  "tasks": [{"doc_id": "文档ID1", "kb_id": "所属知识库ID", "task_id": "delete_xxx"}]
 }
 ```
 
@@ -850,7 +867,7 @@ data: {"type": "error", "error": "错误信息"}
 
 ### 11.1 通用通知通道
 
-**WebSocket** `ws://localhost:8000/ws/notifications`
+**WebSocket** `ws://localhost:8000/api/ws/notifications`
 
 **查询参数**:
 
@@ -880,7 +897,7 @@ data: {"type": "error", "error": "错误信息"}
 **客户端示例**:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8000/ws/notifications?channels=kb:*,doc:*');
+const ws = new WebSocket('ws://localhost:8000/api/ws/notifications?channels=kb:*,doc:*');
 
 ws.onmessage = (event) => {
   const msg = JSON.parse(event.data);
@@ -893,13 +910,13 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ### 11.2 知识库变更通知
 
-**WebSocket** `ws://localhost:8000/ws/kb`
+**WebSocket** `ws://localhost:8000/api/ws/kb`
 
 订阅所有知识库列表变更通知。
 
 ### 11.3 文档变更通知
 
-**WebSocket** `ws://localhost:8000/ws/docs/{kb_id}`
+**WebSocket** `ws://localhost:8000/api/ws/docs/{kb_id}`
 
 订阅指定知识库的文档变更通知。
 
@@ -950,29 +967,110 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ---
 
+## 13. 坏例管理接口
+
+坏例（Badcase）用于记录问答质量异常样本，系统会自动分类问题类型并触发意图路由的在线学习。前缀：`/api/badcases`。
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/badcases` | 提交坏例反馈 |
+| GET | `/api/badcases` | 获取坏例列表 |
+| GET | `/api/badcases/stats` | 获取坏例统计（总数/分类分布/平均严重度） |
+| GET | `/api/badcases/categories` | 获取坏例分类列表 |
+
+**创建坏例** `POST /api/badcases`：
+
+```json
+{
+  "question": "必填：用户问题",
+  "answer": "可选：系统回答",
+  "session_id": "可选：关联会话 ID",
+  "message_id": "可选：关联消息 ID",
+  "feedback_type": "可选：反馈类型",
+  "reason": "可选：问题描述原因",
+  "retrieved_sources": "可选：检索到的来源",
+  "intent_decision": "可选：意图路由决策记录"
+}
+```
+
+---
+
+## 14. RAG 评估接口
+
+提供检索质量与生成质量的评估能力，支持单条与批量模式。前缀：`/api/evaluate`。
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/evaluate/retrieval` | 单次检索评估（context precision/recall） |
+| POST | `/api/evaluate/retrieval/batch` | 批量检索评估 |
+| POST | `/api/evaluate/generation` | 单次生成评估（忠实度/相关度） |
+| POST | `/api/evaluate/generation/batch` | 批量生成评估 |
+
+**检索评估请求**：
+
+```json
+{
+  "question": "用户问题",
+  "retrieved_docs": ["检索返回的文档/chunk 列表"],
+  "expected_doc_ids": ["可选：期望命中的文档 ID"],
+  "expected_contents": ["可选：期望命中的内容片段"]
+}
+```
+
+**生成评估请求**：
+
+```json
+{
+  "question": "用户问题",
+  "answer": "系统生成的答案",
+  "contexts": ["生成时使用的上下文片段"]
+}
+```
+
+---
+
 ## 附录：API 端点汇总
+
+> 与代码核对至 2026-09-01（backend/src/api/ 共 14 个路由模块）。
 
 | 模块 | 方法 | 端点 | 说明 |
 |------|------|------|------|
-| 聊天 | POST | `/api/chat/messages` | 发送消息 |
-| 聊天 | GET | `/api/chat/stream` | 流式回答 |
+| 聊天 | POST | `/api/chat/messages` | 发送消息（非流式） |
+| 聊天 | POST | `/api/chat/stream` | 流式回答（SSE） |
 | 聊天 | POST | `/api/chat/suggestions` | 获取推荐问题 |
 | 聊天 | POST | `/api/chat/enhance_context` | 上下文增强 |
+| 聊天 | POST | `/api/chat/messages/{message_id}/feedback` | 提交消息评价 |
 | 聊天 | POST | `/api/chat/rewrite` | 问题重写 |
 | 聊天 | POST | `/api/chat/classify` | 问题分类 |
 | 聊天 | POST | `/api/chat/compare` | 知识库答案对比 |
-| 聊天 | POST | `/api/chat/messages/{message_id}/feedback` | 提交消息评价 |
 | 知识库 | POST | `/api/knowledge_bases` | 创建知识库 |
 | 知识库 | GET | `/api/knowledge_bases` | 获取知识库列表 |
+| 知识库 | GET | `/api/knowledge_bases/default` | 获取默认知识库 |
 | 知识库 | GET | `/api/knowledge_bases/{kb_id}` | 获取知识库详情 |
 | 知识库 | PUT | `/api/knowledge_bases/{kb_id}` | 更新知识库 |
 | 知识库 | DELETE | `/api/knowledge_bases/{kb_id}` | 删除知识库 |
-| 文档 | POST | `/api/documents/upload` | 上传文档 |
+| 知识库 | POST | `/api/knowledge_bases/batch-delete` | 批量删除知识库 |
+| 知识库 | POST | `/api/knowledge_bases/{kb_id}/set_default` | 设为默认知识库 |
+| 知识库 | POST | `/api/knowledge_bases/recommend` | 知识库推荐 |
+| 知识库 | POST | `/api/knowledge_bases/knowledge_graph` | 生成知识图谱 |
+| 文档 | POST | `/api/documents/upload` | 上传文档（后台异步处理） |
+| 文档 | POST | `/api/documents/batch` | 批量上传 |
+| 文档 | GET | `/api/documents/upload/progress/{upload_id}` | 轮询上传/解析进度 |
+| 文档 | GET | `/api/documents/chunk-config` | 获取分块配置 |
+| 文档 | GET | `/api/documents/search` | 文档内容搜索 |
 | 文档 | GET | `/api/documents` | 获取文档列表 |
-| 文档 | GET | `/api/documents/{document_id}` | 获取文档详情 |
-| 文档 | PUT | `/api/documents/{document_id}` | 更新文档 |
-| 文档 | DELETE | `/api/documents/{document_id}` | 删除文档 |
-| 文档 | DELETE | `/api/documents/batch` | 批量删除文档 |
+| 文档 | GET | `/api/documents/{doc_id}` | 获取文档详情 |
+| 文档 | PUT | `/api/documents/{doc_id}` | 更新文档 |
+| 文档 | DELETE | `/api/documents/{doc_id}` | 删除文档 |
+| 文档 | PUT | `/api/documents/{doc_id}/status` | 更新文档状态 |
+| 文档 | GET | `/api/documents/{doc_id}/preview` | 文档预览 |
+| 文档 | GET | `/api/documents/{doc_id}/chunks` | 获取分块列表 |
+| 文档 | GET | `/api/documents/{doc_id}/source/{chunk_index}` | 引用溯源到原文片段 |
+| 文档 | POST | `/api/documents/{doc_id}/reprocess` | 重新解析 |
+| 文档 | POST | `/api/documents/{doc_id}/classify` | 文档分类 |
+| 文档 | POST | `/api/documents/{doc_id}/quality` | 文档质量检测 |
+| 文档 | POST | `/api/documents/batch/delete` | 批量删除文档 |
+| 文档 | POST | `/api/documents/duplicate-detect` | 重复文档检测 |
 | 会话 | POST | `/api/sessions` | 创建会话 |
 | 会话 | GET | `/api/sessions` | 获取会话列表 |
 | 会话 | GET | `/api/sessions/quick_questions` | 获取快捷问题 |
@@ -982,20 +1080,39 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 会话 | POST | `/api/sessions/batch-delete` | 批量删除会话 |
 | 分类 | POST | `/api/categories` | 创建分类 |
 | 分类 | GET | `/api/categories` | 获取分类列表 |
+| 分类 | GET | `/api/categories/{category_id}` | 获取分类详情 |
 | 分类 | PUT | `/api/categories/{category_id}` | 更新分类 |
 | 分类 | DELETE | `/api/categories/{category_id}` | 删除分类 |
 | 标签 | POST | `/api/tags` | 创建标签 |
 | 标签 | GET | `/api/tags` | 获取标签列表 |
+| 标签 | PUT | `/api/tags/{tag_id}` | 更新标签 |
 | 标签 | DELETE | `/api/tags/{tag_id}` | 删除标签 |
-| 反馈 | GET | `/api/feedback/stats` | 获取评价统计 |
+| 反馈 | POST | `/api/feedback` | 提交反馈 |
+| 反馈 | GET | `/api/feedback` | 获取反馈列表 |
+| 反馈 | GET | `/api/feedback/stats` | 获取反馈统计 |
+| 反馈 | GET | `/api/feedback/{feedback_id}` | 获取反馈详情 |
+| 反馈 | DELETE | `/api/feedback/{feedback_id}` | 删除反馈 |
+| 反馈 | POST | `/api/feedback/like` | 点赞 |
+| 反馈 | POST | `/api/feedback/dislike` | 点踩 |
+| 学习 | GET | `/api/learning/stats` | 获取学习统计信息 |
+| 学习 | GET | `/api/learning/misclassification` | 获取误分类分析 |
 | 学习 | POST | `/api/learning/trigger` | 触发学习 |
-| 学习 | GET | `/api/learning/status` | 获取学习状态 |
+| 学习 | POST | `/api/learning/record-execution` | 记录执行 |
+| 学习 | POST | `/api/learning/record-feedback` | 记录反馈 |
+| 学习 | PUT | `/api/learning/config` | 更新学习引擎配置 |
+| 学习 | GET | `/api/learning/config` | 获取学习引擎配置 |
+| 学习 | POST | `/api/learning/enable` | 启用学习引擎 |
+| 学习 | POST | `/api/learning/disable` | 禁用学习引擎 |
 | 实验 | POST | `/api/experiments` | 创建实验 |
 | 实验 | GET | `/api/experiments` | 获取实验列表 |
 | 实验 | GET | `/api/experiments/{experiment_id}` | 获取实验详情 |
 | 实验 | POST | `/api/experiments/{experiment_id}/start` | 启动实验 |
 | 实验 | POST | `/api/experiments/{experiment_id}/stop` | 停止实验 |
 | 实验 | POST | `/api/experiments/{experiment_id}/allocate` | 分配实验流量 |
+| 实验 | POST | `/api/experiments/{experiment_id}/metrics` | 记录实验指标 |
+| 实验 | GET | `/api/experiments/{experiment_id}/metrics` | 获取实验指标 |
+| 实验 | POST | `/api/experiments/{experiment_id}/analyze` | 分析实验 |
+| 实验 | GET | `/api/experiments/{experiment_id}/result` | 获取实验结果 |
 | 实验 | DELETE | `/api/experiments/batch` | 批量删除实验 |
 | 配置 | GET | `/api/config` | 获取系统配置 |
 | 配置 | GET | `/api/config/processing` | 获取文档处理配置 |
@@ -1003,10 +1120,19 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 配置 | GET | `/api/config/model` | 获取模型配置 |
 | 配置 | POST | `/api/config/reset` | 重置配置为默认值 |
 | 配置 | GET | `/api/config/info` | 获取系统信息 |
-| 通知 | WS | `/ws/notifications` | 通用实时通知通道 |
-| 通知 | WS | `/ws/kb` | 知识库变更通知 |
-| 通知 | WS | `/ws/docs/{kb_id}` | 文档变更通知 |
-| 通知 | WS | `/ws/upload/{upload_id}` | 上传进度通知 |
+| 坏例 | POST | `/api/badcases` | 提交坏例反馈 |
+| 坏例 | GET | `/api/badcases` | 获取坏例列表 |
+| 坏例 | GET | `/api/badcases/stats` | 获取坏例统计 |
+| 坏例 | GET | `/api/badcases/categories` | 获取坏例分类列表 |
+| 评估 | POST | `/api/evaluate/retrieval` | 单次检索评估 |
+| 评估 | POST | `/api/evaluate/retrieval/batch` | 批量检索评估 |
+| 评估 | POST | `/api/evaluate/generation` | 单次生成评估 |
+| 评估 | POST | `/api/evaluate/generation/batch` | 批量生成评估 |
+| 通知 | WS | `/api/ws/notifications` | 通用实时通知通道 |
+| 通知 | WS | `/api/ws/kb` | 知识库变更通知 |
+| 通知 | WS | `/api/ws/docs/{kb_id}` | 文档变更通知 |
+| 文档 | WS | `/api/documents/upload/progress/ws/{upload_id}` | 上传进度实时通知 |
+| 健康检查 | GET | `/` | 根路径信息 |
 | 健康检查 | GET | `/health` | 健康检查 |
 | 健康检查 | GET | `/health/detail` | 详细健康检查（含数据库、Redis） |
 | 监控 | GET | `/metrics` | 获取 Prometheus 监控指标 |

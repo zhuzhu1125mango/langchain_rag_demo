@@ -298,7 +298,7 @@ else:
         logger.warning("SECRET_KEY 未设置，已生成临时随机密钥（重启后失效，仅限开发环境）")
 ```
 
-**5.5 部署文档**：`docs/deployment.md` 与 `.env.prod` 注释补充「非 Docker 生产部署必须设 `APP_ENV=production`」。
+**5.5 部署文档**：`docs/guide/deployment.md` 与 `.env.prod` 注释补充「非 Docker 生产部署必须设 `APP_ENV=production`」。
 
 ### 兼容性
 - `docker-compose.yml` 传 `IN_DOCKER: "true"` → `IS_PRODUCTION=true`，现有 Docker 生产流程**不变**
@@ -335,7 +335,7 @@ MILVUS_REBUILD_ON_MISMATCH: bool = False
 **6.3 移除两处外层 `except Exception: pass`**（`:154-155`、`:183-184`）：让异常传播到启动流程 fail-fast（该修复同时消除中等severity#16 的一部分；实施时如涉及其他兼容检查路径的 pass，仅改为 `logger.error` + 返回安全状态，不扩大范围）。
 
 ### 兼容性
-- **行为变更**：现有"换 embedding 模型 → 重启自动清库重建"的工作流会被阻断。需要旧行为时设置 `MILVUS_REBUILD_ON_MISMATCH=true`（在 `.env.example` 与 `docs/deployment.md` 说明）
+- **行为变更**：现有"换 embedding 模型 → 重启自动清库重建"的工作流会被阻断。需要旧行为时设置 `MILVUS_REBUILD_ON_MISMATCH=true`（在 `.env.example` 与 `docs/guide/deployment.md` 说明）
 - 正常启动（维度一致）完全不受影响
 
 ### 测试计划

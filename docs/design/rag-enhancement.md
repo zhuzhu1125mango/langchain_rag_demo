@@ -369,8 +369,8 @@ async def search_hybrid(query, kb_ids=None, document_ids=None):
 
 **C. 运行方式**
 
-- `poetry run python -m pytest tests/evaluation/test_kb_retrieval.py`：纯检索指标。
-- `poetry run python -m pytest tests/evaluation/test_rag_quality.py --run-e2e`：端到端生成质量。
+- `uv run python -m pytest tests/evaluation/test_kb_retrieval.py`：纯检索指标。
+- `uv run python tests/evaluation/verify_e2e.py`：端到端验证（天气/时间/搜索场景）。
 - 默认 e2e 跳过，CI 可选执行。
 
 **D. 结果看板**

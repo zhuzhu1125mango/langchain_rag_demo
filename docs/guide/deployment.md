@@ -128,11 +128,8 @@ docker-compose -f docker-compose.dev.yml logs milvus-standalone | findstr "Proxy
 ```bash
 cd backend
 
-# 使用 Poetry 创建虚拟环境
-poetry env use python
-
-# 安装依赖（包括开发依赖；poetry.lock 为后端唯一依赖描述）
-poetry install
+# 使用 uv 同步依赖（按 uv.lock 精确安装；uv.lock 为后端唯一依赖描述）
+uv sync --frozen
 
 # 安装 Ollama（必须）
 # 下载地址: https://ollama.com/download
@@ -144,7 +141,7 @@ ollama pull bge-m3:latest
 ollama pull qllama/bge-reranker-v2-m3:latest
 
 # 启动服务（推荐方式）
-poetry run python start.py
+uv run python start.py
 ```
 
 ### 3.4 前端本地开发

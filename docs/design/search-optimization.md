@@ -8,7 +8,7 @@
 
 ### 1.1 问题背景
 
-当前项目已对"金价、汇率、天气、时间"等垂类实时查询做了结构化 API 工具化（见 `docs/design_price_trustworthiness.md`），但**通用网页搜索链路**仍存在以下短板：
+当前项目已对"金价、汇率、天气、时间"等垂类实时查询做了结构化 API 工具化（见 `docs/design/price-trustworthiness.md`），但**通用网页搜索链路**仍存在以下短板：
 
 1. **Query 改写能力弱**：`web_search_service.py` 中的 `SearchQueryRewriter` 虽有基础改写和 LLM 多角度改写，但缺少上下文补全（多轮对话中的代词/省略实体），且改写后 query 不保证保留原始问题，存在召回丢失风险。
 2. **搜索结果后处理不够**：`search_postprocessor.py` 已有去重、评分、重排，但缺少"数值提取与交叉验证"的通用化（仅价格场景有 `cross_validate_numeric`），且权威度评分未与最终置信度模型联动。

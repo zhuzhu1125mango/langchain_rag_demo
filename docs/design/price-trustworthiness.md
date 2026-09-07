@@ -916,7 +916,7 @@ flowchart TD
 | 10 | 新增/修改单元测试 | `backend/tests/evaluation/test_rag_scenarios.py` | 上述所有模块 |
 | 11 | 新增端到端验证 | `backend/tests/evaluation/verify_e2e.py` | 上述所有模块 |
 | 12 | 新增环境变量并更新 docker-compose | `.env.example`, `.env.dev`, `.env.prod`, `docker-compose.yml`, `docker-compose.dev.yml` | 无 |
-| 13 | 集成测试与文档更新 | `docs/design_price_trustworthiness.md`（本文档） | 无 |
+| 13 | 集成测试与文档更新 | `docs/design/price-trustworthiness.md`（本文档） | 无 |
 
 ### 10.2 文件依赖关系
 

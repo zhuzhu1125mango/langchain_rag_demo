@@ -85,7 +85,7 @@ KB_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
 SEARCH_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
 ```
 
-> ⚠️ **Embedding 维度变更注意**：默认 Embedding 从 `nomic-embed-text`（768 维）切换为 `bge-m3`（1024 维）。现有 Milvus 集合会在服务启动时自动检测维度不一致并重建，旧知识库数据将丢失。请在启动前运行 `cd backend && poetry run python scripts/migrate_embedding_model.py --backup` 备份并重新上传文档。
+> ⚠️ **Embedding 维度变更注意**：默认 Embedding 从 `nomic-embed-text`（768 维）切换为 `bge-m3`（1024 维）。现有 Milvus 集合会在服务启动时自动检测维度不一致并重建，旧知识库数据将丢失。请在启动前运行 `cd backend && uv run python scripts/migrate_embedding_model.py --backup` 备份并重新上传文档。
 
 ---
 
@@ -356,17 +356,14 @@ cp ../.env.dev ../.env
 ```bash
 cd backend
 
-# 使用 Poetry 创建虚拟环境（仅首次）
-poetry env use python
-
-# 安装依赖
-poetry install
+# 同步依赖（自动创建 .venv 虚拟环境，按 uv.lock 锁定版本安装）
+uv sync
 
 # 启动服务（推荐方式）
-poetry run python start.py
+uv run python start.py
 
 # 开发模式启动（代码改动后自动热重载，无需手动重启）
-poetry run python start.py --reload
+uv run python start.py --reload
 
 # API文档: http://localhost:8000/docs
 ```
@@ -375,8 +372,8 @@ poetry run python start.py --reload
 
 | 启动命令 | 模式 | 适用场景 |
 |---------|------|---------|
-| `poetry run python start.py` | 普通模式 | 调试断点、性能测试、首次启动检查 |
-| `poetry run python start.py --reload` | 热重载模式 | 日常开发迭代（推荐） |
+| `uv run python start.py` | 普通模式 | 调试断点、性能测试、首次启动检查 |
+| `uv run python start.py --reload` | 热重载模式 | 日常开发迭代（推荐） |
 
 热重载模式基于 uvicorn `--reload`，保存 `backend/src/` 下任意 `.py` 文件后约 1-2 秒自动重启服务。
 
@@ -384,7 +381,7 @@ poetry run python start.py --reload
 > - 仅限本地开发使用，生产/Docker 环境不要启用
 > - 修改 `config.py`、`.env` 等配置文件后，部分单例（如 OllamaEmbeddings 客户端）可能不会重建，若发现"改了没生效"请手动重启一次
 > - 首次启动仍会执行 Ollama / PostgreSQL / MinIO / Milvus 连通性检查
-> - 也可通过环境变量启用：`$env:RELOAD_MODE="true"; poetry run python start.py`
+> - 也可通过环境变量启用：`$env:RELOAD_MODE="true"; uv run python start.py`
 
 #### 4. 启动前端
 
@@ -438,8 +435,8 @@ langchain_rag_demo/
 │   ├── Dockerfile.dev        # 后端开发 Dockerfile（热重载）
 │   ├── Dockerfile.prod       # 后端生产 Dockerfile
 │   ├── start.py              # 后端入口（环境检查 + FastAPI 启动）
-│   ├── pyproject.toml        # Poetry 依赖配置
-│   ├── poetry.lock           # 锁定依赖版本（唯一依赖描述）
+│   ├── pyproject.toml        # uv 依赖配置
+│   ├── uv.lock               # 锁定依赖版本（唯一依赖描述）
 │   ├── scripts/              # 数据库迁移脚本
 │   ├── tests/                # 测试用例
 │   └── src/                  # 源码目录（统一以 `from src.* import` 方式引用）
@@ -839,10 +836,18 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 
 ## 📖 文档
 
+文档索引见 [docs/README.md](docs/README.md)。结构：核心参考（architecture / api）置于顶层，操作指南归入 `guide/`，设计文档归入 `design/`，一次性报告归入 `archive/`。
+
 | 文档 | 说明 | 路径 |
 |------|------|------|
+| 架构总览 | 服务拓扑、RAG 决策管线、代码地图 | [docs/architecture.md](docs/architecture.md) |
 | API 文档 | 完整的 API 接口说明 | [docs/api.md](docs/api.md) |
-| 部署指南 | 开发/生产环境部署说明 | [docs/deployment.md](docs/deployment.md) |
+| 部署指南 | 开发/生产环境部署说明 | [docs/guide/deployment.md](docs/guide/deployment.md) |
+| 开发与测试指南 | 本地开发、测试执行、CI 说明、踩坑记录 | [docs/guide/development.md](docs/guide/development.md) |
+| 监控运维指南 | 监控栈使用、指标说明、告警规则与处置 | [docs/guide/monitoring.md](docs/guide/monitoring.md) |
+| 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
+| 专项设计文档 | 检索增强/意图路由/搜索优化等设计 | `docs/design/` |
+| 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](docs/archive/code-review-2026-08.md) |
 | 快速开始 | 项目入门指南 | 本文件 |
 
 ---
