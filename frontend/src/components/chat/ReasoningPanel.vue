@@ -4,8 +4,8 @@
     class="rounded-xl border transition-all duration-200 overflow-hidden"
     :class="[
       isExpanded
-        ? 'bg-gray-50/80 border-gray-200 dark:bg-gray-800/60 dark:border-gray-700'
-        : 'bg-gray-50 border-gray-200 hover:bg-gray-100 dark:bg-gray-800/40 dark:border-gray-700 dark:hover:bg-gray-800/60'
+        ? 'bg-gray-50/80 border-gray-200 dark:bg-dark-700/60 dark:border-dark-600'
+        : 'bg-gray-50 border-gray-200 hover:bg-gray-100 dark:bg-dark-700/40 dark:border-dark-600 dark:hover:bg-dark-700/60'
     ]"
   >
     <!-- 折叠态头部：摘要 + 展开按钮 -->
@@ -40,7 +40,7 @@
         </div>
         <button
           type="button"
-          class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+          class="p-1 rounded hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
           @click="isExpanded = false"
         >
           <ChevronUp class="w-3.5 h-3.5 text-gray-400" />
@@ -75,7 +75,7 @@
             <div
               v-if="index < sortedSteps.length - 1"
               class="w-px flex-1 min-h-[16px] my-0.5"
-              :class="step.status === 'failed' ? 'bg-red-200 dark:bg-red-900/40' : 'bg-gray-200 dark:bg-gray-700'"
+              :class="step.status === 'failed' ? 'bg-red-200 dark:bg-red-900/40' : 'bg-gray-200 dark:bg-dark-600'"
             />
           </div>
 
@@ -87,7 +87,7 @@
               </span>
               <span
                 v-if="step.duration_ms && step.duration_ms > 0"
-                class="text-[10px] text-gray-400 dark:text-gray-500"
+                class="text-xs text-gray-400 dark:text-gray-500"
               >
                 {{ step.duration_ms }}ms
               </span>
@@ -100,7 +100,7 @@
             </p>
             <p
               v-if="step.metadata?.sources_count !== undefined"
-              class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5"
+              class="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
             >
               来源数：{{ step.metadata.sources_count }}
             </p>
@@ -133,10 +133,19 @@ const hasReasoning = computed(() => {
   return Array.isArray(props.steps) && props.steps.length > 0
 })
 
+/** 按 step 去重：同一阶段保留最后出现的事件（与后端"新事件替换旧事件"语义一致）。
+ * 历史消息的 reasoning 数组可能仍存有逐事件累积的重复条目（如 answer_generate 的
+ * running + done 两条），不去重会导致残留 running 状态使 spinner 一直转圈。 */
+const dedupedSteps = computed(() => {
+  if (!props.steps) return []
+  const map = new Map<string, ReasoningStep>()
+  props.steps.forEach(s => map.set(s.step, s))
+  return Array.from(map.values())
+})
+
 /** 按时间戳排序的步骤列表（未提供时间戳的排在最后） */
 const sortedSteps = computed(() => {
-  if (!props.steps) return []
-  return [...props.steps].sort((a, b) => {
+  return [...dedupedSteps.value].sort((a, b) => {
     const ta = a.timestamp ?? Number.MAX_SAFE_INTEGER
     const tb = b.timestamp ?? Number.MAX_SAFE_INTEGER
     return ta - tb
@@ -197,7 +206,7 @@ function getStatusDotClass(status: ReasoningStep['status']): string {
     case 'failed':
       return 'bg-red-100 dark:bg-red-900/40'
     default:
-      return 'bg-gray-100 dark:bg-gray-700'
+      return 'bg-gray-100 dark:bg-dark-600'
   }
 }
 </script>

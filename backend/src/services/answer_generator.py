@@ -19,11 +19,30 @@ logger = logging.getLogger(__name__)
 class AnswerGenerator:
     """答案生成器。"""
 
-    def __init__(self, llm, numerical_validator: Optional[NumericalValidator] = None):
+    def __init__(
+        self,
+        llm,
+        numerical_validator: Optional[NumericalValidator] = None,
+        llm_direct=None,
+    ):
         self.llm = llm
+        # 深度思考关闭时使用的非思考专用模型（think=False 时切换，避免混合模型空烧思考 token）
+        self.llm_direct = llm_direct
         self.prompt_loader = PromptLoader()
         self.context_builder = ContextBuilder()
         self.numerical_validator = numerical_validator
+
+    def _select_llm(self, think: Optional[bool]):
+        """按深度思考开关选择模型实例。
+
+        True: 思考模型并绑定 reasoning=True；False: 非思考专用模型；
+        None: 思考模型默认行为（模型不支持思考时）。
+        """
+        if think is False and self.llm_direct is not None:
+            return self.llm_direct
+        if think is not None:
+            return self.llm.bind(reasoning=think)
+        return self.llm
 
     def _build_context(
         self,
@@ -159,8 +178,13 @@ class AnswerGenerator:
         kb_docs: Optional[List[Any]] = None,
         kb_source_metadata: Optional[List[Dict[str, Any]]] = None,
         is_realtime: bool = False,
+        think: Optional[bool] = None,
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """非流式生成答案。
+
+        Args:
+            think: 深度思考开关（True 强制开启 / False 强制关闭 / None 用模型默认）。
+                   仅对支持思考的模型生效（config.OLLAMA_SUPPORTS_THINKING）。
 
         Returns:
             (answer, sources_metadata)
@@ -177,7 +201,8 @@ class AnswerGenerator:
         else:
             prompt = await self._build_prompt(question, history_context, context)
 
-        answer = await self.llm.ainvoke(prompt)
+        llm = self._select_llm(think)
+        answer = await llm.ainvoke(prompt)
         answer.content = self._append_numerical_warnings(answer.content, sources)
         return answer.content, sources
 
@@ -189,11 +214,17 @@ class AnswerGenerator:
         kb_docs: Optional[List[Any]] = None,
         kb_source_metadata: Optional[List[Dict[str, Any]]] = None,
         is_realtime: bool = False,
+        think: Optional[bool] = None,
     ):
         """流式生成答案。
 
+        Args:
+            think: 深度思考开关（True 强制开启 / False 强制关闭 / None 用模型默认）。
+
         Yields:
-            (chunk_content, sources_metadata)
+            (chunk_content, sources_metadata, thinking_content)
+            thinking_content 为模型原始思考文本增量（reasoning=True 时出现在
+            additional_kwargs["reasoning_content"]），无思考时为空字符串。
         """
         tool_results = tool_results or []
         kb_docs = kb_docs or []
@@ -207,8 +238,10 @@ class AnswerGenerator:
         else:
             prompt = await self._build_prompt(question, history_context, context)
 
-        async for chunk in self.llm.astream(prompt):
-            yield chunk.content, sources
+        llm = self._select_llm(think)
+        async for chunk in llm.astream(prompt):
+            thinking = (chunk.additional_kwargs or {}).get("reasoning_content") or ""
+            yield chunk.content, sources, thinking
 
     async def generate_with_citation(
         self,
@@ -220,6 +253,7 @@ class AnswerGenerator:
         search_sources: Optional[List[Dict[str, Any]]] = None,
         is_realtime: bool = False,
         citation_backfiller: Optional[Any] = None,
+        think: Optional[bool] = None,
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """生成答案并自动补全内联引用。
 
@@ -250,6 +284,7 @@ class AnswerGenerator:
             kb_docs=kb_docs,
             kb_source_metadata=kb_source_metadata,
             is_realtime=is_realtime,
+            think=think,
         )
 
         # 无 backfiller 或无搜索来源 → 直接返回（仅依赖 LLM 自身标注）

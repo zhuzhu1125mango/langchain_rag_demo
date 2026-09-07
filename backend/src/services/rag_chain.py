@@ -27,8 +27,9 @@ from .knowledge_graph_generator import KnowledgeGraphGenerator
 from .tools.plugins._datetime_impl import build_datetime_answer
 from .intent_router import IntentRouter, PrimaryMode, FallbackStrategy
 from .tool_executor import ToolExecutor
+from .semantic_cache_service import SemanticCacheService
 from .answer_generator import AnswerGenerator
-from .context_builder import ContextBuilder
+from .context_builder import ContextBuilder, estimate_token_count
 from .numerical_validator import NumericalValidator
 from .model_manager import model_manager
 from .output_sanitizer import OutputSanitizer
@@ -41,6 +42,7 @@ from .reasoning import (
     REASONING_STEP_KB_RETRIEVE,
     REASONING_STEP_TOOL_EXECUTE,
     REASONING_STEP_ANSWER_GENERATE,
+    REASONING_STEP_CACHE_HIT,
     REASONING_STEP_FALLBACK,
 )
 
@@ -63,6 +65,9 @@ _request_decision: ContextVar[Optional[DecisionResult]] = ContextVar(
 _request_retrieval_score: ContextVar[float] = ContextVar(
     "rag_request_retrieval_score", default=0.0
 )
+
+# P1-3 语义缓存：后台写入任务引用集，防止 fire-and-forget 任务被垃圾回收
+_background_store_tasks: set = set()
 
 
 # ----------------------------------------------------------------------
@@ -116,12 +121,26 @@ LLM_DIRECT_TEMPLATE = """
 """
 
 
+# 深度思考开关决策（on/off 两态，前端开关透传）
+def should_think(deep_thinking: str = "off") -> Optional[bool]:
+    """深度思考开关决策。
+
+    Returns:
+        True: 开启思考；False: 关闭思考；
+        None: 不干预，使用模型默认行为（模型不支持思考时）。
+    """
+    if not settings.model.OLLAMA_SUPPORTS_THINKING:
+        return None
+    return deep_thinking == "on"
+
+
 @dataclass
 class _PipelineState:
     """问答管线各阶段的共享状态（单次请求内有效，不跨请求复用）。
 
     事件协议（_pipeline 及各阶段 yield 的元组，首元素为事件类型）：
     - ("reasoning", payload_str): reasoning 过程事件（流式对外转发，非流式忽略）
+    - ("thinking", text): 模型原始思考增量（流式对外转发，非流式忽略）
     - ("chunk", text, source_texts, source_metadata, answer_type): 答案片段
     - ("final", state): 终态事件，携带完整状态供 run() 做非流式后处理
     """
@@ -131,6 +150,15 @@ class _PipelineState:
     history: Optional[List[dict]]
     use_web_search: bool
     search_mode: str
+    # 深度思考开关：on | off（前端开关透传）
+    deep_thinking: str = "off"
+    # 深度思考决策结果（True/False 强制，None 用模型默认）
+    think: Optional[bool] = None
+    # Trace 归属用户 ID（run()/arun_stream() 透传）
+    user_id: Optional[str] = None
+    # 语义缓存：本次请求是否已命中（命中后跳过写缓存）、查询向量（finalize 时复用写入）
+    semantic_cache_hit: bool = False
+    semantic_cache_embedding: Optional[Any] = None
 
     trace: Any = None
     resolved_question: str = ""
@@ -154,6 +182,29 @@ class _PipelineState:
     # 阶段置 True 表示流程已产出完整回答（datetime/tool_first/纯 Agent 短路）
     finished: bool = False
 
+    # P1-2 可观测性：LLM 返回的 token 元数据（最后一个携带计数的 chunk 生效）
+    llm_token_meta: Optional[Dict[str, Any]] = None
+    # token 用量是否已写入 trace（避免重复估算）
+    token_usage_recorded: bool = False
+
+
+class _StageTimer:
+    """阶段计时上下文管理器：退出时把阶段名/状态/耗时写入 Trace（P1-2）。"""
+
+    def __init__(self, trace, name: str):
+        self._trace = trace
+        self._name = name
+        self._t0 = 0.0
+
+    async def __aenter__(self):
+        self._t0 = time.time()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        status = "error" if exc_type else "done"
+        self._trace.add_stage(self._name, status, int((time.time() - self._t0) * 1000))
+        return False
+
 
 class RAGChain(AsyncSingleton["RAGChain"]):
     """RAG 问答链类，结合知识库与 LLM 进行智能问答。"""
@@ -166,10 +217,15 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             strategy_manager: 策略管理器实例（可选）。
         """
         self.llm = None
+        # 深度思考关闭时的非思考专用模型（_async_init 中按配置创建）
+        self.llm_direct = None
         self.vector_store = vector_store
         self.retriever = None
         self.strategy_manager = strategy_manager
         self.decision_pipeline = None
+        # MiniLM 相似度模型：主问答链路已改用检索分数判定相关性（C8），
+        # 仅 kb_comparator / document_analyzer / knowledge_graph_generator 等
+        # 低频功能经 _init_similarity_model 惰性加载使用，主链路不再触发加载
         self.similarity_threshold = 0.4
         self.sentence_transformer = None
         self.last_reasoning: List[Dict[str, Any]] = []
@@ -204,7 +260,17 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         self.decision_pipeline = DecisionPipeline(self.strategy_manager)
 
         answer_model = await model_manager.get_model_for_task("answer")
-        self.llm = ChatOllama(model=answer_model, streaming=True)
+        self.llm = ChatOllama(model=answer_model, streaming=True, num_ctx=settings.model.OLLAMA_NUM_CTX)
+        # 深度思考关闭时的非思考专用模型（混合思考模型无法通过提示词真正跳过思考）；
+        # 未配置 OLLAMA_DIRECT_MODEL_NAME 时为 None，调用方回退主模型并绑定 reasoning=False
+        self.llm_direct = None
+        if settings.model.OLLAMA_DIRECT_MODEL_NAME:
+            self.llm_direct = ChatOllama(
+                model=settings.model.OLLAMA_DIRECT_MODEL_NAME, streaming=True, num_ctx=settings.model.OLLAMA_NUM_CTX
+            )
+
+        # 辅助任务统一走 fast 模型并关闭思考（B3/C2），避免占用主模型与空烧思考链
+        fast_llm = await model_manager.get_chat_llm("fast", think=False)
 
         # 初始化联网搜索服务（注入 LLM 和缓存）
         cache_service = None
@@ -213,7 +279,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             cache_service = await CacheService.get_instance()
         except Exception as e:
             logger.warning(f"缓存服务初始化失败，联网搜索将不使用缓存: {e}")
-        self.web_search_service = WebSearchService(llm=self.llm, cache_service=cache_service)
+        self.web_search_service = WebSearchService(llm=fast_llm, cache_service=cache_service)
 
         # 初始化 Phase 3 Agent（按需延迟创建 handler，但先创建 toolkit）
         self.search_toolkit = SearchToolkit(self.web_search_service)
@@ -224,6 +290,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         self.answer_generator = AnswerGenerator(
             self.llm,
             numerical_validator=NumericalValidator(),
+            llm_direct=self.llm_direct,
         )
         self.context_builder = ContextBuilder()
 
@@ -261,7 +328,8 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         return await super().get_instance(vector_store, strategy_manager)
 
     def _init_similarity_model(self):
-        """初始化语义相似度模型（延迟加载）"""
+        """初始化 MiniLM 相似度模型（仅 kb_comparator / document_analyzer /
+        knowledge_graph_generator 等低频功能使用；主问答链路已改用检索分数，C8）"""
         if self.sentence_transformer is None:
             try:
                 from sentence_transformers import SentenceTransformer, util
@@ -272,12 +340,18 @@ class RAGChain(AsyncSingleton["RAGChain"]):
 
     async def _calculate_relevance(self, question, docs):
         """
-        计算检索文档与问题的相关性
-        
+        计算检索文档与问题的相关性（C8：复用检索阶段分数，移除 MiniLM 重复编码）
+
+        - rerank 开启且模型加载成功时，rerank_score 为 Cross-Encoder 相关性
+          （0~1），按 KB_RELEVANCE_SCORE_THRESHOLD 判定"是否有高度相关内容"；
+        - rerank 关闭/未配置/模型加载失败时，rerank_score 退化为 RRF 排序分
+          （无量纲，约 0.01~0.03），不可作相关性依据——保守认为检索结果相关
+          （与原 MiniLM 不可用时的降级行为一致），避免误丢检索结果。
+
         Args:
-            question: 用户问题
-            docs: 检索到的文档列表
-            
+            question: 用户问题（保留签名兼容，分数判定不再使用）
+            docs: 检索到的文档列表（Document.metadata 携带检索分数）
+
         Returns:
             tuple: (avg_score, has_relevant)
                 - avg_score: 平均相关度分数
@@ -285,28 +359,32 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         """
         if not docs or len(docs) == 0:
             return 0.0, False
-        
-        self._init_similarity_model()
-        
-        if self.sentence_transformer is None:
-            return 0.6, True
-        
-        question_embedding = await asyncio.to_thread(self.sentence_transformer.encode, question)
-        total_score = 0.0
-        relevant_count = 0
-        
-        for doc in docs:
-            doc_content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
-            doc_embedding = await asyncio.to_thread(self.sentence_transformer.encode, doc_content)
-            score = float(self.similarity_util.cos_sim(question_embedding, doc_embedding))
-            total_score += score
-            if score >= self.similarity_threshold:
-                relevant_count += 1
-        
-        avg_score = total_score / len(docs)
-        has_relevant = relevant_count > 0 or avg_score >= self.similarity_threshold
-        
-        return avg_score, has_relevant
+
+        def _meta_score(doc, key):
+            meta = getattr(doc, "metadata", None) or {}
+            return float(meta.get(key, 0.0) or 0.0)
+
+        from src.services.hybrid_search import KBReranker
+
+        if (
+            settings.processing.KB_RERANK_ENABLED
+            and settings.processing.KB_RERANK_MODEL
+            and KBReranker.model_loaded()
+        ):
+            scores = [_meta_score(doc, "rerank_score") for doc in docs]
+            if not any(s > 0.0 for s in scores):
+                # 文档未经 rerank 打分（如混合检索失败回退 dense）：无相关性分数，
+                # 保守视为相关，避免误丢结果
+                avg = sum(_meta_score(doc, "score") for doc in docs) / len(docs)
+                return avg, True
+            threshold = settings.processing.KB_RELEVANCE_SCORE_THRESHOLD
+            avg_score = sum(scores) / len(scores)
+            has_relevant = any(s >= threshold for s in scores)
+            return avg_score, has_relevant
+
+        # rerank 未参与：以 metadata.score（rerank_score 或 dense 余弦）均值作参考分
+        avg = sum(_meta_score(doc, "score") for doc in docs) / len(docs)
+        return avg, True
 
     def get_last_retrieval_score(self):
         """
@@ -684,24 +762,36 @@ class RAGChain(AsyncSingleton["RAGChain"]):
     # 统一问答管线：流式/非流式共用的单一实现。
     # arun_stream() 转发事件给 SSE 消费方；run() 累积 chunk 返回完整结果。
     # ------------------------------------------------------------------
-    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple"):
-        """执行完整问答流程，按事件协议产出 reasoning/chunk/final 事件。"""
+    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off"):
+        """执行完整问答流程，按事件协议产出 reasoning/chunk/final 事件。
+
+        user_id / session_id 用于 Trace 归属（request_traces 表按用户隔离查询）。
+        deep_thinking: 深度思考开关（on/off）。
+        """
         state = _PipelineState(
             question=question,
             kb_ids=kb_ids,
             history=history,
             use_web_search=use_web_search,
             search_mode=search_mode,
+            deep_thinking=deep_thinking,
+            user_id=user_id,
         )
+        state.think = should_think(deep_thinking)
         state.trace = TraceCollector()
-        state.trace.set_basic(question=question)
+        state.trace.set_basic(question=question, session_id=session_id, user_id=user_id)
 
         # 阶段 1：上下文增强（指代消解）
-        await self._stage_enhance_context(state)
+        async with _StageTimer(state.trace, "context_enhance"):
+            await self._stage_enhance_context(state)
 
         # 阶段 2：时间/日期类问题快捷返回
+        datetime_start = time.time()
         datetime_answer = build_datetime_answer(state.resolved_question)
         if datetime_answer:
+            state.trace.add_stage(
+                "datetime_tool", "done", int((time.time() - datetime_start) * 1000)
+            )
             if PROMETHEUS_AVAILABLE:
                 record_kb_query("datetime_tool")
             state.final_answer = datetime_answer
@@ -711,39 +801,55 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             return
 
         # 阶段 3：意图路由（含问题改写）
-        async for ev in self._stage_intent(state):
-            yield ev
+        async with _StageTimer(state.trace, "intent_route"):
+            async for ev in self._stage_intent(state):
+                yield ev
 
         # 阶段 4：工具优先（天气/计算等 tool_first 类）
-        async for ev in self._stage_tool_first(state):
-            yield ev
+        async with _StageTimer(state.trace, "tool_first"):
+            async for ev in self._stage_tool_first(state):
+                yield ev
         if state.finished:
             async for ev in self._finalize(state):
                 yield ev
             return
 
         # 阶段 5：知识库使用决策
-        await self._stage_decide(state)
+        async with _StageTimer(state.trace, "kb_decision"):
+            await self._stage_decide(state)
+
+        # 阶段 5.5：语义缓存查找（P1-3，仅纯知识库问答路径）
+        async with _StageTimer(state.trace, "semantic_cache"):
+            async for ev in self._stage_semantic_cache_lookup(state):
+                yield ev
+        if state.finished:
+            async for ev in self._finalize(state):
+                yield ev
+            return
 
         # 阶段 6：Agent 模式（纯模式短路 / 混合收集上下文 / Phase 2 降级）
-        async for ev in self._stage_agent(state):
-            yield ev
+        async with _StageTimer(state.trace, "agent_mode"):
+            async for ev in self._stage_agent(state):
+                yield ev
         if state.finished:
             async for ev in self._finalize(state):
                 yield ev
             return
 
         # 阶段 7：常规联网搜索（Phase 2）
-        async for ev in self._stage_web_search(state):
-            yield ev
+        async with _StageTimer(state.trace, "web_search"):
+            async for ev in self._stage_web_search(state):
+                yield ev
 
         # 阶段 8：知识库检索
-        async for ev in self._stage_kb_retrieval(state):
-            yield ev
+        async with _StageTimer(state.trace, "kb_retrieval"):
+            async for ev in self._stage_kb_retrieval(state):
+                yield ev
 
         # 阶段 9：构建最终上下文并生成回答
-        async for ev in self._stage_generate(state):
-            yield ev
+        async with _StageTimer(state.trace, "generate"):
+            async for ev in self._stage_generate(state):
+                yield ev
 
         async for ev in self._finalize(state):
             yield ev
@@ -841,12 +947,16 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 all_sources.extend(tr.sources or [])
             source_texts, source_metadata = self._web_sources_to_metadata(all_sources)
 
-            async for chunk, _ in self.answer_generator.generate_stream(
+            async for chunk, _, thinking in self.answer_generator.generate_stream(
                 question=state.resolved_question,
                 history_context=state.history_context,
                 tool_results=successful_results,
                 is_realtime=intent_decision.needs_realtime,
+                think=state.think,
             ):
+                if thinking:
+                    yield ("thinking", thinking)
+                    continue
                 cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
                 if polluted:
                     state.trace.set_pollution_detected(True)
@@ -888,6 +998,89 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             and state.decision.mode in (QAMode.FUNCTION_CALLING, QAMode.AGENT_SEARCH)
         )
 
+    async def _stage_semantic_cache_lookup(self, state: _PipelineState):
+        """阶段 5.5：语义缓存查找（P1-3）。命中时回放缓存答案并短路后续流程。
+
+        仅当 KB 决策判定走纯知识库问答路径（PURE_KB / HYBRID_INTELLIGENT）、
+        未开启联网搜索、deep_thinking=off 且非时效性问题时尝试查找。
+        Redis/Embedding 异常由服务内部 fail-open，返回 miss 继续正常流程。
+        """
+        if not settings.semantic_cache.SEMANTIC_CACHE_ENABLED:
+            return
+        decision = state.decision
+        if decision is None or decision.mode not in (QAMode.PURE_KB, QAMode.HYBRID_INTELLIGENT):
+            return
+        if not state.kb_ids or state.use_web_search or state.deep_thinking == "on":
+            return
+        if state.intent_decision is not None and state.intent_decision.needs_realtime:
+            return
+
+        service = SemanticCacheService()
+        hit, embedding = await service.lookup(
+            user_id=state.user_id or "anonymous",
+            kb_ids=state.kb_ids,
+            question=state.resolved_question,
+        )
+        # 未命中：缓存 embedding 供 finalize 后写入复用，避免二次计算
+        state.semantic_cache_embedding = embedding
+        if hit is None:
+            return
+
+        state.semantic_cache_hit = True
+        state.trace.data["semantic_cache_hit"] = {
+            "score": round(hit.score, 4),
+            "match_type": hit.match_type,
+            "cached_question": hit.question,
+        }
+        yield ("reasoning", self._reasoning_payload(
+            REASONING_STEP_CACHE_HIT,
+            "done",
+            "缓存命中",
+            content=f"命中相似问题缓存（相似度 {hit.score:.2f}），直接返回缓存答案",
+            metadata={"score": round(hit.score, 4), "match_type": hit.match_type},
+        ))
+
+        # 回放缓存答案与来源（事件结构与正常流式一致，前端零改动）
+        state.source_texts = list(hit.source_texts)
+        state.source_metadata = list(hit.source_metadata)
+        state.answer_type = "knowledge_base"
+        chunk_chars = max(1, settings.semantic_cache.SEMANTIC_CACHE_REPLAY_CHUNK_CHARS)
+        answer = hit.answer or ""
+        for i in range(0, len(answer), chunk_chars):
+            part = answer[i:i + chunk_chars]
+            state.final_answer += part
+            yield ("chunk", part, state.source_texts, state.source_metadata, "knowledge_base")
+        state.finished = True
+
+    def _maybe_store_semantic_cache(self, state: _PipelineState):
+        """finalize 时按条件把纯知识库答案异步写入语义缓存（不阻塞响应）。"""
+        if state.semantic_cache_hit or not settings.semantic_cache.SEMANTIC_CACHE_ENABLED:
+            return
+        if state.answer_type != "knowledge_base" or not state.final_answer:
+            return
+        if state.web_sources_for_citation or state.search_context:
+            return
+        if state.decision is None or state.decision.mode not in (QAMode.PURE_KB, QAMode.HYBRID_INTELLIGENT):
+            return
+        if not state.kb_ids or not state.docs or state.deep_thinking == "on":
+            return
+        if state.intent_decision is not None and state.intent_decision.needs_realtime:
+            return
+
+        service = SemanticCacheService()
+        task = asyncio.create_task(service.store(
+            user_id=state.user_id or "anonymous",
+            kb_ids=state.kb_ids,
+            question=state.resolved_question,
+            answer=state.final_answer,
+            source_texts=state.source_texts,
+            source_metadata=state.source_metadata,
+            embedding=state.semantic_cache_embedding,
+        ))
+        # 防止任务被垃圾回收（fire-and-forget）
+        _background_store_tasks.add(task)
+        task.add_done_callback(_background_store_tasks.discard)
+
     async def _stage_agent(self, state: _PipelineState):
         """阶段 6：Agent 模式（Function Calling / ReAct）。
 
@@ -917,7 +1110,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 agent_sources = agent_src
 
             # 方案B：Agent 未调用工具（输出为空且无 sources），或 Agent 输出被工具 JSON 污染
-            # （deepseek-r1 容易把工具调用 JSON 直接当回答输出），降级到 Phase 2 联网搜索。
+            # （推理模型容易把工具调用 JSON 直接当回答输出），降级到 Phase 2 联网搜索。
             # 适用于时效性问题 Agent 决策失败的场景（如"吕梁天气"未触发 web_search），
             # 确保实时信息一定被搜索，而非由 LLM 笼统回复"无法获取"或输出工具 JSON。
             from src.services.search_agent import looks_like_tool_call
@@ -1115,6 +1308,23 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 metadata={"sources_count": 0},
             ))
 
+    def _record_token_usage(self, state: _PipelineState, prompt: str):
+        """把 token 用量写入 trace：优先 LLM 元数据，缺失时字符估算兜底（P1-2）。"""
+        if state.token_usage_recorded:
+            return
+        state.token_usage_recorded = True
+        meta = state.llm_token_meta or {}
+        prompt_tokens = meta.get("prompt_tokens")
+        completion_tokens = meta.get("completion_tokens")
+        if prompt_tokens or completion_tokens:
+            state.trace.set_token_usage(prompt_tokens, completion_tokens, estimated=False)
+        else:
+            state.trace.set_token_usage(
+                estimate_token_count(prompt),
+                estimate_token_count(state.final_answer),
+                estimated=True,
+            )
+
     async def _stage_generate(self, state: _PipelineState):
         """阶段 9：构建最终上下文（ContextBuilder）并流式生成回答。"""
         web_sources_for_context = list(state.web_sources_for_citation) if state.web_sources_for_citation else []
@@ -1166,14 +1376,18 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 content="正在生成回答...",
             ))
             async for chunk, source_texts, source_metadata, at in self._stream_with_retry(
-                prompt, state.source_texts, state.source_metadata, answer_type
+                prompt, state.source_texts, state.source_metadata, answer_type, state=state, think=state.think
             ):
+                if at == "thinking":
+                    yield ("thinking", chunk)
+                    continue
                 cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
                 if polluted:
                     state.trace.set_pollution_detected(True)
                 if cleaned_chunk:
                     state.final_answer += cleaned_chunk
                     yield ("chunk", cleaned_chunk, source_texts, source_metadata, at)
+            self._record_token_usage(state, prompt)
             answer_generate_duration = int((time.time() - answer_generate_start) * 1000)
             yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_ANSWER_GENERATE,
@@ -1217,14 +1431,18 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 content="正在生成回答...",
             ))
             async for chunk, source_texts, source_metadata, at in self._stream_with_retry(
-                prompt, [], [], "llm_direct"
+                prompt, [], [], "llm_direct", state=state, think=state.think
             ):
+                if at == "thinking":
+                    yield ("thinking", chunk)
+                    continue
                 cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
                 if polluted:
                     state.trace.set_pollution_detected(True)
                 if cleaned_chunk:
                     state.final_answer += cleaned_chunk
                     yield ("chunk", cleaned_chunk, source_texts, source_metadata, at)
+            self._record_token_usage(state, prompt)
             answer_generate_duration = int((time.time() - answer_generate_start) * 1000)
             yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_ANSWER_GENERATE,
@@ -1236,13 +1454,15 @@ class RAGChain(AsyncSingleton["RAGChain"]):
 
     async def _finalize(self, state: _PipelineState):
         """终态：链路追踪落盘 + 对话摘要更新。"""
+        # P1-3：符合条件的纯知识库答案异步写入语义缓存
+        self._maybe_store_semantic_cache(state)
         state.trace.set_final_answer(state.final_answer)
         state.trace.finish()
         state.trace.save_background()
         await self._update_conversation_summary(state.history or [])
         yield ("final", state)
 
-    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
+    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off"):
         """
         流式运行RAG问答。
 
@@ -1256,19 +1476,23 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 - chunk_content: 回答片段或 reasoning JSON 负载
                 - source_texts: 来源文档文本列表
                 - source_metadata: 来源元信息列表（包含filename、chunk_index等）
-                - answer_type: 回答类型（"knowledge_base"、"llm_direct"、"web_search"、"hybrid_search"、"function_calling"、"agent_search"或"reasoning"）
+                - answer_type: 回答类型（"knowledge_base"、"llm_direct"、"web_search"、"hybrid_search"、"function_calling"、"agent_search"、"reasoning"或"thinking"）
         """
         async for ev in self._pipeline(
             question, kb_ids=kb_ids, history=history,
             use_web_search=use_web_search, search_mode=search_mode,
+            user_id=user_id, session_id=session_id,
+            deep_thinking=deep_thinking,
         ):
             kind = ev[0]
             if kind == "chunk":
                 yield ev[1], ev[2], ev[3], ev[4]
             elif kind == "reasoning":
                 yield ev[1], [], [], "reasoning"
+            elif kind == "thinking":
+                yield ev[1], [], [], "thinking"
 
-    async def _stream_with_retry(self, prompt, source_texts, source_metadata, answer_type, max_retries=2):
+    async def _stream_with_retry(self, prompt, source_texts, source_metadata, answer_type, max_retries=2, state=None, think=None):
         """
         带重试机制的续传式流式生成
 
@@ -1281,12 +1505,22 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             source_metadata: 来源元信息列表
             answer_type: 回答类型
             max_retries: 最大重试次数
+            state: 管线状态（可选），捕获 LLM 返回的 token 计数元数据
+            think: 深度思考开关（True/False 强制，None 用模型默认）
 
         Yields:
             tuple: (chunk_content, source_texts, source_metadata, answer_type)
         """
         llm_start = time.time()
         yielded_part = ""
+        # 深度思考关闭时切换到非思考专用模型（think=False），避免混合模型空烧思考 token；
+        # 未配置专用模型时回退主模型并绑定 reasoning=False
+        if think is False and self.llm_direct is not None:
+            llm = self.llm_direct
+        elif think is not None:
+            llm = self.llm.bind(reasoning=think)
+        else:
+            llm = self.llm
 
         for attempt in range(max_retries):
             current_prompt = prompt
@@ -1298,7 +1532,22 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                     f"{yielded_part}\n\n请继续："
                 )
             try:
-                async for chunk in self.llm.astream(current_prompt):
+                async for chunk in llm.astream(current_prompt):
+                    # 捕获 Ollama token 计数（通常在最后一个 chunk 的元数据中）
+                    if state is not None:
+                        meta = getattr(chunk, "response_metadata", None) or {}
+                        prompt_eval = meta.get("prompt_eval_count")
+                        eval_count = meta.get("eval_count")
+                        if prompt_eval or eval_count:
+                            state.llm_token_meta = {
+                                "prompt_tokens": prompt_eval,
+                                "completion_tokens": eval_count,
+                            }
+                    # 模型原始思考增量（reasoning=True 时出现在 additional_kwargs）：
+                    # 以 "thinking" 哨兵元组转发给 SSE，不计入续传上下文 yielded_part
+                    thinking = (chunk.additional_kwargs or {}).get("reasoning_content")
+                    if thinking:
+                        yield thinking, source_texts, source_metadata, "thinking"
                     if chunk.content:
                         yielded_part += chunk.content
                         yield chunk.content, source_texts, source_metadata, answer_type
@@ -1317,7 +1566,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 error_msg = f"模型调用失败: {str(e)}"
                 yield error_msg, source_texts, source_metadata, "error"
 
-    async def run(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple"):
+    async def run(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None):
         """
         非流式运行RAG问答。
 
@@ -1332,6 +1581,9 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             force_mode: 强制问答模式（可选，保留签名兼容）
             use_web_search: 是否使用联网搜索（可选）
             search_mode: 搜索模式（可选）：simple/function_calling/agent
+            user_id: 当前用户ID（可选），写入 Trace 归属
+            session_id: 会话ID（可选），写入 Trace 归属
+            deep_thinking: 深度思考开关（on/off，可选，默认 off）
 
         Returns:
             tuple: (answer, sources, source_metadata, answer_type)
@@ -1349,6 +1601,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         async for ev in self._pipeline(
             question, kb_ids=kb_ids, history=history,
             use_web_search=use_web_search, search_mode=search_mode,
+            user_id=user_id, session_id=session_id,
         ):
             kind = ev[0]
             if kind == "chunk":

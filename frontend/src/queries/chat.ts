@@ -108,6 +108,8 @@ export interface Message {
   isLoading?: boolean
   /** 搜索/推理过程步骤列表。 */
   reasoning?: ReasoningStep[]
+  /** 模型原始思考内容（深度思考开启时流式接收并持久化，历史回看可展开）。 */
+  thinking?: string
 }
 
 /** 获取会话列表。 */

@@ -91,6 +91,8 @@ const renderedContent = computed(() => {
       'ul', 'ol', 'li',
       'strong', 'b', 'em', 'i', 'code', 'pre',
       'a', 'blockquote',
+      // sup：内联引用上标（cite-ref）；span：highlight.js 代码高亮节点
+      'sup', 'span',
       'table', 'thead', 'tbody', 'tr', 'th', 'td'
     ]
     // 属性白名单走 DOMPurify 默认集（ALLOWED_ATTR 仅支持数组形式的严格白名单，

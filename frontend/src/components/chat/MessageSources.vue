@@ -4,7 +4,7 @@
     <div class="flex items-center gap-1.5 mb-1">
       <BookOpen class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
       <span class="text-xs font-medium text-gray-600 dark:text-gray-300">参考来源</span>
-      <span class="text-[10px] px-1.5 py-0.5 rounded-full bg-gray-200 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+      <span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400">
         {{ dedupedSources.length }}
       </span>
     </div>
@@ -14,14 +14,14 @@
       <div
         v-for="source in visibleSources"
         :key="getSourceKey(source)"
-        class="flex items-start gap-2 p-2 border rounded-lg cursor-pointer transition-all duration-150 bg-gray-50 border-gray-200 hover:-translate-y-0.5 hover:shadow-md hover:border-blue-400 dark:bg-gray-800 dark:border-gray-700 dark:hover:border-blue-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+        class="flex items-start gap-2 p-2 border rounded-lg cursor-pointer transition-all duration-150 bg-gray-50 border-gray-200 hover:-translate-y-0.5 hover:shadow-md hover:border-primary-400 dark:bg-dark-800 dark:border-dark-600 dark:hover:border-primary-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
         role="button"
         tabindex="0"
         @click="emit('navigate', source)"
         @keydown.enter="emit('navigate', source)"
       >
         <!-- 编号徽章 -->
-        <span class="flex-shrink-0 w-5 h-5 inline-flex items-center justify-center text-[11px] font-semibold rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/60 dark:text-blue-300 mt-0.5">
+        <span class="flex-shrink-0 w-5 h-5 inline-flex items-center justify-center text-xs font-semibold rounded-full bg-primary-50 text-primary-600 dark:bg-primary-900/40 dark:text-primary-300 mt-0.5">
           {{ source.index }}
         </span>
 
@@ -43,12 +43,12 @@
           <p class="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
             {{ getSourceTitle(source) }}
           </p>
-          <p class="text-[11px] text-gray-500 dark:text-gray-400 truncate mt-0.5">
+          <p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
             {{ getSourceSubtitle(source) }}
           </p>
           <p
             v-if="getSourceSnippet(source)"
-            class="text-[11px] text-gray-600 dark:text-gray-400 mt-1 line-clamp-2 leading-tight"
+            class="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2 leading-snug"
           >
             {{ getSourceSnippet(source) }}
           </p>
@@ -57,7 +57,7 @@
         <!-- 相关性分数（仅 kb 来源且 score > 0 时显示，按分数高低分色） -->
         <span
           v-if="source.source_type !== 'web' && source.score > 0"
-          class="flex-shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded mt-0.5"
+          class="flex-shrink-0 text-xs font-semibold px-1.5 py-0.5 rounded mt-0.5"
           :class="getScoreClass(source.score)"
         >
           {{ Math.round(source.score * 100) }}%
@@ -69,7 +69,7 @@
     <button
       v-if="dedupedSources.length > collapseThreshold"
       type="button"
-      class="flex items-center justify-center gap-1 w-full mt-1.5 py-1.5 text-[11px] text-gray-500 dark:text-gray-400 rounded-md transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+      class="flex items-center justify-center gap-1 w-full mt-1.5 py-1.5 text-xs text-gray-500 dark:text-gray-400 rounded-md transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-300"
       @click="expanded = !expanded"
     >
       <ChevronDown class="w-3 h-3 transition-transform" :class="expanded ? 'rotate-180' : ''" />

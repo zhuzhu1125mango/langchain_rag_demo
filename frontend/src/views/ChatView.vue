@@ -1,17 +1,5 @@
 <template>
   <div class="flex-1 flex h-full bg-gray-50 dark:bg-dark-900 relative">
-    <!-- 会话列表面板 -->
-    <SessionListPanel
-      ref="sessionListRef"
-      :show="showHistoryPanel"
-      :sessions="sessionsData"
-      :current-session-id="chatStore.currentSession?.id"
-      @create-new-session="createNewSession"
-      @switch-session="switchSession"
-      @delete-session="deleteSession"
-      @batch-delete="batchDeleteSessions"
-    />
-
     <!-- 答案对比侧边面板 -->
     <CompareAnswerPanel
       :show="showComparePanel"
@@ -21,23 +9,6 @@
       @close="showComparePanel = false"
     />
 
-    <button
-      @click="showHistoryPanel = !showHistoryPanel"
-      :class="[
-        'absolute left-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-6 h-16 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-r-lg hover:bg-gray-50 dark:hover:bg-dark-700 transition-all shadow-sm',
-        showHistoryPanel ? 'translate-x-[288px]' : 'translate-x-0'
-      ]"
-    >
-      <ChevronRight
-        v-if="!showHistoryPanel"
-        class="w-4 h-4 text-gray-500"
-      />
-      <ChevronLeft
-        v-else
-        class="w-4 h-4 text-gray-500"
-      />
-    </button>
-
     <div class="flex-1 flex flex-col h-full">
       <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-6 py-4">
         <div class="flex items-center justify-between">
@@ -45,55 +16,34 @@
             <h1 class="text-xl font-semibold text-gray-800 dark:text-white">智能助手</h1>
             <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">基于知识库的智能问答系统</p>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
             <button
               @click="clearChat"
-              class="flex items-center gap-2 px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+              class="flex items-center gap-2 px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg transition-colors"
+              title="清空当前对话"
             >
               <Trash2 class="w-4 h-4" />
-              <span>清空对话</span>
+              <span>清空</span>
             </button>
             <button
               @click="showKBSelector = !showKBSelector"
-              class="flex items-center gap-2 px-4 py-2 text-sm text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/40 rounded-lg transition-colors"
+              class="flex items-center gap-2 px-3 py-2 text-sm text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/40 rounded-lg transition-colors"
             >
               <BookOpen class="w-4 h-4" />
-              <span>{{ selectedKBs.length > 0 ? `${selectedKBs.length}个已选` : '选择知识库' }}</span>
+              <span>{{ selectedKBs.length > 0 ? `${selectedKBs.length}个知识库` : '选择知识库' }}</span>
             </button>
             <button
               @click="handleCompareAnswers"
               :disabled="selectedKBs.length < 2 || !questionInput.trim()"
               :class="[
-                'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
+                'flex items-center gap-2 px-3 py-2 text-sm rounded-lg border transition-colors',
                 selectedKBs.length >= 2 && questionInput.trim()
-                  ? 'bg-purple-500 text-white hover:bg-purple-600'
-                  : 'bg-gray-100 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+                  ? 'border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-200 hover:border-primary-400 dark:hover:border-primary-600 hover:text-primary-600 dark:hover:text-primary-400'
+                  : 'border-gray-200 dark:border-dark-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
               ]"
             >
               <GitCompare class="w-4 h-4" />
               <span>对比答案</span>
-            </button>
-            <button
-              @click="useWebSearch = !useWebSearch"
-              :class="[
-                'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
-                useWebSearch
-                  ? 'bg-blue-500 text-white hover:bg-blue-600'
-                  : 'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600'
-              ]"
-            >
-              <Globe class="w-4 h-4" />
-              <span>{{
-                searchStatus === 'searching'
-                  ? '搜索中...'
-                  : searchStatus === 'failed'
-                    ? '搜索失败'
-                    : searchStatus === 'done'
-                      ? '搜索完成'
-                      : useWebSearch
-                        ? '联网搜索开启'
-                        : '联网搜索'
-              }}</span>
             </button>
           </div>
         </div>
@@ -108,8 +58,11 @@
       <ChatMessageList
         ref="messageListRef"
         :messages="chatStore.messages"
+        :quick-questions="chatStore.quickQuestions"
         @navigate-source="navigateToSource"
         @submit-feedback="onSubmitFeedback"
+        @send-quick-question="sendQuickQuestion"
+        @regenerate="regenerateLast"
       />
 
       <ChatInputArea
@@ -121,16 +74,22 @@
         :suggestions="suggestions"
         :is-generating-suggestions="isGeneratingSuggestions"
         :is-rewriting-question="isRewritingQuestion"
-        :quick-questions="chatStore.quickQuestions"
         :is-typing="chatStore.isTyping"
         :get-kb-name="getKBName"
-        @send="sendMessage"
+        :use-web-search="useWebSearch"
+        :search-status="searchStatus"
+        :deep-thinking="deepThinking"
+        :deep-thinking-label="deepThinkingLabel"
+        :deep-thinking-title="deepThinkingTitle"
+        @send="sendMessage()"
         @send-quick-question="sendQuickQuestion"
         @rewrite-question="handleRewriteQuestion"
         @use-rewritten-question="useRewrittenQuestion"
         @clear-rewrite="rewriteResult = null"
         @input-change="onInputChange"
         @toggle-kb-id="toggleKBById"
+        @toggle-web-search="useWebSearch = !useWebSearch"
+        @toggle-deep-thinking="toggleDeepThinking"
       />
     </div>
 
@@ -144,17 +103,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useChatStore } from '@/stores/chat'
-import { useSessions, useDeleteSession, useBatchDeleteSessions, useSubmitFeedback, useGetSuggestions, useRewriteQuestion, useClassifyQuestion, useCompareKnowledgeBases } from '@/queries/chat'
-import type { Session, Message, MessageSource, CompareResponse, ReasoningStep } from '@/queries/chat'
+import { useSubmitFeedback, useGetSuggestions, useRewriteQuestion, useClassifyQuestion, useCompareKnowledgeBases } from '@/queries/chat'
+import type { Message, MessageSource, CompareResponse, ReasoningStep } from '@/queries/chat'
 import { useKnowledgeBases, useRecommendKnowledgeBases } from '@/queries/kb'
 import type { KBRecommendation } from '@/queries/kb'
-import { Trash2, BookOpen, GitCompare, Globe, ChevronLeft, ChevronRight } from '@lucide/vue'
+import { Trash2, BookOpen, GitCompare } from '@lucide/vue'
 import DocumentSourceModal from '@/components/DocumentSourceModal.vue'
-import SessionListPanel from '@/components/chat/SessionListPanel.vue'
 import CompareAnswerPanel from '@/components/chat/CompareAnswerPanel.vue'
 import KnowledgeBaseSelector from '@/components/chat/KnowledgeBaseSelector.vue'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
@@ -162,6 +120,7 @@ import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import { useToast } from '@/composables/useToast'
 import { api } from '@/utils/axios'
 import { generateId } from '@/utils/id'
+import { mergeReasoningSteps } from '@/utils/reasoning'
 import { openExternalUrl } from '@/utils/url'
 
 /**
@@ -181,9 +140,20 @@ const showKBSelector = ref(false)
 const selectedKBs = ref<string[]>([])
 const useWebSearch = ref(false)
 const searchStatus = ref<'idle' | 'searching' | 'done' | 'failed'>('idle')
+/** 深度思考开关：开=模型先推理再回答，关=直接生成回答（对齐主流产品交互） */
+const deepThinking = ref(false)
+const deepThinkingLabel = computed(() => (deepThinking.value ? '深度思考·开' : '深度思考·关'))
+const deepThinkingTitle = computed(() =>
+  deepThinking.value
+    ? '已开启深度思考：模型先推理再回答，适合复杂问题'
+    : '开启深度思考：模型先推理再回答，适合复杂问题'
+)
+/** 切换深度思考开关 */
+function toggleDeepThinking(): void {
+  deepThinking.value = !deepThinking.value
+}
 const suggestions = ref<string[]>([])
 const isGeneratingSuggestions = ref(false)
-const showHistoryPanel = ref(true)
 const rewriteResult = ref<{ rewritten: string; original: string; changes: string } | null>(null)
 const isRewritingQuestion = ref(false)
 const questionClassification = ref<{ type: string; subtype: string; confidence: number; description: string } | null>(null)
@@ -204,12 +174,19 @@ let debounceTimer: ReturnType<typeof setTimeout> | null = null
 let pendingReasoningUpdate: ReasoningStep[] | null = null
 let reasoningRafId: number | null = null
 
-/** 将 reasoning 步骤合并到现有列表：同 step 且同 id 的用新状态覆盖，新的追加。 */
-function mergeReasoningSteps(existing: ReasoningStep[], incoming: ReasoningStep[]): ReasoningStep[] {
-  const map = new Map<string, ReasoningStep>()
-  existing.forEach(s => map.set(s.id, s))
-  incoming.forEach(s => map.set(s.id, s))
-  return Array.from(map.values())
+/** 后端来源元数据的原始结构（SSE end 事件与会话历史加载共用）。 */
+interface RawSourceMeta {
+  source?: string
+  score?: number
+  filename?: string
+  url?: string
+  title?: string
+  source_type?: string
+  content?: string
+  page_content?: string
+  document_id?: string
+  chunk_index?: number
+  total_chunks?: number
 }
 
 /** 取消挂起的 reasoning 节流更新。 */
@@ -222,7 +199,6 @@ function cancelReasoningRaf(): void {
 }
 
 // 子组件实例引用：用于调用子组件暴露的方法
-const sessionListRef = ref<InstanceType<typeof SessionListPanel> | null>(null)
 const messageListRef = ref<InstanceType<typeof ChatMessageList> | null>(null)
 
 const feedbackMutation = useSubmitFeedback()
@@ -233,9 +209,6 @@ const compareKBsMutation = useCompareKnowledgeBases()
 const recommendKBsMutation = useRecommendKnowledgeBases()
 
 const { data: knowledgeBases } = useKnowledgeBases()
-const { data: sessionsData } = useSessions()
-const deleteSessionMutation = useDeleteSession()
-const batchDeleteMutation = useBatchDeleteSessions()
 
 
 const toast = useToast()
@@ -400,9 +373,10 @@ async function fetchSuggestions(): Promise<void> {
   }, 500)
 }
 
-/** 发送用户问题，通过 SSE 接收流式回答。 */
-async function sendMessage(): Promise<void> {
-  if (!questionInput.value.trim()) return
+/** 发送用户问题，通过 SSE 接收流式回答；传入 overrideQuestion 用于重新生成场景。 */
+async function sendMessage(overrideQuestion?: string): Promise<void> {
+  const question = (overrideQuestion ?? questionInput.value).trim()
+  if (!question) return
 
   const hasLoadingMessage = chatStore.messages.some(m => m.role === 'assistant' && m.isLoading)
   if (hasLoadingMessage) return
@@ -411,7 +385,6 @@ async function sendMessage(): Promise<void> {
     searchStatus.value = 'searching'
   }
 
-  const question = questionInput.value.trim()
   questionInput.value = ''
 
   chatStore.addMessage({
@@ -453,7 +426,8 @@ async function sendMessage(): Promise<void> {
 
     const requestBody: Record<string, unknown> = {
       question,
-      use_web_search: useWebSearch.value
+      use_web_search: useWebSearch.value,
+      deep_thinking: deepThinking.value ? 'on' : 'off'
     }
 
     if (useWebSearch.value) {
@@ -470,6 +444,7 @@ async function sendMessage(): Promise<void> {
 
     const controller = new AbortController()
     let receivedContent = false
+    let receivedEnd = false
     let streamEnded = false
     const closeStream = () => {
       if (!streamEnded) {
@@ -480,10 +455,13 @@ async function sendMessage(): Promise<void> {
 
     // SSE 事件协议：
     //   - content：data.content 为增量文本片段，累加到助手消息内容上
+    //   - thinking：模型原始思考增量（深度思考开启时），累加到助手消息 thinking 上
     //   - reasoning：搜索/思考过程结构化数据，供前端折叠面板展示
     //   - search_status：向后兼容，映射为 reasoning 步骤并更新搜索按钮状态
-    //   - end：流结束，data.sources 为来源列表，data.message_id 为后端正式消息 ID，
-    //          data.session_id/data.title 用于新会话创建与标题更新，data.reasoning 为完整推理过程
+    //   - end：回答结束，data.sources 为来源列表，data.message_id 为后端正式消息 ID，
+    //          data.session_id 用于新会话创建，data.reasoning 为完整推理过程；
+    //          收到 end 后不主动断开，等待后端补发 title 事件后由服务端关闭连接
+    //   - title：后台生成的会话标题（C7：end 先发、标题后补），更新侧栏会话标题
     //   - error：data.error 为错误描述，展示后关闭连接
     const processEvent = (eventData: string) => {
       try {
@@ -496,11 +474,30 @@ async function sendMessage(): Promise<void> {
           return
         }
 
+        if (data.type === 'thinking') {
+          if (data.content) {
+            const updatedThinking = (lastMsg.thinking || '') + data.content
+            chatStore.updateMessage(lastMsg.id, { thinking: updatedThinking })
+            messageListRef.value?.scrollToBottom()
+          }
+          return
+        }
+
         if (data.type === 'reasoning') {
           const step = data as ReasoningStep
           const current = lastMsg.reasoning || []
           const merged = mergeReasoningSteps(current, [step])
           chatStore.updateMessage(lastMsg.id, { reasoning: merged })
+          return
+        }
+
+        if (data.type === 'title') {
+          // C7：end 先发，标题后台生成完成后补发；更新当前会话标题并刷新侧栏列表
+          if (data.title && chatStore.currentSession) {
+            chatStore.updateCurrentSessionTitle(data.title)
+          }
+          queryClient.invalidateQueries({ queryKey: ['sessions'] })
+          queryClient.refetchQueries({ queryKey: ['sessions'] })
           return
         }
 
@@ -512,6 +509,7 @@ async function sendMessage(): Promise<void> {
             messageListRef.value?.scrollToBottom()
           }
         } else if (data.type === 'end') {
+          receivedEnd = true
           // 强制 flush 可能挂起的 reasoning 更新
           cancelReasoningRaf()
           if (data.reasoning && Array.isArray(data.reasoning)) {
@@ -520,7 +518,7 @@ async function sendMessage(): Promise<void> {
             chatStore.updateMessage(lastMsg.id, { reasoning: mergeReasoningSteps(current, finalReasoning) })
           }
           if (data.sources) {
-            const mappedSources: MessageSource[] = data.sources.map((s: any, idx: number) => ({
+            const mappedSources: MessageSource[] = data.sources.map((s: RawSourceMeta, idx: number) => ({
               source: s.source || s.document_id || s.filename || '',
               score: s.score || 0,
               document_name: s.filename,
@@ -547,26 +545,24 @@ async function sendMessage(): Promise<void> {
               chatStore.messages[index].id = data.message_id
             }
           }
-          // 分支：新会话创建 / 已有会话标题更新
+          // 新会话创建：首条消息触发后端创建新会话，写入当前会话并 replace 路由 query。
+          // 直接赋值，避免 setCurrentSession 清空已渲染的流式消息；
+          // 标题先用问题截断占位，后台生成完成后由 title 事件更新。
           if (data.session_id && !chatStore.currentSession) {
-            // 首条消息触发后端创建新会话，写入当前会话并 replace 路由 query
-            // 直接赋值，避免 setCurrentSession 清空已渲染的流式消息
             chatStore.currentSession = {
               id: data.session_id,
-              title: data.title || question.slice(0, 50),
+              title: question.slice(0, 50),
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
             }
             router.replace({ path: '/', query: { session: data.session_id } })
-          } else if (data.title && chatStore.currentSession) {
-            // 后端生成了新标题，更新当前会话并刷新列表
-            chatStore.updateCurrentSessionTitle(data.title)
           }
           // 刷新会话列表，确保新会话或更新后的会话出现在左侧列表
           queryClient.invalidateQueries({ queryKey: ['sessions'] })
           queryClient.refetchQueries({ queryKey: ['sessions'] })
           searchStatus.value = 'idle'
-          closeStream()
+          // 注意：此处不调用 closeStream()——后端 end 后还会补发 title 事件再关流，
+          // 提前 abort 会丢失标题更新
         } else if (data.type === 'error') {
           cancelReasoningRaf()
           searchStatus.value = 'idle'
@@ -643,7 +639,7 @@ async function sendMessage(): Promise<void> {
     }
 
     // 流结束但未收到 end/error 事件且无内容：等价于旧 EventSource 的 onerror
-    if (!streamEnded && !receivedContent) {
+    if (!streamEnded && !receivedEnd && !receivedContent) {
       cancelReasoningRaf()
       searchStatus.value = 'idle'
       const lastMsg = chatStore.messages[chatStore.messages.length - 1]
@@ -667,86 +663,20 @@ function sendQuickQuestion(question: string): void {
   sendMessage()
 }
 
+/** 重新生成最后一条回答：取最后一条用户问题重发。 */
+function regenerateLast(): void {
+  if (chatStore.isTyping) return
+  const hasLoadingMessage = chatStore.messages.some(m => m.role === 'assistant' && m.isLoading)
+  if (hasLoadingMessage) return
+  const lastUser = [...chatStore.messages].reverse().find(m => m.role === 'user')
+  if (lastUser) void sendMessage(lastUser.content)
+}
+
 /** 清空当前对话并重置路由。 */
 function clearChat(): void {
   chatStore.clearMessages()
   chatStore.setCurrentSession(null)
   router.replace({ path: '/', query: {} })
-}
-
-/** 创建新会话并切换到该会话。 */
-async function createNewSession(): Promise<void> {
-  try {
-    const res = await api.post<{ id: string; title: string }>('/sessions/', { title: '新会话' })
-    if (res && res.id) {
-      chatStore.setCurrentSession({
-        id: res.id,
-        title: res.title,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      chatStore.clearMessages()
-      router.replace({ path: '/', query: { session: res.id } })
-      // 刷新会话列表，确保新建会话后立即显示
-      queryClient.invalidateQueries({ queryKey: ['sessions'] })
-      queryClient.refetchQueries({ queryKey: ['sessions'] })
-    }
-  } catch (error) {
-    console.error('创建会话失败:', error)
-    toast.error('创建会话失败', '请稍后重试')
-  }
-}
-
-/** 切换当前会话并加载历史消息。 */
-async function switchSession(session: Session): Promise<void> {
-  if (chatStore.currentSession?.id === session.id) return
-  router.replace({ path: '/', query: { session: session.id } })
-  await loadSession(session.id)
-}
-
-/** 删除单个会话，若删除的是当前会话则清空界面。 */
-function deleteSession(session: Session): void {
-  if (confirm(`确定要删除对话 "${session.title || '未命名对话'}" 吗？`)) {
-    deleteSessionMutation.mutate(session.id, {
-      onSuccess: () => {
-        if (chatStore.currentSession?.id === session.id) {
-          chatStore.clearMessages()
-          chatStore.setCurrentSession(null)
-          router.replace({ path: '/', query: {} })
-        }
-        toast.success('删除成功', '会话已删除')
-      },
-      onError: () => {
-        toast.error('删除失败', '请稍后重试')
-      }
-    })
-  }
-}
-
-/** 批量删除选中的会话。 */
-async function batchDeleteSessions(ids: string[]): Promise<void> {
-  if (ids.length === 0) return
-  if (!confirm(`确定要删除选中的 ${ids.length} 个会话吗？此操作不可恢复。`)) return
-
-  const hasCurrent = chatStore.currentSession?.id && ids.includes(chatStore.currentSession.id)
-
-  try {
-    const res = await batchDeleteMutation.mutateAsync(ids)
-    queryClient.refetchQueries({ queryKey: ['sessions'] })
-
-    if (hasCurrent) {
-      chatStore.clearMessages()
-      chatStore.setCurrentSession(null)
-      router.replace({ path: '/', query: {} })
-    }
-
-    toast.success('删除成功', `已删除 ${res.deleted_count} 个会话`)
-  } catch (error) {
-    console.error('批量删除会话失败:', error)
-    toast.error('删除失败', '请稍后重试')
-  } finally {
-    sessionListRef.value?.resetBatchMode()
-  }
 }
 
 /** 提交对助手回答的星级反馈。 */
@@ -781,14 +711,8 @@ async function loadSession(sessionId: string): Promise<void> {
       role: 'user' | 'assistant'
       content: string
       reasoning?: ReasoningStep[]
-      source_metadata?: {
-        filename?: string
-        document_id?: string
-        chunk_index?: number
-        url?: string
-        title?: string
-        source?: string
-      }[]
+      thinking?: string
+      source_metadata?: RawSourceMeta[]
     }
 
     interface SessionResponse {
@@ -811,14 +735,20 @@ async function loadSession(sessionId: string): Promise<void> {
         role: msg.role,
         content: msg.content,
         reasoning: msg.reasoning,
-        sources: msg.source_metadata?.map((meta: any, idx: number) => ({
+        thinking: msg.thinking,
+        sources: msg.source_metadata?.map((meta, idx: number) => ({
           source: meta.filename || meta.document_id || 'unknown',
           score: meta.score || 0,
           document_name: meta.filename,
           page: meta.chunk_index,
           url: meta.url,
           title: meta.title || meta.filename,
-          source_type: meta.source_type || (meta.source === 'web_search' || meta.url ? 'web' : 'kb'),
+          source_type:
+            meta.source_type === 'web' || meta.source_type === 'kb'
+              ? meta.source_type
+              : meta.source === 'web_search' || meta.url
+                ? 'web'
+                : 'kb',
           content: meta.page_content || meta.content,
           document_id: meta.document_id,
           chunk_index: meta.chunk_index,

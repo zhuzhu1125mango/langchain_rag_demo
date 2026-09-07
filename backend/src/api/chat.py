@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Union, Annotated
 import asyncio
 import uuid
@@ -23,6 +23,7 @@ from src.database import get_db, async_session
 from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback, KnowledgeBase
 from src.services.rag_chain import RAGChain
+from src.services.reasoning import dedupe_steps
 from src.services.vector_store import VectorStoreManager
 from src.services.session_service import append_session_message
 from src.services.learning_engine import learning_engine
@@ -42,6 +43,18 @@ class MessageRequest(BaseModel):
     kb_ids: Optional[List[str]] = None
     use_web_search: Optional[bool] = False
     search_mode: Optional[str] = "simple"
+    # 深度思考开关：on（开启思考）| off（关闭思考）
+    deep_thinking: Optional[str] = "off"
+
+    @field_validator("deep_thinking")
+    @classmethod
+    def _validate_deep_thinking(cls, v: Optional[str]) -> str:
+        if v is None:
+            return "off"
+        allowed = {"on", "off"}
+        if v not in allowed:
+            raise ValueError(f"deep_thinking 必须是 {sorted(allowed)} 之一")
+        return v
 
 
 def _parse_session_id(raw: Optional[str]) -> Optional[uuid.UUID]:
@@ -124,7 +137,9 @@ async def send_message(
     answer, sources, source_metadata, answer_type = await rag_chain.run(
         request.question, kb_ids, history,
         use_web_search=request.use_web_search,
-        search_mode=request.search_mode or "simple"
+        search_mode=request.search_mode or "simple",
+        user_id=current_user.user_id,
+        session_id=str(session.id)
     )
 
     # 记录策略执行到学习引擎
@@ -203,6 +218,7 @@ async def stream_answer(
     kb_ids = payload.kb_ids
     use_web_search = payload.use_web_search
     search_mode = payload.search_mode
+    deep_thinking = payload.deep_thinking or "off"
 
     # request_id 由中间件生成并挂载到 request.state，SSE 错误事件仅回传该 ID
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -264,9 +280,10 @@ async def stream_answer(
         await db.commit()
         logger.info(f"用户消息保存成功(流式): session={current_session_id}, message_id={user_message_id}")
 
-    # 保存助手消息（流式生成结束或异常时调用）
-    async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None):
-        generated_title = None
+    # 保存助手消息（流式生成结束或异常时调用）。
+    # C7：返回会话是否仍为默认标题，标题生成移到 end 事件之后的后台任务，
+    # 不再阻塞流完成信号。
+    async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None, thinking="") -> bool:
         async with async_session() as db:
             result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(current_session_id)))
             session = result.scalar_one_or_none()
@@ -301,22 +318,40 @@ async def stream_answer(
             }
             if reasoning:
                 message_payload["reasoning"] = reasoning
-            # 原子追加（服务端 jsonb 拼接）；此处的 SELECT 仍保留用于读取 title 判断
+            if thinking:
+                message_payload["thinking"] = thinking
+            # 原子追加（服务端 jsonb 拼接）
             assistant_msg_count = await append_session_message(db, session.id, message_payload)
 
-            # 若会话仍为默认标题，根据首条问题生成标题
+            # C7：仅判断是否需要后台生成标题（生成动作移出保存路径，commit 前读取避免属性过期）
             title_generator = await TitleGenerator.get_instance()
-            if title_generator.is_default_title(session.title):
-                try:
-                    session.title = await title_generator.generate_title(question)
-                    generated_title = session.title
-                    logger.info(f"会话标题已生成(流式): session={current_session_id}, title={session.title}")
-                except Exception as title_err:
-                    logger.warning(f"生成会话标题失败(流式): {title_err}")
+            needs_title = title_generator.is_default_title(session.title)
 
             await db.commit()
             logger.info(f"助手消息保存成功: session={current_session_id}, message_id={assistant_message_id}, content_length={len(full_answer)}, messages_count={assistant_msg_count}")
-        return generated_title
+            return needs_title
+
+    # C7：后台生成会话标题并落库；由 SSE 生成器在 end 事件后调用并补发 title 事件，
+    # 客户端提前断开时任务仍会完成（asyncio.shield），标题最终写入数据库
+    async def generate_and_save_title() -> Optional[str]:
+        async with async_session() as db:
+            result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(current_session_id)))
+            session = result.scalar_one_or_none()
+            if not session:
+                return None
+            title_generator = await TitleGenerator.get_instance()
+            if not title_generator.is_default_title(session.title):
+                return None
+            new_title = None
+            try:
+                new_title = await title_generator.generate_title(question)
+                session.title = new_title
+                logger.info(f"会话标题已生成(流式后台): session={current_session_id}, title={new_title}")
+            except Exception as title_err:
+                logger.warning(f"生成会话标题失败(流式后台): {title_err}")
+                return None
+            await db.commit()
+            return new_title
 
     # 流式生成回答
     async def generate():
@@ -325,12 +360,16 @@ async def stream_answer(
         source_metadata = []
         answer_type = "llm_direct"
         reasoning_steps = []
+        thinking_text = ""
 
         try:
             async for result in rag_chain.arun_stream(
                 question, kb_ids, history,
                 use_web_search=use_web_search,
-                search_mode=search_mode or "simple"
+                search_mode=search_mode or "simple",
+                user_id=current_user.user_id,
+                session_id=current_session_id,
+                deep_thinking=deep_thinking,
             ):
                 chunk, source_texts, source_meta, at = result
 
@@ -365,6 +404,16 @@ async def stream_answer(
                     yield f"data: {json.dumps(reasoning_payload)}\n\n"
                     continue
 
+                # 模型原始思考增量：转发 thinking 事件供前端折叠面板实时展示，
+                # 并累积用于持久化（历史回看）
+                if at == "thinking":
+                    if chunk:
+                        thinking_text += chunk
+                        thinking_payload = {'type': 'thinking', 'content': chunk}
+                        logger.debug(f"SSE thinking payload: {thinking_payload}")
+                        yield f"data: {json.dumps(thinking_payload)}\n\n"
+                    continue
+
                 # 过滤模型思考阶段产生的空内容，避免前端显示异常
                 if chunk:
                     full_answer += chunk
@@ -380,7 +429,7 @@ async def stream_answer(
             # 如果已生成部分内容，尝试保存，避免用户消息孤立
             if full_answer:
                 try:
-                    save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, reasoning_steps))
+                    save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, dedupe_steps(reasoning_steps), thinking_text))
                     await asyncio.shield(save_task)
                 except Exception as save_err:
                     logger.error(f"异常时保存部分助手消息失败: {save_err}", exc_info=True)
@@ -414,10 +463,13 @@ async def stream_answer(
             source_info.append(info)
 
         # 在发送 end 事件前先保存助手消息，确保客户端断开前消息已持久化
-        generated_title = None
+        # reasoning 按 step 去重：逐事件累积的列表含同一阶段的 running/done 重复条目，
+        # 去重后再持久化与下发，避免前端历史渲染出现残留 running 状态（spinner 不消失）
+        final_reasoning = dedupe_steps(reasoning_steps)
+        needs_title = False
         try:
-            save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, reasoning_steps))
-            generated_title = await asyncio.shield(save_task)
+            save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, final_reasoning, thinking_text))
+            needs_title = await asyncio.shield(save_task)
         except Exception as e:
             logger.error(f"保存助手消息失败: {str(e)}", exc_info=True)
             error_payload = {'type': 'error', 'error': '回答已生成但保存失败，请稍后重试', 'request_id': request_id}
@@ -425,18 +477,30 @@ async def stream_answer(
             yield f"data: {json.dumps(error_payload)}\n\n"
             return
 
+        # C7：end 事件先发——标题生成改为后台任务，不再推迟流完成信号
         end_payload = {
             'type': 'end',
             'message_id': assistant_message_id,
             'session_id': current_session_id,
             'sources': source_info,
             'answer_type': answer_type,
-            'reasoning': reasoning_steps,
+            'reasoning': final_reasoning,
         }
-        if generated_title:
-            end_payload['title'] = generated_title
         logger.info(f"SSE end payload: {end_payload}")
         yield f"data: {json.dumps(end_payload)}\n\n"
+
+        # C7：标题后台生成，完成后补发 title 事件（客户端断开时任务仍落库，
+        # 仅 title 事件丢失，侧栏刷新可见新标题）
+        if needs_title:
+            try:
+                title_task = asyncio.create_task(generate_and_save_title())
+                new_title = await asyncio.shield(title_task)
+                if new_title:
+                    title_payload = {'type': 'title', 'session_id': current_session_id, 'title': new_title}
+                    logger.debug(f"SSE title payload: {title_payload}")
+                    yield f"data: {json.dumps(title_payload)}\n\n"
+            except Exception as title_err:
+                logger.warning(f"流式后台标题生成失败: {title_err}")
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

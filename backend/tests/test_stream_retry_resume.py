@@ -20,8 +20,9 @@ from src.services.trace_collector import TraceCollector
 
 
 class FakeChunk:
-    def __init__(self, content):
+    def __init__(self, content, additional_kwargs=None):
         self.content = content
+        self.additional_kwargs = additional_kwargs or {}
 
 
 class FakeLLM:
@@ -29,6 +30,7 @@ class FakeLLM:
 
     scripts: 每次调用消耗一个元素 (chunks, error)；
     依次产出 chunks 中各片段后抛出 error（None 表示正常结束）。
+    chunks 元素可为 FakeChunk（携带 additional_kwargs 模拟思考增量）或字符串。
     """
 
     def __init__(self, scripts):
@@ -40,7 +42,7 @@ class FakeLLM:
         chunks, error = self.scripts.pop(0)
         for c in chunks:
             await asyncio.sleep(0)
-            yield FakeChunk(c)
+            yield c if isinstance(c, FakeChunk) else FakeChunk(c)
         if error is not None:
             raise error
 
@@ -49,6 +51,9 @@ def _make_chain(llm):
     """构造不触发外部依赖的 RAGChain，注入最小 mock 依赖。"""
     chain = RAGChain(vector_store=None, strategy_manager=None)
     chain.llm = llm
+    # 深度思考关闭（think=False）时 _stream_with_retry 切换到非思考专用模型；
+    # 测试脚本统一注入同一 FakeLLM，保持新旧路径行为一致
+    chain.llm_direct = llm
 
     async def _enhance(question, history):
         return {"resolved_question": question, "enhanced_context": ""}
@@ -161,6 +166,26 @@ class TestStreamRetryResume:
             ("部分", "llm_direct"),
             ("模型调用失败: ollama down", "error"),
         ]
+
+    async def test_thinking_chunks_forwarded_as_sentinel(self, hermetic):
+        """思考增量以 ("...", "thinking") 哨兵元组转发：不混入正文，也不进续传上下文。"""
+        llm = FakeLLM([
+            ([FakeChunk("", {"reasoning_content": "思考A"}), FakeChunk("答案"), "，B"], RuntimeError("中断")),
+            ([], None),
+        ])
+        chain = _make_chain(llm)
+
+        results = []
+        async for chunk, _, _, at in chain._stream_with_retry("P", [], [], "llm_direct", think=False):
+            results.append((chunk, at))
+
+        # thinking 与 content 各自独立产出；重试续写上下文只含正文
+        assert results == [
+            ("思考A", "thinking"),
+            ("答案", "llm_direct"),
+            ("，B", "llm_direct"),
+        ]
+        assert "思考A" not in llm.prompts[1]
 
 
 def _make_full_chain(llm):
