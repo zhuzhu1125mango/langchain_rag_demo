@@ -16,6 +16,7 @@ from .experiment import (
 from .badcase import Badcase
 from .user import User
 from .request_trace import RequestTrace
+from .wiki_page import WikiPage
 
 __all__ = [
     "Document",
@@ -35,4 +36,5 @@ __all__ = [
     "ExperimentResult",
     "Badcase",
     "User",
+    "WikiPage",
 ]

@@ -308,6 +308,22 @@ class SemanticCacheSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
+class WikiCompileSettings(BaseSettings):
+    """LLM-Wiki 编译层配置（P2 前置编译增强，Phase 1）。默认全关，零风险合入。"""
+
+    # 总开关（false 时文档摄入管线跳过编译阶段）
+    WIKI_COMPILE_ENABLED: bool = False
+    # 编译模型名，空 = 复用主模型（OLLAMA_MODEL_NAME）
+    WIKI_COMPILE_MODEL: str = ""
+    # 单文档触发的页面更新数上限（控 token 成本）
+    WIKI_COMPILE_MAX_PAGES_PER_DOC: int = 10
+    # 单文档编译总超时（秒），超时仅放弃编译，不阻断上传
+    WIKI_COMPILE_TIMEOUT_SECONDS: int = 300
+    # WiCER 式诊断探针（事实保留率自检，仅日志，不影响编译产物）
+    WIKI_DIAGNOSTIC_PROBES: bool = False
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+
 class Settings(BaseSettings):
     """聚合所有子配置的根配置类。"""
 
@@ -323,6 +339,7 @@ class Settings(BaseSettings):
     intent_router: IntentRouterSettings = IntentRouterSettings()
     search: SearchSettings = SearchSettings()
     semantic_cache: SemanticCacheSettings = SemanticCacheSettings()
+    wiki_compile: WikiCompileSettings = WikiCompileSettings()
     decision: DecisionSettings = DecisionSettings()
     evaluation: EvaluationSettings = EvaluationSettings()
     ocr: OcrSettings = OcrSettings()

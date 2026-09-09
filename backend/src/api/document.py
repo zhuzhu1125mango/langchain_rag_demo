@@ -27,6 +27,7 @@ import uuid
 from collections import Counter
 from src.database import get_db, async_session_maker
 from src.auth import get_current_user, get_current_user_for_ws, CurrentUser, require_owner
+from src.config import settings
 from src.models import Document, Category, KnowledgeBase
 from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
 
@@ -308,6 +309,31 @@ async def process_document_async(
             except Exception as e:
                 logger.warning(f"文档LLM分析失败，保留规则分析结果: {doc.filename}, 错误: {str(e)}")
 
+            # 阶段7：Wiki 编译（P2 LLM-Wiki 编译层，默认关闭；约 95-98%）
+            # 编译失败/超时仅记录日志，不阻断文档上传（raw 层永远可用兜底）
+            if settings.wiki_compile.WIKI_COMPILE_ENABLED:
+                doc.processing_message = "正在编译知识 Wiki..."
+                await db.commit()
+                await notify_task_progress(task_upload_id, 95, "正在编译知识 Wiki...")
+                try:
+                    from src.services.wiki_compiler import WikiCompiler
+
+                    compile_result = await asyncio.wait_for(
+                        WikiCompiler().compile_document(db, kb_id, doc_id, chunks),
+                        timeout=settings.wiki_compile.WIKI_COMPILE_TIMEOUT_SECONDS,
+                    )
+                    await notify_task_progress(
+                        task_upload_id, 98,
+                        f"Wiki 编译完成：新建 {compile_result.pages_created} 页，"
+                        f"更新 {compile_result.pages_updated} 页",
+                    )
+                    logger.info(
+                        f"Wiki 编译完成: {doc.filename}, 新建 {compile_result.pages_created} 页, "
+                        f"更新 {compile_result.pages_updated} 页, 入库 {compile_result.chunks_indexed} 块"
+                    )
+                except Exception as e:
+                    logger.warning(f"Wiki 编译失败（不阻断文档上传）: {doc.filename}, 错误: {str(e)}")
+
             # 阶段6：完成 (95-100%)
             doc.status = "published"
             doc.processing_status = "completed"
@@ -421,6 +447,11 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
 
             # P1-3：知识库内容已变更，失效相关语义缓存
             _schedule_semantic_cache_invalidation(kb_id)
+
+            # P2：Wiki 级联清理（剪源/删孤儿页），失败不阻断删除主流程
+            from src.services.wiki_cascade import on_document_deleted
+
+            await on_document_deleted(db, kb_id, doc_id)
 
             logger.info(f"文档删除完成: {doc_id}")
 

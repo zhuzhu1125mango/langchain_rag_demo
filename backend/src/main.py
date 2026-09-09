@@ -42,6 +42,7 @@ from src.api import (
     learning_router,
     experiment_router,
     knowledge_base_router,
+    wiki_router,
     config_router,
     notification_router,
     badcase_router,
@@ -369,6 +370,7 @@ app.include_router(feedback_router, prefix="/api", dependencies=[Depends(get_cur
 app.include_router(learning_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(experiment_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(knowledge_base_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(wiki_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(config_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(badcase_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(evaluation_router, prefix="/api", dependencies=[Depends(get_current_user)])

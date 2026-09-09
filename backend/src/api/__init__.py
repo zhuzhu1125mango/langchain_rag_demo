@@ -8,6 +8,7 @@ from .feedback import router as feedback_router
 from .learning import router as learning_router
 from .experiment import router as experiment_router
 from .knowledge_base import router as knowledge_base_router
+from .wiki import router as wiki_router
 from .config import router as config_router
 from .notification import router as notification_router
 from .badcase import router as badcase_router
@@ -26,6 +27,7 @@ __all__ = [
     "learning_router",
     "experiment_router",
     "knowledge_base_router",
+    "wiki_router",
     "config_router",
     "notification_router",
     "badcase_router",

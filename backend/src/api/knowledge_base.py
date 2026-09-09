@@ -480,6 +480,11 @@ async def delete_knowledge_base(
         # P1-3：知识库内容已清空，失效相关语义缓存
         _schedule_semantic_cache_invalidation(str(kb.id))
 
+        # P2：Wiki 级联清理（wiki_pages 行 + MinIO 正文），失败不阻断删除主流程
+        from src.services.wiki_cascade import on_kb_deleted
+
+        await on_kb_deleted(db, str(kb.id))
+
         return {"message": "知识库已删除"}
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的知识库ID")
@@ -605,6 +610,12 @@ async def batch_delete_knowledge_bases(
     # P1-3：知识库内容已清空，失效相关语义缓存
     for kb in kbs:
         _schedule_semantic_cache_invalidation(str(kb.id))
+
+    # P2：Wiki 级联清理（wiki_pages 行 + MinIO 正文），失败不阻断删除主流程
+    from src.services.wiki_cascade import on_kb_deleted
+
+    for kb in kbs:
+        await on_kb_deleted(db, str(kb.id))
 
     logger.info(
         "批量删除知识库成功: 用户=%s 删除数量=%d 跳过数量=%d",

@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import io
 import logging
 import uuid
 from minio import Minio
@@ -156,3 +157,42 @@ class MinioService(AsyncSingleton["MinioService"]):
             self.file_exists,
             file_key
         )
+
+    # ------------------------------------------------------------------
+    # 文本对象读写（P2 LLM-Wiki：wiki/{kb_id}/{page_id}.md 正文持久化）
+    # ------------------------------------------------------------------
+    def upload_text(self, key, content, content_type="text/markdown; charset=utf-8"):
+        """同步写入文本对象（覆盖写）。key 为不含 bucket 的对象路径。"""
+        data = content.encode("utf-8")
+        self._client.put_object(
+            settings.minio.MINIO_BUCKET_NAME,
+            key,
+            io.BytesIO(data),
+            length=len(data),
+            content_type=content_type,
+        )
+        return key
+
+    def download_text(self, key):
+        """同步读取文本对象，不存在时返回 None。"""
+        try:
+            response = self._client.get_object(settings.minio.MINIO_BUCKET_NAME, key)
+            try:
+                return response.read().decode("utf-8")
+            finally:
+                response.close()
+                response.release_conn()
+        except S3Error as e:
+            if e.code in ("NoSuchKey", "NoSuchObject"):
+                return None
+            raise
+
+    async def upload_text_async(self, key, content):
+        """异步写入文本对象。"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.upload_text, key, content)
+
+    async def download_text_async(self, key):
+        """异步读取文本对象。"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.download_text, key)

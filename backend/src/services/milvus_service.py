@@ -91,6 +91,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             await self._create_indexes()
         else:
             await self._add_heading_path_field_if_missing()
+            await self._add_source_kind_field_if_missing()
             await self._add_kb_id_field_if_missing()
             await self._ensure_dimension_match()
             await self._add_sparse_field_if_missing()
@@ -114,6 +115,9 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         # P0-2a：结构化分块的标题路径（"A > B > C"），旧集合通过 add_collection_field 兼容
         schema.add_field("heading_path", DataType.VARCHAR, max_length=512, default_value="")
         self._has_heading_path = True
+        # P2 LLM-Wiki：chunk 来源类型（raw=原始文档 / wiki=编译页），旧集合在线补加
+        schema.add_field("source_kind", DataType.VARCHAR, max_length=16, default_value="raw")
+        self._has_source_kind = True
         # 阶段一：BM25 sparse vector，维度由 BM25 词表动态决定
         if self._sparse_enabled:
             schema.add_field("sparse_embedding", DataType.SPARSE_FLOAT_VECTOR)
@@ -146,11 +150,39 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             self._has_heading_path = False
             logger.warning(f"在线补加 heading_path 字段失败，插入/查询将不携带该字段: {e}")
 
+    async def _add_source_kind_field_if_missing(self):
+        """兼容旧集合：source_kind 字段缺失时在线补加（同 heading_path 路径）。
+
+        补加失败仅告警，插入自动降级不携带该字段（默认按 raw 处理），不阻断启动。
+        """
+        collection_info = await self.client.describe_collection(settings.milvus.MILVUS_COLLECTION_NAME)
+        field_names = [f["name"] for f in collection_info["fields"]]
+        if "source_kind" in field_names:
+            self._has_source_kind = True
+            return
+        try:
+            await self.client.add_collection_field(
+                collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+                field_name="source_kind",
+                data_type=DataType.VARCHAR,
+                desc="chunk 来源类型（raw=原始文档 / wiki=LLM 编译页）",
+                max_length=16,
+                nullable=True,
+                default_value="raw",
+            )
+            self._has_source_kind = True
+            logger.info("已为现有集合在线补加 source_kind 字段")
+        except Exception as e:
+            self._has_source_kind = False
+            logger.warning(f"在线补加 source_kind 字段失败，插入将不携带该字段: {e}")
+
     def _base_output_fields(self) -> list:
         """检索/查询的基础 output_fields，heading_path 视 schema 能力动态附加。"""
         fields = ["kb_id", "document_id", "content", "source", "chunk_index"]
         if self._has_heading_path:
             fields.append("heading_path")
+        if self._has_source_kind:
+            fields.append("source_kind")
         return fields
 
     async def _create_indexes(self):
@@ -348,6 +380,9 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             }
             if self._has_heading_path:
                 item["heading_path"] = doc.metadata.get("heading_path", "")
+            if self._has_source_kind:
+                # P2 LLM-Wiki：chunk 来源类型，未标注一律按原始文档处理
+                item["source_kind"] = doc.metadata.get("source_kind", "raw")
             if sparse_embeddings and i < len(sparse_embeddings):
                 item["sparse_embedding"] = sparse_embeddings[i]
             data.append(item)

@@ -14,6 +14,7 @@ from sqlalchemy import Select, Delete
 
 from src.api.knowledge_base import delete_knowledge_base
 from src.models import KnowledgeBase, Document
+from src.models.wiki_page import WikiPage
 
 USER_ID = "user-1"
 
@@ -78,6 +79,10 @@ class FakeDB:
             if entity is KnowledgeBase:
                 self.stmt_types.append("select_kb")
                 return FakeResult(self._kb)
+            if entity is WikiPage:
+                # P2：Wiki 级联清理查询（本测试场景无 Wiki 页 → 级联早退）
+                self.stmt_types.append("select_wiki_pages")
+                return FakeResult([])
             self.stmt_types.append("select_docs")
             return FakeResult(self._docs)
         if isinstance(stmt, Delete):
@@ -184,7 +189,10 @@ class TestKbSingleDelete:
 
     @pytest.mark.asyncio
     async def test_db_uses_batch_sql_delete(self, kb, current_user, cleanup_fakes):
-        """数据库记录使用批量 SQL delete（先 Document 后 KB），无逐 ORM delete。"""
+        """数据库记录使用批量 SQL delete（先 Document 后 KB），无逐 ORM delete。
+
+        末尾的 select_wiki_pages 为 P2 级联清理查询（无 Wiki 页 → 早退，不影响主流程）。
+        """
         db, _ = await run_delete(kb, current_user)
 
         assert db.stmt_types == [
@@ -192,6 +200,7 @@ class TestKbSingleDelete:
             "select_docs",
             "delete_documents",
             "delete_knowledge_bases",
+            "select_wiki_pages",
         ]
         assert db.orm_delete_calls == []
         assert db.commit_calls == 1
