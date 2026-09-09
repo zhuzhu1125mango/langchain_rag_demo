@@ -186,6 +186,7 @@ services:
       REDIS_DB: ${REDIS_DB}                            # Redis 逻辑库编号
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME}          # 对话使用的大模型
+      FAST_LLM_MODEL_NAME: ${FAST_LLM_MODEL_NAME}      # 轻量任务模型（启动强校验，必填）
       OLLAMA_DIRECT_MODEL_NAME: ${OLLAMA_DIRECT_MODEL_NAME}  # 深度思考关闭时的非思考专用模型
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}    # 向量化使用的模型
       SKIP_OLLAMA_CHECK: "true"
@@ -193,6 +194,7 @@ services:
       HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
       HF_HUB_OFFLINE: "1"                              # 容器无法访问 huggingface.co，强制离线用缓存
       TRANSFORMERS_OFFLINE: "1"
+      NLTK_DATA: /app/data/nltk_data                    # nltk 语料离线目录（BM25 中文分词依赖 stopwords）
       CHUNK_SIZE: ${CHUNK_SIZE}                        # 文档分块大小
       CHUNK_OVERLAP: ${CHUNK_OVERLAP}                  # 文档分块重叠字符数
       TOP_K: ${TOP_K}                                  # 检索召回数量
@@ -227,6 +229,12 @@ services:
       SEMANTIC_CACHE_TTL_HOURS: ${SEMANTIC_CACHE_TTL_HOURS}                  # 条目过期时间（小时）
       SEMANTIC_CACHE_MAX_ENTRIES: ${SEMANTIC_CACHE_MAX_ENTRIES}              # 单范围条目上限
       SEMANTIC_CACHE_REPLAY_CHUNK_CHARS: ${SEMANTIC_CACHE_REPLAY_CHUNK_CHARS}  # 命中回放切片长度
+      # P2 LLM-Wiki 编译层（默认关闭）
+      WIKI_COMPILE_ENABLED: ${WIKI_COMPILE_ENABLED}                          # 编译总开关
+      WIKI_COMPILE_MODEL: ${WIKI_COMPILE_MODEL}                              # 编译模型（空=复用主模型）
+      WIKI_COMPILE_MAX_PAGES_PER_DOC: ${WIKI_COMPILE_MAX_PAGES_PER_DOC}      # 单文档页面更新上限
+      WIKI_COMPILE_TIMEOUT_SECONDS: ${WIKI_COMPILE_TIMEOUT_SECONDS}          # 单文档编译超时（秒）
+      WIKI_DIAGNOSTIC_PROBES: ${WIKI_DIAGNOSTIC_PROBES}                      # 诊断探针（事实保留率自检）
     volumes:
       - ./backend:/app
       - /app/.venv                                       # 匿名卷防止宿主机 Windows .venv 覆盖容器内 Linux venv
