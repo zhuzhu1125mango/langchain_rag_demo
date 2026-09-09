@@ -21,6 +21,13 @@
           </div>
           <div v-if="currentKB" class="flex items-center gap-3">
             <button
+              @click="showWikiDrawer = true"
+              class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+            >
+              <BookOpen class="w-4 h-4" />
+              <span>Wiki 页面</span>
+            </button>
+            <button
               @click="showEditKBModal = true"
               class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
             >
@@ -284,6 +291,13 @@
       v-model:visible-duplicate="showDuplicateModal"
       :doc="selectedDocForAction"
     />
+
+    <WikiDrawer
+      :visible="showWikiDrawer"
+      :kb-id="currentKB?.id"
+      :kb-name="currentKB?.name"
+      @update:visible="showWikiDrawer = $event"
+    />
   </div>
 </template>
 
@@ -304,7 +318,7 @@ import {
   useSearchDocuments
 } from '@/queries/kb'
 import type { KnowledgeBase, Document, SearchResult } from '@/queries/kb'
-import { Trash2, Upload, Edit3, FileText, Network, Search, FolderOpen, Database } from '@lucide/vue'
+import { Trash2, Upload, Edit3, FileText, Network, Search, FolderOpen, Database, BookOpen } from '@lucide/vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useToast } from '@/composables/useToast'
 import { ElMessageBox } from 'element-plus'
@@ -335,6 +349,7 @@ const showUploadDialog = ref(false)
 const showPreviewDialog = ref(false)
 const showCreateKBModal = ref(false)
 const showEditKBModal = ref(false)
+const showWikiDrawer = ref(false)
 const previewDocId = ref('')
 const previewFilename = ref('')
 const newKBName = ref('')
