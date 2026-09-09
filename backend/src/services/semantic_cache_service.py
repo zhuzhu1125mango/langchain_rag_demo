@@ -37,6 +37,9 @@ KEY_PREFIX = "rag:semcache"
 
 # Redis 操作兜底超时（秒），与 CacheService 的操作超时保持一致量级
 REDIS_OPERATION_TIMEOUT = 3.0
+# question embedding 计算超时（秒）。LLM 与 embedding 模型在显存互换时
+# Ollama 需重新加载模型，远慢于常规 Redis 操作，需独立更长超时
+EMBEDDING_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass
@@ -56,7 +59,6 @@ class SemanticCacheService:
 
     def __init__(self):
         self._embeddings = None
-        self._model_name: Optional[str] = None
 
     # ------------------------------------------------------------------
     # 依赖获取
@@ -66,13 +68,16 @@ class SemanticCacheService:
         return await CacheService.get_instance()
 
     def _get_embeddings(self):
-        """懒加载 OllamaEmbeddings，失败返回 None（降级为只走精确匹配/不缓存）。"""
-        current_model = settings.model.EMBEDDING_MODEL_NAME
-        if self._embeddings is None or self._model_name != current_model:
+        """复用 model_manager 共享 OllamaEmbeddings 单例（B2，与检索链路同源连接），失败返回 None。
+
+        此前此处自建 OllamaEmbeddings 且未显式配置连接地址，容器部署时依赖
+        OLLAMA_HOST 环境变量兜底；改走共享单例以与管线保持完全一致。
+        """
+        if self._embeddings is None:
             try:
-                from langchain_ollama import OllamaEmbeddings
-                self._embeddings = OllamaEmbeddings(model=current_model)
-                self._model_name = current_model
+                from src.services.model_manager import model_manager
+
+                self._embeddings = model_manager.get_embeddings()
             except Exception as e:
                 logger.warning(f"语义缓存 Embedding 模型初始化失败: {e}")
                 self._embeddings = None
@@ -83,8 +88,10 @@ class SemanticCacheService:
         if embeddings is None:
             return None
         try:
+            # 独立于 Redis 操作超时：4GB 显存下 LLM 与 embedding 模型互换加载可达数秒，
+            # 复用 3s 的 REDIS_OPERATION_TIMEOUT 会导致 embedding 永远超时、缓存永不生效
             return await asyncio.wait_for(
-                embeddings.aembed_query(question), timeout=REDIS_OPERATION_TIMEOUT
+                embeddings.aembed_query(question), timeout=EMBEDDING_TIMEOUT_SECONDS
             )
         except Exception as e:
             logger.warning(f"语义缓存问题 embedding 计算失败: {e}")
