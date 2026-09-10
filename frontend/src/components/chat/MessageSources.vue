@@ -38,10 +38,17 @@
           <FileText v-else class="w-4 h-4" />
         </div>
 
-        <!-- 主体内容：标题 + 副标题 + 命中片段预览 -->
+        <!-- 主体内容：标题（+编译页徽标） + 副标题 + 命中片段预览 -->
         <div class="flex-1 min-w-0">
-          <p class="text-xs font-medium text-gray-800 dark:text-gray-200 truncate">
-            {{ getSourceTitle(source) }}
+          <p class="text-xs font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1">
+            <span class="truncate">{{ getSourceTitle(source) }}</span>
+            <span
+              v-if="source.source_kind === 'wiki'"
+              class="flex-shrink-0 px-1 py-px rounded bg-violet-100 text-violet-700 dark:bg-violet-900/50 dark:text-violet-300"
+              title="该条来自 LLM 编译的综合页，非原文"
+            >
+              编译
+            </span>
           </p>
           <p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
             {{ getSourceSubtitle(source) }}

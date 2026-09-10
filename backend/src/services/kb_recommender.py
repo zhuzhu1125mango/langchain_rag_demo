@@ -1,11 +1,25 @@
 """知识库推荐服务。
 
 基于用户问题从向量库中检索相关文档，并按知识库聚合相关性分数进行推荐。
+P3 增强：对有 Wiki 索引页的 KB 融合「覆盖先验」（索引页 embedding 与问题余弦），
+缓解主题命中但 chunk 相似度整体偏低导致的推荐盲区（§11.1）。
 """
 
 import logging
 
+from src.config import settings
+
 logger = logging.getLogger("rag_system")
+
+
+def fuse_prior(chunk_avg: float, index_sim, weight: float) -> float:
+    """融合公式：final = chunk_avg × (1−w) + index_sim × w。
+
+    index_sim 为 None（KB 无 index 页/先验未算出）时保持纯 chunk 分。
+    """
+    if index_sim is None or weight <= 0:
+        return chunk_avg
+    return chunk_avg * (1 - weight) + index_sim * weight
 
 
 class KBRecommender:
@@ -54,12 +68,18 @@ class KBRecommender:
                         kb_scores[kb_id] = []
                     kb_scores[kb_id].append(score)
 
+            priors = await self._get_route_priors(question, list(kb_scores.keys()))
+            weight = settings.wiki_compile.WIKI_ROUTE_PRIOR_WEIGHT
+
             recommendations = []
             for kb_id, scores in kb_scores.items():
                 avg_score = sum(scores) / len(scores)
+                final_score = fuse_prior(avg_score, priors.get(kb_id), weight)
                 recommendations.append({
                     'kb_id': kb_id,
-                    'relevance_score': avg_score,
+                    'relevance_score': final_score,
+                    'chunk_score': avg_score,
+                    'route_prior': priors.get(kb_id),
                     'matched_chunks': len(scores)
                 })
 
@@ -69,3 +89,13 @@ class KBRecommender:
         except Exception as e:
             logger.error(f"知识库推荐失败: {str(e)}", exc_info=True)
             return []
+
+    async def _get_route_priors(self, question: str, kb_ids: list) -> dict:
+        """取覆盖先验分：权重为 0 时跳过；失败由 WikiRoutePrior 兜底返回空 dict
+        （空 dict → 所有 KB 保持纯 chunk 分，行为与现状一致）。"""
+        weight = settings.wiki_compile.WIKI_ROUTE_PRIOR_WEIGHT
+        if weight <= 0 or not kb_ids:
+            return {}
+        from src.services.wiki_route_prior import wiki_route_prior
+
+        return await wiki_route_prior.get_priors(question, kb_ids)

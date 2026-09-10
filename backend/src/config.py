@@ -1,7 +1,8 @@
 """项目配置中心。
 
 使用 pydantic-settings 管理数据库/MinIO/Milvus/Redis/安全/CORS/模型/处理/标题生成/搜索等配置，
-所有子配置统一从根目录 .env 文件读取。
+所有子配置统一从根目录 .env.{APP_ENV} 文件读取（APP_ENV=dev|prod，默认 dev 读 .env.dev；
+容器内由 compose 显式注入环境变量，优先级高于 env 文件）。
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -10,7 +11,9 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
-ENV_FILE = os.path.join(PROJECT_ROOT, ".env")
+# 环境切换：本地裸跑默认读 .env.dev；生产以 APP_ENV=prod 显式声明
+APP_ENV = os.getenv("APP_ENV", "dev")          # dev | prod
+ENV_FILE = os.path.join(PROJECT_ROOT, f".env.{APP_ENV}")
 
 class DatabaseSettings(BaseSettings):
     """PostgreSQL 数据库连接配置。"""
@@ -321,6 +324,23 @@ class WikiCompileSettings(BaseSettings):
     WIKI_COMPILE_TIMEOUT_SECONDS: int = 300
     # WiCER 式诊断探针（事实保留率自检，仅日志，不影响编译产物）
     WIKI_DIAGNOSTIC_PROBES: bool = False
+    # P4 迭代精炼轮数（0 = 关闭）：弱页（事实保留率 < 0.9）按缺失事实重生成，
+    # 开启时探针自动启用
+    WIKI_COMPILE_REFINEMENT_ITERATIONS: int = 0
+    # P3 KB 推荐覆盖先验权重：final = chunk_avg×(1−w) + index_sim×w（0 = 关闭）
+    WIKI_ROUTE_PRIOR_WEIGHT: float = 0.3
+    # P3 交叉链接检索扩展（rerank 后按 wiki 页 links 追加目标页分块）
+    WIKI_LINK_EXPANSION: bool = False
+    # P5 编译去抖（秒）：>0 时上传管线不再立即编译，由调度器合并窗口内文档一次编译
+    WIKI_COMPILE_DEBOUNCE_SECONDS: int = 20
+    # P5 Redis 分布式锁（多副本/多 worker 部署时开启；false 仅进程内锁）
+    WIKI_DISTRIBUTED_LOCK: bool = False
+    # P5 源文档删除后级联重写（从剩余来源重推导受影响页面；false 仅剪源）
+    WIKI_CASCADE_REWRITE: bool = False
+    # P5 编译期 LLM 矛盾抽查（仅诊断：warning 日志 + 指标，不改页面内容）
+    WIKI_CONTRADICTION_CHECK: bool = False
+    # P5 级联重写材料上限（字符）：重写为低频操作，独立于编译的 8000 上限放宽
+    WIKI_REWRITE_MATERIAL_CHARS: int = 16000
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
@@ -345,9 +365,9 @@ class Settings(BaseSettings):
     ocr: OcrSettings = OcrSettings()
 
     IN_DOCKER: bool = False
-    # 显式环境标记：dev | production。未设置时按 IN_DOCKER 推断。
-    # 非 Docker 的生产部署（裸跑 uvicorn/systemd）必须设置 APP_ENV=production，
-    # 否则启动时不执行强密钥/凭据校验。
+    # 显式环境标记：dev | prod（与上方模块级 APP_ENV 同源）。未设置时按 IN_DOCKER 推断。
+    # 非 Docker 的生产部署（裸跑 uvicorn/systemd）必须设置 APP_ENV=prod，
+    # 否则启动时不执行强密钥/凭据校验；兼容旧值 "production"。
     APP_ENV: Optional[str] = None
     # 任务级模型角色映射（可选），key 为任务名，value 为 settings.model 中的字段名
     MODEL_TASK_ROLES: Optional[Dict[str, str]] = None
@@ -358,7 +378,7 @@ class Settings(BaseSettings):
     def IS_PRODUCTION(self) -> bool:
         """是否以生产级标准运行（决定启动时是否强制安全校验）。"""
         if self.APP_ENV:
-            return self.APP_ENV == "production"
+            return self.APP_ENV in ("prod", "production")
         return self.IN_DOCKER
 
 settings = Settings()

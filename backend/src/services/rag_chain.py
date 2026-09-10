@@ -505,7 +505,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         """
         self.strategy_manager.set_threshold(threshold)
 
-    async def _retrieve_documents(self, question, kb_ids=None, document_ids=None):
+    async def _retrieve_documents(self, question, kb_ids=None, document_ids=None, query_embedding=None):
         """
         根据问题检索相关文档。
 
@@ -516,6 +516,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             question: 用户问题
             kb_ids: 指定的知识库ID列表（可选）
             document_ids: 指定的文档ID列表（可选）
+            query_embedding: 预计算的 query 向量（来自语义缓存查找），传入时跳过重复计算
 
         Returns:
             list: 检索到的Document对象列表
@@ -532,6 +533,8 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 search_kwargs["kb_ids"] = kb_ids
             elif document_ids and len(document_ids) > 0:
                 search_kwargs["document_ids"] = document_ids
+            if query_embedding is not None:
+                search_kwargs["query_embedding"] = query_embedding
 
             if settings.processing.KB_ENABLE_HYBRID_SEARCH:
                 try:
@@ -602,6 +605,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 'source': metadata.get('source', ''),
                 'chunk_index': metadata.get('chunk_index', 0),
                 'total_chunks': metadata.get('total_chunks', 1),
+                'source_kind': metadata.get('source_kind', 'raw'),
                 'page_content': doc.page_content[:200] + '...' if len(doc.page_content) > 200 else doc.page_content
             })
         
@@ -1255,7 +1259,10 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             content="正在检索知识库...",
         ))
         kb_search_start = time.time()
-        state.docs = await self._retrieve_documents(state.resolved_question, state.kb_ids)
+        state.docs = await self._retrieve_documents(
+            state.resolved_question, state.kb_ids,
+            query_embedding=state.semantic_cache_embedding,
+        )
 
         kb_search_duration = int((time.time() - kb_search_start) * 1000)
         if state.docs and len(state.docs) > 0:
@@ -1263,6 +1270,11 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             _request_retrieval_score.set(_retrieval_score)
 
             if has_relevant:
+                # P3 交叉链接检索扩展（rerank 后、context 组装前追加，开关控制）
+                if settings.wiki_compile.WIKI_LINK_EXPANSION:
+                    from .wiki_link_expansion import expand_wiki_links
+
+                    state.docs = await expand_wiki_links(state.docs)
                 doc_texts, doc_metadata = self._extract_source_info(state.docs)
                 state.source_texts.extend(doc_texts)
                 state.source_metadata.extend(doc_metadata)

@@ -38,6 +38,8 @@ export interface MessageSource {
   title?: string
   /** 来源类型：kb=知识库，web=网页搜索。 */
   source_type?: 'kb' | 'web'
+  /** 语料种类：raw=原始文档，wiki=LLM 编译综合页（后端缺省回 'raw'）。 */
+  source_kind?: 'raw' | 'wiki'
   /** 命中的文本片段内容。 */
   content?: string
   /** 知识库文档 ID，用于定位文档切片详情（kb 来源点击弹窗必需）。 */

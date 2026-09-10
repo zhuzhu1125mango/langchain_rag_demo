@@ -155,7 +155,9 @@ class ContextBuilder:
                         "chunk_index": metadata.get("chunk_index", 0),
                         "total_chunks": metadata.get("total_chunks", 1),
                         "kb_id": metadata.get("kb_id", ""),
+                        "source_kind": metadata.get("source_kind", "raw"),
                         "score": score,
+                        "link_expanded": bool(metadata.get("link_expanded", False)),
                     },
                 )
             )

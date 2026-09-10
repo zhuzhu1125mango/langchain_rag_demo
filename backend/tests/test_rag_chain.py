@@ -96,3 +96,32 @@ class TestRAGChain:
         retriever = rag_chain._get_retriever()
         assert retriever is None
         assert rag_chain.retriever is None
+
+
+class _FakeDoc:
+    """最小 Document 替身（_extract_source_info 只读 page_content/metadata）。"""
+
+    def __init__(self, metadata):
+        self.page_content = "片段内容"
+        self.metadata = metadata
+
+
+class TestExtractSourceInfo:
+    """P4：来源元数据透传 source_kind（wiki 编译页标识）。"""
+
+    def test_wiki_source_kind_passed_through(self):
+        rag_chain = RAGChain(make_vector_store_with_stub())
+        docs = [_FakeDoc({"document_id": "page-1", "source": "wiki://页面A", "source_kind": "wiki"})]
+
+        _, metadata = rag_chain._extract_source_info(docs)
+
+        assert metadata[0]["source_kind"] == "wiki"
+
+    def test_raw_source_kind_default(self):
+        """metadata 无 source_kind 时兜底 'raw'（联网/工具来源不受影响）。"""
+        rag_chain = RAGChain(make_vector_store_with_stub())
+        docs = [_FakeDoc({"document_id": "doc-1", "filename": "a.pdf"})]
+
+        _, metadata = rag_chain._extract_source_info(docs)
+
+        assert metadata[0]["source_kind"] == "raw"

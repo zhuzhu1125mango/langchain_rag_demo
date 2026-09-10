@@ -909,4 +909,27 @@ export function useRebuildWiki() {
   })
 }
 
+// ---------------------------------------------------------------------------
+// LLM-Wiki 编译层（Phase 3）：体检报告
+// ---------------------------------------------------------------------------
+
+export interface WikiLintIssue {
+  rule: string
+  level: 'error' | 'warning' | 'info'
+  page_id: string
+  title: string
+  message: string
+}
+
+export interface WikiLintReport {
+  kb_id: string
+  checked_pages: number
+  issues: WikiLintIssue[]
+}
+
+/** Wiki 体检（规则级零 LLM，同步毫秒级，仅报告不修复；低频操作直接函数调用）。 */
+export async function fetchWikiLint(kbId: string): Promise<WikiLintReport> {
+  return api.get<WikiLintReport>(`/knowledge_bases/${kbId}/wiki/lint`)
+}
+
 

@@ -10,19 +10,71 @@
       <p class="text-xs text-gray-500 dark:text-gray-400">
         由文档离线编译生成的补充语料，参与混合检索
       </p>
-      <button
-        @click="onRebuild"
-        :disabled="rebuilding || !kbId"
-        :class="[
-          'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
-          rebuilding
-            ? 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
-            : 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
-        ]"
-      >
-        <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': rebuilding }" />
-        <span>{{ rebuilding ? '重编译中...' : '全量重编译' }}</span>
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          @click="onLint"
+          :disabled="lintLoading || !kbId"
+          :class="[
+            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
+            lintLoading
+              ? 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+              : 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
+          ]"
+        >
+          <Stethoscope class="w-3.5 h-3.5" :class="{ 'animate-pulse': lintLoading }" />
+          <span>{{ lintLoading ? '体检中...' : '体检' }}</span>
+        </button>
+        <button
+          @click="onRebuild"
+          :disabled="rebuilding || !kbId"
+          :class="[
+            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
+            rebuilding
+              ? 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+              : 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
+          ]"
+        >
+          <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': rebuilding }" />
+          <span>{{ rebuilding ? '重编译中...' : '全量重编译' }}</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 体检报告（内联展示，只报告不修复） -->
+    <div
+      v-if="lintReport"
+      class="mb-4 border border-gray-200 dark:border-dark-600 rounded-lg p-3"
+    >
+      <div class="flex items-center justify-between">
+        <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
+          体检报告 · 共检查 {{ lintReport.checked_pages }} 页
+        </p>
+        <button
+          @click="lintReport = null"
+          class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          aria-label="关闭体检报告"
+        >
+          <X class="w-3.5 h-3.5" />
+        </button>
+      </div>
+      <p v-if="!lintReport.issues.length" class="text-xs text-emerald-600 dark:text-emerald-400 mt-2">
+        未发现问题
+      </p>
+      <ul v-else class="mt-2 space-y-1.5">
+        <li
+          v-for="(issue, idx) in lintReport.issues"
+          :key="idx"
+          class="flex items-start gap-2 text-xs"
+        >
+          <span :class="['shrink-0 px-1.5 py-0.5 rounded', levelBadgeClass(issue.level)]">
+            {{ levelLabel(issue.level) }}
+          </span>
+          <span class="text-gray-800 dark:text-white shrink-0">{{ issue.title }}</span>
+          <span class="text-gray-500 dark:text-gray-400 min-w-0">
+            {{ ruleLabel(issue.rule) }}：{{ issue.message }}
+          </span>
+        </li>
+      </ul>
     </div>
 
     <!-- 重编译进度条 -->
@@ -103,7 +155,7 @@
 import { ref, computed, watch } from 'vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { ElMessageBox } from 'element-plus'
-import { RefreshCw, Loader2, BookOpen, ChevronDown } from '@lucide/vue'
+import { RefreshCw, Loader2, BookOpen, ChevronDown, Stethoscope, X } from '@lucide/vue'
 import { buildWsUrl } from '@/utils/ws'
 import { useToast } from '@/composables/useToast'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
@@ -111,7 +163,9 @@ import {
   useWikiPages,
   useRebuildWiki,
   fetchWikiPageContent,
-  type WikiPageSummary
+  fetchWikiLint,
+  type WikiPageSummary,
+  type WikiLintReport
 } from '@/queries/kb'
 
 /**
@@ -147,6 +201,51 @@ const contentCache = ref<Map<string, string>>(new Map())
 const rebuilding = ref(false)
 const rebuildProgress = ref(0)
 const rebuildMessage = ref('')
+
+// 体检（P3）：规则级零 LLM，同步毫秒级
+const lintLoading = ref(false)
+const lintReport = ref<WikiLintReport | null>(null)
+
+/** 拉取体检报告并内联展示。 */
+async function onLint(): Promise<void> {
+  if (!props.kbId || lintLoading.value) return
+  lintLoading.value = true
+  try {
+    lintReport.value = await fetchWikiLint(props.kbId)
+  } catch (error) {
+    toast.error('体检失败', error instanceof Error ? error.message : '未知错误')
+  } finally {
+    lintLoading.value = false
+  }
+}
+
+/** 体检级别中文标签。 */
+function levelLabel(level: string): string {
+  const labels: Record<string, string> = { error: '错误', warning: '警告', info: '提示' }
+  return labels[level] || level
+}
+
+/** 体检级别徽标配色。 */
+function levelBadgeClass(level: string): string {
+  const classes: Record<string, string> = {
+    error: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+    warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
+    info: 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+  }
+  return classes[level] || classes.info!
+}
+
+/** 体检规则中文标签。 */
+function ruleLabel(rule: string): string {
+  const labels: Record<string, string> = {
+    broken_link: '断链',
+    orphan_page: '孤立页',
+    missing_in_index: '目录缺失',
+    empty_source: '空源页',
+    abnormal_size: '体量异常'
+  }
+  return labels[rule] || rule
+}
 
 /** 切换页面展开态并懒加载正文。 */
 async function togglePage(page: WikiPageSummary): Promise<void> {
@@ -283,5 +382,6 @@ function formatDate(iso: string): string {
 watch(() => [props.kbId, props.visible], () => {
   expandedId.value = ''
   expandedContent.value = ''
+  lintReport.value = null
 })
 </script>

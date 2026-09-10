@@ -452,6 +452,7 @@ async def stream_answer(
                 "content": meta.get('page_content', ''),
                 "source": meta.get('source', ''),
                 "url": meta.get('url', ''),
+                "source_kind": meta.get('source_kind', 'raw'),
             }
             # 网页来源使用标题作为展示名
             if meta.get('source') == 'web_search' or meta.get('url'):

@@ -34,6 +34,8 @@ class WikiPage(Base):
     content_path = Column(String(512), nullable=False)
     # 贡献该页的源文档 id 列表
     source_doc_ids = Column(JSONB, nullable=False, default=list)
+    # 正文 [[Title]] 交叉链接（已去重、排除自引用与不存在页），P3 检索扩展依据
+    links = Column(JSONB, nullable=False, default=list)
     revision = Column(Integer, nullable=False, default=1)
     # active / stale / deleted
     status = Column(String(16), nullable=False, default="active")

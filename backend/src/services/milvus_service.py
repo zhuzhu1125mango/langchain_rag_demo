@@ -496,9 +496,14 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         """
         return await self.search_dense(query, k=k, document_ids=document_ids, kb_ids=kb_ids)
 
-    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None):
-        """Dense 向量检索通道。"""
-        query_embedding = await self.embeddings.aembed_query(query)
+    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
+        """Dense 向量检索通道。
+
+        Args:
+            query_embedding: 预计算的 query 向量，传入时跳过 aembed_query 避免重复计算。
+        """
+        if query_embedding is None:
+            query_embedding = await self.embeddings.aembed_query(query)
 
         search_params = {
             "metric_type": "IP",
@@ -556,7 +561,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             logger.warning(f"Sparse 检索失败: {e}")
             return []
 
-    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None):
+    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
         """混合检索入口：dense + sparse，返回经 RRF 融合与 Cross-Encoder 重排序后的结果。
 
         Args:
@@ -564,6 +569,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             k: 最终返回结果数量上限。
             document_ids: 可选，限定只在这些文档中检索。
             kb_ids: 可选，限定只在这些知识库中检索。
+            query_embedding: 预计算的 query 向量，传入时跳过 aembed_query 避免重复计算。
 
         Returns:
             list[dict]: 包含额外字段 `dense_score` / `sparse_score` / `rrf_score` / `rerank_score` 的结果列表。
@@ -572,7 +578,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
 
         top_k = max(k, settings.processing.KB_HYBRID_SEARCH_TOP_K)
 
-        dense_results = await self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids)
+        dense_results = await self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding)
         sparse_results = await self.search_sparse(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids)
 
         fused = reciprocal_rank_fusion(
@@ -638,6 +644,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                 "source": hit["entity"].get("source"),
                 "heading_path": hit["entity"].get("heading_path", ""),
                 "chunk_index": hit["entity"].get("chunk_index"),
+                "source_kind": hit["entity"].get("source_kind", "raw"),
                 "score": hit["distance"]
             }
             docs.append(doc)

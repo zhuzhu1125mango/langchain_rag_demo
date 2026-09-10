@@ -53,17 +53,17 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
             )
         return self._results_to_documents(results)
 
-    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None):
+    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
         """纯 dense 向量检索入口（兼容旧逻辑）。"""
         results = await self.milvus_service.search_dense(
-            query, k=k, document_ids=document_ids, kb_ids=kb_ids
+            query, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding
         )
         return self._results_to_documents(results)
 
-    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None):
+    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
         """混合检索入口，返回经 RRF 融合与 Cross-Encoder 重排序后的 Document。"""
         results = await self.milvus_service.search_hybrid(
-            query, k=k, document_ids=document_ids, kb_ids=kb_ids
+            query, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding
         )
         return self._results_to_documents(results)
 
@@ -79,6 +79,7 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
                     "source": result.get("source", ""),
                     "heading_path": result.get("heading_path", ""),
                     "chunk_index": result.get("chunk_index", 0),
+                    "source_kind": result.get("source_kind", "raw"),
                     "score": result.get("rerank_score", result.get("rrf_score", result.get("score", 0.0))),
                     "dense_score": result.get("dense_score", 0.0),
                     "sparse_score": result.get("sparse_score", 0.0),
@@ -88,6 +89,11 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
             )
             docs.append(doc)
         return docs
+
+    async def get_chunks_by_document_id(self, document_id):
+        """获取指定文档（含 Wiki 页）的全部分块，包装为 Document（Wiki 链接扩展用）。"""
+        results = await self.milvus_service.get_document_chunks(document_id)
+        return self._results_to_documents(results)
 
     async def delete_by_document_id(self, document_id):
         """按文档 ID 删除向量数据。"""

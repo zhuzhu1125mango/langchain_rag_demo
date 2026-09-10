@@ -10,6 +10,7 @@
 
 import inspect
 import logging
+import time
 from typing import Callable, Optional, Union
 
 from sqlalchemy import select
@@ -91,6 +92,7 @@ async def rebuild_kb_wiki(
         except Exception as e:
             logger.warning(f"Wiki 重编译进度回调失败: {e}")
 
+    from src.middleware.prometheus import record_wiki_compile
     from src.services.wiki_compiler import WikiCompiler
 
     docs = (
@@ -114,7 +116,15 @@ async def rebuild_kb_wiki(
             report(10 + int(span * i), f"[{i}/{len(docs)}] {doc.filename}: 无 raw chunks，跳过")
             continue
         try:
-            result = await compiler.compile_document(db, str(kb_id), str(doc.id), chunks)
+            compile_started = time.monotonic()
+            result = await compiler.compile_document(db, str(kb_id), [str(doc.id)], chunks)
+            record_wiki_compile(
+                result="ok",
+                pages_created=result.pages_created,
+                pages_updated=result.pages_updated,
+                duration=time.monotonic() - compile_started,
+                fact_retention=result.fact_retention_rate,
+            )
             total_created += result.pages_created
             total_updated += result.pages_updated
             total_indexed += result.chunks_indexed
@@ -124,6 +134,7 @@ async def rebuild_kb_wiki(
                 f"更新 {result.pages_updated} 页",
             )
         except Exception as e:
+            record_wiki_compile(result="failed")
             logger.warning(f"Wiki 重编译失败（跳过该文档）: {doc.filename}: {e}")
             report(10 + int(span * i), f"[{i}/{len(docs)}] {doc.filename}: 编译失败，跳过")
 

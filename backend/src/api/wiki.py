@@ -3,6 +3,7 @@
 提供编译产物（实体页/主题页/索引页）的查看与全量重编译：
 - GET  /knowledge_bases/{kb_id}/wiki/pages            页面列表
 - GET  /knowledge_bases/{kb_id}/wiki/pages/{pid}/content  单页正文预览
+- GET  /knowledge_bases/{kb_id}/wiki/lint             体检报告（P3，规则级零 LLM）
 - POST /knowledge_bases/{kb_id}/wiki/rebuild          全量重编译（后台任务）
 
 权限沿用 KB 归属校验（require_owner）。
@@ -55,6 +56,20 @@ class WikiPageContentResponse(BaseModel):
 class WikiRebuildResponse(BaseModel):
     upload_id: str
     message: str
+
+
+class WikiLintIssue(BaseModel):
+    rule: str
+    level: str  # error / warning / info
+    page_id: str
+    title: str
+    message: str
+
+
+class WikiLintResponse(BaseModel):
+    kb_id: str
+    checked_pages: int
+    issues: List[WikiLintIssue]
 
 
 # ----------------------------------------------------------------------
@@ -168,6 +183,25 @@ async def get_wiki_page_content(
         logger.warning(f"Wiki 页正文读取失败: page={row.id}: {e}")
     return WikiPageContentResponse(
         id=row.id, title=row.title, page_type=row.page_type, content=content
+    )
+
+
+@router.get("/lint", response_model=WikiLintResponse)
+async def lint_wiki(
+    kb_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """体检报告（规则级零 LLM、同步毫秒级，只报告不修复；无 wiki 页返回空报告）。"""
+    kb = await _get_owned_kb(db, kb_id, current_user)
+
+    from src.services.wiki_lint import lint_kb_wiki
+
+    report = await lint_kb_wiki(db, str(kb.id))
+    return WikiLintResponse(
+        kb_id=report.kb_id,
+        checked_pages=report.checked_pages,
+        issues=[WikiLintIssue(**i.to_dict()) for i in report.issues],
     )
 
 

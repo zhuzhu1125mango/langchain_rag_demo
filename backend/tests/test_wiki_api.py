@@ -63,6 +63,7 @@ def make_page(page_id: str, kb_id: str) -> SimpleNamespace:
         revision=3,
         status="active",
         source_doc_ids=["doc-1", "doc-2"],
+        links=[],
         updated_at=None,
         content_path=f"wiki/{kb_id}/{page_id}.md",
     )
@@ -191,3 +192,41 @@ class TestRebuild:
         # TestClient 响应后执行后台任务
         assert calls["kb_id"] == KB_ID
         assert calls["progressed"] is True
+
+
+class TestLint:
+    def test_returns_report_with_issues(self, client):
+        http, db = client
+        page = make_page("page-1", KB_ID)
+        page.links = ["幽灵页"]  # 断链
+        db.select_queue = [[make_kb(KB_ID)], [page]]
+        resp = http.get(f"/api/knowledge_bases/{KB_ID}/wiki/lint")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["kb_id"] == KB_ID
+        assert body["checked_pages"] == 1
+        rules = {i["rule"] for i in body["issues"]}
+        # MinIO mock 正文较短 → 体量异常；无 index 页 → 孤立页
+        assert "broken_link" in rules
+        assert {i["level"] for i in body["issues"]} <= {"error", "warning", "info"}
+
+    def test_empty_pages_returns_empty_report(self, client):
+        http, db = client
+        db.select_queue = [[make_kb(KB_ID)], []]
+        resp = http.get(f"/api/knowledge_bases/{KB_ID}/wiki/lint")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["issues"] == []
+        assert body["checked_pages"] == 0
+
+    def test_kb_not_found_404(self, client):
+        http, db = client
+        db.select_queue = [[None]]
+        resp = http.get(f"/api/knowledge_bases/{KB_ID}/wiki/lint")
+        assert resp.status_code == 404
+
+    def test_forbidden_for_other_owner(self, client):
+        http, db = client
+        db.select_queue = [[make_kb(KB_ID, owner_id="someone-else")], []]
+        resp = http.get(f"/api/knowledge_bases/{KB_ID}/wiki/lint")
+        assert resp.status_code == 403

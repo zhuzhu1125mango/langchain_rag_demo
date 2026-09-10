@@ -149,6 +149,48 @@ SEMANTIC_CACHE_LOOKUP_LATENCY = Histogram(
     registry=registry
 )
 
+# ==================== LLM-Wiki 编译指标（P4） ====================
+
+WIKI_COMPILATIONS = Counter(
+    "wiki_compilations_total",
+    "Total number of wiki compile runs",
+    ["result"],   # ok / failed / timeout
+    registry=registry
+)
+
+WIKI_COMPILE_PAGES = Counter(
+    "wiki_compile_pages_total",
+    "Total number of wiki pages produced by compilation",
+    ["action"],   # created / updated
+    registry=registry
+)
+
+WIKI_COMPILE_DURATION = Histogram(
+    "wiki_compile_duration_seconds",
+    "Wiki compilation duration in seconds (per document)",
+    registry=registry
+)
+
+WIKI_COMPILE_FACT_RETENTION = Histogram(
+    "wiki_compile_fact_retention",
+    "Wiki compile fact retention rate (diagnostic probe; not recorded when not probed)",
+    registry=registry,
+    buckets=[0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+)
+
+WIKI_LOCK_ACQUIRE = Counter(
+    "wiki_lock_acquire_total",
+    "Wiki KB lock acquisition outcomes",
+    ["result"],   # ok / redis_unavailable / timeout
+    registry=registry
+)
+
+WIKI_CONTRADICTIONS = Counter(
+    "wiki_contradictions_total",
+    "Wiki compile contradiction findings (diagnostic check)",
+    registry=registry
+)
+
 
 def get_prometheus_metrics():
     """
@@ -275,3 +317,45 @@ def record_semantic_cache_store(result):
         result: 写入结果（success 或 failed）
     """
     SEMANTIC_CACHE_STORES.labels(result=result).inc()
+
+
+def record_wiki_compile(result, pages_created=0, pages_updated=0, duration=None, fact_retention=None):
+    """
+    记录一次 Wiki 编译结果（上传管线阶段 7 与 rebuild 共用的埋点 helper）
+
+    Args:
+        result: 编译结果（ok / failed / timeout）
+        pages_created: 新建页面数
+        pages_updated: 更新页面数
+        duration: 编译耗时（秒），None 不记录
+        fact_retention: 事实保留率（探针开启时才有值），None 不记录
+    """
+    WIKI_COMPILATIONS.labels(result=result).inc()
+    if pages_created:
+        WIKI_COMPILE_PAGES.labels(action="created").inc(pages_created)
+    if pages_updated:
+        WIKI_COMPILE_PAGES.labels(action="updated").inc(pages_updated)
+    if duration is not None:
+        WIKI_COMPILE_DURATION.observe(duration)
+    if fact_retention is not None:
+        WIKI_COMPILE_FACT_RETENTION.observe(fact_retention)
+
+
+def record_wiki_lock(result):
+    """
+    记录一次 Wiki KB 锁获取结果
+
+    Args:
+        result: 获取结果（ok / redis_unavailable / timeout）
+    """
+    WIKI_LOCK_ACQUIRE.labels(result=result).inc()
+
+
+def record_wiki_contradictions(count=1):
+    """
+    记录矛盾抽查发现的矛盾条数（仅诊断，不改页面内容）
+
+    Args:
+        count: 本次发现的矛盾条数
+    """
+    WIKI_CONTRADICTIONS.inc(count)
