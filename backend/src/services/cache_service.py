@@ -117,6 +117,9 @@ class CacheService(AsyncSingleton["CacheService"]):
     async def _execute(self, coro):
         """统一执行 Redis 命令，提供超时、异常捕获和可用性降级。"""
         if not self.available:
+            # 调用方已创建命令协程，未 await 前需显式关闭，避免
+            # "coroutine was never awaited" 警告（Redis 停机降级路径实测出现）
+            coro.close()
             raise ConnectionError("缓存服务当前不可用")
         return await asyncio.wait_for(coro, timeout=REDIS_OPERATION_TIMEOUT)
 
