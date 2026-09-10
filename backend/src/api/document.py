@@ -14,6 +14,7 @@
 
 import logging
 import asyncio
+import time
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, Query, Body, WebSocket, WebSocketDisconnect, Path, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func as sql_func
@@ -310,17 +311,41 @@ async def process_document_async(
                 logger.warning(f"文档LLM分析失败，保留规则分析结果: {doc.filename}, 错误: {str(e)}")
 
             # 阶段7：Wiki 编译（P2 LLM-Wiki 编译层，默认关闭；约 95-98%）
-            # 编译失败/超时仅记录日志，不阻断文档上传（raw 层永远可用兜底）
-            if settings.wiki_compile.WIKI_COMPILE_ENABLED:
+            # 编译失败/超时仅记录日志与指标，不阻断文档上传（raw 层永远可用兜底）
+            # P5 去抖开启（DEBOUNCE_SECONDS>0）时编译完全移出上传管线：
+            # 文档先完成发布（阶段 6 不被编译等待拖住），由调度器后台合并编译
+            debounce_seconds = max(0, settings.wiki_compile.WIKI_COMPILE_DEBOUNCE_SECONDS)
+            if settings.wiki_compile.WIKI_COMPILE_ENABLED and debounce_seconds > 0:
+                from src.services.wiki_compile_scheduler import schedule_compile
+
+                schedule_compile(kb_id, doc_id)
+                await notify_task_progress(
+                    task_upload_id, 95, "已加入批量编译队列，将在后台执行"
+                )
+                logger.info(
+                    f"Wiki 编译已加入去抖队列（{debounce_seconds}s 窗口合并）: "
+                    f"{doc.filename}, kb={kb_id}"
+                )
+            elif settings.wiki_compile.WIKI_COMPILE_ENABLED:
                 doc.processing_message = "正在编译知识 Wiki..."
                 await db.commit()
                 await notify_task_progress(task_upload_id, 95, "正在编译知识 Wiki...")
+                from src.middleware.prometheus import record_wiki_compile
+
+                compile_started = time.monotonic()
                 try:
                     from src.services.wiki_compiler import WikiCompiler
 
                     compile_result = await asyncio.wait_for(
                         WikiCompiler().compile_document(db, kb_id, doc_id, chunks),
                         timeout=settings.wiki_compile.WIKI_COMPILE_TIMEOUT_SECONDS,
+                    )
+                    record_wiki_compile(
+                        result="ok",
+                        pages_created=compile_result.pages_created,
+                        pages_updated=compile_result.pages_updated,
+                        duration=time.monotonic() - compile_started,
+                        fact_retention=compile_result.fact_retention_rate,
                     )
                     await notify_task_progress(
                         task_upload_id, 98,
@@ -331,7 +356,14 @@ async def process_document_async(
                         f"Wiki 编译完成: {doc.filename}, 新建 {compile_result.pages_created} 页, "
                         f"更新 {compile_result.pages_updated} 页, 入库 {compile_result.chunks_indexed} 块"
                     )
+                except asyncio.TimeoutError:
+                    record_wiki_compile(result="timeout", duration=time.monotonic() - compile_started)
+                    logger.warning(
+                        f"Wiki 编译超时（不阻断文档上传）: {doc.filename}, "
+                        f"超时阈值 {settings.wiki_compile.WIKI_COMPILE_TIMEOUT_SECONDS}s"
+                    )
                 except Exception as e:
+                    record_wiki_compile(result="failed")
                     logger.warning(f"Wiki 编译失败（不阻断文档上传）: {doc.filename}, 错误: {str(e)}")
 
             # 阶段6：完成 (95-100%)
