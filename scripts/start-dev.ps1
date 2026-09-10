@@ -27,9 +27,9 @@ $ErrorActionPreference = 'Stop'
 # ==============================================================================
 
 $script:ScriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
-$script:EnvFileSource = Join-Path $script:ScriptDir "../.env.dev"
-$script:EnvFileTarget = Join-Path $script:ScriptDir "../.env"
+$script:EnvFile = Join-Path $script:ScriptDir "../.env.dev"
 $script:ComposeFile = Join-Path $script:ScriptDir "../docker-compose.dev.yml"
+$script:ComposeArgs = @("compose", "-f", $script:ComposeFile, "--env-file", $script:EnvFile)
 $script:EnvName = "DEVELOPMENT"
 $script:MaxWaitSeconds = $env:MAX_WAIT_SECONDS ? [int]$env:MAX_WAIT_SECONDS : 120
 $script:WaitInterval = $env:WAIT_INTERVAL ? [int]$env:WAIT_INTERVAL : 5
@@ -84,7 +84,7 @@ function Test-Command {
 }
 
 function Invoke-PreflightChecks {
-    Write-Step "1/6" "检测运行环境..."
+    Write-Step "1/5" "检测运行环境..."
 
     # Check docker
     $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
@@ -114,10 +114,10 @@ function Invoke-PreflightChecks {
     }
 
     # Check .env.dev exists
-    if (Test-Path $script:EnvFileSource) {
-        Write-OK "配置文件 $script:EnvFileSource 存在"
+    if (Test-Path $script:EnvFile) {
+        Write-OK "配置文件 $script:EnvFile 存在"
     } else {
-        Write-Err "配置文件 $script:EnvFileSource 不存在"
+        Write-Err "配置文件 $script:EnvFile 不存在"
         Write-Info "请创建 .env.dev 文件，可参考以下必要变量:"
         Write-Host "  POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD"
         Write-Host "  MINIO_ROOT_USER, MINIO_ROOT_PASSWORD"
@@ -139,41 +139,14 @@ function Invoke-PreflightChecks {
 }
 
 # ==============================================================================
-# Copy Environment File
-# ==============================================================================
-
-function Copy-EnvFile {
-    Write-Step "2/6" "复制配置文件..."
-
-    # Backup existing .env if exists
-    if (Test-Path $script:EnvFileTarget) {
-        $timestamp = Get-Date -Format "yyyyMMddHHmmss"
-        $backupFile = "$($script:EnvFileTarget).backup.$timestamp"
-        Copy-Item $script:EnvFileTarget $backupFile -Force
-        Write-Info "已备份旧配置到 $backupFile"
-    }
-
-    # Copy .env.dev to .env
-    try {
-        Copy-Item $script:EnvFileSource $script:EnvFileTarget -Force
-        Write-OK "已复制 $script:EnvFileSource -> $script:EnvFileTarget"
-    } catch {
-        Write-Err "复制配置文件失败: $_"
-        exit 1
-    }
-
-    Write-Host ""
-}
-
-# ==============================================================================
 # Load Environment Variables
 # ==============================================================================
 
 function Load-EnvVars {
-    Write-Step "3/6" "加载环境变量..."
+    Write-Step "2/5" "加载环境变量..."
 
-    # Load .env file
-    Get-Content $script:EnvFileTarget | ForEach-Object {
+    # Load .env.dev file（用于脚本内展示；compose 经 --env-file 自行读取同一文件）
+    Get-Content $script:EnvFile | ForEach-Object {
         if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
             $name = $matches[1].Trim()
             $value = $matches[2].Trim()
@@ -190,14 +163,14 @@ function Load-EnvVars {
 # ==============================================================================
 
 function Start-Services {
-    Write-Step "4/6" "启动 Docker Compose 服务..."
+    Write-Step "3/5" "启动 Docker Compose 服务..."
     Write-Info "拉取/构建镜像中，请耐心等待..."
     Write-Host ""
 
-    & docker compose -f $script:ComposeFile up -d --build
+    & docker @script:ComposeArgs up -d --build
     if ($LASTEXITCODE -ne 0) {
         Write-Err "服务启动失败"
-        Write-Info "请检查 Docker 日志: docker compose -f $script:ComposeFile logs"
+        Write-Info "请检查 Docker 日志: docker $script:ComposeArgs logs"
         exit 1
     }
 
@@ -211,7 +184,7 @@ function Start-Services {
 # ==============================================================================
 
 function Wait-ForHealth {
-    Write-Step "5/6" "等待服务健康检查..."
+    Write-Step "4/5" "等待服务健康检查..."
 
     # Check if SkipWait is set
     if ($SkipWait -or $env:SKIP_WAIT -eq "1") {
@@ -227,7 +200,7 @@ function Wait-ForHealth {
 
     while ($elapsed -lt $script:MaxWaitSeconds) {
         # Get container status
-        $statusOutput = docker compose -f $script:ComposeFile ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
+        $statusOutput = docker @script:ComposeArgs ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
 
         # Count containers and healthy ones
         $totalContainers = 0
@@ -275,7 +248,7 @@ function Wait-ForHealth {
     } else {
         Write-Warn "部分服务未在 $($script:MaxWaitSeconds) 秒内完全就绪"
         Write-Info "请使用以下命令查看详细状态:"
-        Write-Host "    docker compose -f $script:ComposeFile ps"
+        Write-Host "    docker $script:ComposeArgs ps"
     }
 
     Write-Host ""
@@ -305,7 +278,7 @@ function Wait-ForHealth {
 function Print-ContainerStatus {
     Write-Info "容器状态:"
     Write-Host ""
-    docker compose -f $script:ComposeFile ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
+    docker @script:ComposeArgs ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
     Write-Host ""
 }
 
@@ -314,7 +287,7 @@ function Print-ContainerStatus {
 # ==============================================================================
 
 function Print-AccessInfo {
-    Write-Step "6/6" "输出访问信息..."
+    Write-Step "5/5" "输出访问信息..."
     Write-Host ""
 
     # Read env vars for display (dev mode shows actual values)
@@ -355,7 +328,7 @@ function Print-AccessInfo {
     Write-Host "${Bold}========================================${Reset}"
     Write-Host "    查看日志  : .\scripts\logs-dev.ps1"
     Write-Host "    停止服务  : .\scripts\stop-dev.ps1"
-    Write-Host "    查看状态  : docker compose -f $script:ComposeFile ps"
+    Write-Host "    查看状态  : docker $script:ComposeArgs ps"
     Write-Host "    进入容器  : docker exec -it <container_name> powershell"
     Write-Host ""
     Write-Host "${Bold}========================================${Reset}"
@@ -369,7 +342,6 @@ function Print-AccessInfo {
 function Main {
     Print-Banner
     Invoke-PreflightChecks
-    Copy-EnvFile
     Load-EnvVars
     Start-Services
     $healthResult = Wait-ForHealth

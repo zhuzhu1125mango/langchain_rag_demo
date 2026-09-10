@@ -45,9 +45,9 @@ log_fail()    { echo -e "${RED}✗${NC} $1"; }
 # ==============================================================================
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-ENV_FILE_SOURCE="$SCRIPT_DIR/../.env.dev"
-ENV_FILE_TARGET="$SCRIPT_DIR/../.env"
+ENV_FILE="$SCRIPT_DIR/../.env.dev"
 COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.dev.yml"
+COMPOSE_ARGS=(-f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 ENV_NAME="DEVELOPMENT"
 MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-120}
 WAIT_INTERVAL=${WAIT_INTERVAL:-5}
@@ -85,7 +85,7 @@ check_command() {
 }
 
 run_preflight_checks() {
-    log_step "1/6" "检测运行环境..."
+    log_step "1/5" "检测运行环境..."
     
     # Check docker
     if check_command "docker"; then
@@ -114,10 +114,10 @@ run_preflight_checks() {
     fi
     
     # Check .env.dev exists
-    if [[ -f "$ENV_FILE_SOURCE" ]]; then
-        log_ok "配置文件 $ENV_FILE_SOURCE 存在"
+    if [[ -f "$ENV_FILE" ]]; then
+        log_ok "配置文件 $ENV_FILE 存在"
     else
-        log_error "配置文件 $ENV_FILE_SOURCE 不存在"
+        log_error "配置文件 $ENV_FILE 不存在"
         log_info "请创建 .env.dev 文件，可参考以下必要变量:"
         echo "  POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD"
         echo "  MINIO_ROOT_USER, MINIO_ROOT_PASSWORD"
@@ -138,42 +138,17 @@ run_preflight_checks() {
 }
 
 # ==============================================================================
-# Copy Environment File
-# ==============================================================================
-
-copy_env_file() {
-    log_step "2/6" "复制配置文件..."
-    
-    # Backup existing .env if exists
-    if [[ -f "$ENV_FILE_TARGET" ]]; then
-        local backup_file="${ENV_FILE_TARGET}.backup.$(date +%Y%m%d%H%M%S)"
-        cp "$ENV_FILE_TARGET" "$backup_file"
-        log_info "已备份旧配置到 $backup_file"
-    fi
-    
-    # Copy .env.dev to .env
-    if cp "$ENV_FILE_SOURCE" "$ENV_FILE_TARGET"; then
-        log_ok "已复制 $ENV_FILE_SOURCE -> $ENV_FILE_TARGET"
-    else
-        log_error "复制配置文件失败"
-        exit 1
-    fi
-    
-    echo ""
-}
-
-# ==============================================================================
 # Load Environment Variables
 # ==============================================================================
 
 load_env_vars() {
-    log_step "3/6" "加载环境变量..."
-    
-    # Source the .env file
+    log_step "2/5" "加载环境变量..."
+
+    # Source the .env.dev file（用于脚本内展示；compose 经 --env-file 自行读取同一文件）
     set -a
-    source "$ENV_FILE_TARGET"
+    source "$ENV_FILE"
     set +a
-    
+
     log_ok "环境变量已加载"
     echo ""
 }
@@ -183,19 +158,19 @@ load_env_vars() {
 # ==============================================================================
 
 start_services() {
-    log_step "4/6" "启动 Docker Compose 服务..."
+    log_step "3/5" "启动 Docker Compose 服务..."
     log_info "拉取/构建镜像中，请耐心等待..."
     echo ""
-    
-    if $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build; then
+
+    if $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" up -d --build; then
         echo ""
         log_ok "服务启动命令执行成功"
     else
         log_error "服务启动失败"
-        log_info "请检查 Docker 日志: $DOCKER_COMPOSE_CMD -f $COMPOSE_FILE logs"
+        log_info "请检查 Docker 日志: $DOCKER_COMPOSE_CMD ${COMPOSE_ARGS[*]} logs"
         exit 1
     fi
-    
+
     echo ""
 }
 
@@ -204,7 +179,7 @@ start_services() {
 # ==============================================================================
 
 wait_for_health() {
-    log_step "5/6" "等待服务健康检查..."
+    log_step "4/5" "等待服务健康检查..."
     
     # Check if SKIP_WAIT is set
     if [[ "${SKIP_WAIT:-0}" == "1" ]]; then
@@ -221,7 +196,7 @@ wait_for_health() {
     while [[ $elapsed -lt $MAX_WAIT_SECONDS ]]; do
         # Get container status
         local status_output
-        status_output=$($DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || echo "")
+        status_output=$($DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || echo "")
         
         # Count containers and healthy ones
         local total_containers=0
@@ -263,7 +238,7 @@ wait_for_health() {
     else
         log_warn "部分服务未在 ${MAX_WAIT_SECONDS} 秒内完全就绪"
         log_info "请使用以下命令查看详细状态:"
-        echo "    $DOCKER_COMPOSE_CMD -f $COMPOSE_FILE ps"
+        echo "    $DOCKER_COMPOSE_CMD ${COMPOSE_ARGS[*]} ps"
     fi
     
     echo ""
@@ -286,13 +261,13 @@ wait_for_health() {
     [[ "$all_healthy" == true ]] && return 0 || return 1
 }
 
-print_access_info() {
+print_container_status() {
     log_info "容器状态:"
     echo ""
-    
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || \
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps
-    
+
+    $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || \
+    $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" ps
+
     echo ""
 }
 
@@ -301,9 +276,9 @@ print_access_info() {
 # ==============================================================================
 
 print_access_info() {
-    log_step "6/6" "输出访问信息..."
+    log_step "5/5" "输出访问信息..."
     echo ""
-    
+
     # Read env vars for display (dev mode shows actual values)
     local pg_db="${POSTGRES_DB:-rag_demo}"
     local pg_user="${POSTGRES_USER:-postgres}"
@@ -338,7 +313,7 @@ print_access_info() {
     echo -e "${BOLD}========================================${NC}"
     echo "    查看日志  : ./scripts/logs-dev.sh"
     echo "    停止服务  : ./scripts/stop-dev.sh"
-    echo "    查看状态  : $DOCKER_COMPOSE_CMD -f $COMPOSE_FILE ps"
+    echo "    查看状态  : $DOCKER_COMPOSE_CMD ${COMPOSE_ARGS[*]} ps"
     echo "    进入容器  : docker exec -it <container_name> bash"
     echo ""
     echo -e "${BOLD}========================================${NC}"
@@ -352,7 +327,6 @@ print_access_info() {
 main() {
     print_banner
     run_preflight_checks
-    copy_env_file
     load_env_vars
     start_services
     wait_for_health

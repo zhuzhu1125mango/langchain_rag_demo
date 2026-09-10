@@ -27,6 +27,8 @@ virtualenv/
 .env.*.local
 .env.dev
 .env.prod
+.env.backup.*
+.env.*.backup.*
 
 # =============== IDE Configurations ===============
 .idea/

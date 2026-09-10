@@ -93,18 +93,18 @@ SEARCH_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
 
 ### 环境分离说明
 
-项目采用**开发/生产环境分离**策略，通过独立的 Docker Compose 配置文件和环境变量实现环境隔离。
+项目采用**开发/生产环境完全隔离**策略：两套 Docker Compose 使用各自的 project name、env 文件、端口与数据卷，容器/网络/数据卷互不重叠，**可同时运行（双栈并存）**。
 
-| 环境 | Docker 配置 | 数据卷 | 容器后缀 | 适用场景 |
-|------|-----------|--------|---------|---------|
-| **开发环境** | `docker-compose.dev.yml` | `*_dev` | `-dev` | 本地开发、测试、调试 |
-| **生产环境** | `docker-compose.yml` | `*_prod` | `-prod` | 正式部署 |
+| 环境 | Docker 配置 | env 文件 | Project Name | 容器后缀 | 数据卷 | 适用场景 |
+|------|-----------|---------|--------------|---------|--------|---------|
+| **开发环境** | `docker-compose.dev.yml` | `.env.dev`（`--env-file` 注入） | `rag-dev` | `-dev` | `*_dev` | 本地开发、测试、调试 |
+| **生产环境** | `docker-compose.yml` | `.env.prod`（`--env-file` 注入） | `rag-prod` | `-prod` | `*_prod` | 正式部署 |
 
 **核心特性：**
-- ✅ 开发/生产数据完全隔离
-- ✅ 开发环境包含完整应用栈（后端 + 前端 + 基础设施）
-- ✅ 开发环境支持代码热重载
-- ✅ 生产环境包含完整监控体系（含 Alertmanager）
+- ✅ 开发/生产数据完全隔离，双栈可并存运行（端口完全错开，见下文「Docker 服务端口」）
+- ✅ 业务配置统一由 env 文件经 compose `env_file:` 注入；compose 文件仅保留 Docker 网络路由覆盖项
+- ✅ 开发环境包含完整应用栈（后端 + 前端 + 基础设施），支持代码热重载
+- ✅ 生产环境包含完整监控体系（含 Alertmanager），启动脚本自动执行 `alembic upgrade head` 数据库迁移
 
 ---
 
@@ -135,7 +135,7 @@ cd langchain_rag_demo
 **脚本功能特性：**
 - ✅ 自动检测 Docker / Docker Compose 安装状态
 - ✅ 自动检查 `.env.dev` 配置文件
-- ✅ 自动备份旧的 `.env` 配置
+- ✅ 经 `--env-file .env.dev` 启动（compose project: `rag-dev`），无需复制 `.env`
 - ✅ 启动后自动进行容器健康检查（最多 120s）
 - ✅ 彩色进度日志，直观展示每个服务状态
 - ✅ 启动完成后汇总显示所有服务访问地址
@@ -226,7 +226,7 @@ docker logs -f frontend-dev
 使用 `scripts/start-prod.ps1`（Windows PowerShell 7）、`scripts/start-prod.bat`（Windows Batch）或 `scripts/start-prod.sh`（Linux/Mac）启动完整生产环境，包含所有服务。推荐在 Windows 上使用 PowerShell 7 获得最佳彩色输出体验。
 
 **启动前准备：**
-1. 创建并配置 `.env.prod` 文件
+1. 基于 `.env.example` 创建并配置 `.env.prod` 文件
 2. 务必为所有密码项设置强密码（POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / GF_SECURITY_ADMIN_PASSWORD）
 
 **一键启动：**
@@ -253,8 +253,9 @@ cd langchain_rag_demo
 - ⚠️ 启动前确认提示（避免误操作）
 - ✅ 自动检测 Docker / Docker Compose 安装状态
 - ✅ 安全检查：验证关键密码变量已设置且非默认值
-- ✅ 自动备份旧的 `.env` 配置
+- ✅ 经 `--env-file .env.prod` 启动（compose project: `rag-prod`），不再复制/备份 `.env`
 - ✅ 启动后自动进行容器健康检查（最多 180s）
+- ✅ 健康检查通过后自动执行数据库迁移（在 backend 容器内运行 `alembic upgrade head`）
 - ✅ 彩色进度日志，直观展示每个服务状态
 - ✅ **密码安全**：生产环境不显示实际密码值，仅显示变量名
 
@@ -273,16 +274,18 @@ cd langchain_rag_demo
 - PostgreSQL Exporter
 
 **访问地址：**
-- 前端界面: `http://localhost`
-- API 文档: `http://localhost:8000/docs`
-- PostgreSQL: `localhost:5433`
-- MinIO 控制台: `http://localhost:9001`
-- Milvus: `localhost:19530`
-- Redis: `localhost:6379`
-- SearXNG: `http://localhost:8080`
-- Grafana: `http://localhost:3000`
-- Prometheus: `http://localhost:9090`
-- Alertmanager: `http://localhost:9093`
+- 前端界面: `http://localhost`（Nginx，80 端口）
+- API 文档: `http://localhost:8001/docs`（仅回环绑定）
+- PostgreSQL: `localhost:5434`
+- MinIO 控制台: `http://localhost:9003`（S3 API `127.0.0.1:9002`）
+- Milvus: `localhost:19531`
+- Redis: `localhost:6380`
+- SearXNG: `http://localhost:8081`
+- Grafana: `http://localhost:3001`
+- Prometheus: `http://localhost:9094`
+- Alertmanager: `http://localhost:9095`
+
+> 生产栈基础设施端口仅绑定 `127.0.0.1` 回环地址，不对局域网暴露；远程访问请走 SSH 隧道或反向代理。
 
 **查看服务日志：**
 ```bash
@@ -333,8 +336,8 @@ cd langchain_rag_demo
 ```bash
 cd langchain_rag_demo
 
-# 启动数据库与搜索基础设施（不含前后端）
-docker-compose -f docker-compose.dev.yml up -d postgres minio etcd milvus-standalone redis searxng prometheus grafana postgres-exporter
+# 启动数据库与搜索基础设施（不含前后端；--env-file 提供 ${VAR} 插值）
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d postgres minio etcd milvus-standalone redis searxng prometheus grafana postgres-exporter
 
 # 等待服务就绪（Milvus 首次启动需要 1-2 分钟）
 ```
@@ -344,10 +347,10 @@ docker-compose -f docker-compose.dev.yml up -d postgres minio etcd milvus-standa
 ```bash
 cd backend
 
-# 复制开发环境变量（项目根目录的 .env.dev 需要先复制到 .env）
-cp ../.env.dev ../.env
+# 本地裸跑无需复制任何文件：config.py 默认 APP_ENV=dev，直接读项目根目录的 .env.dev
+# 如需以生产配置本地裸跑：设置 APP_ENV=prod（PowerShell: $env:APP_ENV="prod"），将读取 .env.prod 并启用生产级启动强校验
 
-# 确保环境变量正确指向容器内的服务
+# 确保环境变量正确指向容器映射的宿主机端口
 # 本地开发时 .env.dev 已默认使用 localhost:5433 / localhost:9000 / localhost:19530 / localhost:6379 / localhost:8080
 ```
 
@@ -379,7 +382,7 @@ uv run python start.py --reload
 
 > ⚠️ 注意事项：
 > - 仅限本地开发使用，生产/Docker 环境不要启用
-> - 修改 `config.py`、`.env` 等配置文件后，部分单例（如 OllamaEmbeddings 客户端）可能不会重建，若发现"改了没生效"请手动重启一次
+> - 修改 `config.py`、`.env.dev` 等配置文件后，部分单例（如 OllamaEmbeddings 客户端）可能不会重建，若发现"改了没生效"请手动重启一次
 > - 首次启动仍会执行 Ollama / PostgreSQL / MinIO / Milvus 连通性检查
 > - 也可通过环境变量启用：`$env:RELOAD_MODE="true"; uv run python start.py`
 
@@ -515,7 +518,7 @@ langchain_rag_demo/
 | 类别 | 脚本名 | 说明 |
 |------|--------|------|
 | **启动** | `start-dev.ps1 / start-dev.bat / start-dev.sh` | 开发环境启动，含健康检查、状态汇总 |
-| **启动** | `start-prod.ps1 / start-prod.bat / start-prod.sh` | 生产环境启动，含安全检查、确认提示 |
+| **启动** | `start-prod.ps1 / start-prod.bat / start-prod.sh` | 生产环境启动，含安全检查、确认提示、数据库迁移（alembic） |
 | **日志** | `logs-dev.ps1 / logs-dev.bat / logs-dev.sh` | 查看开发环境实时日志，可指定服务 |
 | **日志** | `logs-prod.ps1 / logs-prod.bat / logs-prod.sh` | 查看生产环境实时日志，可指定服务 |
 | **停止** | `stop-dev.ps1 / stop-dev.bat / stop-dev.sh` | 停止开发环境，`-Clean`（PowerShell）或 `--clean`（Batch/Linux）同时清除数据 |
@@ -544,36 +547,31 @@ langchain_rag_demo/
 
 项目包含多个环境变量配置文件，用于不同层次的配置管理：
 
-#### 配置文件层次
+#### 配置文件说明
 
-| 文件 | 用途 | 优先级 | 使用场景 |
-|------|------|--------|---------|
-| **Docker Compose** | 生产环境配置 | 最高 | 生产环境启动时注入 |
-| **.env.dev / .env.prod** | 项目级环境配置 | 中 | 开发/生产环境启动时复制为 `.env` |
+| 文件 | 用途 | 使用场景 |
+|------|------|---------|
+| `.env.dev` | 开发环境全量业务配置 | 本地裸跑（默认）与 dev 容器（`env_file:` 注入）共用 |
+| `.env.prod` | 生产环境全量业务配置 | 生产栈经 `--env-file` + `env_file:` 注入容器 |
+| `.env.example` | 全量配置模板（含注释） | 创建 `.env.dev` / `.env.prod` 时对照；CI 校验其覆盖全部在用键 |
 
 #### 配置加载机制
 
 **后端配置加载逻辑**（`backend/src/config.py`）：
 
-- 统一通过 `pydantic-settings` 读取环境变量和项目根目录 `.env` 文件
-- Docker Compose 通过 `environment` 将环境变量注入容器，优先级高于 `.env` 文件
-- 开发环境和生产环境通过不同的 Docker Compose 配置文件实现隔离
-
-#### 环境变量配置文件说明
-
-| 文件 | 用途 | 使用场景 |
-|------|------|---------|
-| `.env.dev` | 项目级开发环境配置 | 启动开发环境时复制为 `.env` |
-| `.env.prod` | 项目级生产环境配置 | 启动生产环境前必须配置 |
-| `.env` | 项目级运行时配置 | Docker Compose 实际读取 |
+- 由 `APP_ENV` 环境变量选择环境文件：`dev`（默认）→ `.env.dev`，`prod` → `.env.prod`
+- Docker 部署时，业务配置统一由 compose `env_file:` 注入为容器环境变量，优先级高于 env 文件；compose 文件仅保留 Docker 网络路由覆盖（如 `POSTGRES_HOST=postgres`），新增功能开关只改 env 文件，不再改 compose
+- `IS_PRODUCTION` 决定启动强校验（强密钥/凭据非空）：容器内由 `IN_DOCKER=true` 推断为生产；非 Docker 的生产部署（裸跑 uvicorn/systemd）必须显式设置 `APP_ENV=prod`（兼容旧值 `production`），否则不执行强校验
 
 #### 配置对比
 
 | 配置项 | 开发环境 (`.env.dev`) | 生产环境 (`.env.prod`) |
 |--------|---------------------|---------------------|
+| Compose Project | `rag-dev` | `rag-prod` |
 | 数据库名 | `app_dev` | `app_prod` |
 | 用户名 | `dev_user` | `prod_user` |
 | 密码 | 简单密码 | **必须手动设置强密码** |
+| 端口占用 | 常规端口（8000 / 5173 / 5433…） | 错开端口（80 / 8001 / 5434…，仅回环绑定） |
 | MinIO 安全 | `false` | `true` |
 | 重启策略 | `no` | `unless-stopped` |
 | 数据卷 | `*_dev` | `*_prod` |
@@ -626,8 +624,9 @@ REDIS_PASSWORD=  # 必须手动设置！
 SECRET_KEY=  # 必须手动设置！
 
 # 环境标记：Docker 部署无需设置（由 IN_DOCKER 推断为生产）；
-# 非 Docker 的生产部署（直接 uvicorn/systemd 运行）必须设置，否则不执行强校验
-APP_ENV=production
+# 非 Docker 的生产部署（直接 uvicorn/systemd 运行）必须设置 APP_ENV=prod，
+# 否则不执行强校验（兼容旧值 "production"）
+APP_ENV=prod
 
 # Milvus 集合 schema/维度不匹配时是否允许删除重建（破坏性！旧向量数据全部丢失）
 # 默认 false：不匹配时启动失败并提示；确认可接受数据丢失后才改为 true
@@ -685,21 +684,22 @@ MILVUS_REBUILD_ON_MISMATCH=false
 
 ### Docker 服务端口
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| 后端 API | 8000 | FastAPI 服务 |
-| 前端 | 5173 / 80 | Vite（开发）/ Nginx（生产） |
-| PostgreSQL | 5433 | 业务数据库 |
-| MinIO | 9000 | 对象存储 |
-| MinIO 控制台 | 9001 | 管理界面 |
-| Milvus | 19530 | 向量数据库 |
-| Redis | 6379 | 缓存服务 |
-| SearXNG | 8080 | 私有化聚合搜索引擎 |
-| Prometheus | 9090 | 监控指标 |
-| Alertmanager | 9093 | 告警管理 |
-| Grafana | 3000 | 监控面板 |
+| 服务 | 开发环境 | 生产环境 | 说明 |
+|------|---------|---------|------|
+| 后端 API | 8000 | 127.0.0.1:8001 | FastAPI 服务 |
+| 前端 | 5173 | 80 | Vite（开发）/ Nginx（生产） |
+| PostgreSQL | 5433 | 127.0.0.1:5434 | 业务数据库 |
+| MinIO | 9000 | 127.0.0.1:9002 | 对象存储（S3 API） |
+| MinIO 控制台 | 9001 | 127.0.0.1:9003 | 管理界面 |
+| Milvus | 19530 | 127.0.0.1:19531 | 向量数据库 |
+| Milvus 健康检查 | 9091 | 127.0.0.1:9092 | 健康检查/指标端口 |
+| Redis | 6379 | 127.0.0.1:6380 | 缓存服务 |
+| SearXNG | 8080 | 127.0.0.1:8081 | 私有化聚合搜索引擎 |
+| Prometheus | 9090 | 127.0.0.1:9094 | 监控指标 |
+| Alertmanager | -（开发不部署） | 127.0.0.1:9095 | 告警管理 |
+| Grafana | 3000 | 127.0.0.1:3001 | 监控面板 |
 
-**注意：** 开发/生产环境使用相同的端口，但数据完全隔离。同一时间只能运行一个环境。
+**注意：** 两套环境端口完全错开，可**同时运行**（双栈并存），数据完全隔离；生产栈基础设施端口仅绑定回环地址（127.0.0.1），不对局域网暴露。
 
 ---
 
@@ -766,11 +766,11 @@ MILVUS_REBUILD_ON_MISMATCH=false
 
 ### 访问地址
 
-| 服务 | 地址 | 用户名/密码 |
-|------|------|-------------|
-| Grafana | http://localhost:3000 | admin / 见 `.env.dev` 或 `.env.prod` 中 `GF_SECURITY_ADMIN_PASSWORD` |
-| Prometheus | http://localhost:9090 | - |
-| Alertmanager | http://localhost:9093 | -（仅生产环境） |
+| 服务 | 开发环境 | 生产环境 | 用户名/密码 |
+|------|---------|---------|-------------|
+| Grafana | http://localhost:3000 | http://localhost:3001 | admin / 见 env 文件中 `GF_SECURITY_ADMIN_PASSWORD` |
+| Prometheus | http://localhost:9090 | http://localhost:9094 | - |
+| Alertmanager | -（开发不部署） | http://localhost:9095 | - |
 
 ### 监控指标
 
@@ -862,6 +862,16 @@ MIT License
 
 欢迎提交 Issue 和 Pull Request！
 
+### 分支与合并流程
+
+```text
+feature/* → Pull Request → CI 全绿 → squash merge 到 main
+```
+
+- CI 必检项：`env-consistency`（环境变量一致性）/ `backend-unit` / `backend-integration` / `rag-eval` / `frontend`
+- 建议为 main 分支开启保护（Settings → Branches → Add rule）：勾选 *Require a pull request before merging* 与 *Require status checks to pass*，选中上述 5 个 check
+- 提交信息使用中文或英文均可，一次 PR 聚焦一个主题
+
 ### 开发规范
 
 请参考项目代码注释与现有测试用例了解开发规范。
@@ -877,51 +887,29 @@ MIT License
 5. **模型下载**: 首次运行需要下载 Ollama 模型，可能需要较长时间
 6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qllama/bge-reranker-v2-m3:latest`、`ollama pull qwen2.5:7b` 与 `ollama pull deepseek-r1:7b-qwen-distill-q4_K_M`，耗时较长
 7. **内存要求**: 建议至少 8GB 内存，模型越大需要内存越多
-8. **端口冲突**: 确保常用端口（5433, 6379, 8000, 8080, 9000, 9001, 19530, 3000, 9090, 5173）未被占用
-9. **环境切换**: 同一时间只能运行一种环境（开发或生产），切换前请先停止当前环境
+8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 8080, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8081, 9002, 9003, 19531, 9092, 3001, 9094, 9095, 80，均仅绑定回环地址）
+9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
 10. **联网搜索稳定性**: DuckDuckGo 等搜索引擎可能因网络或反爬策略临时不可用，可切换至自托管 SearXNG
 
-### 环境切换流程
+### 环境启停
+
+两套环境端口与数据卷完全隔离，**可同时运行**，无需切换；按需独立启停即可：
 
 ```bash
-# 从开发环境切换到生产环境
-# 1. 停止开发环境（保留数据）
-# Windows PowerShell 7 (推荐):
-.\scripts\stop-dev.ps1
-# Windows Batch:
-.\scripts\stop-dev.bat
-# Linux/Mac:
-./scripts/stop-dev.sh
+# 开发环境（compose project: rag-dev）
+# Windows PowerShell 7 (推荐):  .\scripts\start-dev.ps1 / .\scripts\stop-dev.ps1
+# Windows Batch:                .\scripts\start-dev.bat / .\scripts\stop-dev.bat
+# Linux/Mac:                    ./scripts/start-dev.sh / ./scripts/stop-dev.sh
 
-# 2. 启动生产环境
-# Windows PowerShell 7 (推荐):
-.\scripts\start-prod.ps1
-# Windows Batch:
-.\scripts\start-prod.bat
-# Linux/Mac:
-./scripts/start-prod.sh
-
-# 从生产环境切换到开发环境
-# 1. 停止生产环境
-# Windows PowerShell 7 (推荐):
-.\scripts\stop-prod.ps1
-# Windows Batch:
-.\scripts\stop-prod.bat
-# Linux/Mac:
-./scripts/stop-prod.sh
-
-# 2. 启动开发环境
-# Windows PowerShell 7 (推荐):
-.\scripts\start-dev.ps1
-# Windows Batch:
-.\scripts\start-dev.bat
-# Linux/Mac:
-./scripts/start-dev.sh
+# 生产环境（compose project: rag-prod）
+# Windows PowerShell 7 (推荐):  .\scripts\start-prod.ps1 / .\scripts\stop-prod.ps1
+# Windows Batch:                .\scripts\start-prod.bat / .\scripts\stop-prod.bat
+# Linux/Mac:                    ./scripts/start-prod.sh / ./scripts/stop-prod.sh
 ```
 
-> 💡 切换前请确认：
-> 1. 没有正在处理的文档或对话
-> 2. 已使用相应的 `.env.dev` 或 `.env.prod` 配置好参数
+> 💡 提示：
+> 1. 生产栈基础设施端口仅绑定 127.0.0.1 回环地址，与开发栈常规端口互不冲突
+> 2. 停止脚本（不带 `-Clean` / `--clean`）只停容器，数据卷保留
 > 3. 数据如有需要可提前备份
 
 ---

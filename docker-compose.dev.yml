@@ -12,8 +12,11 @@
 #   - Grafana        监控可视化
 #   - postgres-exporter  PostgreSQL 指标导出
 # 前端使用 Vite dev server（热更新），后端代码挂载到容器支持热重载。
-# 使用方式：docker compose -f docker-compose.dev.yml up -d
+# 使用方式：docker compose -f docker-compose.dev.yml --env-file .env.dev up -d
+# 隔离说明：project name 固定为 rag-dev，与生产栈（rag-prod）容器/卷/网络完全隔离，可并存。
 # =============================================================================
+
+name: rag-dev
 
 services:
   # redis — 缓存服务，用于会话/搜索结果/向量缓存
@@ -36,7 +39,7 @@ services:
 
   # searxng — 元搜索引擎，聚合多个搜索源供 RAG 检索增强使用
   searxng:
-    image: searxng/searxng:latest
+    image: searxng/searxng:2026.8.20-8d3dd0cd4   # 与生产对齐的固定版本 tag，避免 latest 漂移
     container_name: searxng-dev
     networks:
       - monitoring
@@ -89,7 +92,7 @@ services:
 
   # minio — 对象存储，存放上传的原始文档与文件
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z   # 与生产对齐的固定版本 tag，避免 latest 漂移
     container_name: minio-dev
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}              # MinIO 管理员账号
@@ -164,77 +167,25 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     container_name: backend-dev
-    environment:
+    # 全量业务配置由 env 文件注入；新增功能开关只改 env 文件，不再改本文件
+    env_file:
+      - .env.dev
+    environment:          # 仅保留 docker 网络路由覆盖（优先级高于 env_file）
       IN_DOCKER: "true"
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PORT: "5432"
       MINIO_ENDPOINT: minio:9000
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}            # 业务访问 MinIO 的 key
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}            # 业务访问 MinIO 的 secret
-      MINIO_BUCKET_NAME: ${MINIO_BUCKET_NAME}          # 文档存储 bucket
-      MINIO_SECURE: "false"                            # 开发环境关闭 HTTPS
       MILVUS_HOST: milvus-standalone
-      MILVUS_PORT: 19530
-      MILVUS_DATABASE: ${MILVUS_DATABASE}              # Milvus 数据库实例
-      MILVUS_COLLECTION_NAME: ${MILVUS_COLLECTION_NAME}  # 向量集合名
-      MILVUS_INDEX_NAME: ${MILVUS_INDEX_NAME}          # 向量索引名
+      MILVUS_PORT: "19530"
       REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_DB: ${REDIS_DB}                            # Redis 逻辑库编号
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      OLLAMA_MODEL_NAME: ${OLLAMA_MODEL_NAME}          # 对话使用的大模型
-      FAST_LLM_MODEL_NAME: ${FAST_LLM_MODEL_NAME}      # 轻量任务模型（启动强校验，必填）
-      OLLAMA_DIRECT_MODEL_NAME: ${OLLAMA_DIRECT_MODEL_NAME}  # 深度思考关闭时的非思考专用模型
-      EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}    # 向量化使用的模型
-      SKIP_OLLAMA_CHECK: "true"
-      OLLAMA_HOST: host.docker.internal                # 通过宿主机访问本地 Ollama
-      HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
-      HF_HUB_OFFLINE: "1"                              # 容器无法访问 huggingface.co，强制离线用缓存
-      TRANSFORMERS_OFFLINE: "1"
-      NLTK_DATA: /app/data/nltk_data                    # nltk 语料离线目录（BM25 中文分词依赖 stopwords）
-      CHUNK_SIZE: ${CHUNK_SIZE}                        # 文档分块大小
-      CHUNK_OVERLAP: ${CHUNK_OVERLAP}                  # 文档分块重叠字符数
-      TOP_K: ${TOP_K}                                  # 检索召回数量
-      SEARCH_PROVIDER: ${SEARCH_PROVIDER}              # 搜索引擎提供方（searxng/tavily 等）
+      REDIS_PORT: "6379"
       SEARXNG_BASE_URL: http://searxng:8080
-      SEARXNG_TIMEOUT: ${SEARXNG_TIMEOUT}
-      SEARCH_MAX_RESULTS: ${SEARCH_MAX_RESULTS}
-      SEARCH_FETCH_TIMEOUT: ${SEARCH_FETCH_TIMEOUT}
-      SEARCH_MAX_FETCH: ${SEARCH_MAX_FETCH}
-      SEARCH_MIN_CONTENT_LENGTH: ${SEARCH_MIN_CONTENT_LENGTH}
-      SEARCH_ENABLE_MULTI_QUERY: ${SEARCH_ENABLE_MULTI_QUERY}
-      SEARCH_NUM_QUERIES: ${SEARCH_NUM_QUERIES}
-      SEARCH_ENABLE_RERANK: ${SEARCH_ENABLE_RERANK}
-      SEARCH_RERANK_MODEL: ${SEARCH_RERANK_MODEL}
-      SEARCH_RERANK_PROVIDER: ${SEARCH_RERANK_PROVIDER}   # 重排模型加载方式
-      SEARCH_RERANK_TOP_K: ${SEARCH_RERANK_TOP_K}
-      KB_RERANK_MODEL: ${KB_RERANK_MODEL}                 # 知识库重排序模型
-      KB_RERANK_PROVIDER: ${KB_RERANK_PROVIDER}           # 知识库重排模型加载方式
-      SEARCH_CACHE_TTL: ${SEARCH_CACHE_TTL}
-      SEARCH_CONTENT_CACHE_TTL: ${SEARCH_CONTENT_CACHE_TTL}
-      SEARCH_ENABLE_FUNCTION_CALLING: ${SEARCH_ENABLE_FUNCTION_CALLING}
-      SEARCH_ENABLE_REACT: ${SEARCH_ENABLE_REACT}
-      SEARCH_REACT_MAX_STEPS: ${SEARCH_REACT_MAX_STEPS}
-      SEARCH_AGENT_FALLBACK_TO_PHASE2: ${SEARCH_AGENT_FALLBACK_TO_PHASE2}
-      TITLE_GENERATION_ENABLED: ${TITLE_GENERATION_ENABLED}
-      TITLE_MAX_LENGTH: ${TITLE_MAX_LENGTH}
-      TITLE_FALLBACK_LENGTH: ${TITLE_FALLBACK_LENGTH}
-      TITLE_GENERATION_MODEL: ${TITLE_GENERATION_MODEL}
-      SECRET_KEY: ${SECRET_KEY}                        # 应用签名密钥（JWT/Session）
-      SEMANTIC_CACHE_ENABLED: ${SEMANTIC_CACHE_ENABLED}                      # P1-3 语义缓存总开关
-      SEMANTIC_CACHE_SIMILARITY_THRESHOLD: ${SEMANTIC_CACHE_SIMILARITY_THRESHOLD}  # 语义命中相似度阈值
-      SEMANTIC_CACHE_TTL_HOURS: ${SEMANTIC_CACHE_TTL_HOURS}                  # 条目过期时间（小时）
-      SEMANTIC_CACHE_MAX_ENTRIES: ${SEMANTIC_CACHE_MAX_ENTRIES}              # 单范围条目上限
-      SEMANTIC_CACHE_REPLAY_CHUNK_CHARS: ${SEMANTIC_CACHE_REPLAY_CHUNK_CHARS}  # 命中回放切片长度
-      # P2 LLM-Wiki 编译层（默认关闭）
-      WIKI_COMPILE_ENABLED: ${WIKI_COMPILE_ENABLED}                          # 编译总开关
-      WIKI_COMPILE_MODEL: ${WIKI_COMPILE_MODEL}                              # 编译模型（空=复用主模型）
-      WIKI_COMPILE_MAX_PAGES_PER_DOC: ${WIKI_COMPILE_MAX_PAGES_PER_DOC}      # 单文档页面更新上限
-      WIKI_COMPILE_TIMEOUT_SECONDS: ${WIKI_COMPILE_TIMEOUT_SECONDS}          # 单文档编译超时（秒）
-      WIKI_DIAGNOSTIC_PROBES: ${WIKI_DIAGNOSTIC_PROBES}                      # 诊断探针（事实保留率自检）
+      OLLAMA_HOST: host.docker.internal                # 通过宿主机访问本地 Ollama
+      SKIP_OLLAMA_CHECK: "true"
+      NLTK_DATA: /app/data/nltk_data                   # nltk 语料离线目录（BM25 中文分词依赖 stopwords）
+      HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
+      HF_HUB_OFFLINE: "1"                              # 容器内强制离线用缓存
+      TRANSFORMERS_OFFLINE: "1"
     volumes:
       - ./backend:/app
       - /app/.venv                                       # 匿名卷防止宿主机 Windows .venv 覆盖容器内 Linux venv
@@ -320,7 +271,7 @@ services:
 
   # postgres-exporter — 将 PostgreSQL 指标导出给 Prometheus
   postgres-exporter:
-    image: prometheuscommunity/postgres-exporter:latest
+    image: prometheuscommunity/postgres-exporter:v0.20.1   # 与生产对齐的固定版本 tag，避免 latest 漂移
     container_name: postgres-exporter-dev
     environment:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"

@@ -227,7 +227,7 @@ async def lifespan(app: FastAPI):
             settings.security.SECRET_KEY = secrets.token_urlsafe(48)
             logger.warning(
                 "SECRET_KEY 未设置，已生成临时随机密钥（仅限开发环境，重启后旧签名失效）；"
-                "生产部署必须设置强密钥或 APP_ENV=production"
+                "生产部署必须设置强密钥或 APP_ENV=prod"
             )
 
     # 模型配置校验（A2）：模型名必填且存在于本地 Ollama，缺失即启动失败

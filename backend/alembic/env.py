@@ -16,7 +16,7 @@ import src.models  # noqa: F401  确保全部模型注册进 Base.metadata（含
 config = context.config
 
 # 连接串优先级：环境变量 ALEMBIC_DATABASE_URL（用于对临时库生成/验证迁移）
-# > 应用配置（src/config → .env 的 PostgreSQL 连接）
+# > 应用配置（src/config → .env.{APP_ENV} 的 PostgreSQL 连接）
 config.set_main_option(
     "sqlalchemy.url", os.getenv("ALEMBIC_DATABASE_URL", SQLALCHEMY_ASYNC_DATABASE_URL)
 )

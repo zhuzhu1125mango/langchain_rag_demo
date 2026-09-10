@@ -19,8 +19,20 @@ on:
     branches: [main]
 
 jobs:
+  env-consistency:
+    name: Env Consistency Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # 纯 stdlib 脚本：校验 .env.example 覆盖 dev/prod 全部在用键，
+      # 且两份 compose 的 ${VAR} 插值引用均由对应 env 文件提供
+      - name: Run env consistency check
+        run: python3 scripts/check_env_consistency.py
+
   backend-unit:
     name: Backend Unit Tests
+    needs: [env-consistency]
     runs-on: ubuntu-latest
     defaults:
       run:

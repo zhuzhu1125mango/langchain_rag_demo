@@ -32,9 +32,9 @@ $ErrorActionPreference = 'Stop'
 # ==============================================================================
 
 $script:ScriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
-$script:EnvFileSource = Join-Path $script:ScriptDir "../.env.prod"
-$script:EnvFileTarget = Join-Path $script:ScriptDir "../.env"
+$script:EnvFile = Join-Path $script:ScriptDir "../.env.prod"
 $script:ComposeFile = Join-Path $script:ScriptDir "../docker-compose.yml"
+$script:ComposeArgs = @("compose", "-f", $script:ComposeFile, "--env-file", $script:EnvFile)
 $script:EnvName = "PRODUCTION"
 $script:MaxWaitSeconds = $env:MAX_WAIT_SECONDS ? [int]$env:MAX_WAIT_SECONDS : 180
 $script:WaitInterval = $env:WAIT_INTERVAL ? [int]$env:WAIT_INTERVAL : 5
@@ -157,10 +157,10 @@ function Invoke-PreflightChecks {
     }
 
     # Check .env.prod exists
-    if (Test-Path $script:EnvFileSource) {
-        Write-OK "配置文件 $script:EnvFileSource 存在"
+    if (Test-Path $script:EnvFile) {
+        Write-OK "配置文件 $script:EnvFile 存在"
     } else {
-        Write-Err "配置文件 $script:EnvFileSource 不存在"
+        Write-Err "配置文件 $script:EnvFile 不存在"
         Write-Info "请创建 .env.prod 文件，必须包含以下安全变量:"
         foreach ($var in $script:RequiredVars) {
             Write-Host "  - $var"
@@ -188,7 +188,7 @@ function Invoke-SecurityChecks {
     Write-Step "2/7" "执行安全检查..."
 
     # Temporarily load env file to check variables
-    Get-Content $script:EnvFileSource | ForEach-Object {
+    Get-Content $script:EnvFile | ForEach-Object {
         if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
             $name = $matches[1].Trim()
             $value = $matches[2].Trim()
@@ -222,41 +222,14 @@ function Invoke-SecurityChecks {
 }
 
 # ==============================================================================
-# Copy Environment File
-# ==============================================================================
-
-function Copy-EnvFile {
-    Write-Step "3/7" "复制配置文件..."
-
-    # Backup existing .env if exists
-    if (Test-Path $script:EnvFileTarget) {
-        $timestamp = Get-Date -Format "yyyyMMddHHmmss"
-        $backupFile = "$($script:EnvFileTarget).backup.$timestamp"
-        Copy-Item $script:EnvFileTarget $backupFile -Force
-        Write-Info "已备份旧配置到 $backupFile"
-    }
-
-    # Copy .env.prod to .env
-    try {
-        Copy-Item $script:EnvFileSource $script:EnvFileTarget -Force
-        Write-OK "已复制 $script:EnvFileSource -> $script:EnvFileTarget"
-    } catch {
-        Write-Err "复制配置文件失败: $_"
-        exit 1
-    }
-
-    Write-Host ""
-}
-
-# ==============================================================================
 # Load Environment Variables
 # ==============================================================================
 
 function Load-EnvVars {
-    Write-Step "4/7" "加载环境变量..."
+    Write-Step "3/7" "加载环境变量..."
 
-    # Load .env file
-    Get-Content $script:EnvFileTarget | ForEach-Object {
+    # Load .env.prod file（用于脚本内展示；compose 经 --env-file 自行读取同一文件）
+    Get-Content $script:EnvFile | ForEach-Object {
         if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
             $name = $matches[1].Trim()
             $value = $matches[2].Trim()
@@ -273,14 +246,14 @@ function Load-EnvVars {
 # ==============================================================================
 
 function Start-Services {
-    Write-Step "5/7" "启动 Docker Compose 服务..."
+    Write-Step "4/7" "启动 Docker Compose 服务..."
     Write-Info "拉取/构建镜像中，请耐心等待..."
     Write-Host ""
 
-    & docker compose -f $script:ComposeFile up -d --build
+    & docker @script:ComposeArgs up -d --build
     if ($LASTEXITCODE -ne 0) {
         Write-Err "服务启动失败"
-        Write-Info "请检查 Docker 日志: docker compose -f $script:ComposeFile logs"
+        Write-Info "请检查 Docker 日志: docker $script:ComposeArgs logs"
         exit 1
     }
 
@@ -294,7 +267,7 @@ function Start-Services {
 # ==============================================================================
 
 function Wait-ForHealth {
-    Write-Step "6/7" "等待服务健康检查..."
+    Write-Step "5/7" "等待服务健康检查..."
 
     # Check if SkipWait is set
     if ($SkipWait -or $env:SKIP_WAIT -eq "1") {
@@ -310,7 +283,7 @@ function Wait-ForHealth {
 
     while ($elapsed -lt $script:MaxWaitSeconds) {
         # Get container status
-        $statusOutput = docker compose -f $script:ComposeFile ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
+        $statusOutput = docker @script:ComposeArgs ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
 
         # Count containers and healthy ones
         $totalContainers = 0
@@ -358,7 +331,7 @@ function Wait-ForHealth {
     } else {
         Write-Warn "部分服务未在 $($script:MaxWaitSeconds) 秒内完全就绪"
         Write-Info "请使用以下命令查看详细状态:"
-        Write-Host "    docker compose -f $script:ComposeFile ps"
+        Write-Host "    docker $script:ComposeArgs ps"
     }
 
     Write-Host ""
@@ -369,10 +342,36 @@ function Wait-ForHealth {
     return $allHealthy
 }
 
+# ==============================================================================
+# Database Migration (Alembic)
+# ==============================================================================
+
+function Invoke-DatabaseMigration {
+    Write-Step "6/7" "执行数据库迁移（alembic upgrade head）..."
+
+    # 容器内 POSTGRES_HOST=postgres 直连数据库（alembic 为主依赖，prod 镜像可用）
+    & docker @script:ComposeArgs exec -T backend alembic upgrade head
+    if ($LASTEXITCODE -ne 0) {
+        # 全新数据库：backend 启动时 init_db(create_all) 已建全量表但无 alembic_version，
+        # upgrade 撞 DuplicateTableError；此时 schema 与当前镜像模型一致，stamp 对齐即可
+        Write-Warn "upgrade 未执行，尝试按全新库对齐 alembic 版本（stamp head）..."
+        & docker @script:ComposeArgs exec -T backend alembic stamp head
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "数据库迁移失败，请检查 backend 容器日志"
+            Write-Info "查看日志: docker $script:ComposeArgs logs backend"
+            exit 1
+        }
+        Write-OK "已对齐 alembic 版本（全新库由启动建表）"
+    } else {
+        Write-OK "数据库迁移完成"
+    }
+    Write-Host ""
+}
+
 function Print-ContainerStatus {
     Write-Info "容器状态:"
     Write-Host ""
-    docker compose -f $script:ComposeFile ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
+    docker @script:ComposeArgs ps --format "table {{.Name}}`t{{.State}}`t{{.Status}}" 2>$null
     Write-Host ""
 }
 
@@ -394,32 +393,32 @@ function Print-AccessInfo {
     Write-Host ""
     Write-Host "  ${Cyan}前端 & API${Reset}"
     Write-Host "    前端页面     : http://localhost:80"
-    Write-Host "    Backend API  : http://localhost:8000"
-    Write-Host "    API 文档     : http://localhost:8000/docs"
+    Write-Host "    Backend API  : http://localhost:8001（仅回环绑定）"
+    Write-Host "    API 文档     : http://localhost:8001/docs"
     Write-Host ""
     Write-Host "  ${Cyan}存储服务${Reset}"
-    Write-Host "    PostgreSQL   : localhost:5433"
+    Write-Host "    PostgreSQL   : localhost:5434"
     Write-Host "                  数据库: $pgDb"
     Write-Host "                  用户名: $pgUser"
     Write-Host "                  密码  : `${POSTGRES_PASSWORD}"
-    Write-Host "    MinIO 控制台 : http://localhost:9001"
+    Write-Host "    MinIO 控制台 : http://localhost:9003"
     Write-Host "                  用户名: `${MINIO_ROOT_USER}"
     Write-Host "                  密码  : `${MINIO_ROOT_PASSWORD}"
-    Write-Host "    Milvus       : localhost:19530"
+    Write-Host "    Milvus       : localhost:19531"
     Write-Host ""
     Write-Host "  ${Cyan}监控服务${Reset}"
-    Write-Host "    Prometheus   : http://localhost:9090"
-    Write-Host "    Grafana      : http://localhost:3000"
+    Write-Host "    Prometheus   : http://localhost:9094"
+    Write-Host "    Grafana      : http://localhost:3001"
     Write-Host "                  用户名: admin"
     Write-Host "                  密码  : `${GF_SECURITY_ADMIN_PASSWORD}"
-    Write-Host "    Alertmanager : http://localhost:9093"
+    Write-Host "    Alertmanager : http://localhost:9095"
     Write-Host ""
     Write-Host "${Bold}========================================${Reset}"
     Write-Host "  ${Yellow}常用命令${Reset}"
     Write-Host "${Bold}========================================${Reset}"
     Write-Host "    查看日志  : .\scripts\logs-prod.ps1"
     Write-Host "    停止服务  : .\scripts\stop-prod.ps1"
-    Write-Host "    查看状态  : docker compose -f $script:ComposeFile ps"
+    Write-Host "    查看状态  : docker $script:ComposeArgs ps"
     Write-Host "    进入容器  : docker exec -it <container_name> powershell"
     Write-Host ""
     Write-Host "${Bold}========================================${Reset}"
@@ -435,10 +434,10 @@ function Main {
     Confirm-Start
     Invoke-PreflightChecks
     Invoke-SecurityChecks
-    Copy-EnvFile
     Load-EnvVars
     Start-Services
     $healthResult = Wait-ForHealth
+    Invoke-DatabaseMigration
     Print-AccessInfo
 
     if ($healthResult) {

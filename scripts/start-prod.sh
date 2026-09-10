@@ -46,9 +46,9 @@ log_fail()    { echo -e "${RED}✗${NC} $1"; }
 # ==============================================================================
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
-ENV_FILE_SOURCE="$SCRIPT_DIR/../.env.prod"
-ENV_FILE_TARGET="$SCRIPT_DIR/../.env"
+ENV_FILE="$SCRIPT_DIR/../.env.prod"
 COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.yml"
+COMPOSE_ARGS=(-f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 ENV_NAME="PRODUCTION"
 MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-180}
 WAIT_INTERVAL=${WAIT_INTERVAL:-5}
@@ -153,10 +153,10 @@ run_preflight_checks() {
     fi
     
     # Check .env.prod exists
-    if [[ -f "$ENV_FILE_SOURCE" ]]; then
-        log_ok "配置文件 $ENV_FILE_SOURCE 存在"
+    if [[ -f "$ENV_FILE" ]]; then
+        log_ok "配置文件 $ENV_FILE 存在"
     else
-        log_error "配置文件 $ENV_FILE_SOURCE 不存在"
+        log_error "配置文件 $ENV_FILE 不存在"
         log_info "请创建 .env.prod 文件，必须包含以下安全变量:"
         for var in "${REQUIRED_VARS[@]}"; do
             echo "  - $var"
@@ -184,7 +184,7 @@ run_security_checks() {
     
     # Temporarily load env file to check variables
     set -a
-    source "$ENV_FILE_SOURCE"
+    source "$ENV_FILE"
     set +a
     
     local has_issues=false
@@ -212,42 +212,17 @@ run_security_checks() {
 }
 
 # ==============================================================================
-# Copy Environment File
-# ==============================================================================
-
-copy_env_file() {
-    log_step "3/7" "复制配置文件..."
-    
-    # Backup existing .env if exists
-    if [[ -f "$ENV_FILE_TARGET" ]]; then
-        local backup_file="${ENV_FILE_TARGET}.backup.$(date +%Y%m%d%H%M%S)"
-        cp "$ENV_FILE_TARGET" "$backup_file"
-        log_info "已备份旧配置到 $backup_file"
-    fi
-    
-    # Copy .env.prod to .env
-    if cp "$ENV_FILE_SOURCE" "$ENV_FILE_TARGET"; then
-        log_ok "已复制 $ENV_FILE_SOURCE -> $ENV_FILE_TARGET"
-    else
-        log_error "复制配置文件失败"
-        exit 1
-    fi
-    
-    echo ""
-}
-
-# ==============================================================================
 # Load Environment Variables
 # ==============================================================================
 
 load_env_vars() {
-    log_step "4/7" "加载环境变量..."
-    
-    # Source the .env file
+    log_step "3/7" "加载环境变量..."
+
+    # Source the .env.prod file（用于脚本内展示；compose 经 --env-file 自行读取同一文件）
     set -a
-    source "$ENV_FILE_TARGET"
+    source "$ENV_FILE"
     set +a
-    
+
     log_ok "环境变量已加载"
     echo ""
 }
@@ -257,19 +232,19 @@ load_env_vars() {
 # ==============================================================================
 
 start_services() {
-    log_step "5/7" "启动 Docker Compose 服务..."
+    log_step "4/7" "启动 Docker Compose 服务..."
     log_info "拉取/构建镜像中，请耐心等待..."
     echo ""
-    
-    if $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" up -d --build; then
+
+    if $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" up -d --build; then
         echo ""
         log_ok "服务启动命令执行成功"
     else
         log_error "服务启动失败"
-        log_info "请检查 Docker 日志: $DOCKER_COMPOSE_CMD -f $COMPOSE_FILE logs"
+        log_info "请检查 Docker 日志: $DOCKER_COMPOSE_CMD ${COMPOSE_ARGS[*]} logs"
         exit 1
     fi
-    
+
     echo ""
 }
 
@@ -278,7 +253,7 @@ start_services() {
 # ==============================================================================
 
 wait_for_health() {
-    log_step "6/7" "等待服务健康检查..."
+    log_step "5/7" "等待服务健康检查..."
     
     # Check if SKIP_WAIT is set
     if [[ "${SKIP_WAIT:-0}" == "1" ]]; then
@@ -295,7 +270,7 @@ wait_for_health() {
     while [[ $elapsed -lt $MAX_WAIT_SECONDS ]]; do
         # Get container status
         local status_output
-        status_output=$($DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || echo "")
+        status_output=$($DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || echo "")
         
         # Count containers and healthy ones
         local total_containers=0
@@ -337,25 +312,49 @@ wait_for_health() {
     else
         log_warn "部分服务未在 ${MAX_WAIT_SECONDS} 秒内完全就绪"
         log_info "请使用以下命令查看详细状态:"
-        echo "    $DOCKER_COMPOSE_CMD -f $COMPOSE_FILE ps"
+        echo "    $DOCKER_COMPOSE_CMD ${COMPOSE_ARGS[*]} ps"
     fi
-    
+
     echo ""
-    
+
     # Print container status table
     print_container_status
-    
+
     # Return status code
     [[ "$all_healthy" == true ]] && return 0 || return 1
+}
+
+# ==============================================================================
+# Database Migration (Alembic)
+# ==============================================================================
+
+run_database_migration() {
+    log_step "6/7" "执行数据库迁移（alembic upgrade head）..."
+
+    # 容器内 POSTGRES_HOST=postgres 直连数据库（alembic 为主依赖，prod 镜像可用）
+    if ! $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" exec -T backend alembic upgrade head; then
+        # 全新数据库：backend 启动时 init_db(create_all) 已建全量表但无 alembic_version，
+        # upgrade 撞 DuplicateTableError；此时 schema 与当前镜像模型一致，stamp 对齐即可
+        log_warn "upgrade 未执行，尝试按全新库对齐 alembic 版本（stamp head）..."
+        if ! $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" exec -T backend alembic stamp head; then
+            log_error "数据库迁移失败，请检查 backend 容器日志"
+            log_info "查看日志: $DOCKER_COMPOSE_CMD ${COMPOSE_ARGS[*]} logs backend"
+            exit 1
+        fi
+        log_ok "已对齐 alembic 版本（全新库由启动建表）"
+    else
+        log_ok "数据库迁移完成"
+    fi
+    echo ""
 }
 
 print_container_status() {
     log_info "容器状态:"
     echo ""
-    
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || \
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" ps
-    
+
+    $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" ps --format "table {{.Name}}\t{{.State}}\t{{.Status}}" 2>/dev/null || \
+    $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" ps
+
     echo ""
 }
 
@@ -377,32 +376,32 @@ print_access_info() {
     echo ""
     echo -e "  ${CYAN}前端 & API${NC}"
     echo "    前端页面     : http://localhost:80"
-    echo "    Backend API  : http://localhost:8000"
-    echo "    API 文档     : http://localhost:8000/docs"
+    echo "    Backend API  : http://localhost:8001（仅回环绑定）"
+    echo "    API 文档     : http://localhost:8001/docs"
     echo ""
     echo -e "  ${CYAN}存储服务${NC}"
-    echo "    PostgreSQL   : localhost:5433"
+    echo "    PostgreSQL   : localhost:5434"
     echo "                  数据库: $pg_db"
     echo "                  用户名: $pg_user"
     echo "                  密码  : \${POSTGRES_PASSWORD}"
-    echo "    MinIO 控制台 : http://localhost:9001"
+    echo "    MinIO 控制台 : http://localhost:9003"
     echo "                  用户名: \${MINIO_ROOT_USER}"
     echo "                  密码  : \${MINIO_ROOT_PASSWORD}"
-    echo "    Milvus       : localhost:19530"
+    echo "    Milvus       : localhost:19531"
     echo ""
     echo -e "  ${CYAN}监控服务${NC}"
-    echo "    Prometheus   : http://localhost:9090"
-    echo "    Grafana      : http://localhost:3000"
+    echo "    Prometheus   : http://localhost:9094"
+    echo "    Grafana      : http://localhost:3001"
     echo "                  用户名: admin"
     echo "                  密码  : \${GF_SECURITY_ADMIN_PASSWORD}"
-    echo "    Alertmanager : http://localhost:9093"
+    echo "    Alertmanager : http://localhost:9095"
     echo ""
     echo -e "${BOLD}========================================${NC}"
     echo -e "  ${YELLOW}常用命令${NC}"
     echo -e "${BOLD}========================================${NC}"
     echo "    查看日志  : ./scripts/logs-prod.sh"
     echo "    停止服务  : ./scripts/stop-prod.sh"
-    echo "    查看状态  : $DOCKER_COMPOSE_CMD -f $COMPOSE_FILE ps"
+    echo "    查看状态  : $DOCKER_COMPOSE_CMD ${COMPOSE_ARGS[*]} ps"
     echo "    进入容器  : docker exec -it <container_name> bash"
     echo ""
     echo -e "${BOLD}========================================${NC}"
@@ -418,11 +417,11 @@ main() {
     confirm_start
     run_preflight_checks
     run_security_checks
-    copy_env_file
     load_env_vars
     start_services
     wait_for_health
     local health_result=$?
+    run_database_migration
     print_access_info
     
     if [[ $health_result -eq 0 ]]; then
