@@ -1,5 +1,7 @@
 # 决策模型（Intent Router）升级设计方案
 
+> 状态：已实施（`backend/src/services/intent_router/`：LLMRouter / ConfidenceGate / 历史上下文增强）
+
 ## 1. 背景与目标
 
 ### 1.1 当前现状

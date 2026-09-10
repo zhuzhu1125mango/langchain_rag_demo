@@ -1,5 +1,7 @@
 # RAG 知识库系统升级设计方案
 
+> 状态：部分实施（混合检索/重排序/评估闭环/意图路由已落地；分阶段进度并入 [improvement-roadmap.md](improvement-roadmap.md) 推进）
+
 ## 1. 背景与目标
 
 ### 1.1 当前状态

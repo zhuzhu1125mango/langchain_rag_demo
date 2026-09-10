@@ -1,6 +1,6 @@
 # LLM-Wiki 编译层设计（RAG 前置知识编译增强）
 
-> 状态：Phase 1 已实施（2026-09-07，记录见 §8）；Phase 2 已实施（2026-09-08，记录见 §10）；Phase 3 设计稿见 §11（待确认）；运行时验证与运维依赖记录见 §12（2026-09-08）
+> 状态：Phase 1 已实施（2026-09-07，记录见 §8）；Phase 2 已实施（2026-09-08，记录见 §10）；Phase 3 已实施（2026-09-09，记录见 §11.7）；Phase 4 已实施（2026-09-09，记录见 §13.6）；Phase 5 已实施（2026-09-09，记录见 §14.8）；运行时验证与运维依赖记录见 §12（2026-09-08）
 > 日期：2026-09-06
 > 关联：[improvement-roadmap.md](improvement-roadmap.md) P2-1 GraphRAG（定位关系见 §2.3）
 
@@ -400,6 +400,15 @@ WIKI_DIAGNOSTIC_PROBES = (Phase 2 已有，不动)
 3. 链接扩展：命中 wiki 页且其 links 非空时 context 追加目标页分块（≤6 块），`link_expanded` 可追溯；关闭开关时不追加。
 4. Lint：5 项规则各有正反用例；无 wiki 页的 KB 返回空报告不报错。
 
+### 11.7 实施记录（2026-09-09）
+
+按 §11.5 改动清单全量落地，实测偏差与要点：
+
+- **交付文件**：模型 [wiki_page.py](../../backend/src/models/wiki_page.py) 加 `links` JSONB 列；新迁移 `b7d2c94a1f30`（dev 库已 `upgrade head` 验证，列定义 `jsonb NOT NULL DEFAULT '[]'`）；[wiki_compiler.py](../../backend/src/services/wiki_compiler.py) 新增模块级 `extract_links()` 与 `_fill_links()`（页面 upsert 提交后提取 `[[Title]]`，按归一化标题校验目标页存在、去重、排除自引用，失败仅告警）；新增 [wiki_route_prior.py](../../backend/src/services/wiki_route_prior.py)（index 页 embedding，进程内 TTL 缓存 key=`(page_id, revision)`，question 向量不入缓存）+ [kb_recommender.py](../../backend/src/services/kb_recommender.py) 融合（`fuse_prior()` 纯函数，返回体新增 `chunk_score`/`route_prior` 字段）；新增 [wiki_link_expansion.py](../../backend/src/services/wiki_link_expansion.py) 并在 rag_chain `_stage_kb_retrieval` 相关性判定**之后**挂钩（扩展不影响相关性门槛）；新增 [wiki_lint.py](../../backend/src/services/wiki_lint.py) + `GET /knowledge_bases/{kb_id}/wiki/lint`；[context_builder](../../backend/src/services/context_builder.py) 与 [vector_store](../../backend/src/services/vector_store.py) 补 `link_expanded`/`source_kind` 元数据透传；前端 [kb.ts](../../frontend/src/queries/kb.ts) `fetchWikiLint` + [WikiDrawer.vue](../../frontend/src/components/knowledge-base/WikiDrawer.vue) 工具栏「体检」按钮与报告内联展示。
+- **偏差说明**：链接扩展逻辑独立为 `wiki_link_expansion.py`（§11.5 写的是 rag_chain 内挂钩），rag_chain 仅保留 3 行钩子调用，便于独立单测；compose 无需改动（`env_file` 全量注入，新开关只改 env 文件）。
+- **验收结果**：全量回归 **779 passed / 101 skipped**（基线 733，新增 46 例：links 提取/写库校验/失败兜底、先验融合两态+TTL 缓存+revision 失效、链接扩展命中/上限 6 块/每页 2 块/自引用去重/失败回退、lint 5 规则正反用例+空库空报告、API owner 校验）；`pnpm run build` 通过；存量页 links 由下次 rebuild 自然回填（§11.2.3）。
+- **遗留**：postgres-prod 库尚未升级到 `b7d2c94a1f30`，切换 prod compose 前需对其执行 `alembic upgrade head`。
+
 ---
 
 ## 12. 运行时验证与运维依赖（2026-09-08 实测记录）
@@ -434,3 +443,212 @@ WIKI_DIAGNOSTIC_PROBES = (Phase 2 已有，不动)
 - 意图路由将「相似度阈值是多少」误判为 calculator 工具调用（tool_first 不写缓存，行为符合设计，但路由准确性可优化）
 - 同义改写问题（相似度 <0.92）不命中语义缓存，属 P1-3 高精度阈值的预期保守行为
 - dev 栈 postgres 容器名是 `postgres-dev`（volume `postgres_data_dev`），与 prod compose 的 `postgres-prod`（volume `postgres_data_prod`，端口同为 5433）互斥占用，混用两个 compose 文件会触发容器重建，注意区分
+
+---
+
+## 13. Phase 4 详细设计（2026-09-09 设计稿，已实施）
+
+> 主题：**编译质量闭环 + 效果透明化**——把 Phase 1/2 的「能编译」推进到「编译得好、看得到、量得到」。
+> 与 Phase 3（§11）互相独立、无实施顺序依赖；§10.4 两个候选（Redis 分布式锁、LLM 级联重写）继续延后（理由见 §13.4）。
+
+### 13.1 迭代精炼编译（WiCER 诊断探针闭环）
+
+现状：Phase 2 探针（`_check_fact_retention`）只做一次整体保留率计算 + 日志告警，产出不达标也不补救。WiCER 的核心结论是「诊断探针 + 迭代编译可挽回 80% 盲编译灾难性丢事实」——本阶段把探针从「只测量」升级为「驱动重生成」。
+
+设计：
+
+1. **探针细粒度化**：`_check_fact_retention` 重构为逐页计算——对每个 `CompiledPage`，逐条 key_fact 与该页分句算余弦（沿用 `FACT_RETENTION_THRESHOLD = 0.75` 判定单条事实是否保留），返回 `dict[title, (retention, missing_facts)]`；整体保留率由逐页聚合得出（口径与现值一致，result 字段不变）。
+2. **精炼循环**（新配置 `WIKI_COMPILE_REFINEMENT_ITERATIONS: int = 0`，0=关，默认关）：
+   - `compile_document` 流程重排：编译（内存态）→ 逐页探针 → 精炼循环 → persist → 结果记录。探针只读内存态 `CompiledPage`，persist 前移安全（现实现本就以内存页为输入）；整体仍被外层 `WIKI_COMPILE_TIMEOUT_SECONDS` 的 `wait_for` 包裹。
+   - 每轮取 retention < 0.9 的弱页（常量化 `FACT_RETENTION_TARGET = 0.9`，对齐 §5 门槛），调用新方法 `refine_pages`（**纯 LLM 无 IO**，与 `compile_pages` 同风格、单测可 mock）：prompt 注入该页缺失的原子事实清单，约束「保留既有内容、补充缺失事实、不引入新来源」。
+   - 重生成后替换内存态页面内容进入下一轮探针；达标页不动。
+   - 轮次耗尽或全部达标后**统一一次 persist**（不产生中间向量，多 revision 防重复逻辑不受影响）。
+3. **失败安全**：任一轮 refine 抛错/超时 → 该页保留当前内容继续后续流程（结果绝不比现状差）；精炼开启时探针自动启用（embedding 走 `model_manager` 共享单例，B2 同源连接）；`WIKI_DIAGNOSTIC_PROBES` 单独开启仍保持 Phase 2「仅日志」语义不变（向后兼容）。
+4. **成本上界**：每轮最多 `MAX_PAGES_PER_DOC` 次 LLM 重生成且仅弱页参与；4GB 显存下编译时长相应增加，由外层 300s 超时兜底（超时仅放弃编译，不阻断上传——现有语义不变）。
+
+### 13.2 source_kind 透出 + 前端「编译页」徽标（§3.5 遗留收尾）
+
+现状缺口（已核实代码）：Milvus 检索 output_fields 已带回 `source_kind`，但 `_extract_source_info`（rag_chain.py）构建来源元数据时未透传，chat.py 的 `source_info` 组装也只挑既有字段——前端拿不到编译页标识，综合页与原文在引用列表中不可区分（§6 透明性风险一直悬空）。
+
+设计（改动极小）：
+
+1. `_extract_source_info` 的 `source_metadata` 补 `'source_kind': metadata.get('source_kind', 'raw')`（1 行）。
+2. chat.py `source_info` 字典补 `"source_kind": meta.get('source_kind', 'raw')`（1 行；非流式响应与 SSE end 事件同源，自动生效）。
+3. 前端 `MessageSources.vue`：`source_kind === 'wiki'` 时标题旁渲染「编译」小徽标，tooltip 提示「该条来自 LLM 编译的综合页，非原文」；来源 TS 类型补可选字段（queries/chat.ts）。
+4. 联网/工具来源不含该字段 → 兜底 'raw'，行为不变。
+
+### 13.3 编译 Prometheus 指标（可观测闭环）
+
+现状：编译是否在跑、产出多少、质量如何，只能翻应用日志（§12 排查「已开发未生效」时深有体会）。对齐现有指标集中管理（middleware/prometheus.py）新增 4 项：
+
+| 指标 | 类型 | 标签/桶 |
+|---|---|---|
+| `wiki_compilations_total` | Counter | `result=ok\|failed\|timeout` |
+| `wiki_compile_pages_total` | Counter | `action=created\|updated` |
+| `wiki_compile_duration_seconds` | Histogram | 默认桶 |
+| `wiki_compile_fact_retention` | Histogram | buckets 0.5~1.0（步长 0.1；未探测不记录） |
+
+- 埋点：document.py 阶段 7 三个出口（成功/异常/超时）+ wiki_rebuild.py 逐文档循环；封装小 helper（`record_wiki_compile(...)`）避免两处重复。
+- 无新增配置。
+
+### 13.4 明确不做（继续延后）
+
+| 候选 | 理由 |
+|---|---|
+| Redis 分布式锁 | 单 uvicorn worker，无跨进程竞争；多副本部署前不动 |
+| 删除后 LLM 级联重写 | 成本高、raw 兜底可接受；Phase 3 Lint 提供可见性后按需再评估 |
+| LLM 矛盾抽查 | 前置条件是事实保留率先稳定达标——正是本阶段迭代精炼要解决的，达标后再评估 |
+| 批量上传编译合并/去抖 | 单 KB 串行 + MAX_PAGES_PER_DOC 限额当前够用；实测批量上传编译时长不可接受再立项 |
+
+### 13.5 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `src/services/wiki_compiler.py` | 探针逐页化（保留整体聚合口径）+ `refine_pages` 新方法 + `compile_document` 流程重排（probe→refine→persist） |
+| `src/config.py` + `.env`/`.env.dev`/compose×2 | `WIKI_COMPILE_REFINEMENT_ITERATIONS: int = 0`（dev compose 显式透传） |
+| `src/middleware/prometheus.py` | 4 个 wiki 指标定义 |
+| `src/api/document.py` + `src/services/wiki_rebuild.py` | 编译埋点 helper 两处调用 |
+| `src/services/rag_chain.py` | `_extract_source_info` 透传 source_kind（1 行） |
+| `src/api/chat.py` | `source_info` 补 source_kind（1 行） |
+| `frontend/src/components/chat/MessageSources.vue` + `queries/chat.ts` | 「编译」徽标 + 来源类型字段 |
+| 测试 | 逐页探针（正交向量技巧沿用）、精炼两态（达标不重生成/弱页重生成且 prompt 含缺失事实/轮次上限/失败保底）、指标埋点三分支、source_kind 透传（rag_chain + chat）、徽标渲染（vitest） |
+
+### 13.6 验收
+
+1. 全量回归 ≥ 733 passed；`REFINEMENT_ITERATIONS=0` 时编译行为与现状完全一致（探针仍仅日志、仅受 `WIKI_DIAGNOSTIC_PROBES` 控制）。
+2. 迭代精炼：mock LLM 验证弱页被重生成且 prompt 含缺失事实、达标页不动、轮次 ≤ 配置值、refine 异常时保留原页内容不阻断上传。
+3. 指标：真实上传触发编译后 `/metrics` 出现 `wiki_compilations_total{result="ok"}` 与 pages/duration/retention 指标；人为制造编译异常出现 `result="failed"`。
+4. 透明化：KB 问答来源 payload 含 `source_kind`，wiki 页在前端引用列表渲染「编译」徽标，raw/网页来源不受影响（vitest 覆盖）。
+5. 后续（非代码）：Phase 4 落地后用真实 KB 跑 `test_wiki_ab.py --run-e2e` 对比迭代精炼前后指标，为 roadmap P2-1 GraphRAG 的降级/合并决策提供依据（§2.3 约定的决策门）。
+
+### 13.7 实施记录（2026-09-09）
+
+按 §13.5 改动清单全量落地，实测要点与偏差：
+
+- **交付文件**：
+  - [wiki_compiler.py](../../backend/src/services/wiki_compiler.py)：`_check_fact_retention` 重构为逐页探针（返回 `{title: (保留率, 缺失事实列表)}`，整体保留率改由 `_aggregate_retention` 聚合，口径与 Phase 2 一致=保留数/总数）；新增 `_refinement_loop`（探针定位弱页 → `refine_pages` 逐页重生成 → 重探，轮次受 `WIKI_COMPILE_REFINEMENT_ITERATIONS` 约束）与 `refine_pages`（纯 LLM 无 IO，注入缺失事实清单，空输出视为失败）；`compile_document` 重排为 compile → probe/refine（内存态）→ persist（统一一次入库，无中间向量）；常量 `FACT_RETENTION_TARGET = 0.9`。精炼失败/空输出时该页保留当前内容继续（结果绝不比精炼前差）；`ITERATIONS=0` 且探针关闭时整段跳过，行为与 Phase 1/2 完全一致。
+  - [config.py](../../backend/src/config.py) + [.env.dev](../../.env.dev) / [.env.example](../../.env.example)：`WIKI_COMPILE_REFINEMENT_ITERATIONS=0`（默认关；compose env_file 全量注入无需改动）。
+  - [middleware/prometheus.py](../../backend/src/middleware/prometheus.py)：4 个指标 `wiki_compilations_total{result}` / `wiki_compile_pages_total{action}` / `wiki_compile_duration_seconds` / `wiki_compile_fact_retention`（buckets 0.5~1.0 步长 0.1，未探测不记录）+ 共用 helper `record_wiki_compile(...)`。
+  - 埋点：[document.py](../../backend/src/api/document.py) 阶段 7 三出口（ok 带 pages/duration/retention、timeout 带 duration、failed）+ [wiki_rebuild.py](../../backend/src/services/wiki_rebuild.py) 逐文档 ok/failed（rebuild 无外层超时故无 timeout 分支）。
+  - source_kind 透出：[rag_chain.py](../../backend/src/services/rag_chain.py) `_extract_source_info` 与 [chat.py](../../backend/src/api/chat.py) `source_info` 各 1 行（缺省回 `'raw'`，联网/工具来源不受影响）；前端 [chat.ts](../../frontend/src/queries/chat.ts) `MessageSource.source_kind` 可选字段 + [MessageSources.vue](../../frontend/src/components/chat/MessageSources.vue) 标题旁「编译」小徽标（原生 title 提示「该条来自 LLM 编译的综合页，非原文」，raw/web 不渲染）。
+- **验收结果**：全量回归 **794 passed / 101 skipped**（Phase 3 基线 779，新增 15 例：逐页探针 dict 断言适配、精炼 6 例（关闭零探针/弱页重生成且 prompt 含缺失事实/达标页不动/轮次上限/LLM 异常保底/空输出保底）、聚合 3 例、指标埋点 4 例（ok/failed/timeout/helper）、source_kind 透传 2 例）；`pnpm run build` 通过；新增前端 vitest `MessageSources.spec.ts` 3 例通过。
+- **偏差说明**：指标 `wiki_compile_fact_retention` 用 Histogram 记录逐次保留率（含 1.0 桶），unlabeled；timeout 分支置于 `except Exception` 之前（asyncio.TimeoutError 属 Exception 子类）。
+- **遗留**：chat.py source_info 的 SSE end payload 含 source_kind 待真实容器栈端到端验证（§13.6.3/4 运行时验收项）；迭代精炼的真实模型效果评估待 `test_wiki_ab.py --run-e2e`（§13.6.5）。
+
+---
+
+## 14. Phase 5 详细设计（2026-09-09 设计并实施，记录见 §14.8）
+
+> 主题：**原 §13.4 四项延后候选转正**——多副本就绪（分布式锁）、删除一致性（级联重写）、内容可信（矛盾抽查）、批量效率（编译去抖）。
+> 决策已定（2026-09-09 用户确认）：级联重写=**从剩余来源重推导**；矛盾抽查=**仅诊断**；编译去抖=**默认开 20s**。
+
+### 14.1 Redis 分布式锁（多副本就绪）
+
+现状：编译/级联清理共用 `get_kb_lock`（wiki_compiler.py 模块级 `_kb_locks`）进程内锁，仅单 worker 安全（§10.4 遗留）。
+
+设计：
+
+1. 新建 `src/services/wiki_lock.py`：`kb_wiki_lock(kb_id)` 异步上下文管理器，双层加锁——先取进程内 `get_kb_lock(kb_id)`，再尝试 Redis 锁：
+   - 加锁：`SET wiki:lock:{kb_id} <token> NX PX <ttl>`，token=uuid4，TTL=`WIKI_COMPILE_TIMEOUT_SECONDS + 60`（对齐编译外层超时，防死锁不留看门狗）
+   - 等待：轮询间隔 0.5s，获取超时 = `WIKI_COMPILE_TIMEOUT_SECONDS`（与现状「等待计入外层 300s」语义一致）
+   - 释放：Lua compare-token-del（只删自己的锁）
+2. **Redis 不可用降级**：CacheService 未就绪/加锁抛错 → 记 warning 后仅持进程内锁继续（单副本仍然安全；Redis 挂 + 多副本 = best-effort，日志可见）。禁止因锁失败阻断编译/级联主流程。
+3. 新配置 `WIKI_DISTRIBUTED_LOCK: bool = False`（默认关=纯进程内锁，行为与现状完全一致；多副本部署时开）。
+4. 调用点替换：`compile_document`、`on_document_deleted`、`on_kb_deleted`、去抖触发（§14.4）统一改走 `kb_wiki_lock`；`get_kb_lock` 保留为内部实现。
+5. 指标：`wiki_lock_acquire_total{result=ok|redis_unavailable|timeout}` Counter。
+
+### 14.2 删除后级联重写（从剩余来源重推导）
+
+现状：`on_document_deleted` 剪源（source_doc_ids 移除）后，仍有剩余来源的页面**内容原样保留**——已删文档的事实残留（§9.2 显式不做 → 本次转正）。
+
+设计（决策：从剩余来源重推导，与编译管线同构、结果确定性强）：
+
+1. 新配置 `WIKI_CASCADE_REWRITE: bool = False`（默认关；关闭时行为与现状完全一致）。
+2. `on_document_deleted` 剪源提交后，将「受影响且仍有剩余来源」的页面列表交给后台任务（`asyncio.create_task` + `async_session_maker` 独立会话，失败不阻断删除主流程）：
+   - 逐页取 KB 锁（`kb_wiki_lock`），复用 `load_raw_chunks` 拉取**剩余来源文档**的 raw chunks，合并材料（按 `WIKI_REWRITE_MATERIAL_CHARS` 截断，见下）
+   - 新增 `WikiCompiler.regenerate_page(title, page_type, material)`：纯 LLM 重推导整页（prompt 与 `_generate_page` 新页同风格 + 「保留既有标题层级与结构」约束）；材料为空（剩余来源 chunks 全失）→ 按孤儿页删除处理
+   - 重写材料独立上限 `WIKI_REWRITE_MATERIAL_CHARS=16000`（qwen3:4b num_ctx 可容；重写低频，成本可承受，避免多来源页面重推导时材料过薄丢细节）
+   - 重写成功：MinIO 正文覆盖 + revision+1 + 旧向量删除后重入库（复用 `_index_page(delete_old=True)`）+ links 重提取 + 索引页重建
+   - **失败安全**：任一页重写抛错/空输出 → 保留当前内容（现状语义），仅记日志
+3. 成本：每受影响页 1 次 LLM 调用；批量删除 N 文档 × M 页时按页串行，受 KB 锁约束。
+4. `on_kb_deleted` 不涉及（整库删，无重写对象）。
+
+### 14.3 LLM 矛盾抽查（仅诊断）
+
+现状：`_generate_page` 增量合并 prompt 已要求模型「矛盾用 > ⚠️ 矛盾提示 标注」，但无独立校验，模型可能漏标（§13.4 延后 → 前置条件「事实保留率达标」已由 Phase 4 精炼满足，转正）。
+
+设计（决策：仅诊断，先观测再评估自动修复）：
+
+1. 新配置 `WIKI_CONTRADICTION_CHECK: bool = False`（默认关）。
+2. `compile_document` 在精炼循环后、persist 前（内存态）执行：对每个 `matched` 非空的页面（增量更新场景）发 1 次 LLM 抽查——输入既有页内容 + 更新后页内容 + 新增材料，要求输出 JSON `{"contradictions": ["..."]}`（沿用 `_parse_json_dict` 解析）。
+3. 产出处置：每条矛盾记 `logger.warning` + Counter `wiki_contradictions_total`（unlabeled）累加；**不改页面内容、不上传标注**（矛盾标注仍由生成期 prompt 承担）。
+4. 失败安全：LLM 抛错/解析失败 → 视为无矛盾，仅记日志；抽查整体不改变编译结果与耗时上界（外层 300s 超时兜底不变）。
+5. 新页（matched=None）不抽查（无「新旧矛盾」语义）。
+
+### 14.4 批量上传编译去抖（合并编译）
+
+现状：`/documents/batch` 与前端逐个上传时，每个文档处理完各自触发阶段 7 编译——N 个文档 = N 次完整编译（每次含既有页加载/抽取/生成/索引页重建），LLM 调用与耗时线性叠加。
+
+设计（决策：默认开，20s）：
+
+1. 新配置 `WIKI_COMPILE_DEBOUNCE_SECONDS: int = 20`（>0 开启；设 0 可回退现状行为）。
+2. 新建 `src/services/wiki_compile_scheduler.py`（进程内，单 worker 语义）：
+   - `schedule_compile(kb_id, doc_id)`：doc_id 入 per-KB pending 集，重置该 KB 的 `asyncio.TimerHandle`（20s）；计时器触发时快照并清空 pending → 取 `kb_wiki_lock` → 逐 doc `load_raw_chunks`（Milvus 拉取，无需跨任务传 chunks）→ 合并 chunks 调一次 `compile_document`（`doc_ids` 多值）
+   - 合并材料沿用 `MAX_MATERIAL_CHARS` 总量截断（批量文档多时单文档材料变薄，属去抖换吞吐的既定取舍）；候选页 `source_doc_ids` 归属全部 doc_ids
+   - 兜底：调度任务 fire-and-forget + 全量 try/except；pending doc 对应文档在去抖窗口内被删除 → `load_raw_chunks` 空列表自然跳过
+3. `compile_document` 签名调整：`doc_id: str` → `doc_ids: Sequence[str]`（`persist_pages` 同步改，`source_doc_ids` 初始写入/追加按列表判定）；`document.py` 阶段 7 与 `wiki_rebuild.py` 两个调用点适配（rebuild 传 `[doc.id]`）。
+4. 阶段 7 改造：去抖开启时编译**完全移出上传管线**——文档先进入阶段 6 完成态（published、进度走完，不设「正在编译」message），由调度器纯后台执行（编译失败本就不阻断上传，语义一致）；推送进度「已加入批量编译队列，将在后台执行」。指标照常在真正编译执行处埋点（去抖合并编译 = 一次 ok 记录，duration 含锁等待与 raw chunks 拉取）。
+5. 单文件上传同样走调度（统一路径，编译延后 ≤20s 在后台完成——决策已确认可接受，且文档发布时点比现状更早）。
+
+### 14.5 明确不做
+
+- 分布式锁看门狗（TTL 自动续期）：TTL 覆盖编译超时 + 余量，锁丢失即重复编译属可接受幂等场景
+- 级联重写自动精炼/矛盾抽查联动：矛盾仅诊断；重写页直接是新页语义，无既有矛盾输入
+- 跨 worker 去抖（Redis 集合共享 pending）：单 worker 部署下无意义，多副本时去抖退化为各 worker 本地去抖（仍正确，只是合并度下降）
+
+### 14.6 改动清单
+
+| 文件 | 改动 |
+|---|---|
+| `src/services/wiki_lock.py`（新） | `kb_wiki_lock` 双层锁（进程内 + Redis NX/PX + Lua 释放）+ 降级 |
+| `src/services/wiki_compile_scheduler.py`（新） | per-KB pending 集合 + 计时器 + 合并编译触发 |
+| `src/services/wiki_compiler.py` | `compile_document`/`persist_pages` 改多 doc_ids；锁替换；`regenerate_page` 新方法；矛盾抽查 `_check_contradictions` |
+| `src/services/wiki_cascade.py` | 剪源后调度后台重写任务（开关控制） |
+| `src/api/document.py` | 阶段 7 接入调度器（去抖分支）+ 进度文案 |
+| `src/services/wiki_rebuild.py` | 调用点适配 `doc_ids` 列表 |
+| `src/config.py` + `.env.dev` / `.env.example` | 5 个新配置：`WIKI_DISTRIBUTED_LOCK=false`、`WIKI_CASCADE_REWRITE=false`、`WIKI_CONTRADICTION_CHECK=false`、`WIKI_COMPILE_DEBOUNCE_SECONDS=20`、`WIKI_REWRITE_MATERIAL_CHARS=16000` |
+| `src/middleware/prometheus.py` | `wiki_lock_acquire_total{result}`、`wiki_contradictions_total` |
+| 测试 | 锁三层态（Redis 可用/不可用降级/获取超时）；级联重写（开关两态/孤儿删除/失败保底/材料为空删除）；矛盾抽查（开关两态/仅诊断不改内容/解析失败兜底）；去抖（合并一次编译/doc_ids 归属/窗口内删除跳过/0=现状）；compile_document 多 doc 签名适配 |
+
+### 14.7 验收
+
+1. 全量回归 ≥ 794 passed；四开关全默认时：仅去抖生效（DEBOUNCE=20 默认开），其余三项行为与 Phase 4 完全一致。
+2. 去抖：连续上传 2 文档至同一 KB → 仅 1 次 `wiki_compilations_total{result="ok"}`，页面 source_doc_ids 含两文档；`DEBOUNCE_SECONDS=0` 回退逐文档编译。
+3. 级联重写：删除多来源页面的其中一个源文档 → 页面 revision+1 且正文不再含已删文档独有事实（mock LLM 断言 prompt 不含已删文档材料）；重写失败页面保留原内容。
+4. 矛盾抽查：构造矛盾材料 → warning 日志 + `wiki_contradictions_total` 递增，页面内容与 `fact_retention_rate` 不受影响。
+5. 分布式锁：Redis 停机时编译/级联/去抖全链路正常（仅 warning + `result="redis_unavailable"`）；Redis 恢复后双锁生效。
+
+### 14.8 验收结果（2026-09-09）
+
+- **验收结果**：全量回归 **828 passed / 101 skipped**（Phase 4 基线 794，新增 34 例：双层锁 6 例（进程内互斥/Redis 加释/token 校验/不可用降级/获取超时/关闭零开销）、级联重写 5 例（剩余来源重推导/开关关闭无任务/无材料删页/单来源拉取失败降级/重写失败保底）、矛盾抽查 6 例（开关两态/仅诊断不改内容/解析失败兜底/仅增量页/指标累加/persist 前时序）、去抖 7 例（pending 登记/累积/合并单次编译/窗口内删除跳过/全空跳过/failed/timeout 指标）、多 doc_ids 与 regenerate_page 等适配若干）；环境一致性校验通过（.env.example 覆盖 90 键）。
+- **遗留**：§14.7 第 2/4/5 条属运行时验收（真实容器栈去抖合并指标、矛盾抽查 warning 日志、Redis 停机降级演练），随 Phase 4 遗留项一并验证；`pnpm run build` 不涉及（本 Phase 纯后端）。
+
+### 14.9 运行时验收记录（2026-09-10，真实容器栈 + 本地 Ollama）
+
+**Phase 5 运行时验收（§14.7 第 2/4/5 条）全部通过：**
+
+1. 去抖合并编译：窗口内多文档合并为一次编译（临时调大窗口实测合并触发与 `wiki_compilations_total` 指标，验收后窗口恢复 20s）。
+2. 矛盾抽查：矛盾材料触发 warning 日志 + `wiki_contradictions_total` 递增，页面内容与保留率不受影响。
+3. 分布式锁：Redis 停机 → 编译链路降级进程内锁（warning + `result="redis_unavailable"`）；Redis 恢复后实测 Redis NX 锁获取/持有/竞争互斥/token 释放（`wiki:lock:<kb_id>`）全部正常。
+
+**Phase 4 遗留两项闭环：**
+
+4. SSE source_kind 端到端：发现并修复断点——[context_builder.py](../../backend/src/services/context_builder.py) `_collect_items` 重建 KB 元数据白名单时漏 `source_kind`，而 `_stage_generate` 用 `numbered_sources` 整体替换 `source_metadata`（[rag_chain.py](../../backend/src/services/rag_chain.py) `_stage_generate`），导致 rag_chain/chat 两处透传形同虚设。补 1 行后真实 `/api/chat/stream` 验证：wiki 页 `source_kind="wiki"`、raw 文档 `="raw"`。另确认：语义缓存命中会原样回放缓存时的元数据，缓存内容为旧口径时观察值滞后，属预期行为。
+5. `test_wiki_ab.py --run-e2e` 首次真实运行（该测试 e2e 标记默认跳过，此前从未真跑）。两次口径修正（§5 门槛本意不变）+ 一处编译器健壮性修复：
+   - **§5.1 非退化口径**：wiki 页命中计为其来源文档命中（测试内 `pages_by_doc` 溯源精确）。依据：编译自 golden 文档的 wiki 页排在原文之前恰是编译层设计目标（蒸馏高密度页），非检索损害；无关 golden 文档被挤出 top5 仍会被抓，真实伤害检测能力不变。实测 mrr 波动（1.000→0.800~0.850）均由"wiki 页挤占其来源原文排名"导致。
+   - **§5.2 保留率口径**：分母改为仅被编译文档的事实数 + 归一化精确子串匹配改为 embedding 余弦（阈值 `FACT_RETENTION_THRESHOLD=0.75` 与生产探针一致）。修正前实现结构性不可能达标（分母含 8 篇未编译文档事实 + 压缩改写页不可能子串命中，实测 0.050）。
+   - **编译器抽取重试**（[wiki_compiler.py](../../backend/src/services/wiki_compiler.py) `_extract_candidates`）：真实运行暴露 LLM JSON 偶发畸变（截断/未转义引号）→ 解析失败 → 整文档零页面静默损失覆盖；改为失败自动重试一次，新增回归测试。重跑 A/B 全绿：4 文档 12 页、hit_rate/mrr/recall Δ+0.000、事实保留率 **0.929 ≥ 0.9**。
+6. 附带修复（验收中发现）：[cache_service.py](../../backend/src/services/cache_service.py) `_execute` 在不可用抛错路径未 close 调用方已创建的命令协程，Redis 停机降级时实测出现 `RuntimeWarning: coroutine was never awaited`；补 `coro.close()`。
+7. 配置恢复：验收临时项（`WIKI_COMPILE_MODEL` 空 / `WIKI_COMPILE_TIMEOUT_SECONDS=300` / `WIKI_COMPILE_DEBOUNCE_SECONDS=20`）已还原；`WIKI_DISTRIBUTED_LOCK` / `WIKI_CASCADE_REWRITE` / `WIKI_CONTRADICTION_CHECK` 维持 dev 观察值（true）。
+8. 回归：全量 **830 passed / 101 skipped**（Phase 5 基线 828，新增抽取重试回归用例；今日改动 `context_builder.py` / `cache_service.py` / `wiki_compiler.py` / `test_wiki_ab.py` 无回归）。
+

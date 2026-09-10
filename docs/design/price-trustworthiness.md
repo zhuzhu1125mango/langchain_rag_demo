@@ -4,6 +4,7 @@
 >
 > 版本：v1.0
 > 日期：2026-06-27
+> 状态：已实施（垂类结构化工具落地于 `backend/src/tools/`：金价/汇率/天气/时间）
 > 适用项目：c:\MyCode\langchain_rag_demo
 
 ---
