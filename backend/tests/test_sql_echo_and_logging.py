@@ -34,12 +34,12 @@ class TestSqlEchoConfig:
     def test_env_override_enabled(self, monkeypatch):
         """环境变量 SQL_ECHO=true 可覆盖默认（开发打开）。"""
         monkeypatch.setenv("SQL_ECHO", "true")
-        assert DatabaseSettings().SQL_ECHO is True
+        assert DatabaseSettings(_env_file=None).SQL_ECHO is True
 
     def test_env_override_disabled(self, monkeypatch):
         """环境变量 SQL_ECHO=false 显式关闭。"""
         monkeypatch.setenv("SQL_ECHO", "false")
-        assert DatabaseSettings().SQL_ECHO is False
+        assert DatabaseSettings(_env_file=None).SQL_ECHO is False
 
 
 class TestDocumentLoggerSideEffects:

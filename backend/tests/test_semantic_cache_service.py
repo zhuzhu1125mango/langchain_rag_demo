@@ -204,6 +204,15 @@ class TestLookup:
         assert hit is None
 
     async def test_expired_entry_misses(self, fake_cache, service, monkeypatch):
+        # 显式设置依赖配置，确保测试与 .env 文件及其他测试的状态修改隔离
+        monkeypatch.setattr(
+            "src.services.semantic_cache_service.settings.semantic_cache.SEMANTIC_CACHE_ENABLED",
+            True,
+        )
+        monkeypatch.setattr(
+            "src.services.semantic_cache_service.settings.semantic_cache.SEMANTIC_CACHE_TTL_HOURS",
+            24,
+        )
         patch_embeddings(monkeypatch, service, {"__default__": [1.0, 0.0]})
         await service.store("u1", ["kb-a"], "问题A", "答案", [], [])
         # 直接回拨条目时间戳（Windows time.time() 粒度粗，动态构造过期不可靠）
