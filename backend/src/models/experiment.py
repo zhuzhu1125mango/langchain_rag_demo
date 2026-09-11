@@ -5,6 +5,7 @@ A/B测试实验模型
 """
 
 from sqlalchemy import Column, String, Float, Boolean, DateTime, JSON, UUID, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 import uuid
@@ -24,8 +25,8 @@ class Experiment(Base):
     name = Column(String, nullable=False)                        # 实验名称
     description = Column(String)                                 # 实验描述
     status = Column(String, default="created")                   # 状态: created, running, stopped
-    variants = Column(JSON, nullable=False)                      # 变体配置
-    metrics = Column(JSON, default=["accuracy", "response_time"]) # 监控指标
+    variants = Column(JSONB, nullable=False)                      # 变体配置
+    metrics = Column(JSONB, default=["accuracy", "response_time"]) # 监控指标
     traffic_allocation = Column(Float, default=1.0)              # 流量分配比例
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     started_at = Column(DateTime(timezone=True))
@@ -75,7 +76,7 @@ class ExperimentVariant(Base):
     )                                                            # 关联实验ID
     name = Column(String, nullable=False)                        # 变体名称
     weight = Column(Float, default=0.5)                         # 流量权重
-    config = Column(JSON, nullable=False)                        # 变体配置
+    config = Column(JSONB, nullable=False)                        # 变体配置
     enabled = Column(Boolean, default=True)                      # 是否启用
 
     experiment = relationship("Experiment", back_populates="experiment_variants")
@@ -143,7 +144,7 @@ class ExperimentResult(Base):
         nullable=False
     )                                                            # 关联实验ID
     winning_variant_id = Column(String)                          # 获胜变体ID（兼容自定义字符串ID）
-    analysis_data = Column(JSON)                                 # 分析数据
+    analysis_data = Column(JSONB)                                 # 分析数据
     confidence = Column(Float)                                   # 置信度
     conclusion = Column(String)                                  # 结论
     analyzed_at = Column(DateTime(timezone=True), server_default=func.now())
