@@ -11,7 +11,7 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc -b"
   },
   "dependencies": {
     "@lucide/vue": "^1.17.0",
