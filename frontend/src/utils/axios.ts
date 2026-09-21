@@ -59,21 +59,20 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    // 重试条件：连接被拒绝（ECONNREFUSED）、连接超时（ETIMEDOUT）或服务端 5xx，
-    // 且该请求尚未记录过重试计数（_retryCount 不存在）。首次进入重试分支时才判定，
-    // 后续重试通过 _retryCount 递增控制上限，避免对同一请求无限重试。
-    const shouldRetry = (code === 'ECONNREFUSED' || code === 'ETIMEDOUT' ||
-                        (response?.status && response.status >= 500)) &&
-                       config && !config._retryCount
+    // 重试条件：连接被拒绝（ECONNREFUSED）、连接超时（ETIMEDOUT）或服务端 5xx。
+    // 重试次数上限由 _retryCount 与 MAX_RETRIES 共同控制：首次失败时 _retryCount
+    // 为 0/undefined，仍在限定次数内即可重试（D7 修正：此前用 !config._retryCount
+    // 导致首次重试后即为 1，后续失败恒不重试，MAX_RETRIES=3 不可达）。
+    const currentRetry = (config as { _retryCount?: number } | undefined)?._retryCount ?? 0
+    const isRetryable = code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || (response?.status && response.status >= 500)
+    const shouldRetry = Boolean(config && isRetryable && currentRetry < MAX_RETRIES)
 
     if (shouldRetry) {
       // 延迟递增策略：第 n 次重试等待 RETRY_DELAY * n 毫秒（2s/4s/6s），
       // 最多重试 MAX_RETRIES 次，超过后抛出原错误。
       config._retryCount = (config._retryCount || 0) + 1
-      if (config._retryCount <= MAX_RETRIES) {
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * config._retryCount))
-        return api(config)
-      }
+      await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * config._retryCount))
+      return api(config)
     }
 
     return Promise.reject(error)

@@ -322,13 +322,14 @@
 import { ref, computed } from 'vue'
 import { Plus, Play, Square, BarChart3, Trophy, FlaskConical, X, Trash2 } from '@lucide/vue'
 import { ElMessageBox } from 'element-plus'
+import { useQueryClient } from '@tanstack/vue-query'
+import { api } from '@/utils/axios'
 import {
   useExperiments,
   useCreateExperiment,
   useStartExperiment,
   useStopExperiment,
   useAnalyzeExperiment,
-  useExperimentResult,
   useDeleteExperiments,
   type ExperimentCreateRequest,
   type ExperimentResult,
@@ -338,6 +339,7 @@ import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
 
 const toast = useToast()
+const queryClient = useQueryClient()
 
 const { data: experiments, refetch } = useExperiments()
 
@@ -492,9 +494,19 @@ async function stopExperiment(experimentId: string): Promise<void> {
 async function analyzeExperiment(experimentId: string): Promise<void> {
   try {
     await analyzeMutation.mutateAsync(experimentId)
-    const resultQuery = useExperimentResult(experimentId)
-    await resultQuery.refetch()
-    experimentResult.value = resultQuery.data.value || null
+    // D11 修复：事件回调中调用 useExperimentResult() 会创建无组件 scope 回收的 query
+    // observer，随每次分析累积泄漏。改为 queryClient.fetchQuery 单次取数，不绑定组件生命周期。
+    const result = await queryClient.fetchQuery<ExperimentResult>({
+      queryKey: ['experiment_result', experimentId],
+      queryFn: async (): Promise<ExperimentResult> => {
+        const response = await api.get<{ success: boolean; data: ExperimentResult }>(
+          `/experiments/${experimentId}/result`
+        )
+        return response.data
+      },
+      staleTime: 5 * 60 * 1000
+    })
+    experimentResult.value = result || null
     selectedExperiment.value = experimentId
     toast.success('分析完成')
   } catch {

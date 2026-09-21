@@ -47,6 +47,9 @@ export function useWebSocketNotifications() {
   let heartbeatTimer: number | null = null
   const subscribedChannels = ref<string[]>([])
   let authFailed = false
+  // D5 修复：标记主动关闭（disconnect/组件卸载）。避免主动断开后 onclose 仍触发
+  // scheduleReconnect() 导致 3s 后悄然重连；connect() 重新建立连接时复位此标记。
+  let manualClose = false
 
   // 默认订阅频道
   const defaultChannels = ['kb:*', 'doc:*']
@@ -61,6 +64,9 @@ export function useWebSocketNotifications() {
     if (authFailed) {
       return
     }
+
+    // 主动建立连接：复位主动关闭标记，使后续意外断开仍可自动重连
+    manualClose = false
 
     const channelParam = subscribedChannels.value.join(',') || defaultChannels.join(',')
     const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
@@ -119,6 +125,11 @@ export function useWebSocketNotifications() {
           return
         }
 
+        // D5：主动断开（disconnect/卸载）后不自动重连
+        if (manualClose) {
+          return
+        }
+
         scheduleReconnect()
       }
 
@@ -133,6 +144,7 @@ export function useWebSocketNotifications() {
 
   /** 主动断开：清理重连与心跳定时器并关闭连接。 */
   function disconnect() {
+    manualClose = true
     if (reconnectTimer) {
       clearTimeout(reconnectTimer)
       reconnectTimer = null

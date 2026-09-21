@@ -457,24 +457,13 @@ function toggleSelectAll(event: Event): void {
  */
 function deleteDocument(doc: Document): void {
   if (confirm(`确定要删除文档 "${doc.filename}" 吗？`)) {
-    // 立即从列表中移除（乐观更新）
-    const originalDocs = documentsData.value?.items || []
-    const docIndex = originalDocs.findIndex(d => d.id === doc.id)
-
     // 立即提示用户
     toast.info('正在删除文档...', `正在后台删除 ${doc.filename}`)
 
-    // 立即移除文档（乐观更新）
-    if (docIndex > -1) {
-      // 创建一个新的数组触发响应式更新
-      const newDocs = [...originalDocs]
-      newDocs.splice(docIndex, 1)
-      // 通过 queryClient 直接更新缓存
-      queryClient.setQueryData(['documents'], (old: { items?: Document[] } | undefined) => ({
-        ...old,
-        items: newDocs
-      }))
-    }
+    // 立即重拉文档列表（D2）：实际 query key 为 ['documents', effectiveParams]
+    // （queries/kb.ts），不能写死 ['documents'] 做乐观 setQueryData——
+    // 此前写入无人读取的键导致删除不生效。失效命中前缀即可触发精确重拉（既有惯例）。
+    queryClient.invalidateQueries({ queryKey: ['documents'] })
 
     // 调用API删除
     deleteMutation.mutate(doc.id, {

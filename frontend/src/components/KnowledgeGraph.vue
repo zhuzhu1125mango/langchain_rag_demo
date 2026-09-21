@@ -489,7 +489,6 @@ function updateSize() {
 }
 
 onMounted(() => {
-  fetchGraphData()
   updateSize()
   window.addEventListener('resize', updateSize)
 })
@@ -498,9 +497,11 @@ onUnmounted(() => {
   window.removeEventListener('resize', updateSize)
 })
 
+// D10：移除 onMounted 内 fetchGraphData 的首载调用，改由下方 watch（immediate）统一触发，
+// 避免挂载时数据加载 + watch 初值触发导致同一图谱被拉取两次。
 watch(() => props.kbIds, () => {
   fetchGraphData()
-}, { deep: true })
+}, { deep: true, immediate: true })
 </script>
 
 <style scoped>

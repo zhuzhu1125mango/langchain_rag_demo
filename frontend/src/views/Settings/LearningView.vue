@@ -133,7 +133,7 @@
             :disabled="triggerMutation.isPending.value || !config?.enabled"
             class="px-4 py-2 bg-gray-100 dark:bg-dark-600 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-dark-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <RefreshCw class="w-4 h-4 inline mr-2" :class="{ 'animate-spin': triggerMutation.isPending }" />
+            <RefreshCw class="w-4 h-4 inline mr-2" :class="{ 'animate-spin': triggerMutation.isPending.value }" />
             手动触发学习
           </button>
         </div>

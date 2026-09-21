@@ -122,25 +122,30 @@ const filteredKBs = computed(() => {
 })
 
 // 将知识库按分组聚合，未分组显示为平铺列表
+// D12 修复：分组 key 用 group_id（稳定唯一），显示名用 group_name——此前直接用
+// group_id 当显示名，有 group_id 的分组会渲染出 UUID。key 与显示名解耦。
 const groupedKBs = computed(() => {
   if (!filteredKBs.value || filteredKBs.value.length === 0) {
     return []
   }
 
-  const groups: Record<string, KnowledgeBase[]> = {}
+  const groups: Record<string, { name: string; items: KnowledgeBase[] }> = {}
 
   filteredKBs.value.forEach(kb => {
-    const groupId = kb.group_id || kb.group_name || 'ungrouped'
-    if (!groups[groupId]) {
-      groups[groupId] = []
+    const groupKey = kb.group_id || 'ungrouped'
+    if (!groups[groupKey]) {
+      groups[groupKey] = {
+        name: kb.group_name || (kb.group_id ? kb.group_id : ''),
+        items: []
+      }
     }
-    groups[groupId].push(kb)
+    groups[groupKey].items.push(kb)
   })
 
-  return Object.entries(groups).map(([id, kbs]) => ({
+  return Object.entries(groups).map(([id, group]) => ({
     id,
-    name: id === 'ungrouped' ? '' : id,
-    kbs
+    name: id === 'ungrouped' ? '' : group.name,
+    kbs: group.items
   }))
 })
 

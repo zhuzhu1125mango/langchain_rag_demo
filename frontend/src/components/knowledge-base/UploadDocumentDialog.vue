@@ -124,6 +124,9 @@ const isUploading = ref(false)
 const currentUploadFile = ref('')
 const uploadMessage = ref('')
 const wsConnections = ref<Map<string, WebSocket>>(new Map())
+// D6 修复：当前上传任务的 AbortController。共享同一 controller——取消后后续文件
+// 循环通过 signal.aborted 提前跳出，不再继续上传。
+let uploadAbortController: AbortController | null = null
 
 /** 处理弹窗显隐切换，并在非上传态关闭时重置内部状态。 */
 function onVisibleChange(val: boolean): void {
@@ -165,8 +168,14 @@ async function uploadFiles(): Promise<void> {
   uploadProgress.value = 0
   let successCount = 0
   const failedFiles: string[] = []
+  // D6：新建本批上传的取消控制器；取消后 signal.aborted 会被循环与请求共享
+  uploadAbortController = new AbortController()
 
   for (let i = 0; i < selectedFiles.value.length; i++) {
+    // D6：取消后跳出剩余文件，不再继续发起上传
+    if (uploadAbortController.signal.aborted) {
+      break
+    }
     const file = selectedFiles.value[i]
     if (!file) continue
 
@@ -188,6 +197,7 @@ async function uploadFiles(): Promise<void> {
       const response = await api.post('/documents/upload', formData, {
         params: { kb_id: kbId, upload_id: uploadId },
         timeout: 30000, // 减小超时时间，因为现在是异步处理
+        signal: uploadAbortController.signal, // D6：取消上传时 abort 进行中的 HTTP 请求
         // 删除默认 Content-Type，让浏览器根据 FormData 自动生成带 boundary 的 multipart 请求头，
         // 否则后端无法正确解析 multipart 边界
         transformRequest: [(data, headers) => {
@@ -201,6 +211,10 @@ async function uploadFiles(): Promise<void> {
       console.log('[Upload] File uploaded, processing in background:', response)
 
     } catch (error) {
+      // D6：用户主动取消时不视为失败文件
+      if (error instanceof Error && error.name === 'CanceledError') {
+        break
+      }
       failedFiles.push(file.name)
       uploadMessage.value = `上传失败: ${error instanceof Error ? error.message : '未知错误'}`
     } finally {
@@ -304,6 +318,10 @@ function closeWebSocket(uploadId: string): void {
 /** 取消上传过程或关闭上传弹窗。 */
 function cancelUpload(): void {
   if (isUploading.value) {
+    // D6：abort 进行中的 HTTP 上传请求；循环检测 signal.aborted 提前跳出
+    uploadAbortController?.abort()
+    uploadAbortController = null
+
     wsConnections.value.forEach((ws) => {
       try {
         ws.close()

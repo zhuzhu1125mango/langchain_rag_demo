@@ -247,8 +247,22 @@ const localSettings = ref<Settings>({
 onMounted(() => {
   const saved = localStorage.getItem('rag-settings')
   if (saved) {
-    const parsed = JSON.parse(saved)
-    localSettings.value = { ...localSettings.value, ...parsed }
+    // D8：损坏/非法 JSON 时回退默认设置，避免整个设置页崩溃
+    try {
+      // 只合并已知键，防止陈旧/异常结构污染当前设置
+      const pick: Partial<Settings> = {}
+      const parsed = JSON.parse(saved) as Record<string, unknown>
+      for (const key of Object.keys(localSettings.value) as (keyof Settings)[]) {
+        if (typeof parsed[key] === typeof localSettings.value[key]) {
+          // @ts-expect-error —— 已用同类型守卫校验，parsed 值为对应字段类型
+          pick[key] = parsed[key]
+        }
+      }
+      localSettings.value = { ...localSettings.value, ...pick }
+    } catch {
+      console.warn('设置缓存解析失败，已回退默认值')
+      localStorage.removeItem('rag-settings')
+    }
   }
   
   if (processingConfig.value) {

@@ -103,7 +103,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useChatStore } from '@/stores/chat'
@@ -164,14 +164,18 @@ const kbRecommendations = ref<KBRecommendation[]>([])
 const showSourceModal = ref(false)
 const selectedSourceDocId = ref('')
 const selectedSourceChunkIndex = ref(0)
-// fetchSuggestions 与 fetchKBRecommendations 共用同一个防抖计时器：
-// 输入变化时两个函数依次调用，后者会清掉前者刚注册的定时器，从而保证
-// 一次输入抖动内只有最后一次注册的请求真正发出，避免并发重复请求。
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
+// fetchSuggestions 与 fetchKBRecommendations 各自独立防抖计时器：
+// 二者共用同一 timer 时后调用的函数会清掉前者刚注册的定时器（D1），
+// 导致 /api/chat/suggestions 永不发出。拆分为独立变量，互不干扰。
+let suggestionDebounceTimer: ReturnType<typeof setTimeout> | null = null
+let kbRecommendDebounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// 当前活动的 SSE 流控制器（D4）：提升到组件作用域，组件卸载时统一 abort，
+// 避免切页/卸载后流仍在后台写入已销毁的消息。
+let activeStreamController: AbortController | null = null
 
 // SSE reasoning 事件节流：同一帧内多次 reasoning 更新合并为一次状态提交，
 // 避免高频时间线更新导致渲染抖动。
-let pendingReasoningUpdate: ReasoningStep[] | null = null
 let reasoningRafId: number | null = null
 
 /** 后端来源元数据的原始结构（SSE end 事件与会话历史加载共用）。 */
@@ -195,7 +199,6 @@ function cancelReasoningRaf(): void {
     cancelAnimationFrame(reasoningRafId)
     reasoningRafId = null
   }
-  pendingReasoningUpdate = null
 }
 
 // 子组件实例引用：用于调用子组件暴露的方法
@@ -324,8 +327,8 @@ function onInputChange(): void {
 
 /** 防抖获取与当前问题相关的知识库推荐。 */
 async function fetchKBRecommendations(): Promise<void> {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer)
+  if (kbRecommendDebounceTimer) {
+    clearTimeout(kbRecommendDebounceTimer)
   }
 
   const question = questionInput.value.trim()
@@ -335,7 +338,7 @@ async function fetchKBRecommendations(): Promise<void> {
     return
   }
 
-  debounceTimer = setTimeout(async () => {
+  kbRecommendDebounceTimer = setTimeout(async () => {
     try {
       const result = await recommendKBsMutation.mutateAsync({ question, top_k: 3 })
       kbRecommendations.value = result
@@ -348,8 +351,8 @@ async function fetchKBRecommendations(): Promise<void> {
 
 /** 防抖获取基于当前输入的智能问题推荐。 */
 async function fetchSuggestions(): Promise<void> {
-  if (debounceTimer) {
-    clearTimeout(debounceTimer)
+  if (suggestionDebounceTimer) {
+    clearTimeout(suggestionDebounceTimer)
   }
 
   const question = questionInput.value.trim()
@@ -359,7 +362,7 @@ async function fetchSuggestions(): Promise<void> {
     return
   }
 
-  debounceTimer = setTimeout(async () => {
+  suggestionDebounceTimer = setTimeout(async () => {
     isGeneratingSuggestions.value = true
 
     try {
@@ -443,6 +446,8 @@ async function sendMessage(overrideQuestion?: string): Promise<void> {
     }
 
     const controller = new AbortController()
+    activeStreamController?.abort()
+    activeStreamController = controller
     let receivedContent = false
     let receivedEnd = false
     let streamEnded = false
@@ -466,7 +471,10 @@ async function sendMessage(overrideQuestion?: string): Promise<void> {
     const processEvent = (eventData: string) => {
       try {
         const data = JSON.parse(eventData)
-        const lastMsg = chatStore.messages[chatStore.messages.length - 1]
+        // D4 修复：由此前动态取最后一条改为按本次流创建的目标消息 id 定位。
+        // 流式期间若发生会话切换/消息清空，动态取 last 会把增量错写到别的消息上；
+        // 用 assistantMsgId 精确定位（end 前的 message_id 替换不影响流期内写入）。
+        const lastMsg = chatStore.messages.find(m => m.id === assistantMsgId)
         if (!lastMsg) return
 
         if (data.type === 'search_status') {
@@ -636,6 +644,9 @@ async function sendMessage(overrideQuestion?: string): Promise<void> {
     } finally {
       // 释放底层连接（服务端正常结束或中途退出均安全）
       controller.abort()
+      if (activeStreamController === controller) {
+        activeStreamController = null
+      }
     }
 
     // 流结束但未收到 end/error 事件且无内容：等价于旧 EventSource 的 onerror
@@ -764,6 +775,13 @@ async function loadSession(sessionId: string): Promise<void> {
     toast.error('加载历史对话失败', '请稍后重试')
   }
 }
+
+onBeforeUnmount(() => {
+  // D4：组件卸载时中止仍在进行的 SSE 流，避免后台继续写入已销毁的响应式消息
+  activeStreamController?.abort()
+  activeStreamController = null
+  cancelReasoningRaf()
+})
 
 onMounted(() => {
   chatStore.loadQuickQuestions()

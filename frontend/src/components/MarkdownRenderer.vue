@@ -52,15 +52,15 @@ const highlight = (str: string, lang: string): string => {
   return hljs.highlightAuto(str).value
 }
 
-onMounted(() => {
-  md.value = new MarkdownIt({
-    highlight,
-    html: false,
-    linkify: true,
-    typographer: true
-  })
-
-  // 为所有链接添加安全属性，并过滤非 http/https scheme
+// D3 修复：DOMPurify 的 addHook 注册的是全局单例 hook。此前在 onMounted 每次都
+// addHook 而不清除，同一钩子会在每条消息挂载时重复累积，sanitize 每跑 N 遍且不回收。
+// 改为模块级单次注册（hookInstalled 标志保证全局仅安装一份），消除反复 addHook 泄漏。
+let hookInstalled = false
+function installLinkSafeHook(): void {
+  if (hookInstalled) {
+    return
+  }
+  hookInstalled = true
   DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     if (node.tagName === 'A') {
       const href = node.getAttribute('href') || ''
@@ -75,6 +75,17 @@ onMounted(() => {
       }
     }
   })
+}
+
+onMounted(() => {
+  md.value = new MarkdownIt({
+    highlight,
+    html: false,
+    linkify: true,
+    typographer: true
+  })
+
+  installLinkSafeHook()
 })
 
 const renderedContent = computed(() => {
