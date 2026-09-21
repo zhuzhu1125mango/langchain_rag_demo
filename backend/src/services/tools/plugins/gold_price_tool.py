@@ -28,6 +28,17 @@ from src.services.tools.tool_manager import BaseTool, ToolResult
 logger = logging.getLogger("rag_system")
 
 
+# 模块级共享 HTTP 客户端：懒加载复用连接，避免每次请求新建+关闭的 TCP/TLS 握手开销
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=8.0)
+    return _http_client
+
+
 # 金属代码映射
 _METAL_CODES = {
     "gold": "XAU",
@@ -320,10 +331,10 @@ async def _fetch_xaus(currency: str, unit: str) -> Optional[PriceDataPoint]:
     url = "https://xaus.com/api/v1/spot"
     params = {"currency": currency, "unit": unit}
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
 
         xau = data.get("xau", {})
         price = _to_decimal(xau.get("price"))
@@ -355,10 +366,10 @@ async def _fetch_goldapi(
     url = f"https://www.goldapi.io/api/{metal_code}/{currency}"
     headers = {"x-access-token": api_key}
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
 
         # GoldAPI.io 默认返回每盎司价格，字段名为 price
         price = _to_decimal(data.get("price"))

@@ -87,6 +87,9 @@ class CalculatorTool(BaseTool):
 
     def _safe_eval(self, expression: str) -> Optional[str]:
         """安全求值数学表达式，仅支持基本四则运算和幂运算。"""
+        # 原串含中文或字母（如 "100美元是多少人民币"）直接拒绝，避免静默清洗后求值得出截断数值
+        if re.search(r"[\u4e00-\u9fff]|[a-zA-Z]", expression or ""):
+            return None
         # 清理表达式：替换中文符号、删除空格
         cleaned = expression.replace(" ", "").replace("×", "*").replace("÷", "/")
         cleaned = cleaned.replace("（", "(").replace("）", ")")

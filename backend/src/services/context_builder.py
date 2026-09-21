@@ -233,8 +233,9 @@ class ContextBuilder:
                 selected.append(item)
                 used += cost
             else:
-                # 预算不足时停止（贪心策略）
-                break
+                # 预算不足：跳过当前超预算片段，继续尝试后续更低成本片段，
+                # 避免单个高分大片段堵住后续可用的碎片上下文
+                continue
         return selected
 
     def _lost_in_the_middle_reorder(self, items: List[SourceItem]) -> List[SourceItem]:

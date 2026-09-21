@@ -56,7 +56,7 @@ def _serialize_summary(trace: RequestTrace) -> dict:
     }
 
 
-@router.get("")
+@router.get("/")
 async def list_traces(
     session_id: Optional[str] = Query(None, description="按会话 ID 过滤"),
     start: Optional[datetime] = Query(None, description="起始时间（含）"),

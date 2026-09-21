@@ -216,6 +216,17 @@ class ModelManager:
         from langchain_ollama import ChatOllama
 
         model_name = await self.get_model_for_task(task, preferred=preferred)
+        # think=False 且配置了非思考专用模型时切换到该模型（与主回答链
+        # _stream_with_retry 的 deep_thinking=off 行为一致）：
+        # 混合思考模型（如 qwen3:4b）无法真正跳过思考，长思考链会拖垮
+        # 意图路由/标题生成等辅助任务的延迟预算；deep_thinking=off（默认）
+        # 时 direct 模型常驻 VRAM，辅助任务复用同模型零切换。
+        if (
+            think is False
+            and settings.model.OLLAMA_DIRECT_MODEL_NAME
+            and model_name != settings.model.OLLAMA_DIRECT_MODEL_NAME
+        ):
+            model_name = settings.model.OLLAMA_DIRECT_MODEL_NAME
         kwargs = {
             "model": model_name,
             "streaming": streaming,
@@ -226,7 +237,14 @@ class ModelManager:
         if timeout is not None:
             kwargs["timeout"] = timeout
         llm = ChatOllama(**kwargs)
-        if think is not None and settings.model.OLLAMA_SUPPORTS_THINKING:
+        # 切换到 direct 模型时不绑定 reasoning（与主回答链对 llm_direct 的
+        # 用法一致：2507-instruct 类非思考模型从不生成思考块，无需该参数）
+        switched_to_direct = model_name == settings.model.OLLAMA_DIRECT_MODEL_NAME
+        if (
+            think is not None
+            and settings.model.OLLAMA_SUPPORTS_THINKING
+            and not switched_to_direct
+        ):
             return llm.bind(reasoning=think)
         return llm
 

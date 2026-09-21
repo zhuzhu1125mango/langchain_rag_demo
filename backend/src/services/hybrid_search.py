@@ -31,11 +31,12 @@ def reciprocal_rank_fusion(
 
     Args:
         channel_results: 通道名称到结果列表的映射，例如
-            {"dense": [...], "sparse": [...]}。
+            {"dense": [...], "sparse": [...]}；多查询场景（P2-2）下通道名
+            带查询序号前缀（如 "q1_dense" / "q2_sparse"），按后缀识别类型。
         k: RRF 平滑因子，默认 60。
 
     Returns:
-        按融合分降序排列的结果列表，每个结果额外包含：
+        按 rrf_score 降序的结果列表，每个结果额外包含：
         - rrf_score: 融合后的总分
         - dense_score: dense 通道原始分数（如有）
         - sparse_score: sparse 通道原始分数（如有）
@@ -54,9 +55,9 @@ def reciprocal_rank_fusion(
                 }
             rrf_score = 1.0 / (k + rank)
             fused[key]["rrf_score"] += rrf_score
-            if channel_name == "dense":
+            if channel_name.endswith("_dense") or channel_name == "dense":
                 fused[key]["dense_score"] = result.get("score", 0.0)
-            elif channel_name == "sparse":
+            elif channel_name.endswith("_sparse") or channel_name == "sparse":
                 fused[key]["sparse_score"] = result.get("score", 0.0)
 
     ranked = sorted(fused.values(), key=lambda x: x["rrf_score"], reverse=True)

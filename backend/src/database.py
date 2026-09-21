@@ -21,6 +21,8 @@ async_engine = create_async_engine(
     max_overflow=50,
     pool_timeout=30,
     pool_recycle=3600,
+    # F7：从连接池取出连接时先做 ping，剔除失效连接，避免复用断开的连接
+    pool_pre_ping=True,
 )
 
 AsyncSessionLocal = sessionmaker(

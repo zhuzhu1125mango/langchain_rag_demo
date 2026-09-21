@@ -7,6 +7,7 @@
 import asyncio
 import json
 import logging
+import time
 from datetime import timedelta
 from typing import Any, Optional
 
@@ -30,6 +31,11 @@ REDIS_INIT_PING_TIMEOUT = 3.0
 # 外部调用缓存操作时的兜底超时，防止任何异常情况下缓存操作挂死。
 REDIS_OPERATION_TIMEOUT = 3.0
 
+# Redis 故障后自动重探的冷却窗口（秒）。
+# 失败后进入冷却；冷却过期后下一次操作会尝试用一次 ping 探测，成功即自愈，
+# 避免缓存因偶发异常"一次失败永久降级"。
+REDIS_RECOVERY_COOLDOWN = 30.0
+
 
 class CacheService(AsyncSingleton["CacheService"]):
     """Redis 客户端封装，支持单例访问与常用缓存操作。
@@ -44,6 +50,8 @@ class CacheService(AsyncSingleton["CacheService"]):
     def __init__(self):
         self.client = None
         self._available = False
+        # 下一次允许自动重探的时间戳（time.monotonic），冷却期内快速失败不重探
+        self._unavailable_until = 0.0
 
     async def _async_init(self):
         """初始化异步 Redis 连接，并立即验证连通性。"""
@@ -114,13 +122,40 @@ class CacheService(AsyncSingleton["CacheService"]):
         """缓存服务当前是否可用。"""
         return self._available and self.client is not None
 
+    def _mark_unavailable(self) -> None:
+        """标记不可用并进入冷却窗口。"""
+        self._available = False
+        self._unavailable_until = time.monotonic() + REDIS_RECOVERY_COOLDOWN
+
+    async def _maybe_recover(self) -> None:
+        """冷却过期后尝试用一次 ping 探测 Redis 恢复。
+
+        成功即自愈置为可用；失败则重置冷却窗口，避免每次操作都重探。
+        Redis 偶发异常（瞬时抖动）不应导致缓存永久降级。
+        """
+        if self._available or self.client is None:
+            return
+        if time.monotonic() < self._unavailable_until:
+            return
+        try:
+            await asyncio.wait_for(self.client.ping(), timeout=REDIS_SOCKET_TIMEOUT)
+            self._available = True
+            logger.info("Redis 缓存服务恢复可用")
+        except Exception:
+            self._unavailable_until = time.monotonic() + REDIS_RECOVERY_COOLDOWN
+
     async def _execute(self, coro):
-        """统一执行 Redis 命令，提供超时、异常捕获和可用性降级。"""
+        """统一执行 Redis 命令，提供超时、异常捕获和可用性降级。
+
+        不可用时先尝试自动恢复（冷却过期后 ping 探测），仍不可用才快速失败。
+        """
         if not self.available:
-            # 调用方已创建命令协程，未 await 前需显式关闭，避免
-            # "coroutine was never awaited" 警告（Redis 停机降级路径实测出现）
-            coro.close()
-            raise ConnectionError("缓存服务当前不可用")
+            await self._maybe_recover()
+            if not self.available:
+                # 调用方已创建命令协程，未 await 前需显式关闭，避免
+                # "coroutine was never awaited" 警告（Redis 停机降级路径实测出现）
+                coro.close()
+                raise ConnectionError("缓存服务当前不可用")
         return await asyncio.wait_for(coro, timeout=REDIS_OPERATION_TIMEOUT)
 
     async def get(self, key: str) -> Optional[Any]:
@@ -137,7 +172,7 @@ class CacheService(AsyncSingleton["CacheService"]):
                     return value
         except Exception as exc:
             logger.warning("读取缓存失败 [key=%s]: %s", key, exc)
-            self._available = False
+            self._mark_unavailable()
         return None
 
     async def set(self, key: str, value: Any, expire: Optional[timedelta] = None) -> bool:
@@ -158,7 +193,7 @@ class CacheService(AsyncSingleton["CacheService"]):
             return await self._execute(self.client.set(key, value))
         except Exception as exc:
             logger.warning("写入缓存失败 [key=%s]: %s", key, exc)
-            self._available = False
+            self._mark_unavailable()
         return False
 
     async def delete(self, key: str) -> int:
@@ -167,7 +202,7 @@ class CacheService(AsyncSingleton["CacheService"]):
             return await self._execute(self.client.delete(key))
         except Exception as exc:
             logger.warning("删除缓存失败 [key=%s]: %s", key, exc)
-            self._available = False
+            self._mark_unavailable()
         return 0
 
     async def exists(self, key: str) -> bool:
@@ -176,7 +211,7 @@ class CacheService(AsyncSingleton["CacheService"]):
             return await self._execute(self.client.exists(key)) == 1
         except Exception as exc:
             logger.warning("判断缓存存在失败 [key=%s]: %s", key, exc)
-            self._available = False
+            self._mark_unavailable()
         return False
 
     async def clear_pattern(self, pattern: str) -> None:
@@ -187,17 +222,19 @@ class CacheService(AsyncSingleton["CacheService"]):
                 await self._execute(self.client.delete(*keys))
         except Exception as exc:
             logger.warning("按模式清除缓存失败 [pattern=%s]: %s", pattern, exc)
-            self._available = False
+            self._mark_unavailable()
 
     async def ping(self) -> bool:
         """测试 Redis 连接是否可用；失败时返回 False。"""
         if not self.available:
-            return False
+            await self._maybe_recover()
+            if not self.available:
+                return False
         try:
             await self._execute(self.client.ping())
             self._available = True
             return True
         except Exception as exc:
             logger.warning("Redis ping 失败: %s", exc)
-            self._available = False
+            self._mark_unavailable()
             return False

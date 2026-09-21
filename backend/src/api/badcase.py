@@ -6,7 +6,7 @@
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -132,8 +132,8 @@ async def create_badcase(
 async def list_badcases(
     category: Optional[str] = None,
     feedback_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0, description="跳过数量（分页参数）"),
+    limit: int = Query(100, ge=1, le=1000, description="每页数量（分页参数）"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):

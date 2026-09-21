@@ -218,7 +218,7 @@ async def rebuild_wiki(
 
     from src.services.progress_manager import create_upload_progress, update_upload_progress
 
-    create_upload_progress(task_id, "Wiki 全量重编译", 0)
+    create_upload_progress(task_id, "Wiki 全量重编译", 0, owner_id=current_user.user_id)
     update_upload_progress(task_id, status="processing", message="正在提交重编译任务...")
     background_tasks.add_task(_run_wiki_rebuild, str(kb.id), task_id)
 

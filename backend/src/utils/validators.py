@@ -55,11 +55,20 @@ async def validate_kb_ownership(
     """
     if not kb_ids:
         return
+    # 复用 parse_uuid_list 规范化：非法 ID 统一返回 400，并转为小写去重集合。
+    # 归一化是必需的——DB 中 str(UUID) 为小写，若调用方传入大写 UUID，
+    # 下面的集合比较会把"自己的知识库"误判为无权限。
+    normalized = set(parse_uuid_list(kb_ids))
     result = await db.execute(
         select(KnowledgeBase.id).filter(
-            KnowledgeBase.id.in_([uuid.UUID(k) for k in kb_ids])
+            KnowledgeBase.id.in_([uuid.UUID(k) for k in normalized]),
+            # 对象级授权：必须限定为当前用户所有。
+            # 缺少此条件时本函数退化为"知识库是否存在"的存在性检查，
+            # 任何登录用户都能借他人 kb_id 检索其全部内容。
+            KnowledgeBase.owner_id == current_user.user_id,
         )
     )
     owned = {str(row) for row in result.scalars()}
-    if len(owned) < len(kb_ids):
+    # 集合比较而非长度比较：调用方传入重复 ID 时长度比较会误判为无权
+    if owned != normalized:
         raise HTTPException(status_code=403, detail="无权访问部分知识库")

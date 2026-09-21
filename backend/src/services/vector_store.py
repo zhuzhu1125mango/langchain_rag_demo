@@ -53,17 +53,27 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
             )
         return self._results_to_documents(results)
 
-    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
+    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
         """纯 dense 向量检索入口（兼容旧逻辑）。"""
         results = await self.milvus_service.search_dense(
-            query, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding
+            query, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind
         )
         return self._results_to_documents(results)
 
-    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
+    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
         """混合检索入口，返回经 RRF 融合与 Cross-Encoder 重排序后的 Document。"""
         results = await self.milvus_service.search_hybrid(
-            query, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding
+            query, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind
+        )
+        return self._results_to_documents(results)
+
+    async def search_hybrid_multi(self, queries, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+        """多查询并行混合检索入口（P2-2），返回经跨查询 RRF 融合与重排序后的 Document。
+
+        queries[0] 必须为原始（或消解后）问题，作为 rerank 语义基准。
+        """
+        results = await self.milvus_service.search_hybrid_multi(
+            queries, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind
         )
         return self._results_to_documents(results)
 

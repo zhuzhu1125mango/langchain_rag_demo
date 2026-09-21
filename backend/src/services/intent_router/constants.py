@@ -33,6 +33,9 @@ CALCULATION_KEYWORDS = {
     "换算", "兑换", "汇率", "天后", "天前",
 }
 
+# 计算题显式意图关键词：单独出现不足以判为计算，需与数字同时出现
+CALCULATION_EXPLICIT_KEYWORDS = {"计算", "等于", "换算"}
+
 # 适合 Agent 多步研究的复杂问题特征
 RESEARCH_KEYWORDS = {
     "对比", "比较", "分析", "总结", "综合", "调研", "研究",

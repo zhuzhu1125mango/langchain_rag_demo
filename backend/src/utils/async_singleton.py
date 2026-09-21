@@ -72,7 +72,14 @@ class AsyncSingleton(Generic[T]):
                 cls._instances[cls] = instance
 
             instance = cls._instances[cls]
-            await instance._async_init()
+            try:
+                await instance._async_init()
+            except Exception:
+                # B5：初始化失败时从缓存中剔除半成品实例并重置状态，
+                # 下次 get_instance 会重建，避免复用未初始化/泄漏连接的实例。
+                cls._instances.pop(cls, None)
+                cls._initialized[cls] = False
+                raise
             cls._initialized[cls] = True
             logger.debug(f"{cls.__name__} 单例初始化完成")
             return instance

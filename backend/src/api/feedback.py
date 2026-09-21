@@ -9,7 +9,7 @@
 5. 删除评价
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from pydantic import BaseModel
@@ -123,8 +123,8 @@ async def create_feedback(
 async def list_feedback(
     session_id: Optional[str] = None,
     message_id: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0, description="跳过数量（分页参数）"),
+    limit: int = Query(100, ge=1, le=1000, description="每页数量（分页参数）"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):

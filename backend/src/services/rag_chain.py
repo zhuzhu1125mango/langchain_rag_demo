@@ -10,6 +10,7 @@ import logging
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any
+import uuid
 from langchain_ollama import ChatOllama
 
 logger = logging.getLogger("rag_system")
@@ -20,6 +21,7 @@ from .web_search_service import WebSearchService
 from .search_agent import SearchToolkit, FunctionCallingHandler, ReActAgent, SearchAgentResult
 from .context_enhancer import ContextEnhancer
 from .question_processor import QuestionProcessor
+from .query_rewriter import QueryRewriter
 from .kb_comparator import KBComparator
 from .document_analyzer import DocumentAnalyzer
 from .kb_recommender import KBRecommender
@@ -27,11 +29,14 @@ from .knowledge_graph_generator import KnowledgeGraphGenerator
 from .tools.plugins._datetime_impl import build_datetime_answer
 from .intent_router import IntentRouter, PrimaryMode, FallbackStrategy
 from .tool_executor import ToolExecutor
+from .agent_orchestrator import AgentOrchestrator
 from .semantic_cache_service import SemanticCacheService
+from .kb_retrieval_service import KBRetrievalService
 from .answer_generator import AnswerGenerator
 from .context_builder import ContextBuilder, estimate_token_count
 from .numerical_validator import NumericalValidator
 from .model_manager import model_manager
+from .vector_store import VectorStoreManager
 from .output_sanitizer import OutputSanitizer
 from .trace_collector import TraceCollector
 from .reasoning import (
@@ -48,7 +53,7 @@ from .reasoning import (
 
 # 导入 Prometheus 指标模块
 try:
-    from src.middleware.prometheus import record_vector_search, record_llm_call, record_llm_call_error, record_kb_query
+    from src.middleware.prometheus import record_llm_call, record_llm_call_error, record_kb_query
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
@@ -156,9 +161,13 @@ class _PipelineState:
     think: Optional[bool] = None
     # Trace 归属用户 ID（run()/arun_stream() 透传）
     user_id: Optional[str] = None
+    # 会话 ID（arun_stream() 透传）：Agent L1-a 跨请求记忆按会话隔离注入/写入
+    session_id: Optional[str] = None
     # 语义缓存：本次请求是否已命中（命中后跳过写缓存）、查询向量（finalize 时复用写入）
     semantic_cache_hit: bool = False
     semantic_cache_embedding: Optional[Any] = None
+    # 终态清理是否已执行（SSE 断连/finally 兜底与正常路径共用，幂等防重）
+    finalized: bool = False
 
     trace: Any = None
     resolved_question: str = ""
@@ -206,6 +215,16 @@ class _StageTimer:
         return False
 
 
+def _memory_doc_id(session_id: str) -> str:
+    """为跨请求记忆生成确定性 document_id（UUIDv5，基于 session_id）。
+
+    同会话得到同一 document_id，使记忆切片聚合可统一检索；不同会话 UUID 不同，
+    天然隔离。必须产出合法 UUID——Milvus 过滤表达式 `_safe_id` 仅放行 UUID，
+    拒绝 `memory:{session_id}` 这类带冒号的字符串（防注入白名单）。
+    """
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"agent-memory:{session_id}"))
+
+
 class RAGChain(AsyncSingleton["RAGChain"]):
     """RAG 问答链类，结合知识库与 LLM 进行智能问答。"""
 
@@ -230,6 +249,8 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         self.search_toolkit = None
         self.function_calling_handler = None
         self.react_agent = None
+        # P2：有界 Agent 循环编排器（_async_init 中创建）
+        self.agent_orchestrator = None
         # 阶段二新增：意图路由、工具执行、答案生成
         self.intent_router = None
         self.tool_executor = None
@@ -242,6 +263,8 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         self.question_processor = None
         self.kb_comparator = None
         self.document_analyzer = None
+        # 统一知识库检索服务（管线与 Agent 工具共用同一检索口径，P1-1）
+        self.kb_retrieval_service = None
         self.kb_recommender = None
         self.knowledge_graph_generator = None
 
@@ -255,6 +278,8 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             self.vector_store = await VectorStoreManager.get_instance()
         self.strategy_manager = self.strategy_manager or await create_default_strategy_manager()
         self.decision_pipeline = DecisionPipeline(self.strategy_manager)
+        # 统一检索服务（注入同一 vector_store 实例，保证口径一致）
+        self.kb_retrieval_service = KBRetrievalService(self.vector_store)
 
         answer_model = await model_manager.get_model_for_task("answer")
         self.llm = ChatOllama(model=answer_model, streaming=True, num_ctx=settings.model.OLLAMA_NUM_CTX)
@@ -283,13 +308,30 @@ class RAGChain(AsyncSingleton["RAGChain"]):
 
         # 初始化阶段二组件
         self.intent_router = IntentRouter()
-        self.tool_executor = ToolExecutor(self.search_toolkit.tool_manager)
+        # 统一注册表：tool_first 路径可执行全部插件（此前 toolkit 局部注册表
+        # 缺天气/金价/汇率等工具，意图路由建议后会静默"未注册"失败）
+        from .tools.tool_manager import get_tool_manager
+        self.tool_executor = ToolExecutor(get_tool_manager())
         self.answer_generator = AnswerGenerator(
             self.llm,
             numerical_validator=NumericalValidator(),
             llm_direct=self.llm_direct,
         )
         self.context_builder = ContextBuilder()
+
+        # P2：有界 Agent 循环编排器（AGENT_ORCHESTRATOR_ENABLED 灰度开关控制生效）
+        try:
+            decision_llm = await model_manager.get_chat_llm("fast", think=False)
+            from .tools.tool_manager import get_tool_manager
+            self.agent_orchestrator = AgentOrchestrator(
+                llm=decision_llm,
+                tool_manager=get_tool_manager(),
+                answer_generator=self.answer_generator,
+                metadata_converter=self._web_sources_to_metadata,
+            )
+        except Exception as e:
+            logger.warning(f"AgentOrchestrator 初始化失败，回退旧 Agent 路径: {e}")
+            self.agent_orchestrator = None
 
         # P0-f：初始化引用补全器与答案校验器（复用 Milvus 服务的 embeddings）
         embeddings = None
@@ -311,6 +353,8 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         # 初始化各独立服务（按职责拆分）
         self.context_enhancer = ContextEnhancer(self.llm)
         self.question_processor = QuestionProcessor(self.llm)
+        # P2-2：KB 多查询改写器（LLM 懒加载，规则路径零模型成本）
+        self.query_rewriter = QueryRewriter()
         self.kb_comparator = KBComparator(self.llm, self)
         self.document_analyzer = DocumentAnalyzer(self.llm, self)
         self.kb_recommender = KBRecommender(self)
@@ -401,6 +445,61 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             bool: True表示向量库存在并可用
         """
         return self.vector_store is not None and self.vector_store.milvus_service is not None
+
+    # ------------------------------------------------------------------
+    # L1-a 跨请求记忆（AGENT_MEMORY_ENABLED 灰度，见 agent-evolution.md §11.2）
+    # ------------------------------------------------------------------
+    async def _load_agent_memory(self, question: str, session_id: str, top_k: int = 3) -> str:
+        """检索当前会话与"当前问题"相关的历史记忆，拼接注入决策 prompt（fail-open）。
+
+        记忆以 UUIDv5(session_id) 作 document_id + source_kind="memory" 写入主 collection，
+        同会话多条记忆聚合在同一 document_id，检索按该 document_id 隔离会话，
+        并以 question 作语义 query 取最相关的历史记忆。任何异常不阻断主流程。
+        """
+        if not session_id or not settings.search.AGENT_MEMORY_ENABLED:
+            return ""
+        if not self._has_vector_store():
+            return ""
+        try:
+            doc_id = _memory_doc_id(session_id)
+            results = await self.vector_store.search_hybrid(
+                question, k=top_k, document_ids=[doc_id], source_kind="memory"
+            )
+            if not results:
+                return ""
+            # search_hybrid 返回 Document；取 page_content 倒序拼接（默认近写入优先，倒序成时间正序）
+            mems = [d.page_content for d in results if getattr(d, "page_content", "")]
+            return "\n\n".join(mems[::-1]) if mems else ""
+        except Exception as e:
+            logger.warning(f"加载 Agent 记忆失败（忽略）: {e}")
+            return ""
+
+    async def _save_agent_memory(self, session_id: str, summary: str) -> None:
+        """将本轮发言摘要异步写入会话记忆（fail-open）。
+
+        summary 空则跳过；复用 insert_embeddings 走既有 embedding+写入管线。
+        """
+        if not session_id or not summary or not settings.search.AGENT_MEMORY_ENABLED:
+            return
+        if not self._has_vector_store():
+            return
+        try:
+            from langchain_core.documents import Document as LcDoc
+            doc_id = _memory_doc_id(session_id)
+            doc = LcDoc(
+                page_content=summary[:2000],
+                metadata={
+                    "document_id": doc_id,
+                    "source": "对话记忆",
+                    "chunk_index": 0,
+                    "source_kind": "memory",
+                },
+            )
+            await self.vector_store.milvus_service.insert_embeddings(
+                [doc], kb_id=f"memory"
+            )
+        except Exception as e:
+            logger.warning(f"写入 Agent 记忆失败（忽略）: {e}")
 
     async def _should_use_knowledge_base(self, question, history=None, kb_ids=None, use_web_search=False, search_mode="simple"):
         """
@@ -505,53 +604,39 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         """
         self.strategy_manager.set_threshold(threshold)
 
-    async def _retrieve_documents(self, question, kb_ids=None, document_ids=None, query_embedding=None):
+    async def _retrieve_documents(self, question, kb_ids=None, document_ids=None, query_embedding=None, queries=None):
         """
-        根据问题检索相关文档。
+        根据问题检索相关文档（委托给统一检索服务 KBRetrievalService）。
 
         阶段一升级：优先使用混合检索（dense + BM25 + RRF + rerank），
         未启用或失败时回退到纯 dense 检索。
+        P2-2：queries 提供多个改写查询且混合检索开启时，走多查询并行检索
+        （跨查询 RRF 融合，rerank 仍用原始问题）。
 
         Args:
             question: 用户问题
             kb_ids: 指定的知识库ID列表（可选）
             document_ids: 指定的文档ID列表（可选）
             query_embedding: 预计算的 query 向量（来自语义缓存查找），传入时跳过重复计算
+            queries: 改写后的多查询列表（可选，首元素必须为 question）
 
         Returns:
             list: 检索到的Document对象列表
         """
+        if self.kb_retrieval_service is None:
+            self.kb_retrieval_service = KBRetrievalService(self.vector_store)
+        # 保留原 _has_vector_store 防护：空壳实例（Milvus 未初始化）直接返回空
         if not self._has_vector_store():
             return []
+        return await self.kb_retrieval_service.retrieve(
+            question,
+            kb_ids=kb_ids,
+            document_ids=document_ids,
+            query_embedding=query_embedding,
+            queries=queries,
+        )
 
-        # 记录向量检索开始时间
-        search_start = time.time()
-
-        try:
-            search_kwargs = {"k": settings.processing.TOP_K}
-            if kb_ids and len(kb_ids) > 0:
-                search_kwargs["kb_ids"] = kb_ids
-            elif document_ids and len(document_ids) > 0:
-                search_kwargs["document_ids"] = document_ids
-            if query_embedding is not None:
-                search_kwargs["query_embedding"] = query_embedding
-
-            if settings.processing.KB_ENABLE_HYBRID_SEARCH:
-                try:
-                    docs = await self.vector_store.search_hybrid(question, **search_kwargs)
-                except Exception as e:
-                    logger.warning(f"混合检索失败，回退到 dense 检索: {e}")
-                    docs = await self.vector_store.search_dense(question, **search_kwargs)
-            else:
-                docs = await self.vector_store.search_dense(question, **search_kwargs)
-
-            return docs[:settings.processing.TOP_K]
-        finally:
-            # 记录向量检索时间（Prometheus）
-            if PROMETHEUS_AVAILABLE:
-                record_vector_search(time.time() - search_start)
-
-    async def _update_conversation_summary(self, history: list) -> str:
+    async def _update_conversation_summary(self, history: list, session_id: str = "") -> str:
         """
         更新对话摘要，用于长对话的上下文管理
 
@@ -559,13 +644,14 @@ class RAGChain(AsyncSingleton["RAGChain"]):
 
         Args:
             history: 历史对话列表
+            session_id: 会话ID（摘要按会话隔离）
 
         Returns:
             str: 更新后的对话摘要
         """
-        return await self.context_enhancer._update_conversation_summary(history)
+        return await self.context_enhancer._update_conversation_summary(history, session_id)
 
-    async def enhance_context(self, question: str, history: list) -> dict:
+    async def enhance_context(self, question: str, history: list, session_id: str = "") -> dict:
         """
         增强上下文处理，包括指代消解和上下文优化
 
@@ -574,11 +660,12 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         Args:
             question: 当前问题
             history: 历史对话列表
+            session_id: 会话ID（摘要按会话隔离）
 
         Returns:
             dict: 包含增强后的问题和上下文信息
         """
-        return await self.context_enhancer.enhance_context(question, history)
+        return await self.context_enhancer.enhance_context(question, history, session_id)
 
     def _extract_source_info(self, docs):
         """
@@ -766,11 +853,28 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             search_mode=search_mode,
             deep_thinking=deep_thinking,
             user_id=user_id,
+            session_id=session_id,
         )
         state.think = should_think(deep_thinking)
         state.trace = TraceCollector()
         state.trace.set_basic(question=question, session_id=session_id, user_id=user_id)
 
+        try:
+            # 各阶段执行内部生成器
+            async for ev in self._pipeline_process(state):
+                yield ev
+        finally:
+            # SSE 断连兜底：客户端中途断连会 aclose 当前生成器，中断于某条
+            # yield 而跳过正常收尾；此处确保 trace 落盘/对话摘要/语义缓存等
+            # 持久化副作用仍执行（幂等，正常路径已执行后为 no-op）。
+            await self._finalize_side_effects(state)
+
+    async def _pipeline_process(self, state: _PipelineState):
+        """问答各阶段执行（内部生成器）。
+
+        供 _pipeline 在外层 try/finally 中迭代；自身可被 aclose 中断，
+        终态清理由外层 finally 统一兜底（见 _finalize_side_effects）。
+        """
         # 阶段 1：上下文增强（指代消解）
         async with _StageTimer(state.trace, "context_enhance"):
             await self._stage_enhance_context(state)
@@ -846,7 +950,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
 
     async def _stage_enhance_context(self, state: _PipelineState):
         """阶段 1：上下文增强（指代消解与上下文压缩）。"""
-        enhanced = await self.enhance_context(state.question, state.history or [])
+        enhanced = await self.enhance_context(state.question, state.history or [], state.session_id)
         state.resolved_question = enhanced["resolved_question"]
         state.history_context = enhanced["enhanced_context"]
         state.trace.data["resolved_question"] = state.resolved_question
@@ -1081,6 +1185,13 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         if not state.is_agent_mode:
             return
 
+        # P2：有界 Agent 循环（灰度开关 AGENT_ORCHESTRATOR_ENABLED 控制，
+        # 初始化失败或未开启时回退旧 FunctionCalling/ReAct 分支）
+        if settings.search.AGENT_ORCHESTRATOR_ENABLED and self.agent_orchestrator is not None:
+            async for ev in self._run_agent_orchestrator(state):
+                yield ev
+            return
+
         agent_sources = []
 
         if not state.use_kb:
@@ -1144,6 +1255,120 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             f"Agent 搜索已触发: mode={state.decision.mode.value}, query={state.resolved_question}, "
             f"context_length={len(state.search_context)}, sources={len(state.source_metadata)}"
         )
+
+    async def _run_agent_orchestrator(self, state: _PipelineState):
+        """P2：有界 Agent 循环的事件映射与降级衔接。
+
+        纯 Agent 模式（use_kb=False）：循环综合答案直接流式输出；
+        空输出或污染时降级 Phase 2 联网搜索（与旧路径语义一致）。
+        混合模式（use_kb=True）：循环仅收集工具上下文，交给阶段 8/9 合并生成。
+        """
+        from src.services.search_agent import looks_like_tool_call
+
+        answer_type = (
+            "function_calling"
+            if state.decision.mode == QAMode.FUNCTION_CALLING
+            else "agent_search"
+        )
+        state.answer_type = answer_type
+
+        result = None
+        # L1-a：读取本会话历史记忆，注入决策 prompt（fail-open，空串即关闭）
+        memory_context = ""
+        if settings.search.AGENT_MEMORY_ENABLED and state.session_id:
+            memory_context = await self._load_agent_memory(
+                state.resolved_question, state.session_id,
+                top_k=settings.search.AGENT_MEMORY_TOP_K,
+            )
+        async for ev in self.agent_orchestrator.run_stream(
+            question=state.resolved_question,
+            history_context=state.history_context,
+            kb_ids=state.kb_ids,
+            collect_only=bool(state.use_kb),
+            think=bool(state.think),
+            answer_type=answer_type,
+            memory_context=memory_context,
+        ):
+            kind = ev[0]
+            if kind in ("reasoning", "thinking"):
+                yield ev
+            elif kind == "chunk":
+                _, chunk, src_texts, src_meta, _atype = ev
+                if chunk:
+                    state.final_answer += chunk
+                    if src_texts and not state.source_texts:
+                        state.source_texts = src_texts
+                    if src_meta and not state.source_metadata:
+                        state.source_metadata = src_meta
+                    yield ev
+            elif kind == "result":
+                result = ev[1]
+
+        if result is None:
+            # 编排器异常中断（不应发生），回退 Phase 2 搜索
+            async for ev2 in self._phase2_web_search(state):
+                yield ev2
+            state.is_agent_mode = False
+            return
+
+        # L1-a：写入本会话记忆（fail-open）。摘要 = 问答对 + 关键工具观察，
+        # 简洁文本避免额外 LLM 调用；异步不阻塞响应。
+        if settings.search.AGENT_MEMORY_ENABLED and state.session_id:
+            q = state.resolved_question.strip()
+            a = (state.final_answer or "").strip()
+            if q and a:
+                summary = f"问：{q}\n答：{a}"
+                try:
+                    await self._save_agent_memory(state.session_id, summary)
+                except Exception as e:
+                    logger.warning(f"Agent 记忆写入（兜底）失败（忽略）: {e}")
+
+        if not state.use_kb:
+            # 纯 Agent 模式：空答案或污染 → 降级 Phase 2
+            polluted = bool(result.get("polluted")) or looks_like_tool_call(state.final_answer)
+            if polluted:
+                state.trace.set_pollution_detected(True)
+            if (not state.final_answer or polluted) and settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
+                if polluted:
+                    logger.warning(f"Agent 循环回答被污染，降级到 Phase 2: {state.resolved_question}")
+                else:
+                    logger.info(f"Agent 循环输出为空，降级到 Phase 2: {state.resolved_question}")
+                async for ev2 in self._phase2_web_search(state):
+                    yield ev2
+                state.is_agent_mode = False
+                return
+
+            sources = result.get("sources") or []
+            if sources and not state.source_metadata:
+                state.source_texts, state.source_metadata = self._web_sources_to_metadata(sources)
+                state.web_sources_for_citation = sources
+            cleaned, pol = OutputSanitizer.sanitize(state.final_answer)
+            state.final_answer = cleaned
+            state.trace.set_pollution_detected(pol)
+            state.finished = True
+            logger.info(
+                f"Agent 循环完成: steps={result.get('steps')}, reason={result.get('reason')}, "
+                f"answer_len={len(state.final_answer)}"
+            )
+            return
+
+        # 混合模式：工具上下文并入 search_context，交由阶段 8/9 合并生成
+        context = result.get("context") or result.get("answer") or ""
+        if context:
+            state.search_context = context
+            sources = result.get("sources") or []
+            if sources and not state.source_texts and not state.source_metadata:
+                state.source_texts, state.source_metadata = self._web_sources_to_metadata(sources)
+                state.web_sources_for_citation = sources
+            logger.info(
+                f"Agent 循环上下文已收集: steps={result.get('steps')}, "
+                f"context_length={len(context)}, sources={len(state.source_metadata)}"
+            )
+        elif settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
+            logger.info(f"Agent 循环未获得上下文，降级到 Phase 2: {state.resolved_question}")
+            async for ev2 in self._phase2_web_search(state):
+                yield ev2
+            state.is_agent_mode = False
 
     async def _phase2_web_search(self, state: _PipelineState):
         """Agent 降级路径的 Phase 2 联网搜索（含 reasoning 事件）。"""
@@ -1259,9 +1484,19 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             content="正在检索知识库...",
         ))
         kb_search_start = time.time()
+        # P2-2：多查询改写（开关开启时），改写失败自动回退单查询
+        queries = None
+        if settings.processing.KB_MULTI_QUERY_ENABLED:
+            try:
+                rewritten = await self.query_rewriter.rewrite(state.resolved_question)
+                if rewritten and len(rewritten) > 1:
+                    queries = rewritten
+            except Exception as e:
+                logger.warning(f"KB 多查询改写失败，回退单查询: {e}")
         state.docs = await self._retrieve_documents(
             state.resolved_question, state.kb_ids,
             query_embedding=state.semantic_cache_embedding,
+            queries=queries,
         )
 
         kb_search_duration = int((time.time() - kb_search_start) * 1000)
@@ -1278,13 +1513,16 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 doc_texts, doc_metadata = self._extract_source_info(state.docs)
                 state.source_texts.extend(doc_texts)
                 state.source_metadata.extend(doc_metadata)
+                retrieve_metadata = {"sources_count": len(doc_metadata)}
+                if queries:
+                    retrieve_metadata["multi_query_count"] = len(queries)
                 yield ("reasoning", self._reasoning_payload(
                     REASONING_STEP_KB_RETRIEVE,
                     "done",
                     "知识库检索",
                     content=f"知识库检索完成，命中 {len(doc_metadata)} 个片段",
                     duration_ms=kb_search_duration,
-                    metadata={"sources_count": len(doc_metadata)},
+                    metadata=retrieve_metadata,
                 ))
             else:
                 state.docs = []
@@ -1450,14 +1688,32 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 duration_ms=answer_generate_duration,
             ))
 
+    async def _finalize_side_effects(self, state: _PipelineState):
+        """终态清理副作用：语义缓存写入 + 链路落盘 + 对话摘要更新。
+
+        与流式 ("final", ...) 事件解耦，使 SSE 客户端中途断连（生成器被
+        aclose 关闭而中断于某条 yield）时，这些持久化操作仍会执行，而非
+        连同 final 事件一起被丢弃。幂等：state.finalized 防重复执行。
+        """
+        if state.finalized:
+            return
+        state.finalized = True
+        try:
+            # P1-3：符合条件的纯知识库答案异步写入语义缓存
+            self._maybe_store_semantic_cache(state)
+            state.trace.set_final_answer(state.final_answer)
+            state.trace.finish()
+            state.trace.save_background()
+            await self._update_conversation_summary(state.history or [], state.session_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            # 收尾为最佳努力（best-effort），异常不应向客户端回传或阻塞断连流程
+            logger.warning(f"终态清理异常: {e}", exc_info=True)
+
     async def _finalize(self, state: _PipelineState):
-        """终态：链路追踪落盘 + 对话摘要更新。"""
-        # P1-3：符合条件的纯知识库答案异步写入语义缓存
-        self._maybe_store_semantic_cache(state)
-        state.trace.set_final_answer(state.final_answer)
-        state.trace.finish()
-        state.trace.save_background()
-        await self._update_conversation_summary(state.history or [])
+        """终态：执行清理副作用并产出 ("final", state) 事件。"""
+        await self._finalize_side_effects(state)
         yield ("final", state)
 
     async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off"):
@@ -1692,7 +1948,7 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         """
         return await self.question_processor.generate_suggestions(question, history_context, kb_ids)
 
-    async def recommend_knowledge_bases(self, question: str, top_k: int = 3) -> list:
+    async def recommend_knowledge_bases(self, question: str, top_k: int = 3, kb_ids: list = None) -> list:
         """
         基于问题自动推荐相关知识库
 
@@ -1701,11 +1957,15 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         Args:
             question: 用户问题
             top_k: 返回的知识库数量
+            kb_ids: 候选知识库ID列表（调用方须限定为当前用户拥有的 KB；
+                传 None 会检索全部用户的知识库）
 
         Returns:
             list: 推荐的知识库列表，按相关性排序
         """
-        return await self.kb_recommender.recommend_knowledge_bases(question, top_k)
+        return await self.kb_recommender.recommend_knowledge_bases(
+            question, top_k, kb_ids=kb_ids
+        )
 
     async def detect_duplicates(self, content: str, kb_id: str = None, threshold: float = 0.85) -> list:
         """
@@ -1750,6 +2010,20 @@ class RAGChain(AsyncSingleton["RAGChain"]):
             dict: 分类结果
         """
         return await self.document_analyzer.classify_document(content)
+
+    async def analyze_document(self, content: str) -> dict:
+        """
+        合并文档智能分析（分类 + 质量评估）为一次 LLM 调用。
+
+        委托给 DocumentAnalyzer 处理。
+
+        Args:
+            content: 文档内容
+
+        Returns:
+            dict: 分类 + 质量评估合并结果
+        """
+        return await self.document_analyzer.analyze_document(content)
 
     async def generate_knowledge_graph(self, kb_ids: list = None) -> dict:
         """

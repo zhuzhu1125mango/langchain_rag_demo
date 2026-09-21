@@ -4,6 +4,7 @@
 """
 
 import logging
+from collections import OrderedDict
 
 from src.config import settings
 from src.services.intent_router.constants import PRONOUN_PATTERN
@@ -29,22 +30,38 @@ class ContextEnhancer:
             max_summary_length: 摘要最大长度
         """
         self.llm = llm
-        self.conversation_summary = ""
+        self._summaries: "OrderedDict[str, str]" = OrderedDict()
+        self._max_summaries = 200
         self.max_history_turns = max_history_turns
         self.max_summary_length = max_summary_length
 
-    async def _build_history_context(self, history):
+    def _get_summary(self, session_id: str) -> str:
+        """按会话读取摘要并移动到末尾（LRU 访问）。"""
+        summary = self._summaries.get(session_id, "")
+        if session_id in self._summaries:
+            self._summaries.move_to_end(session_id)
+        return summary
+
+    def _set_summary(self, session_id: str, text: str) -> None:
+        """按会话写入摘要；超过上限时淘汰最久未使用的会话。"""
+        self._summaries[session_id] = text
+        self._summaries.move_to_end(session_id)
+        while len(self._summaries) > self._max_summaries:
+            self._summaries.popitem(last=False)
+
+    async def _build_history_context(self, history, session_id: str = ""):
         """
         构建历史对话上下文（支持多轮对话优化）
 
         Args:
             history: 历史消息列表，每个消息包含role和content
+            session_id: 会话ID（摘要按会话隔离，防止跨用户串号）
 
         Returns:
             str: 格式化的历史对话上下文
         """
         if not history or len(history) == 0:
-            return self.conversation_summary
+            return self._get_summary(session_id)
 
         recent_history = history[-self.max_history_turns:]
 
@@ -58,8 +75,9 @@ class ContextEnhancer:
         if len(full_context) > 2000:
             full_context = await self._compress_context(full_context)
 
-        if self.conversation_summary:
-            return f"对话摘要: {self.conversation_summary}\n\n详细对话:\n{full_context}"
+        summary = self._get_summary(session_id)
+        if summary:
+            return f"对话摘要: {summary}\n\n详细对话:\n{full_context}"
 
         return full_context
 
@@ -138,12 +156,13 @@ class ContextEnhancer:
             logger.error(f"指代消解失败: {str(e)}", exc_info=True)
             return question
 
-    async def _update_conversation_summary(self, history: list) -> str:
+    async def _update_conversation_summary(self, history: list, session_id: str = "") -> str:
         """
         更新对话摘要，用于长对话的上下文管理
 
         Args:
             history: 历史对话列表
+            session_id: 会话ID（摘要按会话隔离，防止跨用户串号）
 
         Returns:
             str: 更新后的对话摘要
@@ -153,6 +172,7 @@ class ContextEnhancer:
 
         recent_history = history[-5:]
         context = "\n".join([f"{msg['role']}: {msg['content']}" for msg in recent_history])
+        previous_summary = self._get_summary(session_id)
 
         template = """
         请对以下对话进行总结，生成一个简洁的对话摘要：
@@ -167,31 +187,33 @@ class ContextEnhancer:
         """
         prompt = template.format(
             context=context,
-            previous_summary=self.conversation_summary,
+            previous_summary=previous_summary,
             max_length=self.max_summary_length
         )
 
         try:
             response = await self.llm.ainvoke(prompt)
-            self.conversation_summary = response.content.strip()[:self.max_summary_length]
-            return self.conversation_summary
+            new_summary = response.content.strip()[:self.max_summary_length]
+            self._set_summary(session_id, new_summary)
+            return new_summary
         except Exception as e:
             logger.error(f"更新对话摘要失败: {str(e)}", exc_info=True)
-            return self.conversation_summary
+            return previous_summary
 
-    async def enhance_context(self, question: str, history: list) -> dict:
+    async def enhance_context(self, question: str, history: list, session_id: str = "") -> dict:
         """
         增强上下文处理，包括指代消解和上下文优化
 
         Args:
             question: 当前问题
             history: 历史对话列表
+            session_id: 会话ID（摘要按会话隔离）
 
         Returns:
             dict: 包含增强后的问题和上下文信息
         """
         resolved_question = await self._resolve_references(question, history)
-        context = await self._build_history_context(history)
+        context = await self._build_history_context(history, session_id)
 
         return {
             "resolved_question": resolved_question,

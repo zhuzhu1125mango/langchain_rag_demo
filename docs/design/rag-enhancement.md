@@ -1,5 +1,6 @@
 # RAG 知识库系统升级设计方案
 
+> ⚠️ 弃用注记（2026-09）：下文联网搜索之 SearXNG 已迁移至 Tavily，原文相关表述保留为设计背景。
 > 状态：部分实施（混合检索/重排序/评估闭环/意图路由已落地；分阶段进度并入 [improvement-roadmap.md](improvement-roadmap.md) 推进）
 
 ## 1. 背景与目标
@@ -498,34 +499,36 @@ POST /api/feedback/badcase
 
 建议分三个阶段实施，每个阶段都可独立测试、独立回退。
 
+> 勾选状态于 2026-09-16 逐项读码核实回填。
+
 ### 阶段一：检索增强（高优先级）
 
-- [ ] 在 `milvus_service.py` 中实现 sparse embedding + BM25 检索。
-- [ ] 实现 RRF Fusion 与 Cross-Encoder 重排序。
-- [ ] 修改 `vector_store.py` 暴露 `search_hybrid` 接口。
-- [ ] 在 `rag_chain.py` 中替换 `_retrieve_documents` 为混合检索。
-- [ ] 增加配置项与迁移脚本。
-- [ ] 新增检索评测集与 `tests/evaluation/test_kb_retrieval.py`。
+- [x] 在 `milvus_service.py` 中实现 sparse embedding + BM25 检索。
+- [x] 实现 RRF Fusion 与 Cross-Encoder 重排序。
+- [x] 修改 `vector_store.py` 暴露 `search_hybrid` 接口。
+- [x] 在 `rag_chain.py` 中替换 `_retrieve_documents` 为混合检索。
+- [x] 增加配置项与迁移脚本。
+- [x] 新增检索评测集与 `tests/evaluation/test_kb_retrieval.py`。
 
 **预期收益**：KB 检索召回率和 Top-K 精度显著提升。
 
 ### 阶段二：上下文与分块优化（中优先级）
 
-- [ ] 实现 `ChunkingStrategy` 工厂，支持 Markdown/代码/表格策略。
-- [ ] 增强 chunk metadata（heading/page/doc_type 等）。
-- [ ] 实现 `ContextBuilder`：预算管理 + Lost in the Middle 重排序 + 统一溯源编号。
-- [ ] 在 `rag_chain.py` 中接入 `ContextBuilder`。
+- [x] 实现 `ChunkingStrategy` 工厂，支持 Markdown/代码/表格策略。
+- [x] 增强 chunk metadata（heading/page/doc_type 等）。
+- [x] 实现 `ContextBuilder`：预算管理 + Lost in the Middle 重排序 + 统一溯源编号。
+- [x] 在 `rag_chain.py` 中接入 `ContextBuilder`。
 - [ ] 前端上传界面增加分块策略选择。
 
 **预期收益**：长文档回答质量提升，上下文利用率提高。
 
 ### 阶段三：路由学习与模型分工（中优先级）
 
-- [ ] 扩展 `intent_router.py`：Embedding-based 分类 + 规则投票。
-- [ ] 扩展 `rule_learner.py` 在线学习反馈闭环。
-- [ ] 引入轻量子模型（改写/校验/标题），统一模型管理。
-- [ ] 完善评估体系：LLM-as-Judge + Grafana 面板。
-- [ ] 新增 badcase 反馈 API 与 trace 增强。
+- [x] 扩展 `intent_router.py`：Embedding-based 分类 + 规则投票。
+- [x] 扩展 `rule_learner.py` 在线学习反馈闭环。
+- [x] 引入轻量子模型（改写/校验/标题），统一模型管理。
+- [ ] 完善评估体系：LLM-as-Judge + Grafana 面板。（LLM-as-Judge 已落地于 `services/evaluation/generation_evaluator.py`；**Grafana 面板尚未创建**，`configs/grafana/` 仅 provision 了 datasource）
+- [x] 新增 badcase 反馈 API 与 trace 增强。
 
 **预期收益**：复杂问题路由更准确，整体延迟降低，可解释性增强。
 
@@ -608,4 +611,11 @@ TITLE_GENERATION_MODEL=
 
 ## 9. 下一步
 
-本方案为设计稿，待确认后按“阶段一 → 阶段二 → 阶段三”顺序实施。建议优先投入**阶段一（混合检索 + 重排序）**，因为这是当前知识库召回率和精度最明显的短板，且改动相对集中、收益可量化。
+> 本节原结论（"本方案为设计稿，待确认后实施"）已过期。截至 2026-09-16，三个阶段共 16 项中
+> **14 项已落地**，仅剩 2 项未做：前端上传界面的分块策略选择、Grafana 监控面板
+> （详见上方各阶段的勾选状态）。
+
+剩余可推进项：
+
+1. 前端上传界面暴露分块策略选择（当前由 `document_processor.py` 按扩展名自动推断，用户无法干预）。
+2. 补齐 Grafana 面板（当前仅有 datasource provisioning，无任何 dashboard），与 `docs/guide/monitoring.md` 描述对齐。

@@ -20,7 +20,7 @@ from src.services.intent_router.conversation_context import (
     get_default_conversation_context_builder,
 )
 from src.services.intent_router.constants import (
-    CALCULATION_KEYWORDS,
+    CALCULATION_EXPLICIT_KEYWORDS,
     COMPLEX_INTENT_KEYWORDS,
     FAST_PATH_MAX_QUESTION_LEN,
     GREETING_RE,
@@ -89,14 +89,25 @@ class IntentRouter:
         if not question:
             return False
         q = question.lower()
+        # 剔除"对比"避免子串误命中（如"对比分析"包含"比分"、"对比排名"包含"排名"）
+        q = q.replace("对比", "")
         return any(kw in q for kw in REALTIME_KEYWORDS)
 
     @staticmethod
     def is_calculation_question(question: str) -> bool:
-        """判断是否包含计算需求。"""
+        """判断是否包含计算需求。
+
+        收紧规则：仅当问题同时含数字与数学特征（运算符，或 "计算/等于/换算" 关键词）
+        才判为计算题，避免 "100美元是多少人民币" 这类含歧义子串的句子被误路由进计算器。
+        """
         if not question:
             return False
-        return any(kw in question for kw in CALCULATION_KEYWORDS)
+        import re
+        if not re.search(r"[0-9０-９]", question):
+            return False
+        if any(op in question for op in ("+", "-", "*", "×", "÷", "/", "%")):
+            return True
+        return any(kw in question for kw in CALCULATION_EXPLICIT_KEYWORDS)
 
     @staticmethod
     def is_research_question(question: str) -> bool:
@@ -303,8 +314,14 @@ class IntentRouter:
                 rule_hit=True,
             )
 
-        # 7. 规则冲突检测：多个规则同时命中时转 LLM 裁决
-        if self._detect_rule_conflict(question):
+        # 7. 规则冲突检测：多个规则同时命中时转 LLM 裁决。
+        # 用户显式指定 search_mode（function_calling/agent）时模式已确定，
+        # 跳过 LLM 裁决直接走后续规则（research 规则对显式模式同样生效），
+        # 避免 4GB VRAM 下模型切换导致 60s 级路由超时空等。
+        if (
+            self._detect_rule_conflict(question)
+            and search_mode not in ("function_calling", "agent")
+        ):
             if settings.intent_router.INTENT_ROUTER_USE_LLM:
                 try:
                     draft = await self._llm_router.route(question, history=history)

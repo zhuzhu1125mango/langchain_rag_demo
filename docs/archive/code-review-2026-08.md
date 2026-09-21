@@ -1,5 +1,7 @@
 # LangChain RAG Demo 代码审查报告（v2 复审版）
 
+> ⚠️ 弃用注记（2026-09）：文中 SearXNG 组件已迁移至 Tavily，相关部署/资源表述仅为当时快照，留作追溯。
+
 > **状态：已归档**。报告中所列严重/中等问题已全部修复（最终提交 `6219e58`，CI 全绿）；后续优化项已迁移至 [design/improvement-roadmap.md](../design/improvement-roadmap.md)。本文仅供追溯。
 
 - **首次审查日期**：2026-08-28

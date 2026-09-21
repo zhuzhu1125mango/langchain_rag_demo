@@ -20,10 +20,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.config import settings
 from .tools.plugins._datetime_impl import get_current_datetime
-from .tools.tool_manager import ToolManager
 from .tools.plugins.web_search_tool import WebSearchTool
 from .tools.plugins.fetch_webpage_tool import FetchWebpageTool
-from .tools.plugins.datetime_tool import DateTimeTool
 
 logger = logging.getLogger(__name__)
 
@@ -170,23 +168,33 @@ class Tool:
 class SearchToolkit:
     """搜索工具集兼容层。
 
-    内部基于新的 ToolManager 平台，保持对旧版 SearchAgent 的接口兼容。
-    新增工具通过 ToolManager 自动发现，无需在此硬编码。
+    基于全局 ToolManager（get_tool_manager，自动发现全部插件）的白名单视图，
+    保持对旧版 SearchAgent 的接口兼容：get_tool()/tools 仅暴露白名单内的工具，
+    避免旧 Agent（4B 模型）面对过大的工具面。
     """
 
-    def __init__(self, web_search_service):
+    # 默认白名单：与旧版行为一致（仅搜索相关核心工具）
+    DEFAULT_TOOL_NAMES = ("web_search", "fetch_webpage", "get_current_time")
+
+    def __init__(self, web_search_service, tool_names=None):
+        from .tools.tool_manager import get_tool_manager
+
         self.web_search_service = web_search_service
-        self.tool_manager = ToolManager()
-        # 注册与搜索相关的核心工具，复用同一 WebSearchService 实例
+        # 统一注册表：全局 ToolManager（含全部插件：web/时间/天气/计算/KB 检索/Wiki 等）
+        self.tool_manager = get_tool_manager()
+        # 用共享 WebSearchService 实例覆盖自动发现的无参实例，保持搜索缓存/上下文共享
         self.tool_manager.register_tool(WebSearchTool(web_search_service))
         self.tool_manager.register_tool(FetchWebpageTool(web_search_service))
-        self.tool_manager.register_tool(DateTimeTool())
+        # 白名单视图（旧 Agent 只见搜索核心工具；P2 Agent 循环用 AGENT_TOOLS_ENABLED 扩展）
+        self._tool_names = tuple(tool_names) if tool_names else self.DEFAULT_TOOL_NAMES
         self._tools = self._build_tools()
 
     def _build_tools(self) -> List[Tool]:
-        """基于 ToolManager 注册的工具，生成旧版 Tool 对象列表。"""
+        """基于 ToolManager 注册的白名单工具，生成旧版 Tool 对象列表。"""
         tools = []
         for base_tool in self.tool_manager.registry.list_tools():
+            if base_tool.name not in self._tool_names:
+                continue
             # 包装 BaseTool 的 execute 为旧版 handler 签名
             handler = self._make_handler(base_tool.name)
             tools.append(
@@ -354,22 +362,80 @@ class FunctionCallingHandler(BaseSearchAgent):
     Function Calling 处理器
 
     流程：
-    1. 向 LLM 注册 web_search / fetch_webpage 工具
+    1. 向 LLM 注册工具（native FC 优先，失败回退 prompt 约定 JSON 模式）
     2. LLM 决定是直接回答还是调用工具
     3. 如需工具，并行执行工具调用
     4. 将工具结果回传给 LLM，生成最终回答
     """
 
-    async def run(self, question: str, history_context: str = "") -> SearchAgentResult:
+    def _native_tools_schema(self) -> List[Dict[str, Any]]:
+        """生成 OpenAI function-calling 风格的工具 schema（native FC 用）。"""
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": t.name,
+                    "description": t.description,
+                    "parameters": t.parameters,
+                },
+            }
+            for t in self.toolkit.tools
+        ]
+
+    async def _decide_native(
+        self, question: str, history_context: str
+    ) -> Tuple[List[ToolCall], str]:
+        """原生 function calling 决策（Ollama tools API）。
+
+        Returns:
+            (tool_calls, direct_content)：有工具调用时 direct_content 为空；
+            无工具调用时 direct_content 为模型直接回答。
+        Raises:
+            任何异常由调用方捕获并回退 prompt 模式。
+        """
+        from langchain_core.messages import HumanMessage
+
+        bound = self.llm.bind_tools(self._native_tools_schema())
+        prompt = (
+            "你是一个智能助手，可以使用工具辅助回答。\n"
+            "若是时效性问题（天气/新闻/价格/汇率/比分等实时数据），必须调用相应工具；\n"
+            "稳定知识（概念解释/历史事实）可直接回答，不必调用工具。\n\n"
+            f"对话历史：\n{history_context}\n\n用户问题：{question}"
+        )
+        response = await bound.ainvoke([HumanMessage(content=prompt)])
+        tool_calls = [
+            ToolCall(name=tc["name"], arguments=tc.get("args") or {})
+            for tc in (getattr(response, "tool_calls", None) or [])
+            if isinstance(tc, dict) and tc.get("name")
+        ]
+        direct_content = (response.content or "").strip() if response.content else ""
+        return tool_calls, ("" if tool_calls else direct_content)
+
+    async def _decide(
+        self, question: str, history_context: str
+    ) -> Tuple[List[ToolCall], str]:
+        """工具决策：native FC 优先，异常时自动回退 prompt 约定 JSON 模式。"""
+        if settings.search.SEARCH_AGENT_NATIVE_FC:
+            try:
+                tool_calls, content = await self._decide_native(question, history_context)
+                logger.info(
+                    f"原生 FC 决策成功: tools={[tc.name for tc in tool_calls]}"
+                )
+                return tool_calls, content
+            except Exception as e:
+                logger.warning(f"原生 FC 决策失败，回退 prompt 模式: {e}")
+
         decision_prompt = self._build_decision_prompt(question, history_context)
         try:
             response = await self.llm.ainvoke(decision_prompt)
             content = response.content.strip() if response.content else ""
         except Exception as e:
             logger.warning(f"Function Calling 决策请求失败: {e}")
-            return SearchAgentResult(answer="")
+            content = ""
+        return self._parse_tool_calls(content), content
 
-        tool_calls = self._parse_tool_calls(content)
+    async def run(self, question: str, history_context: str = "") -> SearchAgentResult:
+        tool_calls, content = await self._decide(question, history_context)
 
         # 模型未调用工具，直接返回答案
         # 但若为强时效性问题，返回空 answer 触发 RAGChain 降级到 Phase 2 直接搜索，
@@ -408,16 +474,8 @@ class FunctionCallingHandler(BaseSearchAgent):
     async def arun_stream(
         self, question: str, history_context: str = ""
     ):
-        """流式版本：工具决策阶段非流式，最终答案流式输出"""
-        decision_prompt = self._build_decision_prompt(question, history_context)
-        try:
-            response = await self.llm.ainvoke(decision_prompt)
-            content = response.content.strip() if response.content else ""
-        except Exception as e:
-            logger.warning(f"Function Calling 决策请求失败: {e}")
-            content = ""
-
-        tool_calls = self._parse_tool_calls(content)
+        """流式版本：工具决策阶段非流式（native FC 优先），最终答案流式输出"""
+        tool_calls, content = await self._decide(question, history_context)
 
         if not tool_calls:
             # 没有工具调用，直接流式返回原内容（统一按 chunk 输出）

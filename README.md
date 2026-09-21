@@ -8,8 +8,13 @@
 
 | 功能模块 | 特性描述 | 状态 |
 |---------|---------|------|
+| 🔐 **多用户认证** | API Key（单实例）+ JWT（注册/登录）双模式；资源按 `owner_id` 隔离，越权返回 403 | ✅ |
 | 📁 **多格式文档支持** | TXT, PDF, DOCX, XLSX, PPTX, MD, CSV, JSON, HTML, EPUB | ✅ |
-| 🔍 **智能检索** | 基于向量数据库的语义检索，支持策略模式融合 | ✅ |
+| 🖼️ **扫描版 PDF OCR** | 扫描版检测 + 双后端（MinerU / PaddleOCR）可选依赖分流，失败回退内置解析 | ✅ |
+| 🔍 **智能检索** | 混合检索（BM25 稀疏 + 向量稠密 + RRF 融合）+ Cross-Encoder 重排 | ✅ |
+| 🧩 **结构化分块** | 按类型路由分块策略（Markdown / HTML / Word / 代码 / 表格行），保留标题层级 | ✅ |
+| ⚡ **语义缓存** | 高相似度问题直接回放答案，Redis 不可用时 fail-open | ✅ |
+| 📖 **LLM-Wiki 编译层** | 将文档预编译为结构化页面（增量编译 / 交叉链接 / 一致性检查） | ✅ |
 | 🌐 **联网搜索** | 支持 DuckDuckGo / SearXNG / Tavily，Query 改写 + 重排 + Redis 缓存 | ✅ |
 | 🤖 **搜索 Agent** | Function Calling / ReAct Agent，支持多步推理与网页抓取 | ✅ |
 | 💬 **流式输出** | 实时打字效果，提升用户体验 | ✅ |
@@ -20,7 +25,10 @@
 | 🖥️ **界面支持** | Vue3 生产级界面 | ✅ |
 | 📊 **实验框架** | 支持 A/B 测试和策略权重调整 | ✅ |
 | 🧠 **动态学习** | 基于用户反馈的规则学习引擎 | ✅ |
-| 📈 **监控告警** | 集成 Prometheus + Grafana 监控体系 | ✅ |
+| 🔎 **答案可信度** | 引用补全（embedding 匹配补 `[n]`）+ 数值幻觉校验 + 分档置信度提示 | ✅ |
+| 🧭 **意图路由** | 规则 + Embedding 分类 + LLM 路由三层，置信度门控与歧义澄清 | ✅ |
+| 📈 **监控告警** | 集成 Prometheus + Alertmanager 监控体系（**Grafana 已部署但尚无 dashboard**） | ⚠️ |
+| 🧾 **请求追踪** | 每次问答的完整链路耗时记录，经 `/api/traces` 查询 | ✅ |
 | 🏷️ **标签分类** | 文档分类和标签管理 | ✅ |
 | ⭐ **评价反馈** | 用户评价收集和反馈学习 | ✅ |
 | ⚙️ **系统配置** | 支持在线调整分块、检索、模型等处理配置 | ✅ |
@@ -32,21 +40,28 @@
 
 ### 核心技术
 
+版本以 `backend/pyproject.toml`（Python 依赖，uv 锁定）、`frontend/package.json`（前端）
+与 compose 镜像 tag 为准。
+
 | 分类 | 技术 | 版本 | 说明 |
 |------|------|------|------|
-| 后端框架 | FastAPI | ^0.115.0 | 现代高性能 API 框架 |
-| ORM | SQLAlchemy | ^2.0.34 | 异步数据库操作 |
-| 向量数据库 | Milvus | ^2.6.17 | 分布式向量存储 |
-| LLM 集成 | Ollama | ^0.2.10 | 本地模型运行 |
+| 后端框架 | FastAPI | 0.136.3 | 现代高性能 API 框架 |
+| ORM | SQLAlchemy | 2.0.50 | 异步数据库操作 |
+| 向量数据库 | Milvus（服务端） | v2.6.17（镜像 tag） | 分布式向量存储 |
+| 向量数据库客户端 | pymilvus | 3.0.0 | 与上者版本号不同步，注意区分 |
+| LLM 集成 | Ollama（Python 客户端） | 0.6.2 | 本地模型运行 |
 | 嵌入模型 | bge-m3 | latest | 离线多语言向量嵌入，1024 维 |
-| 对象存储 | MinIO | latest | 分布式对象存储 |
+| 对象存储 | MinIO | RELEASE.2025-09-07T16-13-09Z | 分布式对象存储 |
 | 前端框架 | Vue 3 | ^3.5.35 | 现代前端框架 |
 | 状态管理 | Pinia | ^3.0.4 | 状态管理 |
 | 数据缓存 | Vue Query | ^5.100.14 | 客户端数据缓存 |
 | UI 组件 | Element Plus | ^2.14.1 | 企业级组件库 |
-| 缓存服务 | Redis | ^7.0 | 搜索结果与网页内容缓存 |
-| 监控系统 | Prometheus | ^3.5.0 | 监控指标采集 |
-| 可视化 | Grafana | ^12.0.2 | 监控仪表盘 |
+| 缓存服务 | Redis（Python 客户端） | 8.0.0 | 缓存与语义缓存 |
+| 监控系统 | Prometheus | v3.5.0（镜像 tag） | 监控指标采集 |
+| 可视化 | Grafana | v12.0.2（镜像 tag） | 监控仪表盘 |
+
+> 依赖清单以 `pyproject.toml` / `package.json` 为唯一事实来源，本表仅为速览；
+> 两者不一致时以后者为准。
 
 ### 支持的文档格式
 
@@ -65,14 +80,22 @@
 
 ## 🧠 模型分工
 
-系统默认在 Ollama 本地部署多个模型，按任务特点分工协作，降低主模型负载并提升响应速度：
+系统在 Ollama 本地部署多个模型，按任务特点分工协作，降低主模型负载并提升响应速度。
 
-| 任务 | 默认模型 | 说明 |
-|------|---------|------|
-| 主生成模型 | `deepseek-r1:7b-qwen-distill-q4_K_M` | 复杂推理、RAG 最终答案生成、Agent / Function Calling |
-| 轻量任务模型 | `qwen2.5:7b` | 意图路由、会话标题生成、Query 改写等结构化/低延迟任务 |
-| Embedding 模型 | `bge-m3:latest` | 多语言文档向量化，输出 1024 维稠密向量 |
-| 重排序模型 | `qllama/bge-reranker-v2-m3:latest` | 知识库检索与网页搜索结果精排，通过 Ollama 本地调用 |
+> ⚠️ **模型名没有内置默认值**（A2 去硬编码），必须由 `.env` 提供；启动时会经 `/api/tags`
+> 校验存在性，缺失或未 pull 则**拒绝启动**。下表为**开发栈当前取值**，供参考而非固定值：
+
+| 任务 | 配置项 | 开发栈取值 | 说明 |
+|------|--------|-----------|------|
+| 主生成模型 | `OLLAMA_MODEL_NAME` | `qwen3:4b` | 复杂推理、RAG 最终答案生成、Agent / Function Calling |
+| 非思考模型 | `OLLAMA_DIRECT_MODEL_NAME` | `qwen3:4b-instruct-2507-q4_K_M` | 关闭深度思考时使用；留空则回退主模型并绑定 `reasoning=false` |
+| 轻量任务模型 | `FAST_LLM_MODEL_NAME` | `qwen3:4b` | 意图路由、会话标题生成、Query 改写等结构化/低延迟任务 |
+| Embedding 模型 | `EMBEDDING_MODEL_NAME` | `bge-m3:latest` | 多语言文档向量化，输出 1024 维稠密向量（维度须与 `EMBEDDING_DIMENSION` 一致） |
+| 重排序模型 | `KB_RERANK_MODEL` / `SEARCH_RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | 知识库检索与网页搜索结果精排；`KB_RERANK_PROVIDER` 可选 `sentence_transformers` 或 `ollama` |
+
+> 混合思考模型（如 `qwen3:4b`）无法通过提示词真正跳过思考，故「深度思考关闭」路径
+> 依赖 `OLLAMA_DIRECT_MODEL_NAME` 指向一个非思考模型。若主模型本身不支持思考
+> （如 `qwen2.5`），应设 `OLLAMA_SUPPORTS_THINKING=false`，否则会触发 Ollama 400 错误。
 
 通过环境变量可灵活调整：
 
@@ -148,7 +171,6 @@ cd langchain_rag_demo
 - Milvus（向量数据库）
 - etcd（Milvus 依赖）
 - Redis（缓存服务）
-- SearXNG（私有化聚合搜索引擎）
 - Prometheus（监控）
 - Grafana（监控面板）
 - PostgreSQL Exporter（数据库监控导出器）
@@ -161,7 +183,6 @@ cd langchain_rag_demo
 - MinIO 控制台: `http://localhost:9001`
 - Milvus: `localhost:19530`
 - Redis: `localhost:6379`
-- SearXNG: `http://localhost:8080`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
 
@@ -267,7 +288,6 @@ cd langchain_rag_demo
 - Milvus
 - etcd
 - Redis（搜索结果与网页内容缓存）
-- SearXNG（私有化聚合搜索引擎）
 - Prometheus
 - Grafana
 - Alertmanager（生产专用，告警通知）
@@ -280,7 +300,6 @@ cd langchain_rag_demo
 - MinIO 控制台: `http://localhost:9003`（S3 API `127.0.0.1:9002`）
 - Milvus: `localhost:19531`
 - Redis: `localhost:6380`
-- SearXNG: `http://localhost:8081`
 - Grafana: `http://localhost:3001`
 - Prometheus: `http://localhost:9094`
 - Alertmanager: `http://localhost:9095`
@@ -337,7 +356,7 @@ cd langchain_rag_demo
 cd langchain_rag_demo
 
 # 启动数据库与搜索基础设施（不含前后端；--env-file 提供 ${VAR} 插值）
-docker compose -f docker-compose.dev.yml --env-file .env.dev up -d postgres minio etcd milvus-standalone redis searxng prometheus grafana postgres-exporter
+docker compose -f docker-compose.dev.yml --env-file .env.dev up -d postgres minio etcd milvus-standalone redis prometheus grafana postgres-exporter
 
 # 等待服务就绪（Milvus 首次启动需要 1-2 分钟）
 ```
@@ -408,9 +427,9 @@ pnpm dev
 langchain_rag_demo/
 ├── docker-compose.yml        # Docker Compose 配置（生产环境）
 ├── docker-compose.dev.yml    # Docker Compose 配置（开发环境，含应用）
-├── .env                      # 环境变量配置（自动切换）
-├── .env.dev                  # 开发环境变量配置
-├── .env.prod                 # 生产环境变量配置
+├── .env.example              # 环境变量模板（全部可配置项 + 中文注释）
+├── .env.dev                  # 开发环境变量配置（compose 经 env_file 引用）
+├── .env.prod                 # 生产环境变量配置（compose 经 env_file 引用）
 ├── scripts/                  # 根目录脚本（开发/生产启停）
 │   ├── start-dev.ps1         # 开发环境启动脚本（PowerShell 7，推荐）
 │   ├── start-prod.ps1        # 生产环境启动脚本（PowerShell 7，推荐）
@@ -431,9 +450,13 @@ langchain_rag_demo/
 │   ├── stop-dev.sh           # 开发环境停止脚本（Linux/Mac）
 │   └── stop-prod.sh          # 生产环境停止脚本（Linux/Mac）
 ├── README.md                 # 项目说明文档
-├── docs/                     # 文档目录
-│   ├── api.md                # API 接口文档
-│   └── deployment.md         # 部署指南
+├── docs/                     # 文档目录（索引见 docs/README.md）
+│   ├── README.md             # 文档索引（命名/状态规范）
+│   ├── api.md                # API 接口参考
+│   ├── architecture.md       # 架构总览
+│   ├── guide/                # 操作指南（deployment / development / monitoring）
+│   ├── design/               # 设计文档（对标 RFC，一文一事）
+│   └── archive/              # 归档（一次性报告）
 ├── backend/                  # 后端服务
 │   ├── Dockerfile.dev        # 后端开发 Dockerfile（热重载）
 │   ├── Dockerfile.prod       # 后端生产 Dockerfile
@@ -443,21 +466,26 @@ langchain_rag_demo/
 │   ├── scripts/              # 数据库迁移脚本
 │   ├── tests/                # 测试用例
 │   └── src/                  # 源码目录（统一以 `from src.* import` 方式引用）
-│       ├── config.py         # 配置文件
+│       ├── config.py         # 配置中心（pydantic-settings，按 APP_ENV 选 .env.{env}）
 │       ├── database.py       # 数据库连接
-│       ├── dependencies.py   # 依赖注入
+│       ├── auth.py           # 认证与授权（API Key / JWT / owner 归属校验）
 │       ├── exceptions.py     # 异常定义
 │       ├── main.py           # FastAPI 入口
-│       ├── api/              # REST API 路由
-│       │   ├── chat.py                 # 聊天问答接口
+│       ├── api/              # REST API 路由（16 个模块）
+│       │   ├── auth.py                 # 注册/登录/当前用户
+│       │   ├── chat.py                 # 聊天问答接口（含 SSE 流式）
 │       │   ├── document.py             # 文档管理接口
 │       │   ├── knowledge_base.py       # 知识库管理接口
+│       │   ├── wiki.py                 # Wiki 编译层接口
 │       │   ├── session.py              # 会话管理接口
+│       │   ├── trace.py                # 请求链路追踪
 │       │   ├── experiment.py           # A/B 测试实验接口
 │       │   ├── category.py             # 分类管理接口
 │       │   ├── tag.py                  # 标签管理接口
 │       │   ├── feedback.py             # 评价反馈接口
+│       │   ├── badcase.py              # 坏例管理接口
 │       │   ├── learning.py             # 学习引擎接口
+│       │   ├── evaluation.py           # RAG 评估接口
 │       │   ├── config.py               # 系统配置接口
 │       │   └── notification.py         # WebSocket 实时通知接口
 │       ├── services/         # 业务逻辑层
@@ -508,9 +536,7 @@ langchain_rag_demo/
 │   │   └── alerts.yml        # 告警规则
 │   ├── grafana/              # Grafana 配置
 │   ├── alertmanager/         # Alertmanager 配置
-│   ├── postgres/             # PostgreSQL 配置
-│   └── searxng/              # SearXNG 配置
-│       └── settings.yml      # SearXNG 搜索引擎配置
+│   └── postgres/             # PostgreSQL 配置
 ```
 
 ### 📜 配套脚本说明
@@ -637,9 +663,9 @@ MILVUS_REBUILD_ON_MISMATCH=false
 
 | 参数 | 说明 | 默认值 | 范围 |
 |------|------|--------|------|
-| `CHUNK_SIZE` | 文本分割大小（字符数） | 512 | 200-1000 |
-| `CHUNK_OVERLAP` | 分割重叠大小 | 64 | 0-200 |
-| `TOP_K` | 检索文档数量 | 3 | 1-10 |
+| `CHUNK_SIZE` | 文本分割大小（字符数） | 500 | 50-5000 |
+| `CHUNK_OVERLAP` | 分割重叠大小 | 50 | ≥0 且 < `CHUNK_SIZE` |
+| `TOP_K` | 检索文档数量 | 3 | 1-20 |
 | `POSTGRES_PORT` | 数据库端口 | 5433（本地）/ 5432（容器内） | - |
 | `MINIO_ROOT_USER` | MinIO 管理员账号 | - | - |
 | `MINIO_ROOT_PASSWORD` | MinIO 管理员密码 | - | - |
@@ -648,19 +674,18 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `MINIO_BUCKET_NAME` | MinIO 存储桶名称 | `documents` | - |
 | `MINIO_SECURE` | 是否启用 HTTPS | `false` | true/false |
 | `SECRET_KEY` | JWT/安全签名密钥 | 无（开发缺失时启动自动生成临时密钥） | 生产环境必须设置为强密钥，否则启动失败 |
-| `APP_ENV` | 显式环境标记 | 空（按 IN_DOCKER 推断） | 非 Docker 生产部署必须设为 `production` |
+| `APP_ENV` | 显式环境标记 | 空（按 `IN_DOCKER` 推断） | `dev` / `prod`（兼容旧值 `production`）。非 Docker 的生产部署**必须显式设为 `prod`**，否则不执行启动强校验 |
 | `MILVUS_REBUILD_ON_MISMATCH` | 集合 schema/维度不匹配时是否删除重建 | `false` | 破坏性操作，开启前必须完成数据迁移/备份 |
 | `REDIS_HOST` | Redis 主机 | `localhost` | 容器内自动覆盖为 `redis` |
 | `REDIS_PORT` | Redis 端口 | `6379` | - |
 | `REDIS_DB` | Redis 数据库编号 | `0` | 0-15 |
 | `REDIS_PASSWORD` | Redis 密码 | `dev_redis_password` | 必填，生产环境必须设置为强密码 |
-| `SEARCH_PROVIDER` | 搜索引擎 | `searxng` | `duckduckgo` / `searxng` / `tavily` |
+| `SEARCH_PROVIDER` | 搜索引擎 | `tavily` | `duckduckgo` / `searxng` / `tavily` |
+| `SEARCH_API_KEY` | Tavily API Key（provider 为 tavily 时必填） | - | - |
 | `SEARCH_MAX_RESULTS` | 单次搜索返回结果数 | 10 | 1-20 |
 | `SEARCH_FETCH_TIMEOUT` | 网页抓取超时（秒） | 10 | - |
 | `SEARCH_MAX_FETCH` | 最大并发抓取网页数 | 5 | - |
 | `SEARCH_MIN_CONTENT_LENGTH` | 网页内容最小长度 | 100 | - |
-| `SEARXNG_BASE_URL` | SearXNG 服务地址 | `http://localhost:8080` | 容器内使用 `http://searxng:8080` |
-| `SEARXNG_TIMEOUT` | SearXNG 请求超时（秒） | 10 | - |
 | `SEARCH_ENABLE_MULTI_QUERY` | 是否启用 LLM 多角度 Query 改写 | `true` | true/false |
 | `SEARCH_NUM_QUERIES` | Query 改写生成的查询数 | 3 | - |
 | `SEARCH_ENABLE_RERANK` | 是否启用 Cross-Encoder 语义重排 | `true` | true/false |
@@ -673,7 +698,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `SEARCH_RERANK_TOP_K` | 重排后返回 Top-K | 5 | - |
 | `SEARCH_CACHE_TTL` | 搜索结果缓存时间（秒） | 3600 | - |
 | `SEARCH_CONTENT_CACHE_TTL` | 网页内容缓存时间（秒） | 86400 | - |
-| `SEARCH_ENABLE_FUNCTION_CALLING` | 是否启用 Function Calling | `false` | true/false |
+| `SEARCH_ENABLE_FUNCTION_CALLING` | 是否启用 Function Calling | `true` | true/false |
 | `SEARCH_ENABLE_REACT` | 是否启用 ReAct Agent | `false` | true/false |
 | `SEARCH_REACT_MAX_STEPS` | ReAct 最大推理步数 | 3 | - |
 | `SEARCH_AGENT_FALLBACK_TO_PHASE2` | Agent 失败是否回退到普通搜索 | `true` | true/false |
@@ -694,7 +719,6 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | Milvus | 19530 | 127.0.0.1:19531 | 向量数据库 |
 | Milvus 健康检查 | 9091 | 127.0.0.1:9092 | 健康检查/指标端口 |
 | Redis | 6379 | 127.0.0.1:6380 | 缓存服务 |
-| SearXNG | 8080 | 127.0.0.1:8081 | 私有化聚合搜索引擎 |
 | Prometheus | 9090 | 127.0.0.1:9094 | 监控指标 |
 | Alertmanager | -（开发不部署） | 127.0.0.1:9095 | 告警管理 |
 | Grafana | 3000 | 127.0.0.1:3001 | 监控面板 |
@@ -747,7 +771,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | 模式 | `search_mode` | 说明 |
 |------|---------------|------|
 | 简单联网搜索 | `simple` | 单次搜索，结果经 LLM 改写、Cross-Encoder 重排后进入上下文 |
-| Function Calling | `function_calling` | 本地模型以 prompt-based 方式调用 `web_search` / `fetch_webpage` 工具（需开启 `SEARCH_ENABLE_FUNCTION_CALLING=true`） |
+| Function Calling | `function_calling` | 本地模型优先走原生 FC（`bind_tools`），不支持时回退 prompt-based JSON 约定。该路径暴露 3 个工具：`web_search` / `fetch_webpage` / `get_current_time`（需开启 `SEARCH_ENABLE_FUNCTION_CALLING`，默认已开启） |
 | ReAct Agent | `agent` | 多轮 Thought → Action → Observation 迭代搜索（需开启 `SEARCH_ENABLE_REACT=true`） |
 
 **前端使用示例**：
@@ -889,7 +913,7 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 7. **内存要求**: 建议至少 8GB 内存，模型越大需要内存越多
 8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 8080, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8081, 9002, 9003, 19531, 9092, 3001, 9094, 9095, 80，均仅绑定回环地址）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
-10. **联网搜索稳定性**: DuckDuckGo 等搜索引擎可能因网络或反爬策略临时不可用，可切换至自托管 SearXNG
+10. **联网搜索稳定性**: 联网搜索默认走 Tavily 在线 API，需在 `SEARCH_API_KEY` 配置有效的 Key；如遇网络或配额限制可切换其它 provider
 
 ### 环境启停
 

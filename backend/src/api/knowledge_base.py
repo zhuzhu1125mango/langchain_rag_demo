@@ -25,6 +25,7 @@ import asyncio
 import logging
 from src.database import get_db
 from src.auth import get_current_user, CurrentUser, require_owner
+from src.utils.validators import parse_uuid_list, validate_kb_ownership
 from src.models import KnowledgeBase, Document
 from src.services.vector_store import VectorStoreManager
 from src.services.cache_service import CacheService
@@ -650,24 +651,50 @@ async def set_default_knowledge_base(
         raise HTTPException(status_code=400, detail="无效的知识库ID")
 
 
-@router.post("/recommend", response_model=List[KBRecommendationResponse])
-async def recommend_knowledge_bases(request: KBRecommendationRequest):
+async def _owned_kb_ids(db: AsyncSession, current_user: CurrentUser) -> List[str]:
+    """取当前用户拥有的全部知识库 ID（可能为空列表）。
+
+    调用方在结果为空时**必须短路返回**，不可把空列表继续下传：
+    检索层把空 kb_ids 当作"不限定范围"，会退化为跨用户的全量检索。
     """
-    基于问题自动推荐相关知识库
+    result = await db.execute(
+        select(KnowledgeBase.id).filter(KnowledgeBase.owner_id == current_user.user_id)
+    )
+    return [str(row) for row in result.scalars()]
+
+
+@router.post("/recommend", response_model=List[KBRecommendationResponse])
+async def recommend_knowledge_bases(
+    request: KBRecommendationRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    基于问题自动推荐相关知识库（候选范围限定为当前用户拥有的知识库）
 
     Args:
         request: 请求数据（问题、返回数量）
+        current_user: 当前认证用户
+        db: 数据库会话
 
     Returns:
         list: 推荐的知识库列表，按相关性排序
     """
+    # 候选知识库由服务端按 owner 解析，不接受客户端指定
+    owned_kb_ids = await _owned_kb_ids(db, current_user)
+    if not owned_kb_ids:
+        return []
+
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
 
     try:
-        recommendations = await rag_chain.recommend_knowledge_bases(request.question, request.top_k)
+        recommendations = await rag_chain.recommend_knowledge_bases(
+            request.question, request.top_k, kb_ids=owned_kb_ids
+        )
         return recommendations
     except Exception as e:
+        logger.error(f"知识库推荐失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="知识库推荐失败，请稍后重试")
 
 
@@ -677,21 +704,39 @@ class KnowledgeGraphRequest(BaseModel):
 
 
 @router.post("/knowledge_graph", response_model=KnowledgeGraphResponse)
-async def generate_knowledge_graph(request: KnowledgeGraphRequest = Body(...)):
+async def generate_knowledge_graph(
+    request: KnowledgeGraphRequest = Body(...),
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """
-    生成知识库关系图谱
+    生成知识库关系图谱（范围限定为当前用户拥有的知识库）
 
     Args:
-        request: 包含知识库ID列表的请求体（可选）
+        request: 包含知识库ID列表的请求体（可选；不传则取当前用户全部知识库）
+        current_user: 当前认证用户
+        db: 数据库会话
 
     Returns:
         dict: 知识图谱数据
     """
+    if request.kb_ids:
+        # 显式指定时校验归属：含非本人知识库则整体拒绝（403）
+        kb_ids = parse_uuid_list(request.kb_ids, name="kb_id")
+        await validate_kb_ownership(db, kb_ids, current_user)
+    else:
+        kb_ids = await _owned_kb_ids(db, current_user)
+
+    # 空列表必须短路：检索层对空 kb_ids 不加过滤条件，等价于全量检索
+    if not kb_ids:
+        return {"nodes": [], "edges": [], "summary": "没有可用的知识库"}
+
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
 
     try:
-        result = await rag_chain.generate_knowledge_graph(request.kb_ids)
+        result = await rag_chain.generate_knowledge_graph(kb_ids)
         return result
     except Exception as e:
+        logger.error(f"生成知识图谱失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="生成知识图谱失败，请稍后重试")

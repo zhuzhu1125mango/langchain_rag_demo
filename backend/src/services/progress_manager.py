@@ -20,10 +20,11 @@ ws_connections: Dict[str, list] = {}
 class UploadProgress:
     """上传进度类"""
 
-    def __init__(self, upload_id: str, file_name: str, file_size: int):
+    def __init__(self, upload_id: str, file_name: str, file_size: int, owner_id: Optional[str] = None):
         self.upload_id = upload_id
         self.file_name = file_name
         self.file_size = file_size
+        self.owner_id = owner_id
         self.uploaded_bytes = 0
         self.status = "uploading"  # uploading, processing, completed, failed
         self.message = "上传中..."
@@ -65,9 +66,9 @@ class UploadProgress:
             return 30 + self.processing_progress * 0.7
 
 
-def create_upload_progress(upload_id: str, file_name: str, file_size: int) -> UploadProgress:
+def create_upload_progress(upload_id: str, file_name: str, file_size: int, owner_id: Optional[str] = None) -> UploadProgress:
     """创建上传进度记录"""
-    progress = UploadProgress(upload_id, file_name, file_size)
+    progress = UploadProgress(upload_id, file_name, file_size, owner_id=owner_id)
     progress_store[upload_id] = progress
     return progress
 

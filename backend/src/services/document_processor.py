@@ -510,7 +510,17 @@ def get_local_file_path(file_path):
         with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as temp_file:
             temp_path = temp_file.name
         
-        minio_service.download_file(file_path, temp_path)
+        try:
+            minio_service.download_file(file_path, temp_path)
+        except Exception:
+            # 下载失败时清理刚创建的临时文件，避免脏文件残留在临时目录
+            # （load_document 的 finally 清理逻辑在异常传播前不会执行）
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    logger.warning(f"清理下载失败的临时文件失败: {temp_path}")
+            raise
         return temp_path, True
     
     return file_path, False

@@ -57,18 +57,20 @@ class FetchWebpageTool(BaseTool):
                 error=f"抓取失败: {e}",
             )
 
-        if not content:
+        # fetch_content 返回 WebContent 数据类，取其 content 字段（字符串）
+        page_text = content.content if hasattr(content, "content") else str(content)
+        if not page_text:
             return ToolResult(tool_name=self.name, output="网页内容为空或无法解析。")
 
         return ToolResult(
             tool_name=self.name,
             input_arguments=kwargs,
-            output=content[:3000],
+            output=page_text[:3000],
             sources=[{
                 "url": url,
                 "source": "webpage",
                 "title": kwargs.get("title", ""),
-                "page_content": content[:500],
+                "page_content": page_text[:500],
                 "document_id": "",
                 "filename": "fetch_webpage",
                 "chunk_index": 0,

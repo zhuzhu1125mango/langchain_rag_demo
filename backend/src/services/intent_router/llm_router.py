@@ -42,7 +42,7 @@ _INTENT_ROUTER_PROMPT = """你是一名意图分类专家。请根据用户问�
 输出要求：
 1. 只输出一个 JSON 对象，不要 markdown 代码块，不要解释
 2. JSON 字段如下：
-{
+{{
   "needs_kb": 0.0~1.0,
   "needs_web": 0.0~1.0,
   "needs_realtime": 0.0~1.0,
@@ -54,7 +54,7 @@ _INTENT_ROUTER_PROMPT = """你是一名意图分类专家。请根据用户问�
   "clarify_question": "",
   "context_rewrite": "结合历史补全后的标准问题",
   "reasoning": "简短说明理由"
-}
+}}
 
 判断规则：
 - 问候语、闲聊 → direct_llm，所有 needs_* 给低分

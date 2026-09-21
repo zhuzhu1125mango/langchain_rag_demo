@@ -109,8 +109,15 @@ class GenerationEvaluator:
         self,
         answer: str,
         contexts: Sequence[str],
+        mode: str = "strict",
     ) -> Dict[str, Any]:
-        """评估答案对参考上下文的忠实度。"""
+        """评估答案对参考上下文的忠实度。
+
+        mode:
+            strict —— 仅允许严格源自参考信息（默认，用于固定管线/fast 等受控路径）
+            loose  —— 允许结合实际检索信息与自身知识作答（Agent 语义复核用，
+                      多源综合属预期能力而非退化），但不得与参考信息相矛盾。
+        """
         if not answer or not contexts:
             return {"score": 0.0, "reason": "答案或上下文为空"}
 
@@ -121,6 +128,23 @@ class GenerationEvaluator:
                 context=context_text,
                 answer=answer,
             )
+        elif mode == "loose":
+            prompt = f"""你是一名答案质量评估专家。判断以下回答中的事实性陈述是否与给定的参考信息一致（可结合自身知识作答，但不能与参考信息矛盾，也不能编造参考信息明确反驳的事实）。
+
+参考信息：
+{context_text}
+
+回答：
+{answer}
+
+请输出 JSON 格式：{{"score": 0-1 之间的浮点数, "reason": "简短理由"}}
+评分标准：
+- 1.0：所有事实性陈述均与参考信息一致，且无明显编造。
+- 0.7-1.0：回答在参考信息基础上合理补充自身知识，但核心事实没有偏离参考信息。
+- 0.3-0.7：部分事实有依据，部分与参考信息矛盾或无法印证。
+- 0.0：包含与参考信息明显矛盾或凭空伪造的内容。
+中间值按程度判断。补充性知识不算扣分，除非它与参考信息冲突。
+"""
         else:
             prompt = f"""你是一名严格的答案质量评估专家。请判断以下回答是否完全基于参考信息，未引入参考信息之外的内容。
 
@@ -185,6 +209,7 @@ class GenerationEvaluator:
         answer: str,
         question: str,
         contexts: Sequence[str],
+        faithfulness_mode: str = "strict",
     ) -> GenerationEvalResult:
         """同时评估忠实度与相关度。
 
@@ -192,11 +217,12 @@ class GenerationEvaluator:
             answer: 生成的答案。
             question: 用户问题。
             contexts: 参考上下文列表。
+            faithfulness_mode: strict/loose，透传给 evaluate_faithfulness。
 
         Returns:
             GenerationEvalResult: 评估结果。
         """
-        faithfulness_result = await self.evaluate_faithfulness(answer, contexts)
+        faithfulness_result = await self.evaluate_faithfulness(answer, contexts, mode=faithfulness_mode)
         relevance_result = await self.evaluate_relevance(answer, question)
 
         return GenerationEvalResult(

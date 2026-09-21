@@ -258,8 +258,8 @@ def require_owner(owner_id: str, current_user: CurrentUser) -> None:
     规则：
     - 资源 owner_id 与当前用户 ID 必须一致（含 api_key_user，创建资源时
       owner_id 一律记录为当前用户 ID，因此单租户 API Key 形态天然自洽）；
-    - owner_id 为空的遗留数据保持放行，避免历史数据被锁死
-      （可用 scripts/migrate_owner_id.py 补齐）；
+    - owner_id 为空的遗留数据：开发模式兼容放行；生产（Docker）拒绝访问，
+      需用 scripts/migrate_owner_id.py 补齐后访问；
     - 开发模式默认用户（default）在非 Docker 环境放行所有资源。
 
     Args:
@@ -271,7 +271,13 @@ def require_owner(owner_id: str, current_user: CurrentUser) -> None:
     """
     if not current_user.is_authenticated:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="请先登录")
-    if owner_id and owner_id != current_user.user_id:
+    if not owner_id:
+        # 遗留数据（owner_id 为空）：开发模式兼容放行；生产环境收紧拒绝，
+        # 避免无主资源被任意已登录用户访问，须先迁移补齐归属。
+        if settings.IN_DOCKER:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="该资源缺少所有者信息，请迁移补齐后访问")
+        return
+    if owner_id != current_user.user_id:
         # 开发模式默认用户可访问所有资源（向后兼容）
         if current_user.user_id == "default" and not settings.IN_DOCKER:
             return

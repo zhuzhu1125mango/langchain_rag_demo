@@ -38,22 +38,31 @@ class KBRecommender:
         """
         self.rag_chain = rag_chain
 
-    async def recommend_knowledge_bases(self, question: str, top_k: int = 3) -> list:
+    async def recommend_knowledge_bases(
+        self, question: str, top_k: int = 3, kb_ids: list = None
+    ) -> list:
         """
         基于问题自动推荐相关知识库
 
         Args:
             question: 用户问题
             top_k: 返回的知识库数量
+            kb_ids: 候选知识库ID列表。**调用方必须传入当前用户拥有的 KB**：
+                传 None 时检索层将其视为"不限定范围"，会命中全部用户的知识库。
 
         Returns:
             list: 推荐的知识库列表，按相关性排序
         """
+        # 显式传入空列表 = 该用户没有任何可访问的知识库，必须在此短路。
+        # 检索层对空 kb_ids 不加过滤条件（等价于全量检索），继续下传会越权。
+        if kb_ids is not None and len(kb_ids) == 0:
+            return []
+
         if not self.rag_chain._has_vector_store():
             return []
 
         try:
-            docs = await self.rag_chain._retrieve_documents(question, kb_ids=None)
+            docs = await self.rag_chain._retrieve_documents(question, kb_ids=kb_ids)
 
             if not docs:
                 return []

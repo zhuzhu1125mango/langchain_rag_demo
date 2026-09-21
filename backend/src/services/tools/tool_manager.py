@@ -229,9 +229,22 @@ default_tool_manager: Optional[ToolManager] = None
 
 
 def get_tool_manager() -> ToolManager:
-    """获取全局默认工具管理器，首次调用时自动发现所有工具。"""
+    """获取全局默认工具管理器，首次调用时自动发现所有工具。
+
+    发现完成后，同步向意图路由的 ToolMetaRegistry 补注册缺省元数据，
+    保证新插件无需手工维护两处描述。
+    """
     global default_tool_manager
     if default_tool_manager is None:
         default_tool_manager = ToolManager()
         default_tool_manager.discover_tools()
+        try:
+            # 懒导入避免模块加载期循环依赖（intent_router 包导入链较重）
+            from src.services.intent_router.tool_registry import get_tool_meta_registry
+
+            get_tool_meta_registry().ensure_defaults(
+                {t.name: t.description for t in default_tool_manager.registry.list_tools()}
+            )
+        except Exception as e:
+            logger.warning(f"工具元数据自动同步失败（不影响执行）: {e}")
     return default_tool_manager

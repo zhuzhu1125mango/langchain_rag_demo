@@ -1,8 +1,10 @@
 # 通用联网搜索链路优化方案
 
+> ⚠️ 弃用注记（2026-09）：方案以 SearXNG 为默认联网搜索设计，现已迁移至 Tavily（`SEARCH_API_KEY`，`SEARCH_PROVIDER=tavily`）；原文 SearXNG 架构叙述存留为历史。
 > 版本：v1.0
 > 日期：2026-06-27
-> 状态：待确认
+> 状态：**已实施**（2026-09-16 核实，逐项见 §5.1 的落地核对表；仅 `search_types.py` 的
+> `source_id`/`domain` 字段扩展未实现，链路未依赖该字段）
 
 ## 一、背景与目标
 
@@ -510,17 +512,19 @@ LLM Rewriter（1 LLM）→ 多 query 并行 SearXNG → Postprocessor + 交叉�
 
 ### 5.1 新增/修改文件
 
-| 文件 | 动作 | 说明 |
-|---|---|---|
-| `backend/src/services/query_rewriter.py` | 新增 | 独立 Query 改写器，含上下文补全 |
-| `backend/src/services/citation_backfiller.py` | 新增 | 引用补全器，embedding 匹配 |
-| `backend/src/services/search_postprocessor.py` | 修改 | 新增 `extract_numeric_values`、`cross_source_validate`、扩展 `ScoredResult` |
-| `backend/src/services/output_sanitizer.py` | 修改 | 新增 `AnswerVerifier`、`VerificationResult` |
-| `backend/src/services/answer_generator.py` | 修改 | Prompt 改为鼓励引用，新增 `generate_with_citation` |
-| `backend/src/services/web_search_service.py` | 修改 | 接入新 QueryRewriter，`search_multi` 传入 conversation_context |
-| `backend/src/services/rag_chain.py` | 修改 | 整合完整链路 |
-| `backend/src/services/intent_router.py` | 修改 | 新增快速/完整路径分流判断方法 |
-| `backend/src/services/search_types.py` | 修改 | `SearchResult` 可选扩展 source_id/domain 字段 |
+落地核对（2026-09-16，逐项读码核实）：
+
+| 文件 | 动作 | 说明 | 落地情况 |
+|---|---|---|---|
+| `backend/src/services/query_rewriter.py` | 新增 | 独立 Query 改写器，含上下文补全 | ✅ 已存在（504 行） |
+| `backend/src/services/citation_backfiller.py` | 新增 | 引用补全器，embedding 匹配 | ✅ 已存在；调用点 `answer_generator.py:297`、`rag_chain.py:1838` |
+| `backend/src/services/search_postprocessor.py` | 修改 | 新增 `extract_numeric_values`、`cross_source_validate`、扩展 `ScoredResult` | ✅ `ScoredResult:63`、`extract_numeric_values:233`、`cross_source_validate:274` |
+| `backend/src/services/output_sanitizer.py` | 修改 | 新增 `AnswerVerifier`、`VerificationResult` | ✅ `VerificationResult:274`、`AnswerVerifier:300`、`verify:341`；调用点 `rag_chain.py:777` |
+| `backend/src/services/answer_generator.py` | 修改 | Prompt 改为鼓励引用，新增 `generate_with_citation` | ✅ `generate_with_citation:246` |
+| `backend/src/services/web_search_service.py` | 修改 | 接入新 QueryRewriter，`search_multi` 传入 conversation_context | ✅ |
+| `backend/src/services/rag_chain.py` | 修改 | 整合完整链路 | ✅ `citation_backfiller` / `answer_verifier` 在 `_async_init:344-347` 装配并在管线调用 |
+| `backend/src/services/intent_router.py` | 修改 | 新增快速/完整路径分流判断方法 | ⚠️ 路径已改为 `intent_router/` 包；`FAST_PATH` 分流通过 LLM 输出的 `search_pipeline` 字段实现（`models.py:38`、`llm_router.py:170`），非独立判断方法 |
+| `backend/src/services/search_types.py` | 修改 | `SearchResult` 可选扩展 source_id/domain 字段 | ❌ **未实现**（`SearchResult` 仍只有 title/url/content/source/engine；链路未依赖该字段） |
 
 ### 5.2 新增测试文件
 

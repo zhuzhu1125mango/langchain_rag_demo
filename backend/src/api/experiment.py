@@ -4,6 +4,8 @@ A/B测试实验API接口
 提供实验的创建、管理和分析功能
 """
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -11,6 +13,8 @@ from src.auth import get_current_user, CurrentUser
 from src.services.experiment_manager import experiment_manager
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
+
+logger = logging.getLogger("rag_system")
 
 
 class CreateExperimentRequest(BaseModel):
@@ -37,11 +41,13 @@ async def create_experiment(
             name=request.name,
             description=request.description,
             variants=request.variants,
-            metrics=request.metrics
+            metrics=request.metrics,
+            owner_id=current_user.user_id
         )
         return {"success": True, "experiment_id": experiment_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.get("/", summary="获取实验列表")
@@ -51,10 +57,11 @@ async def list_experiments(
 ):
     """获取实验列表，支持状态过滤"""
     try:
-        experiments = await experiment_manager.list_experiments(status=status)
+        experiments = await experiment_manager.list_experiments(status=status, owner_id=current_user.user_id)
         return {"success": True, "data": experiments}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.delete("/batch", summary="批量删除实验")
@@ -64,10 +71,11 @@ async def batch_delete_experiments(
 ):
     """批量删除实验及其关联数据（变体、指标、结果、分流记录）"""
     try:
-        result = await experiment_manager.delete_experiments(request.experiment_ids)
+        result = await experiment_manager.delete_experiments(request.experiment_ids, owner_id=current_user.user_id)
         return {"success": True, "data": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.get("/{experiment_id}", summary="获取实验详情")
@@ -77,7 +85,7 @@ async def get_experiment(
 ):
     """获取指定实验的详细信息"""
     try:
-        experiment = await experiment_manager.get_experiment(experiment_id)
+        experiment = await experiment_manager.get_experiment(experiment_id, owner_id=current_user.user_id)
         if experiment:
             return {"success": True, "data": experiment}
         else:
@@ -85,7 +93,8 @@ async def get_experiment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/{experiment_id}/start", summary="启动实验")
@@ -95,7 +104,7 @@ async def start_experiment(
 ):
     """启动实验"""
     try:
-        success = await experiment_manager.start_experiment(experiment_id)
+        success = await experiment_manager.start_experiment(experiment_id, owner_id=current_user.user_id)
         if success:
             return {"success": True, "message": "实验已启动"}
         else:
@@ -103,7 +112,8 @@ async def start_experiment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/{experiment_id}/stop", summary="停止实验")
@@ -113,7 +123,7 @@ async def stop_experiment(
 ):
     """停止实验"""
     try:
-        success = await experiment_manager.stop_experiment(experiment_id)
+        success = await experiment_manager.stop_experiment(experiment_id, owner_id=current_user.user_id)
         if success:
             return {"success": True, "message": "实验已停止"}
         else:
@@ -121,7 +131,8 @@ async def stop_experiment(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/{experiment_id}/allocate", summary="分配流量")
@@ -136,7 +147,8 @@ async def allocate_traffic(
         variant_id = await experiment_manager.allocate_traffic(
             experiment_id=experiment_id,
             user_id=user_id,
-            session_id=session_id
+            session_id=session_id,
+            owner_id=current_user.user_id
         )
         if variant_id:
             return {"success": True, "variant_id": variant_id}
@@ -145,7 +157,8 @@ async def allocate_traffic(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/{experiment_id}/metrics", summary="记录指标")
@@ -162,11 +175,13 @@ async def record_metric(
             experiment_id=experiment_id,
             variant_id=variant_id,
             metric_name=metric_name,
-            metric_value=metric_value
+            metric_value=metric_value,
+            owner_id=current_user.user_id
         )
         return {"success": True, "message": "指标记录成功"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.get("/{experiment_id}/metrics", summary="获取指标")
@@ -176,10 +191,11 @@ async def get_metrics(
 ):
     """获取实验的指标数据"""
     try:
-        metrics = await experiment_manager.get_metrics(experiment_id)
+        metrics = await experiment_manager.get_metrics(experiment_id, owner_id=current_user.user_id)
         return {"success": True, "data": metrics}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/{experiment_id}/analyze", summary="分析实验")
@@ -189,10 +205,11 @@ async def analyze_experiment(
 ):
     """分析实验结果"""
     try:
-        result = await experiment_manager.analyze_experiment(experiment_id)
+        result = await experiment_manager.analyze_experiment(experiment_id, owner_id=current_user.user_id)
         return {"success": True, "data": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.get("/{experiment_id}/result", summary="获取实验结果")
@@ -202,7 +219,7 @@ async def get_experiment_result(
 ):
     """获取实验的分析结果"""
     try:
-        result = await experiment_manager.get_experiment_result(experiment_id)
+        result = await experiment_manager.get_experiment_result(experiment_id, owner_id=current_user.user_id)
         if result:
             return {"success": True, "data": result}
         else:
@@ -210,4 +227,5 @@ async def get_experiment_result(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("实验操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")

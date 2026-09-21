@@ -20,6 +20,10 @@ class DocumentAnalyzer:
     文档分析器
 
     对文档进行重复检测、质量评估和自动分类。
+
+    注：质量评估与自动分类属于辅助任务，统一走 think=False 的 direct 模型
+    （`model_manager.get_chat_llm`），避免 qwen3:4b 等混合思考模型在结构
+    化小任务上烧长思考链（upload 92%「智能分析」阶段耗时 2-3 分钟的根因）。
     """
 
     def __init__(self, llm, rag_chain):
@@ -27,11 +31,22 @@ class DocumentAnalyzer:
         初始化文档分析器
 
         Args:
-            llm: LLM 实例
+            llm: LLM 实例（保留入参以兼容构造签名；辅助任务实际走 think=False 懒加载）
             rag_chain: RAGChain 实例，用于复用核心检索和相似度能力
         """
         self.llm = llm
         self.rag_chain = rag_chain
+        self._aux_llm = None
+
+    async def _get_aux_llm(self):
+        """懒加载辅助 LLM（think=False，与 GenerationEvaluator/llm_inference 口径一致）。"""
+        if self._aux_llm is None:
+            from src.services.model_manager import model_manager
+
+            self._aux_llm = await model_manager.get_chat_llm(
+                "fast", think=False, temperature=0.0
+            )
+        return self._aux_llm
 
     async def detect_duplicates(self, content: str, kb_id: str = None, threshold: float = 0.85) -> list:
         """
@@ -120,7 +135,8 @@ class DocumentAnalyzer:
         prompt = template.format(content=content[:2000])
 
         try:
-            response = await self.llm.ainvoke(prompt)
+            llm = await self._get_aux_llm()
+            response = await llm.ainvoke(prompt)
 
             content = response.content.strip()
             json_match = re.search(r'\{[\s\S]*\}', content)
@@ -186,7 +202,8 @@ class DocumentAnalyzer:
         prompt = template.format(content=content[:2000])
 
         try:
-            response = await self.llm.ainvoke(prompt)
+            llm = await self._get_aux_llm()
+            response = await llm.ainvoke(prompt)
 
             content = response.content.strip()
             json_match = re.search(r'\{[\s\S]*\}', content)
@@ -208,6 +225,115 @@ class DocumentAnalyzer:
                 "domain": "未知",
                 "summary": "分类失败"
             }
+
+    async def analyze_document(self, content: str) -> dict:
+        """
+        合并文档分类与质量评估为一次 LLM 调用（省一半排队与双 prompt 开销）。
+
+        单次 ainvoke 生成「分类 + 质量」合并 JSON，返回单 dict。
+        分类字段: document_type/topics/domain/summary；
+        质量字段: overall_score/completeness/accuracy/structure/language_quality/relevance/summary/suggestions。
+        overall_grade 不在 LLM 模板内，由本方法按 overall_score 推导。
+        失败/解析异常时返回兜底（各 50 分 + 分类兜底），不抛异常。
+
+        Args:
+            content: 文档内容
+
+        Returns:
+            dict: 分类 + 质量评估合并结果
+        """
+        template = """
+你是一个文档智能分析专家，请一次性完成文档的「分类」与「质量评估」两项任务：
+
+文档内容:
+{content}
+
+【任务一：文档分类】
+1. 文档类型: 技术文档/产品文档/报告/论文/手册/指南/其他
+2. 主题标签: 最多5个关键词
+3. 适用领域: 描述适用的业务领域
+4. 内容摘要: 简短摘要
+
+【任务二：质量评估】
+按 0-100 评分：
+1. 完整性(completeness): 内容是否完整覆盖主题
+2. 准确性(accuracy): 信息是否准确可靠
+3. 结构清晰度(structure): 组织结构是否清晰
+4. 语言质量(language_quality): 语言表达是否规范
+5. 相关性(relevance): 内容是否与常见知识库主题相关
+再给出综合评分 overall_score、简短评估总结 summary、若干个改进建议 suggestions。
+
+请以单个JSON对象返回全部结果：
+{{
+    "document_type": "文档类型",
+    "topics": ["标签1", "标签2", ...],
+    "domain": "适用领域",
+    "summary": "内容摘要与评估总结",
+    "overall_score": 综合评分,
+    "completeness": 完整性评分,
+    "accuracy": 准确性评分,
+    "structure": 结构清晰度评分,
+    "language_quality": 语言质量评分,
+    "relevance": 相关性评分,
+    "suggestions": ["改进建议1", "改进建议2"]
+}}
+
+请直接返回JSON，不要添加其他内容。
+"""
+        prompt = template.format(content=content[:2000])
+
+        try:
+            llm = await self._get_aux_llm()
+            response = await llm.ainvoke(prompt)
+
+            content = response.content.strip()
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                result = json.loads(json_match.group())
+                return self._derive_grade(result)
+            else:
+                return self._fallback_analyze("无法解析评估结果")
+        except Exception as e:
+            logger.error(f"文档智能分析合并失败: {str(e)}", exc_info=True)
+            return self._fallback_analyze("评估失败")
+
+    @staticmethod
+    def _derive_grade(result: dict) -> dict:
+        """按 overall_score 推导 overall_grade（档位与 api/document.py 现有实现逐字一致）。"""
+        score = result.get("overall_score")
+        try:
+            score = float(score or 0)
+        except (TypeError, ValueError):
+            score = 0
+        if not result.get("overall_grade"):
+            if score >= 90:
+                result["overall_grade"] = "优秀"
+            elif score >= 80:
+                result["overall_grade"] = "良好"
+            elif score >= 70:
+                result["overall_grade"] = "中等"
+            elif score >= 60:
+                result["overall_grade"] = "及格"
+            else:
+                result["overall_grade"] = "需改进"
+        return result
+
+    @staticmethod
+    def _fallback_analyze(summary_text: str) -> dict:
+        return {
+            "document_type": "其他",
+            "topics": ["未分类"],
+            "domain": "未知",
+            "summary": summary_text,
+            "overall_score": 50,
+            "completeness": 50,
+            "accuracy": 50,
+            "structure": 50,
+            "language_quality": 50,
+            "relevance": 50,
+            "overall_grade": "及格",
+            "suggestions": ["建议重新评估"],
+        }
 
     @staticmethod
     def analyze_document_content(content: str) -> tuple:

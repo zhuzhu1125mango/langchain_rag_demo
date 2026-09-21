@@ -16,6 +16,13 @@ logger = logging.getLogger("intent_router.context")
 # 常见中文代词与指示词
 _PRONOUNS = {"它", "这", "那", "这个", "那个", "其", "此", "该", "上面", "刚才", "之前"}
 
+# 单字代词独立出现匹配：左侧非汉字（行首/空格/标点/非中文字符）才视为独立词，
+# 避免命中"应该"、"这个"等合成词内部。
+_SINGLE_PRONOUN_RE = {
+    p: re.compile(rf"(?<![\u4e00-\u9fff]){re.escape(p)}")
+    for p in ("它", "这", "那", "其", "此", "该")
+}
+
 # 用于从历史消息中提取主题实体的简单模式
 _TOPIC_STOPWORDS = {
     "是", "的", "了", "在", "和", "与", "或", "有", "没有", "多少", "什么",
@@ -148,11 +155,20 @@ class ConversationContextBuilder:
             return question
 
         # 3. 替换首个出现的代词为主题
+        # 单字代词（它/这/那/其/此/该）常作为合成词的一部分（"应该"、"这个"），
+        # 必须要求左侧是词边界（行首/空格/标点/非汉字）才替换，避免破坏文本。
         for p in sorted(_PRONOUNS, key=len, reverse=True):
-            if p in question:
+            if p not in question:
+                continue
+            if len(p) == 1:
+                match = _SINGLE_PRONOUN_RE[p].search(question)
+                if not match:
+                    continue  # 非独立出现，跳过该代词
+                resolved = _SINGLE_PRONOUN_RE[p].sub(topic, question, count=1)
+            else:
                 resolved = question.replace(p, topic, 1)
-                logger.debug(f"指代消解: '{question}' -> '{resolved}' (topic={topic})")
-                return resolved
+            logger.debug(f"指代消解: '{question}' -> '{resolved}' (topic={topic})")
+            return resolved
 
         return question
 

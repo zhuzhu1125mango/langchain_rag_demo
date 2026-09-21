@@ -59,8 +59,11 @@ async def create_category(
     existing = result.scalar_one_or_none()
     if existing:
         raise HTTPException(status_code=400, detail="分类名称已存在")
-    
-    parent_id = uuid.UUID(data.parent_id) if data.parent_id else None
+
+    try:
+        parent_id = uuid.UUID(data.parent_id) if data.parent_id else None
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="无效的父分类ID")
     
     category = Category(
         name=data.name,

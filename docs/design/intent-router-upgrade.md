@@ -297,3 +297,26 @@ INTENT_ROUTER_LLM_MODEL=                  # 留空则使用 FAST_LLM_MODEL_NAME
 ## 下一步
 
 待确认本方案后，进入 Phase 1 实现：先实现 `LLMRouter` + `ConfidenceGate`，并更新 `IntentRouter.route()` 的三层决策流程。
+
+---
+
+## 11. 实施修正记录（2026-09-11，Agent 演进联调）
+
+运行时联调发现两处与原设计偏差的路由问题，已在 `backend/src/services/intent_router/__init__.py` 修复：
+
+### 11.1 规则冲突裁决跳过显式 search_mode（对 §4.1 的修正）
+
+原设计：规则冲突时无条件转 LLM 裁决。实际缺陷：当用户显式指定 `search_mode=function_calling|agent` 时，模式已由 decision_pipeline 强制生效，冲突裁决结果不影响管线模式，纯属浪费——且 4GB VRAM 下模型切换会导致 `INTENT_ROUTER_LLM_TIMEOUT`（现为 60s）级别的超时空等，实测把首字延迟拖到 105s。
+
+修正：冲突分支增加前置条件 `search_mode not in ("function_calling", "agent")`；显式模式下直接落后续规则（research 规则对显式模式同样命中 `AGENT_RESEARCH`）。simple 模式行为不变。
+
+### 11.2 实时性关键词子串误命中（规则层精度修正）
+
+`REALTIME_KEYWORDS` 的朴素子串匹配存在碰撞：「对比分析」包含「比分」（「对比排名」包含「排名」同理），导致 KB 研究类问题被误判为强时效性、返回 DIRECT_LLM 兜底理由。
+
+修正：`is_realtime_question` 匹配前先剔除「对比」前缀；「对比今天和昨天的新闻」类真时效问题不受影响（剔除后仍命中「新闻」）。
+
+### 11.3 回归验证
+
+- `tests/test_intent_router.py` 新增 2 用例：显式模式跳过 LLM 裁决、simple 模式保持裁决；69 用例全绿
+- 联调实测：混合模式意图路由 60s → 1ms，决策理由恢复为「复杂研究性问题，使用 Agent 多步搜索」

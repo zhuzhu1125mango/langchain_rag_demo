@@ -179,7 +179,7 @@ class TestRebuild:
             yield FakeDB([])
 
         monkeypatch.setattr("src.database.async_session_maker", lambda: fake_session())
-        monkeypatch.setattr("src.services.progress_manager.create_upload_progress", lambda *a: None)
+        monkeypatch.setattr("src.services.progress_manager.create_upload_progress", lambda *a, **k: None)
         monkeypatch.setattr("src.services.progress_manager.update_upload_progress", lambda *a, **k: None)
         monkeypatch.setattr("src.services.notification_service.notify_task_progress", noop)
         monkeypatch.setattr("src.services.notification_service.notify_task_completed", noop)

@@ -89,6 +89,7 @@ dependencies = [
     # P1-1 JWT 多用户认证
     "pyjwt>=2.8,<3",
     "bcrypt>=4.0,<5",
+    "tavily>=1.1.0",
 ]
 
 [project.scripts]

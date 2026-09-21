@@ -353,7 +353,23 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             int: 实际插入的切片数量。
         """
         contents = [doc.page_content for doc in documents]
-        embeddings_list = await self.embeddings.aembed_documents(contents)
+        # A1：整篇一次性 aembed_documents 在超大 batch 下易 OOM/超时；改为分片 + 限并发
+        # （Semaphore 2）跑子批 aembed_documents，降低峰值并可能提速。aembed 返回与输入同序，
+        # 按子批 flat 回原序，保证下游 zip(documents, embedding) 一一对应。
+        _EMBED_SUB_BATCH = 32
+        if len(contents) > _EMBED_SUB_BATCH:
+            _sem = asyncio.Semaphore(2)
+
+            async def _embed_sub(batch):
+                async with _sem:
+                    return await self.embeddings.aembed_documents(batch)
+
+            _sub_lists = await asyncio.gather(
+                *(_embed_sub(contents[i:i + _EMBED_SUB_BATCH]) for i in range(0, len(contents), _EMBED_SUB_BATCH))
+            )
+            embeddings_list = [v for _sl in _sub_lists for v in _sl]
+        else:
+            embeddings_list = await self.embeddings.aembed_documents(contents)
 
         # 阶段一：计算 BM25 sparse embedding
         sparse_embeddings = None
@@ -361,7 +377,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             try:
                 await self._ensure_bm25_fitted(contents)
                 sparse_embeddings = await asyncio.to_thread(self.bm25_ef.encode_documents, contents)
-                sparse_embeddings = self._convert_sparse_embeddings(sparse_embeddings)
+                # B2：csr->dict 转换为纯 CPU 密集，移入线程池避免阻塞事件循环
+                sparse_embeddings = await asyncio.to_thread(self._convert_sparse_embeddings, sparse_embeddings)
             except Exception as e:
                 logger.warning(f"BM25 sparse embedding 计算失败，跳过 sparse 字段插入: {e}")
                 sparse_embeddings = None
@@ -496,7 +513,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         """
         return await self.search_dense(query, k=k, document_ids=document_ids, kb_ids=kb_ids)
 
-    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
+    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
         """Dense 向量检索通道。
 
         Args:
@@ -509,7 +526,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             "metric_type": "IP",
             "params": {"ef": settings.milvus.MILVUS_EF}
         }
-        filter_expr = self._build_filter_expr(document_ids, kb_ids)
+        filter_expr = self._build_filter_expr(document_ids, kb_ids, source_kind=source_kind)
 
         results = await self.client.search(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
@@ -522,7 +539,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         )
         return self._parse_search_results(results)
 
-    async def search_sparse(self, query, k=3, document_ids=None, kb_ids=None):
+    async def search_sparse(self, query, k=3, document_ids=None, kb_ids=None, source_kind=None):
         """Sparse BM25 关键词检索通道。
 
         若 BM25 未启用或初始化失败，返回空列表并记录日志。
@@ -544,7 +561,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             "metric_type": "IP",
             "params": {"drop_ratio_search": 0.2}
         }
-        filter_expr = self._build_filter_expr(document_ids, kb_ids)
+        filter_expr = self._build_filter_expr(document_ids, kb_ids, source_kind=source_kind)
 
         try:
             results = await self.client.search(
@@ -561,7 +578,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             logger.warning(f"Sparse 检索失败: {e}")
             return []
 
-    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None):
+    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
         """混合检索入口：dense + sparse，返回经 RRF 融合与 Cross-Encoder 重排序后的结果。
 
         Args:
@@ -570,6 +587,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             document_ids: 可选，限定只在这些文档中检索。
             kb_ids: 可选，限定只在这些知识库中检索。
             query_embedding: 预计算的 query 向量，传入时跳过 aembed_query 避免重复计算。
+            source_kind: 可选，限定切片来源类型（如 "wiki" 只检索编译页）。
 
         Returns:
             list[dict]: 包含额外字段 `dense_score` / `sparse_score` / `rrf_score` / `rerank_score` 的结果列表。
@@ -578,8 +596,11 @@ class MilvusService(AsyncSingleton["MilvusService"]):
 
         top_k = max(k, settings.processing.KB_HYBRID_SEARCH_TOP_K)
 
-        dense_results = await self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding)
-        sparse_results = await self.search_sparse(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids)
+        # B2：dense/sparse 检索彼此独立，并行执行减少 IO 串行等待
+        dense_results, sparse_results = await asyncio.gather(
+            self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind),
+            self.search_sparse(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind),
+        )
 
         fused = reciprocal_rank_fusion(
             {"dense": dense_results, "sparse": sparse_results},
@@ -597,6 +618,62 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         # C1：RRF 融合后先截断到 rerank 候选数再送打分，避免对全部融合候选逐条调用重排序
         rerank_n = max(k, settings.processing.KB_HYBRID_RERANK_TOP_K)
         reranked = await rerank_results(query, fused[:rerank_n], top_k=k)
+        return reranked
+
+    async def search_hybrid_multi(self, queries, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+        """多查询并行混合检索（P2-2）：N query × (dense+sparse) → 跨查询 RRF → 单次 rerank。
+
+        与 search_hybrid 的区别：接收改写后的多查询列表并行召回，
+        同一 chunk 命中多个查询通道时 rrf_score 累加（多查询共识加分）；
+        rerank 语义基准固定用 queries[0]（原始/消解后问题），rerank 调用次数不变。
+
+        Args:
+            queries: 查询列表，第一个元素必须为原始（或消解后）问题。
+            k: 最终返回结果数量上限。
+            document_ids: 可选，限定只在这些文档中检索。
+            kb_ids: 可选，限定只在这些知识库中检索。
+            query_embedding: queries[0] 的预计算向量（来自语义缓存查找），传入时跳过重复计算。
+
+        Returns:
+            list[dict]: 字段同 search_hybrid。
+        """
+        from src.services.hybrid_search import reciprocal_rank_fusion, rerank_results
+
+        queries = [q for q in queries if q and q.strip()]
+        if not queries:
+            return []
+        top_k = max(k, settings.processing.KB_MULTI_QUERY_CHANNEL_TOP_K)
+
+        # N × (dense + sparse) 并行召回；dense 通道失败不阻塞其他查询
+        tasks = []
+        for i, q in enumerate(queries):
+            emb = query_embedding if i == 0 else None
+            tasks.append(self.search_dense(q, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=emb, source_kind=source_kind))
+            tasks.append(self.search_sparse(q, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind))
+        channel_outputs = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # 单通道失败降级：可用通道照常融合（sparse 通道内部已自行兜底为空列表）
+        channel_results = {}
+        for i in range(len(queries)):
+            dense_res, sparse_res = channel_outputs[i * 2], channel_outputs[i * 2 + 1]
+            if isinstance(dense_res, Exception):
+                logger.warning(f"多查询 dense 通道失败（query {i}），降级跳过: {dense_res}")
+                dense_res = []
+            channel_results[f"q{i}_dense"] = dense_res
+            channel_results[f"q{i}_sparse"] = sparse_res
+
+        fused = reciprocal_rank_fusion(channel_results, k=settings.processing.KB_RRF_K)
+
+        # rerank 关闭或未配置模型时，直接按 RRF 分数截断（与单查询路径行为一致）
+        if (
+            not settings.processing.KB_RERANK_ENABLED
+            or not settings.processing.KB_RERANK_MODEL
+        ):
+            ranked = sorted(fused, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
+            return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in ranked[:k]]
+
+        rerank_n = max(k, settings.processing.KB_HYBRID_RERANK_TOP_K)
+        reranked = await rerank_results(queries[0], fused[:rerank_n], top_k=k)
         return reranked
 
     # 过滤表达式仅接受 UUID 格式的 ID（防御表达式注入的兜底校验）
@@ -620,13 +697,22 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         return v
 
     @classmethod
-    def _build_filter_expr(cls, document_ids=None, kb_ids=None):
-        """根据 document_ids 与 kb_ids 构建 Milvus filter 表达式。"""
+    def _build_filter_expr(cls, document_ids=None, kb_ids=None, source_kind=None):
+        """根据 document_ids、kb_ids 与 source_kind 构建 Milvus filter 表达式。
+
+        source_kind 仅允许字母/数字/下划线（≤16 字符，与 schema 一致），
+        防止拼接注入篡改过滤语义。
+        """
         conditions = []
         if kb_ids and len(kb_ids) > 0:
             conditions.append(f"kb_id in [{','.join([f'\"{cls._safe_id(kb)}\"' for kb in kb_ids])}]")
         if document_ids and len(document_ids) > 0:
             conditions.append(f"document_id in [{','.join([f'\"{cls._safe_id(doc_id)}\"' for doc_id in document_ids])}]")
+        if source_kind:
+            sk = str(source_kind)
+            if len(sk) > 16 or not all(c.isalnum() or c == "_" for c in sk):
+                raise ValueError(f"非法 source_kind，已拒绝进入过滤表达式: {sk[:32]}")
+            conditions.append(f'source_kind == "{sk}"')
         return " && ".join(conditions) if conditions else None
 
     @staticmethod

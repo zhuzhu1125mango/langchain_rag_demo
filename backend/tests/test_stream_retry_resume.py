@@ -55,10 +55,10 @@ def _make_chain(llm):
     # 测试脚本统一注入同一 FakeLLM，保持新旧路径行为一致
     chain.llm_direct = llm
 
-    async def _enhance(question, history):
+    async def _enhance(question, history, session_id=""):
         return {"resolved_question": question, "enhanced_context": ""}
 
-    async def _summary(history):
+    async def _summary(history, session_id=""):
         return ""
 
     chain.context_enhancer = SimpleNamespace(

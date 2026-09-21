@@ -29,12 +29,15 @@
 
 ### 1.2 数据库依赖
 
-| 服务 | 版本 | 默认端口 | 说明 |
+| 服务 | 版本 | 宿主机端口（dev / prod） | 说明 |
 |------|------|----------|------|
-| PostgreSQL | >= 15 | 5433 (映射端口) | 业务数据库 |
-| MinIO | >= 2024 | 9000 | 对象存储 |
-| Milvus | >= 2.6 | 19530 | 向量数据库 |
-| Redis | >= 7.0 | 6379 | 缓存服务 |
+| PostgreSQL | >= 15 | 5433 / 5434 | 业务数据库 |
+| MinIO | >= RELEASE.2025-09-07 | 9000 / 9002 | 对象存储 |
+| Milvus | >= 2.6 | 19530 / 19531 | 向量数据库 |
+| Redis | >= 7.0 | 6379 / 6380 | 缓存服务 |
+
+> 均为 compose 托管，通常无需本机另行安装；上表用于排查端口冲突。
+> 完整对照见文末「附录：端口汇总」。
 
 ### 1.3 资源要求
 
@@ -64,10 +67,30 @@
 
 ### 2.2 核心优势
 
-- ✅ **数据隔离**: 开发测试数据不会影响生产数据
+- ✅ **数据隔离**: 开发测试数据不会影响生产数据（`name: rag-dev` / `rag-prod` 隔离容器与卷）
 - ✅ **安全可控**: 生产环境必须手动配置强密码
 - ✅ **灵活切换**: 一键启动脚本自动切换环境
-- ⚠️ **端口冲突**: 两个环境使用相同端口（5433/8000/8080 等），**同一时间只能运行一个环境**
+- ✅ **端口全错开**: 生产栈所有宿主机端口与开发栈逐一错开（详见 §2.2.1），**两个环境可同时运行**
+- ✅ **生产仅回环暴露**: 生产栈除前端 `80` 外全部绑定 `127.0.0.1`，基础设施端口不对外网开放
+
+#### 2.2.1 端口对照
+
+| 服务 | 开发栈（`docker-compose.dev.yml`） | 生产栈（`docker-compose.yml`） |
+|---|---|---|
+| 前端 | 5173（Vite dev server） | **80**（nginx，唯一对外端口） |
+| 后端 API | 8000 | 127.0.0.1:8001 |
+| PostgreSQL | 5433 | 127.0.0.1:5434 |
+| Redis | 6379 | 127.0.0.1:6380 |
+| MinIO S3 API | 9000 | 127.0.0.1:9002 |
+| MinIO 控制台 | 9001 | 127.0.0.1:9003 |
+| Milvus gRPC | 19530 | 127.0.0.1:19531 |
+| Milvus 指标 | 9091 | 127.0.0.1:9092 |
+| Prometheus | 9090 | 127.0.0.1:9094 |
+| Alertmanager | —（dev 栈未部署） | 127.0.0.1:9095 |
+| Grafana | 3000 | 127.0.0.1:3001 |
+
+> 容器**内部**端口两栈一致（后端 8000、Milvus 19530 等），差异仅在宿主机映射。
+> 生产栈绑定回环地址意味着远程运维需走 SSH 隧道或反向代理。
 
 ### 2.3 环境切换流程
 
@@ -102,10 +125,15 @@ cd langchain_rag_demo
 # 一键启动开发环境
 .\scripts\start-dev.bat
 
-# 或手动执行
-copy .env.dev .env
+# 或手动执行（无需复制 .env：compose 直接引用 .env.dev）
 docker-compose -f docker-compose.dev.yml up -d
 ```
+
+> ⚠️ **本仓库没有 `.env` 文件，也不需要创建。** 配置分两层：
+> - **容器内**：compose 通过 `env_file: .env.dev` / `.env.prod` 注入（见 `docker-compose*.yml`）
+> - **本地裸跑**：`backend/src/config.py` 按 `APP_ENV` 选择 `.env.{APP_ENV}`（默认 `dev` 读 `.env.dev`）
+>
+> 旧版文档中的 `copy .env.dev .env` 步骤已废弃。
 
 ### 3.2 启动依赖服务
 
@@ -167,7 +195,6 @@ pnpm dev
 | MinIO 控制台 | http://localhost:9001 | 对象存储管理 |
 | Milvus | localhost:19530 | 向量数据库 |
 | Redis | localhost:6379 | 缓存服务 |
-| SearXNG | http://localhost:8080 | 聚合搜索引擎 |
 | Prometheus | http://localhost:9090 | 监控指标 |
 | Grafana | http://localhost:3000 | 监控面板 |
 
@@ -194,9 +221,8 @@ cd langchain_rag_demo
 # 一键启动生产环境（会提示确认）
 .\scripts\start-prod.bat
 
-# 或手动执行
-copy .env.prod .env
-docker-compose up -d
+# 或手动执行（无需复制 .env：compose 直接引用 .env.prod）
+docker compose -f docker-compose.yml up -d
 ```
 
 ### 4.2 首次部署准备
@@ -221,9 +247,9 @@ GF_SECURITY_ADMIN_PASSWORD=your_secure_grafana_password_here
 # 安全密钥（必须设置为强密钥，否则后端启动失败）
 SECRET_KEY=your_very_long_random_secret_key_here_min_32_chars
 
-# 联网搜索配置（使用内置 SearXNG 时保持默认即可）
-SEARCH_PROVIDER=searxng
-SEARXNG_BASE_URL=http://searxng:8080
+# 联网搜索配置（默认走 Tavily 在线 API）
+SEARCH_PROVIDER=tavily
+SEARCH_API_KEY=your_tavily_api_key
 ```
 
 #### 4.2.2 验证配置
@@ -248,20 +274,22 @@ docker-compose logs -f
 
 ### 4.4 访问地址
 
-| 服务 | 地址 | 用户名/密码 |
+| 服务 | 宿主机地址 | 用户名/密码 |
 |------|------|-------------|
-| 前端界面 | http://localhost | - |
-| 后端 API | http://localhost:8000 | - |
-| API 文档 | http://localhost:8000/docs | - |
-| PostgreSQL | localhost:5433 | 见 .env.prod |
-| MinIO 控制台 | http://localhost:9001 | 见 .env.prod |
-| Milvus | localhost:19530 | - |
-| Redis | localhost:6379 | 见 .env.prod |
-| SearXNG | http://localhost:8080 | - |
-| Prometheus | http://localhost:9090 | - |
-| Alertmanager | http://localhost:9093 | - |
-| Grafana | http://localhost:3000 | admin / 见 .env.prod |
+| 前端界面 | http://localhost（**80**，唯一对外端口） | - |
+| 后端 API | http://localhost:**8001** | - |
+| API 文档 | http://localhost:**8001**/docs | - |
+| PostgreSQL | localhost:**5434** | 见 .env.prod |
+| MinIO 控制台 | http://localhost:**9003** | 见 .env.prod |
+| Milvus | localhost:**19531** | - |
+| Redis | localhost:**6380** | 见 .env.prod |
+| Prometheus | http://localhost:**9094** | - |
+| Alertmanager | http://localhost:**9095** | - |
+| Grafana | http://localhost:**3001** | admin / 见 .env.prod |
 | PostgreSQL Exporter | localhost:9187（容器内） | 仅 Prometheus 通过 Docker 网络访问 |
+
+> ⚠️ 除前端 `80` 外，上述端口全部绑定 `127.0.0.1`，**只能从宿主机本机访问**；
+> 远程运维需走 SSH 隧道或反向代理。
 
 ### 4.5 停止生产环境
 
@@ -281,38 +309,41 @@ docker-compose down -v
 
 `docker-compose.dev.yml` 包含以下服务：
 
-| 服务 | 镜像 | 端口 | 数据卷 | 说明 |
-|------|------|------|--------|------|
-| postgres-dev | postgres:16.14 | 5433:5432 | postgres_data_dev | 开发数据库 |
-| minio-dev | minio/minio:latest | 9000-9001 | minio_data_dev | 开发对象存储 |
-| milvus-standalone-dev | milvusdb/milvus:v2.6.17 | 19530 | milvus_data_dev | 开发向量数据库 |
-| etcd-dev | quay.io/coreos/etcd:v3.5.30 | - | etcd_data_dev | Milvus 元数据 |
-| redis-dev | redis:7.2-alpine | 6379 | redis_data_dev | 开发缓存服务 |
-| searxng-dev | searxng/searxng:latest | 8080 | - | 开发聚合搜索引擎 |
-| prometheus-dev | prom/prometheus:v3.5.0 | 9090 | prometheus_data_dev | 监控指标采集 |
-| grafana-dev | grafana/grafana:12.0.2 | 3000 | grafana_data_dev | 监控面板 |
-| backend-dev | - | 8000 | - | 后端 API 服务 |
-| frontend-dev | - | 5173 | - | 前端界面 |
-| postgres-exporter-dev | prometheuscommunity/postgres-exporter:latest | 9187 | - | PostgreSQL 指标导出 |
+> 下表「服务」列为 **Compose 服务名**（用于 `docker compose` 命令），
+> 「容器名」为 `container_name`（用于 `docker exec` 等）。两者不同，勿混用。
+
+| 服务（Compose 服务名） | 容器名 | 镜像 | 宿主机端口 | 数据卷 | 说明 |
+|------|------|------|--------|--------|------|
+| postgres | postgres-dev | postgres:16.14 | 5433:5432 | postgres_data_dev | 开发数据库 |
+| minio | minio-dev | minio/minio:RELEASE.2025-09-07T16-13-09Z | 9000:9000（S3）/ 9001:9001（控制台） | minio_data_dev | 开发对象存储 |
+| milvus-standalone | milvus-standalone-dev | milvusdb/milvus:v2.6.17 | 19530:19530 / 9091:9091 | milvus_data_dev | 开发向量数据库 |
+| etcd | etcd-dev | quay.io/coreos/etcd:v3.5.30 | - | etcd_data_dev | Milvus 元数据 |
+| redis | redis-dev | redis:7.2-alpine | 6379:6379 | redis_data_dev | 开发缓存服务 |
+| prometheus | prometheus-dev | prom/prometheus:v3.5.0 | 9090:9090 | prometheus_data_dev | 监控指标采集 |
+| grafana | grafana-dev | grafana/grafana:12.0.2 | 3000:3000 | grafana_data_dev | 监控面板 |
+| backend | backend-dev | - | 8000:8000 | - | 后端 API 服务 |
+| frontend | frontend-dev | - | 5173:5173 | - | 前端界面（Vite dev server） |
+| postgres-exporter | postgres-exporter-dev | prometheuscommunity/postgres-exporter:v0.20.1 | 9187 | - | PostgreSQL 指标导出 |
+
+> dev 栈**未部署** Alertmanager。
 
 ### 5.2 生产环境 Docker Compose 服务说明
 
-`docker-compose.yml` 包含以下服务：
+`docker-compose.yml` 包含以下服务（服务名与 dev 栈**相同**，仅容器名与卷不同）：
 
-| 服务 | 镜像 | 端口 | 数据卷 | 说明 |
-|------|------|------|--------|------|
-| backend-prod | - | 8000 | - | 后端 API 服务 |
-| frontend-prod | - | 80 | - | 前端界面 |
-| postgres-prod | postgres:16.14 | 5433:5432 | postgres_data_prod | 生产数据库 |
-| minio-prod | minio/minio:latest | 9000-9001 | minio_data_prod | 生产对象存储 |
-| milvus-standalone-prod | milvusdb/milvus:v2.6.17 | 19530 | milvus_data_prod | 生产向量数据库 |
-| etcd-prod | quay.io/coreos/etcd:v3.5.30 | - | etcd_data_prod | Milvus 元数据 |
-| redis-prod | redis:7.2-alpine | 6379 | redis_data_prod | 生产缓存服务 |
-| searxng-prod | searxng/searxng:latest | 8080 | - | 生产聚合搜索引擎 |
-| prometheus-prod | prom/prometheus:v3.5.0 | 9090 | prometheus_data_prod | 监控指标采集 |
-| grafana-prod | grafana/grafana:12.0.2 | 3000 | grafana_data_prod | 监控面板 |
-| alertmanager-prod | prom/alertmanager:v0.29.0 | 9093 | alertmanager_data_prod | 告警管理 |
-| postgres-exporter-prod | prometheuscommunity/postgres-exporter:latest | 9187 | - | PostgreSQL 指标导出 |
+| 服务（Compose 服务名） | 容器名 | 镜像 | 宿主机端口 | 数据卷 | 说明 |
+|------|------|------|--------|--------|------|
+| backend | backend-prod | - | 127.0.0.1:8001:8000 | - | 后端 API 服务 |
+| frontend | frontend-prod | - | **80:80**（唯一对外端口） | - | 前端界面（nginx） |
+| postgres | postgres-prod | postgres:16.14 | 127.0.0.1:5434:5432 | postgres_data_prod | 生产数据库 |
+| minio | minio-prod | minio/minio:RELEASE.2025-09-07T16-13-09Z | 127.0.0.1:9002:9000 / 9003:9001 | minio_data_prod | 生产对象存储 |
+| milvus-standalone | milvus-standalone-prod | milvusdb/milvus:v2.6.17 | 127.0.0.1:19531:19530 / 9092:9091 | milvus_data_prod | 生产向量数据库 |
+| etcd | etcd-prod | quay.io/coreos/etcd:v3.5.30 | - | etcd_data_prod | Milvus 元数据 |
+| redis | redis-prod | redis:7.2-alpine | 127.0.0.1:6380:6379 | redis_data_prod | 生产缓存服务 |
+| prometheus | prometheus-prod | prom/prometheus:v3.5.0 | 127.0.0.1:9094:9090 | prometheus_data_prod | 监控指标采集 |
+| grafana | grafana-prod | grafana/grafana:12.0.2 | 127.0.0.1:3001:3000 | grafana_data_prod | 监控面板 |
+| alertmanager | alertmanager-prod | prom/alertmanager:v0.29.0 | 127.0.0.1:9095:9093 | alertmanager_data_prod | 告警管理 |
+| postgres-exporter | postgres-exporter-prod | prometheuscommunity/postgres-exporter:v0.20.1 | 9187 | - | PostgreSQL 指标导出 |
 
 ### 5.3 常用命令
 
@@ -446,8 +477,7 @@ services:
 | `APP_ENV` | 不设置 | Docker 部署不设置；非 Docker 生产部署必设 `production` | 否 |
 | `MILVUS_REBUILD_ON_MISMATCH` | `false` | `false`（除非已确认可丢弃向量数据） | 否 |
 | `ADMIN_KEY` | 不设置（管理接口仅限开发模式） | 建议设置；未设置时管理接口一律 403 | ✅ |
-| `SEARCH_PROVIDER` | `searxng` | `searxng` | 否 |
-| `SEARXNG_BASE_URL` | `http://localhost:8080` | `http://searxng:8080` | 否 |
+| `SEARCH_PROVIDER` | `tavily` | `tavily` | 否 |
 | `GF_SECURITY_ADMIN_PASSWORD` | `admin` | **必须手动设置** | ✅ |
 | `TITLE_GENERATION_ENABLED` | `true` | `true` | 否 |
 | `TITLE_MAX_LENGTH` | `30` | `30` | 否 |
@@ -455,8 +485,8 @@ services:
 | `TITLE_GENERATION_MODEL` | 空 | 空 | 否 |
 
 > **说明**：
-> - `SEARXNG_BASE_URL`：本地（非 Docker）开发使用 `http://localhost:8080`（见 `.env.dev` / `.env.example`）；Docker 模式下后端容器通过 `docker-compose.dev.yml` / `docker-compose.yml` 硬编码为 `http://searxng:8080`，`.env` 中的值不会生效。
-> - SearXNG 的 `redis: url: false`（见 `configs/searxng/settings.yml`）显式关闭 SearXNG 自身的 Redis 限流缓存，与项目 Redis 缓存用途相互独立，无需修改。
+> - `SEARCH_PROVIDER` 默认 `tavily`，需在 `.env` 中配置有效的 `SEARCH_API_KEY`；若切换为 `searxng` / `duckduckgo` 则无需 Key。
+> - `SEARCH_API_KEY`：Tavily 在线 API Key（`SEARCH_PROVIDER=tavily` 时必填），请通过 `tavily.com` 获取。
 
 ### 6.4.1 存量库升级：sessions.messages 列迁移 JSONB
 
@@ -488,9 +518,10 @@ python scripts/migrate_session_messages_jsonb.py
 `X-Admin-Key` 头（常量时间比较）；生产模式未配置时一律 403；开发模式放行。
 
 **基础设施端口**：生产编排（`docker-compose.yml`）中 Redis/PostgreSQL/MinIO/
-Milvus/SearXNG/Prometheus/Alertmanager/Grafana 的宿主机端口仅绑定
-`127.0.0.1`，对外只暴露 backend(8000) 与 frontend(80)；远程运维走 SSH
-隧道或反向代理。
+Milvus/Prometheus/Alertmanager/Grafana **以及 backend** 的宿主机端口
+均仅绑定 `127.0.0.1`，**对外只暴露 frontend(80)**；远程运维走 SSH
+隧道或反向代理。后端在生产映射为 **8001**（容器内仍为 8000），
+经 nginx 的 `/api/` 反代访问。
 
 ### 6.5 配置检查清单
 
@@ -539,11 +570,10 @@ docker-compose exec postgres psql -U prod_user -d app_prod -c "SELECT 1"
 
 ```env
 # 搜索引擎：duckduckgo / searxng / tavily
-SEARCH_PROVIDER=searxng
+SEARCH_PROVIDER=tavily
 
-# SearXNG 私有化部署地址（使用 searxng 时必填）
-SEARXNG_BASE_URL=http://searxng:8080
-SEARXNG_TIMEOUT=10
+# Tavily 在线 API Key（SEARCH_PROVIDER=tavily 时必填）
+SEARCH_API_KEY=your_tavily_api_key
 
 # 搜索结果数量与抓取
 SEARCH_MAX_RESULTS=10
@@ -572,7 +602,7 @@ SEARCH_AGENT_FALLBACK_TO_PHASE2=true
 
 **说明**：
 - 启用 `SEARCH_ENABLE_RERANK=true` 后，默认通过 Ollama 本地调用 `qllama/bge-reranker-v2-m3:latest`；若切换为 `SEARCH_RERANK_PROVIDER=sentence_transformers`，则需联网下载对应 HuggingFace 模型
-- 使用 SearXNG 可避免 DuckDuckGo 的反爬限制，项目已内置 `searxng-dev` / `searxng-prod` 服务
+- 联网搜索默认走 Tavily 在线 API，需确保 `SEARCH_API_KEY` 有效；如网络或配额受限可切换其它 provider
 - Function Calling / ReAct 对本地模型的指令遵循能力要求较高，建议充分测试后再开启
 
 ### 6.7 会话标题生成配置
@@ -777,7 +807,7 @@ ollama list
 |--------|-------------|-------------|
 | 服务状态 | `docker-compose -f docker-compose.dev.yml ps postgres` | `docker-compose ps postgres` |
 | 连接参数 | 检查 `.env.dev` | 检查 `.env.prod` |
-| 端口占用 | `netstat -tlnp` 过滤 5433 | `netstat -tlnp` 过滤 5433 |
+| 端口占用 | `netstat -tlnp` 过滤 5433 | `netstat -tlnp` 过滤 5434 |
 | 密码验证 | `docker exec -it postgres-dev psql -U dev_user -d app_dev` | `docker exec -it postgres-prod psql -U prod_user -d app_prod` |
 
 **解决方案**:
@@ -890,15 +920,8 @@ cat .env.dev
 # 检查生产环境配置
 cat .env.prod
 
-# 确保 .env 文件存在
-ls -la .env
-
-# 如果 .env 不存在，复制对应的环境文件
-# 开发环境：
-copy .env.dev .env
-
-# 生产环境：
-copy .env.prod .env
+# 确认没有多余的 .env（本仓库不使用该文件，其存在会被部分工具误读）
+ls -la .env 2>/dev/null || echo "无 .env，符合预期"
 ```
 
 ### 8.8 环境切换失败
@@ -1076,38 +1099,46 @@ docker stats backend-prod postgres-prod
 ### 9.4 端口测试
 
 ```bash
-# 测试端口是否可访问
+# 测试端口是否可访问（开发栈）
 nc -zv localhost 5433
 nc -zv localhost 8000
 nc -zv localhost 9000
 nc -zv localhost 19530
 
-# 使用 curl 测试
+# 使用 curl 测试（开发栈）
 curl -I http://localhost:8000/health
 curl -I http://localhost:9090
+
+# 生产栈（注意端口不同，且除 80 外均绑回环）
+nc -zv localhost 5434
+nc -zv localhost 8001
+nc -zv localhost 9002
+nc -zv localhost 19531
+curl -I http://localhost:8001/health
+curl -I http://localhost:9094
 ```
 
 ---
 
 ## 附录：端口汇总
 
-| 服务 | 端口 | 说明 | 环境 |
+| 服务 | 开发栈端口 | 生产栈端口 | 说明 |
 |------|------|------|------|
-| 前端（开发） | 5173 | Vue3 开发服务器 | 开发 |
-| 前端（生产） | 80/443 | Nginx 代理 | 生产 |
-| 后端 API | 8000 | FastAPI 服务 | 两者 |
-| PostgreSQL | 5433 | 业务数据库 | 两者 |
-| MinIO | 9000 | 对象存储 | 两者 |
-| MinIO 控制台 | 9001 | 管理界面 | 两者 |
-| Milvus | 19530 | 向量数据库 | 两者 |
-| Redis | 6379 | 搜索结果与网页内容缓存 | 两者 |
-| SearXNG | 8080 | 私有化聚合搜索引擎 | 两者 |
-| Prometheus | 9090 | 监控指标 | 两者 |
-| Alertmanager | 9093 | 告警管理 | 生产 |
-| Grafana | 3000 | 监控面板 | 两者 |
-| PostgreSQL Exporter | 9187 | 指标导出 | 生产 |
+| 前端 | 5173 | **80** | Vue3 开发服务器 / nginx（生产唯一对外端口） |
+| 后端 API | 8000 | **8001** | FastAPI 服务（生产绑 `127.0.0.1`） |
+| PostgreSQL | 5433 | **5434** | 业务数据库（生产绑 `127.0.0.1`） |
+| MinIO | 9000 | **9002** | 对象存储 S3 API |
+| MinIO 控制台 | 9001 | **9003** | 管理界面 |
+| Milvus | 19530 | **19531** | 向量数据库 gRPC |
+| Milvus 指标 | 9091 | **9092** | 健康检查/指标 |
+| Redis | 6379 | **6380** | 缓存与语义缓存 |
+| Prometheus | 9090 | **9094** | 监控指标 |
+| Alertmanager | —（dev 未部署） | **9095** | 告警管理 |
+| Grafana | 3000 | **3001** | 监控面板 |
+| PostgreSQL Exporter | 9187（容器内） | 9187（容器内） | 指标导出 |
 
-**注意**: 开发/生产环境使用相同的端口，但数据完全隔离。
+**注意**: 两栈**端口全部错开**，可同时运行；数据通过 `name: rag-dev` / `rag-prod`
+与独立数据卷完全隔离。生产栈除前端 `80` 外均绑定 `127.0.0.1`，不对公网开放。
 
 ---
 

@@ -10,6 +10,10 @@ from typing import Any, Dict, List, Optional
 
 from src.services.tools.tool_manager import ToolResult
 
+# P1-B7：持有后台保存任务的引用，避免任务被 GC（fire-and-forget 正确写法，
+# 与 rag_chain 的 _background_store_tasks 一致）；任务完成时回调自动清理。
+_background_tasks: set = set()
+
 
 class TraceCollector:
     """单次请求链路追踪采集器。"""
@@ -145,7 +149,10 @@ class TraceCollector:
     def save_background(self) -> None:
         """在后台任务中保存（不阻塞主流程）。"""
         try:
-            asyncio.create_task(self.save_async())
+            task = asyncio.create_task(self.save_async())
+            # P1-B7：保留引用防 GC，任务结束回调自动从集合移除
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
         except Exception as e:
             import logging
 

@@ -192,6 +192,42 @@ class TestCompilePages:
         assert pages[0].matched is existing
         assert pages[1].matched is None
 
+    async def test_embedding_match_multi_candidate_no_misalignment(self, monkeypatch):
+        """2 候选 + 2 既有页：第一个命中后，第二个必须与正确的（未消费）页向量比较。
+
+        回归守卫：此前 page_vecs 在循环外按 remaining 初始顺序一次性算出，
+        循环内 remaining.remove(best) 改变列表下标后 page_vecs[j] 与错位向量
+        比较，导致第二个候选跟"别人的向量"比相似度并匹配到错误页面。
+        """
+        class FakeEmbeddings:
+            async def aembed_documents(self, texts):
+                # 候选 0「RAG架构」→ 与既有页「检索增强生成」同向
+                # 候选 1「天气接口」→ 与既有页「气象数据」同向，与「检索增强生成」正交
+                table = {
+                    "RAG架构": [1.0, 0.0],
+                    "天气接口": [0.0, 1.0],
+                    "检索增强生成": [1.0, 0.0],
+                    "气象数据": [0.0, 1.0],
+                }
+                return [table[t] for t in texts]
+
+        extract = (
+            '{"pages": ['
+            '{"title": "RAG架构", "type": "entity", "key_facts": []},'
+            '{"title": "天气接口", "type": "topic", "key_facts": []}'
+            "]}"
+        )
+        compiler = make_compiler([extract, "页A", "页B"], monkeypatch)
+        monkeypatch.setattr(compiler, "_get_embeddings", lambda: FakeEmbeddings())
+
+        existing_rag = ExistingPage(page_id="p1", title="检索增强生成", page_type="entity", content="旧RAG")
+        existing_weather = ExistingPage(page_id="p2", title="气象数据", page_type="topic", content="旧天气")
+        pages = await compiler.compile_pages(FakeChunks.of("材料"), [existing_rag, existing_weather])
+
+        # 两个候选各自匹配到正确的既有页，不交叉
+        assert pages[0].matched is existing_rag
+        assert pages[1].matched is existing_weather
+
 
 # ----------------------------------------------------------------------
 # persist_pages：MinIO/DB/向量库（全 mock）
@@ -934,8 +970,7 @@ def patched_pipeline(monkeypatch):
     async def fake_llm_classify(*a):
         return None
 
-    monkeypatch.setattr("src.api.document.classify_document_with_llm", fake_llm_classify)
-    monkeypatch.setattr("src.api.document.evaluate_quality_with_llm", fake_llm_classify)
+    monkeypatch.setattr("src.api.document.analyze_document_with_llm", fake_llm_classify)
 
     async def noop(*a, **k):
         return None

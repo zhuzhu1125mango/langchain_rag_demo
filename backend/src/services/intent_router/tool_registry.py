@@ -213,9 +213,50 @@ class ToolMetaRegistry:
                 examples=["抓取这个链接的内容 https://example.com"],
                 conflict_priority=4,
             ),
+            # Agent 专属检索工具：规则路由不自动触发（空 trigger_patterns），
+            # 由 Agent 循环（P2）按需调用；元数据供 LLM 路由与描述对齐
+            ToolMeta(
+                name="kb_search",
+                description="在已选择的知识库中语义检索（混合 dense+BM25+rerank），返回相关文档片段。",
+                trigger_patterns=[],
+                required_entities=[],
+                examples=["在知识库中查找 XX 的说明"],
+                conflict_priority=0,
+            ),
+            ToolMeta(
+                name="wiki_lookup",
+                description="查询知识库的 Wiki 编译页（跨文档综合的主题页），适合概念解释与多文档对比。",
+                trigger_patterns=[],
+                required_entities=[],
+                examples=["查一下知识库 Wiki 中关于 XX 的主题页"],
+                conflict_priority=0,
+            ),
         ]
         for meta in defaults:
             self.register(meta)
+
+    def ensure_defaults(self, names_to_descriptions: Dict[str, str]) -> None:
+        """为未登记元数据的工具补注册缺省元数据（自动发现工具的兜底同步）。
+
+        缺省元数据：空 trigger_patterns（规则路由不自动触发）、
+        conflict_priority=0、无必需实体，仅保证 get()/select_tools() 不缺项。
+
+        Args:
+            names_to_descriptions: 工具名到功能描述的映射（如来自 ToolRegistry）。
+        """
+        for name, description in names_to_descriptions.items():
+            if name in self._tools:
+                continue
+            self.register(
+                ToolMeta(
+                    name=name,
+                    description=description or f"工具 {name}。",
+                    trigger_patterns=[],
+                    required_entities=[],
+                    examples=[],
+                    conflict_priority=0,
+                )
+            )
 
     @staticmethod
     def _match_patterns(question: str, patterns: List[str]) -> bool:

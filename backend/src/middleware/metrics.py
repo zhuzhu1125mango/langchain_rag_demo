@@ -9,6 +9,7 @@
 """
 
 import asyncio
+import re
 import time
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,6 +17,18 @@ from collections import defaultdict
 import logging
 
 logger = logging.getLogger("rag_system")
+
+# 动态路径段归一化：UUID 与纯数字段替换为占位符，
+# 避免请求路径（如 /documents/{uuid}）导致指标标签与内存统计无边基数膨胀。
+_UUID_SEG_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+_DIGIT_SEG_RE = re.compile(r"/(?:[0-9]+)(?=/|$)")
+
+
+def _sanitize_path(path: str) -> str:
+    """将请求路径归一化为有界标签：UUID/数字段替换为 {id}。"""
+    path = _UUID_SEG_RE.sub("{id}", path)
+    path = _DIGIT_SEG_RE.sub("/{id}", path)
+    return path
 
 # 导入 Prometheus 指标模块
 try:
@@ -48,7 +61,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next) -> Response:
         start_time = time.time()
-        endpoint = f"{request.method} {request.url.path}"
+        endpoint = f"{request.method} {_sanitize_path(request.url.path)}"
         
         # 增加活跃请求数（Prometheus）
         if PROMETHEUS_AVAILABLE:
@@ -92,7 +105,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             
             # 记录 Prometheus 指标
             if PROMETHEUS_AVAILABLE:
-                record_request(request.method, str(request.url.path), status_code, response_time)
+                record_request(request.method, _sanitize_path(request.url.path), status_code, response_time)
                 ACTIVE_REQUESTS.dec()
 
 

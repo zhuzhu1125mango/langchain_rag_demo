@@ -36,6 +36,10 @@ class TestRuleRouter:
         assert IntentRouter.is_calculation_question("1+1等于几")
         assert IntentRouter.is_calculation_question("15% 乘以 200 是多少")
         assert not IntentRouter.is_calculation_question("今天星期几")
+        # P0-8：含歧义子串的句子不再误路由进计算器
+        assert not IntentRouter.is_calculation_question("100美元是多少人民币")
+        assert not IntentRouter.is_calculation_question("3天后是几号")
+        assert IntentRouter.is_calculation_question("30% 折扣后是多少")
 
     def test_is_price_question(self):
         assert IntentRouter.is_price_question("今天金价")
@@ -260,6 +264,47 @@ class TestIntentRouterIntegration:
             {"role": "user", "content": "黄金价格"},
         ])
         assert decision.context_rewrite == "黄金价格今天多少"
+        assert decision.llm_routed is True
+
+    @pytest.mark.asyncio
+    async def test_rule_conflict_skipped_with_explicit_agent_mode(self, monkeypatch):
+        """显式指定 function_calling/agent 模式时，规则冲突跳过 LLM 裁决直接走 research 规则。"""
+        router = IntentRouter()
+
+        async def fail_llm_route(question, history=None):
+            raise AssertionError("显式模式下不应调用 LLM 冲突裁决")
+
+        monkeypatch.setattr(router._llm_router, "route", fail_llm_route)
+
+        question = "对比分析员工年假制度和病假制度的规定"
+        assert IntentRouter.is_kb_preferred_question(question)
+        assert IntentRouter.is_research_question(question)
+
+        decision = await router.route(
+            question, kb_ids=["kb-1"], search_mode="function_calling"
+        )
+        assert decision.primary_mode == PrimaryMode.AGENT_RESEARCH
+        assert decision.llm_routed is False
+
+    @pytest.mark.asyncio
+    async def test_rule_conflict_llm_adjudication_still_used_in_simple_mode(self, monkeypatch):
+        """simple 模式下规则冲突仍走 LLM 裁决（保持原有行为）。"""
+        router = IntentRouter()
+
+        async def mock_llm_route(question, history=None):
+            return IntentDecision(
+                confidence_scores={"needs_kb": 0.9},
+                primary_mode=PrimaryMode.KB_ONLY,
+                reasoning="模拟 LLM 冲突裁决",
+                llm_routed=True,
+            )
+
+        monkeypatch.setattr(router._llm_router, "route", mock_llm_route)
+
+        decision = await router.route(
+            "对比分析员工年假制度和病假制度的规定", kb_ids=["kb-1"], search_mode="simple"
+        )
+        assert decision.primary_mode == PrimaryMode.KB_ONLY
         assert decision.llm_routed is True
 
 

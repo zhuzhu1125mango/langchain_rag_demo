@@ -7,9 +7,14 @@ A/B测试实验管理器
 import hashlib
 import uuid
 from typing import List, Dict, Optional, Any
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, or_
 from src.database import async_session
 from src.models.experiment import Experiment, ExperimentVariant, TrafficAllocation, ExperimentMetric, ExperimentResult
+
+
+def _owner_condition(owner_id: str):
+    """归属过滤：本人实验或 owner 为空的遗留数据（与 require_owner 约定一致）。"""
+    return or_(Experiment.owner_id == owner_id, Experiment.owner_id == "")
 
 
 class ExperimentManager:
@@ -24,7 +29,8 @@ class ExperimentManager:
     
     async def create_experiment(self, name: str, description: str = None, 
                                variants: List[Dict[str, Any]] = None,
-                               metrics: List[str] = None) -> str:
+                               metrics: List[str] = None,
+                               owner_id: str = "") -> str:
         """
         创建新实验
         
@@ -33,6 +39,7 @@ class ExperimentManager:
             description: 实验描述
             variants: 变体配置列表
             metrics: 监控指标列表
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             str: 实验ID
@@ -40,6 +47,7 @@ class ExperimentManager:
         async with async_session() as session:
             experiment = Experiment(
                 name=name,
+                owner_id=owner_id,
                 description=description,
                 variants=variants or [],
                 metrics=metrics or ["accuracy", "response_time"],
@@ -63,19 +71,20 @@ class ExperimentManager:
             
             return str(experiment.id)
     
-    async def start_experiment(self, experiment_id: str) -> bool:
+    async def start_experiment(self, experiment_id: str, owner_id: str = "") -> bool:
         """
         启动实验
         
         Args:
             experiment_id: 实验ID
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             bool: 是否成功启动
         """
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id == experiment_id)
+                select(Experiment).where(Experiment.id == experiment_id, _owner_condition(owner_id))
             )
             experiment = result.scalar_one_or_none()
             
@@ -89,19 +98,20 @@ class ExperimentManager:
             
             return False
     
-    async def stop_experiment(self, experiment_id: str) -> bool:
+    async def stop_experiment(self, experiment_id: str, owner_id: str = "") -> bool:
         """
         停止实验
         
         Args:
             experiment_id: 实验ID
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             bool: 是否成功停止
         """
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id == experiment_id)
+                select(Experiment).where(Experiment.id == experiment_id, _owner_condition(owner_id))
             )
             experiment = result.scalar_one_or_none()
             
@@ -117,19 +127,20 @@ class ExperimentManager:
             
             return False
     
-    async def get_experiment(self, experiment_id: str) -> Optional[Dict[str, Any]]:
+    async def get_experiment(self, experiment_id: str, owner_id: str = "") -> Optional[Dict[str, Any]]:
         """
         获取实验详情
         
         Args:
             experiment_id: 实验ID
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             Dict[str, Any] or None: 实验信息
         """
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id == experiment_id)
+                select(Experiment).where(Experiment.id == experiment_id, _owner_condition(owner_id))
             )
             experiment = result.scalar_one_or_none()
             
@@ -149,18 +160,19 @@ class ExperimentManager:
             
             return None
     
-    async def list_experiments(self, status: str = None) -> List[Dict[str, Any]]:
+    async def list_experiments(self, status: str = None, owner_id: str = "") -> List[Dict[str, Any]]:
         """
         获取实验列表
         
         Args:
             status: 状态过滤（可选）
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             List[Dict[str, Any]]: 实验列表
         """
         async with async_session() as session:
-            query = select(Experiment)
+            query = select(Experiment).where(_owner_condition(owner_id))
             if status:
                 query = query.where(Experiment.status == status)
             
@@ -177,12 +189,13 @@ class ExperimentManager:
                 for e in experiments
             ]
     
-    async def delete_experiments(self, experiment_ids: List[str]) -> Dict[str, Any]:
+    async def delete_experiments(self, experiment_ids: List[str], owner_id: str = "") -> Dict[str, Any]:
         """
         批量删除实验及其关联数据
         
         Args:
             experiment_ids: 实验ID列表
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             Dict[str, Any]: 删除结果统计
@@ -209,7 +222,7 @@ class ExperimentManager:
         
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id.in_(valid_ids))
+                select(Experiment).where(Experiment.id.in_(valid_ids), _owner_condition(owner_id))
             )
             experiments = result.scalars().all()
             found_ids = {str(e.id) for e in experiments}
@@ -272,7 +285,8 @@ class ExperimentManager:
         return hash_value / (2**128)
     
     async def allocate_traffic(self, experiment_id: str, user_id: str, 
-                              session_id: Optional[str] = None) -> Optional[str]:
+                              session_id: Optional[str] = None,
+                              owner_id: str = "") -> Optional[str]:
         """
         分配用户到变体
         
@@ -280,12 +294,13 @@ class ExperimentManager:
             experiment_id: 实验ID
             user_id: 用户标识
             session_id: 会话ID（可选）
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             str or None: 分配的变体ID
         """
         if experiment_id not in self.active_experiments:
-            experiment = await self.get_experiment(experiment_id)
+            experiment = await self.get_experiment(experiment_id, owner_id)
             if experiment and experiment["status"] == "running":
                 self.active_experiments[experiment_id] = experiment
             else:
@@ -320,7 +335,8 @@ class ExperimentManager:
         return None
     
     async def record_metric(self, experiment_id: str, variant_id: str,
-                           metric_name: str, metric_value: float):
+                           metric_name: str, metric_value: float,
+                           owner_id: str = ""):
         """
         记录指标数据
         
@@ -329,7 +345,11 @@ class ExperimentManager:
             variant_id: 变体ID
             metric_name: 指标名称
             metric_value: 指标值
+            owner_id: 所有者 ID（对象级授权）
         """
+        # 归属校验：非本人（且非遗留数据）实验拒绝写入
+        if not await self.get_experiment(experiment_id, owner_id):
+            return
         async with async_session() as session:
             metric = ExperimentMetric(
                 experiment_id=experiment_id,
@@ -340,16 +360,19 @@ class ExperimentManager:
             session.add(metric)
             await session.commit()
     
-    async def get_metrics(self, experiment_id: str) -> Dict[str, Dict[str, List[float]]]:
+    async def get_metrics(self, experiment_id: str, owner_id: str = "") -> Dict[str, Dict[str, List[float]]]:
         """
         获取实验指标
         
         Args:
             experiment_id: 实验ID
+            owner_id: 所有者 ID（对象级授权）
             
         Returns:
             Dict[str, Dict[str, List[float]]]: 指标数据
         """
+        if not await self.get_experiment(experiment_id, owner_id):
+            return {}
         async with async_session() as session:
             result = await session.execute(
                 select(ExperimentMetric).where(ExperimentMetric.experiment_id == experiment_id)
@@ -370,16 +393,24 @@ class ExperimentManager:
             
             return result_dict
     
-    async def analyze_experiment(self, experiment_id: str) -> Dict[str, Any]:
+    async def analyze_experiment(self, experiment_id: str, owner_id: str = "") -> Dict[str, Any]:
         """
         分析实验结果
 
         Args:
             experiment_id: 实验ID
+            owner_id: 所有者 ID（对象级授权）
 
         Returns:
             Dict[str, Any]: 分析结果
         """
+        if not await self.get_experiment(experiment_id, owner_id):
+            return {
+                "experiment_id": experiment_id,
+                "status": "no_data",
+                "message": "暂无指标数据"
+            }
+
         # 验证实验ID是否为有效的UUID格式
         try:
             uuid.UUID(experiment_id)
@@ -390,7 +421,7 @@ class ExperimentManager:
                 "message": "暂无指标数据"
             }
 
-        metrics = await self.get_metrics(experiment_id)
+        metrics = await self.get_metrics(experiment_id, owner_id)
 
         if not metrics:
             return {
@@ -400,7 +431,7 @@ class ExperimentManager:
             }
 
         # 获取实验信息以映射变体名称
-        experiment = await self.get_experiment(experiment_id)
+        experiment = await self.get_experiment(experiment_id, owner_id)
         variant_name_map = {}
         if experiment and experiment.get("variants"):
             for v in experiment["variants"]:
@@ -460,16 +491,19 @@ class ExperimentManager:
 
         return result_data
     
-    async def get_experiment_result(self, experiment_id: str) -> Optional[Dict[str, Any]]:
+    async def get_experiment_result(self, experiment_id: str, owner_id: str = "") -> Optional[Dict[str, Any]]:
         """
         获取实验分析结果
 
         Args:
             experiment_id: 实验ID
+            owner_id: 所有者 ID（对象级授权）
 
         Returns:
             Dict[str, Any] or None: 分析结果
         """
+        if not await self.get_experiment(experiment_id, owner_id):
+            return None
         async with async_session() as session:
             result = await session.execute(
                 select(ExperimentResult).where(ExperimentResult.experiment_id == experiment_id)

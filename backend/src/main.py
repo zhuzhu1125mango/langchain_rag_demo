@@ -392,8 +392,8 @@ async def health_check():
 
 
 @app.get("/health/detail")
-async def health_check_detail():
-    """详细健康检查接口，检查各依赖服务状态"""
+async def health_check_detail(current_user: CurrentUser = Depends(require_admin)):
+    """详细健康检查接口，检查各依赖服务状态（管理接口：暴露依赖拓扑，需管理员权限）。"""
     checks = {}
     
     try:

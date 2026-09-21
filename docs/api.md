@@ -8,6 +8,39 @@
 - **版本**: v1.0
 - **依赖管理**: uv（uv.lock 锁定版本）
 
+### 鉴权
+
+除 `/api/auth/register`、`/api/auth/login`、`/health`、`/health/detail`、`/metrics`、`/` 外，
+全部接口都需要认证。支持两种凭据，按以下顺序判定：
+
+| 方式 | 携带位置 | 说明 |
+|------|----------|------|
+| API Key | `X-API-Key: <API_KEY>` | 自托管单实例模式；身份记为 `api_key_user` |
+| JWT | `Authorization: Bearer <access_token>` | 多用户模式；身份为 `users` 表主键。经 `POST /api/auth/login` 获取 |
+
+```bash
+# JWT 方式：先登录
+TOKEN=$(curl -s -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "password": "..."}' | jq -r .access_token)
+
+curl -X POST http://localhost:8000/api/chat/messages \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"question": "什么是 RAG？"}'
+```
+
+补充说明：
+
+- **开发模式放行**：未配置 `API_KEY` 且**非 Docker** 时允许匿名访问，身份记为 `default`
+- **管理操作**：`POST /api/config/*`、`POST /metrics/reset` 等还需携带 `X-Admin-Key: <ADMIN_KEY>`；
+  生产模式未配置 `ADMIN_KEY` 时这些接口一律 403
+- **对象级隔离**：资源（知识库/文档/会话/反馈）按 `owner_id` 隔离，非所有者访问返回 **403**；
+  `owner_id` 为空的遗留数据对任意登录用户放行
+- **JWT 有效期为 `ACCESS_TOKEN_EXPIRE_MINUTES`（默认 1440 分钟）**，无 refresh token 机制，
+  且服务端不查库校验，因此删号/改密后 token 在过期前仍然有效
+- WebSocket 走首帧鉴权，见 §11
+
 ### API 使用示例
 
 ```bash
@@ -46,6 +79,7 @@ curl -X POST http://localhost:8000/api/documents/upload \
 
 ## 目录
 
+0. [认证接口](#0-认证接口)
 1. [聊天问答接口](#1-聊天问答接口)
 2. [知识库管理接口](#2-知识库管理接口)
 3. [文档管理接口](#3-文档管理接口)
@@ -60,6 +94,45 @@ curl -X POST http://localhost:8000/api/documents/upload \
 12. [错误响应格式](#12-错误响应格式)
 13. [坏例管理接口](#13-坏例管理接口)
 14. [RAG 评估接口](#14-rag-评估接口)
+15. [Wiki 编译层接口](#15-wiki-编译层接口)
+16. [请求追踪接口](#16-请求追踪接口)
+
+---
+
+## 0. 认证接口
+
+前缀 `/api/auth`。本模块**不挂全局鉴权依赖**（登录/注册必须匿名可用）。
+
+### 0.1 注册
+
+**POST** `/api/auth/register` → **201 Created**
+
+```json
+{ "username": "alice", "password": "至少6位" }
+```
+
+| 字段 | 约束 |
+|------|------|
+| username | 3~64 字符，仅允许 `[a-zA-Z0-9_-]` |
+| password | 6~128 字符 |
+
+**响应**：
+```json
+{ "access_token": "<JWT>", "token_type": "bearer", "user_id": "用户UUID" }
+```
+
+> 受 `AUTH_ALLOW_REGISTRATION`（默认 `true`）控制；关闭后返回 403。
+
+### 0.2 登录
+
+**POST** `/api/auth/login`
+
+请求体 `{"username": "...", "password": "..."}`，响应同上。
+用户名或密码错误统一返回 401，不区分具体原因。
+
+### 0.3 获取当前用户
+
+**GET** `/api/auth/me` → `{ "user_id": "...", "username": "..." }`
 
 ---
 
@@ -78,7 +151,8 @@ curl -X POST http://localhost:8000/api/documents/upload \
   "session_id": "可选，会话ID",
   "kb_ids": ["可选，知识库ID列表"],
   "use_web_search": false,
-  "search_mode": "simple"
+  "search_mode": "simple",
+  "deep_thinking": "off"
 }
 ```
 
@@ -89,8 +163,10 @@ curl -X POST http://localhost:8000/api/documents/upload \
 | kb_ids | array | 否 | 知识库ID列表，指定查询范围 |
 | use_web_search | boolean | 否 | 是否启用联网搜索，默认false |
 | search_mode | string | 否 | 搜索模式：`simple` / `function_calling` / `agent`，默认 `simple` |
+| deep_thinking | string | 否 | 深度思考开关：`on` / `off`，默认 `off`（有校验器，其他取值返回 422） |
 
-**成功响应** (200):
+**成功响应** (200) —— 固定 7 个字段：
+
 ```json
 {
   "session_id": "会话UUID",
@@ -117,10 +193,7 @@ curl -X POST http://localhost:8000/api/documents/upload \
     }
   ],
   "answer_type": "knowledge_base",
-  "title": "生成的会话标题",
-  "llm_calls": 1,
-  "vector_searches": 1,
-  "processing_time": 2.5
+  "title": "生成的会话标题"
 }
 ```
 
@@ -133,8 +206,13 @@ curl -X POST http://localhost:8000/api/documents/upload \
 | answer | string | 回答内容 |
 | sources | array | 引用的源文本片段 |
 | source_metadata | array | 来源元数据详情 |
+| answer_type | string | 实际走的回答路径（如 `knowledge_base` / `llm_direct` / `function_calling`） |
+| title | string \| null | 会话标题；仅当本次为会话首条消息且生成了新标题时非空，否则为 `null` |
 | source_metadata[].source_type | string | 来源类型：`kb` 知识库 / `web` 网页 |
 | source_metadata[].url | string | 网页来源 URL（仅 `web`） |
+
+> 该接口**不返回** `llm_calls` / `vector_searches` / `processing_time` 等统计字段；
+> 需要调用与耗时数据请使用 `/api/traces` 或 `/metrics`。
 | source_metadata[].filename | string | 文件名或网页标题 |
 | answer_type | string | 回答类型：`knowledge_base`、`llm_direct`、`web_search`、`hybrid_search` 等 |
 | title | string | 首次发送消息时生成的会话标题，后续消息可能为空 |
@@ -159,24 +237,35 @@ curl -X POST http://localhost:8000/api/documents/upload \
 | search_mode | string | 否 | 搜索模式：`simple` / `function_calling` / `agent`，默认 `simple` |
 
 **响应格式** (SSE):
+
+> **实现要点**：服务端只发送 `data:` 行，**不使用 SSE 的 `event:` 字段**；
+> 事件类型由 `data` JSON 中的 `type` 字段表达（见 `backend/src/api/chat.py` 的流式生成器）。
+
+事件类型共 6 种（`reasoning` / `thinking` / `content` / `end` / `title` / `error`）。
+**没有独立的 `sources` 事件**——来源信息随 `end` 事件一并下发：
+
 ```
-event: content
+data: {"type": "reasoning", "step": "intent|kb_retrieve|web_search|tool_execute|answer_generate|...",
+       "status": "running|done|skipped", "title": "步骤标题", "content": "步骤说明",
+       "metadata": {...}}
+
+data: {"type": "thinking", "content": "模型原始思考增量片段"}
+
 data: {"type": "content", "content": "回答片段"}
 
-event: content
-data: {"type": "content", "content": "继续的回答"}
+data: {"type": "end", "message_id": "消息ID", "session_id": "会话ID", "sources": [...],
+       "answer_type": "llm_direct|function_calling|agent|...", "reasoning": [...]}
 
-event: end
-data: {"type": "end", "message_id": "消息ID", "session_id": "会话ID", "title": "生成的会话标题", "sources": [...], "sources_metadata": [{"filename": "网页标题", "url": "https://example.com", "source_type": "web"}, ...]}
+data: {"type": "title", "session_id": "会话ID", "title": "新生成的会话标题"}
 
-event: error
-data: {"type": "error", "error": "错误信息"}
+data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "请求追踪ID"}
 ```
 
 **说明**：
-- `end` 事件返回的 `sources_metadata` 同时包含 `kb` 与 `web` 类型来源
-- 网页来源包含 `url` 字段，前端可直接点击跳转
-- `title` 字段在首次发送消息并生成会话标题时返回，前端可用于即时更新会话列表
+- `reasoning` 为分步过程事件，前端渲染为答案气泡上方的可折叠时间线；`thinking` 为模型原始思考增量，供折叠面板实时展示
+- `end` 事件**不含** `title`：标题生成已改为后台任务（避免推迟流完成信号），完成后**在 `end` 之后**补发独立的 `title` 事件。客户端断开时标签生成任务仍会落库，仅 `title` 事件丢失，刷新侧栏可见新标题
+- `end` 事件的来源字段名为 `sources`（非 `sources_metadata`），每项含 `source_type` 为 `kb` 或 `web`；网页来源额外含 `url` 字段供前端跳转
+- 会话不存在等错误在**流开始前**无法以 4xx 返回时，会以 `200 + error 事件` 形式下发；非流式接口同场景返回 404
 
 ### 1.3 获取会话历史
 
@@ -224,11 +313,12 @@ data: {"type": "error", "error": "错误信息"}
 | 纯知识库 | false / 不填 | - | 仅检索知识库，无结果时可能降级为 LLM |
 | 纯联网搜索 | true | `simple` | 仅使用联网搜索生成回答 |
 | 混合搜索 | true + 传入 `kb_ids` | `simple` | 同时使用知识库检索与联网搜索 |
-| Function Calling | true | `function_calling` | LLM 决定调用 `web_search` / `fetch_webpage` 工具 |
-| ReAct Agent | true | `agent` | 多轮 Thought → Action → Observation 迭代搜索 |
+| Function Calling | true | `function_calling` | 有界 Agent 循环调用 `web_search` / `fetch_webpage` / `kb_search` / `wiki_lookup` 等工具（步数与时间预算受限）；可传 `kb_ids` 进入混合模式（Agent 工具收集 + 知识库检索合并生成） |
+| ReAct Agent | true | `agent` | 同 Function Calling 的有界 Agent 循环，多轮 DECIDE → ACT → OBSERVE 迭代搜索 |
 
 **降级策略**：
 - 当 `search_mode=function_calling|agent` 但对应功能开关未开启时，自动降级为 `simple` 联网搜索
+- Agent 循环输出为空或被工具 JSON 污染时，降级为 Phase 2 联网搜索
 - 问候/日常对话（如“你好”）会跳过知识库检索，直接由 LLM 回答
 
 ---
@@ -270,10 +360,11 @@ data: {"type": "error", "error": "错误信息"}
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| page | int | 否 | 页码，默认1 |
-| page_size | int | 否 | 每页数量，默认20 |
-| keyword | string | 否 | 关键词搜索 |
-| category_id | string | 否 | 分类筛选 |
+| page | int | 否 | 页码，默认 1，最小 1 |
+| page_size | int | 否 | 每页数量，**默认 10**，范围 1~1000 |
+
+> 该接口**不支持** `keyword` / `category_id` 筛选。
+> 结果限定为当前用户拥有的知识库，并按 `(user_id, page, page_size)` 走 Redis 缓存。
 
 **成功响应** (200):
 ```json
@@ -289,7 +380,8 @@ data: {"type": "error", "error": "错误信息"}
   ],
   "total": 100,
   "page": 1,
-  "page_size": 20
+  "page_size": 10,
+  "total_pages": 10
 }
 ```
 
@@ -381,21 +473,21 @@ data: {"type": "error", "error": "错误信息"}
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| page | int | 否 | 页码，默认1 |
-| page_size | int | 否 | 每页数量，默认20 |
-| kb_id | string | 否 | 知识库筛选 |
-| status | string | 否 | 状态筛选 |
-| keyword | string | 否 | 文件名搜索 |
+| kb_id | string | 否 | 知识库筛选（UUID，非法时返回 400）；不传则返回全部知识库的文档 |
+| status | string | 否 | 状态筛选。`active` → 映射为库内 `published`；`inactive` → 映射为 `draft` 或 `archived` |
 
-**成功响应** (200):
+结果始终限定为**当前用户拥有的文档**（`owner_id` 过滤）。
+
+**成功响应** (200)：`DocumentResponse` 的**裸数组**（非分页对象）：
+
 ```json
-{
-  "items": [...],
-  "total": 100,
-  "page": 1,
-  "page_size": 20
-}
+[ { "id": "...", "filename": "...", "...": "..." } ]
 ```
+
+> ⚠️ **本接口不分页，全量返回**（含 `joinedload` 关联），文档量大时响应体可能很大。
+> 同类的 `/api/sessions` 亦不分页。这与 `/api/knowledge_bases`（`page`/`page_size`）、
+> `/api/feedback`（`skip`/`limit`）、`/api/traces`（`limit`/`offset`）等接口的分页风格并存，
+> 属已知的接口规范不统一问题（见 `docs/archive/code-review-2026-09.md` P1-C2）。
 
 ### 3.3 获取文档详情
 
@@ -486,18 +578,17 @@ data: {"type": "error", "error": "错误信息"}
 
 **GET** `/api/sessions/{session_id}`
 
-**成功响应** (200):
+**成功响应** (200)：
 ```json
 {
   "id": "会话UUID",
   "title": "会话标题",
-  "user_id": "用户ID",
   "messages": [...],
-  "kb_ids": ["知识库UUID"],
-  "created_at": "2024-01-01T12:00:00",
-  "updated_at": "2024-01-01T12:05:00"
+  "kb_ids": ["知识库UUID"]
 }
 ```
+
+> 响应**不包含** `user_id`（避免回显归属信息）；非会话所有者返回 403。
 
 ### 4.3 更新会话标题
 
@@ -621,41 +712,63 @@ data: {"type": "error", "error": "错误信息"}
 
 ## 8. 学习引擎接口
 
-### 8.1 触发学习
+前缀 `/api/learning`。全部端点仅需登录，其中修改全局引擎状态的 4 个端点
+（`trigger` / `config` / `enable` / `disable`）**与 `/api/config/*` 的 `require_admin` 尺度不一致**，
+属已知问题（见 `docs/archive/code-review-2026-09.md` P1-A7）。
+
+### 8.1 获取学习统计
+
+**GET** `/api/learning/stats`
+
+**成功响应** (200)：`learning_engine.get_learning_stats()` 的返回，并按前端期望结构补充 `misclassification_count`。
+
+### 8.2 获取误分类分析
+
+**GET** `/api/learning/misclassification?limit=50`
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| limit | int | 否 | 返回的误分类样本数上限，默认 50 |
+
+### 8.3 触发学习
 
 **POST** `/api/learning/trigger`
 
-**请求体**:
-```json
-{
-  "sample_count": 100,
-  "retrain": true
-}
-```
+**请求体**：无（该端点不接受请求体）
 
 **成功响应** (200):
 ```json
-{
-  "status": "completed",
-  "samples_learned": 100,
-  "rules_added": 5,
-  "rules_updated": 3
-}
+{ "success": true, "data": { "...": "learning_engine.check_and_trigger_learning() 的返回" } }
 ```
 
-### 8.2 获取学习状态
+### 8.4 记录执行 / 记录反馈
 
-**GET** `/api/learning/status`
+- **POST** `/api/learning/record-execution`
+- **POST** `/api/learning/record-feedback`
 
-**成功响应** (200):
+由问答链路内部调用，用于在线学习闭环采样。
+
+### 8.5 学习引擎配置
+
+- **GET** `/api/learning/config` — 获取配置
+
 ```json
 {
-  "is_running": false,
-  "last_run": "2024-01-01T12:00:00",
-  "total_rules": 50,
-  "total_samples": 1000
+  "success": true,
+  "data": {
+    "enabled": true,
+    "learning_interval_hours": 24,
+    "last_learning_time": "2024-01-01T12:00:00"
+  }
 }
 ```
+
+- **PUT** `/api/learning/config` — 更新配置
+
+### 8.6 启用 / 禁用学习引擎
+
+- **POST** `/api/learning/enable` → `{"success": true, "message": "学习引擎已启用"}`
+- **POST** `/api/learning/disable` → `{"success": true, "message": "学习引擎已禁用"}`
 
 ---
 
@@ -860,10 +973,24 @@ data: {"type": "error", "error": "错误信息"}
 
 系统通过 WebSocket 提供实时通知，主要用于知识库列表变更、文档列表变更、上传任务进度等场景。
 
-**鉴权**：所有 WebSocket 通道与服务端 HTTP 接口使用同一凭据。配置了 `API_KEY`
-（或生产模式）时必须在握手 URL 上以 query 参数携带 `?api_key=<key>`
-（浏览器 WebSocket 不支持自定义请求头），凭据缺失或错误会在握手阶段被拒绝
-（关闭码 1008）；未配置 `API_KEY` 的开发环境允许匿名连接。
+**鉴权**：采用**首帧鉴权**，凭据不出现在 URL 上。
+
+浏览器 WebSocket 无法携带自定义请求头，而把密钥放进 query 参数会进入反向代理
+访问日志与浏览器历史。因此握手阶段**不做校验**，连接建立后由客户端发送首帧：
+
+```json
+{"type": "auth", "api_key": "<API_KEY>"}
+// 或 JWT 用户：
+{"type": "auth", "token": "<access_token>"}
+```
+
+认证通过后服务端回 `{"type": "auth_ok"}`；失败或超过 10 秒未收到认证帧，
+以关闭码 **1008** 关闭连接。认证通过前不推送任何业务数据。
+
+未配置 `API_KEY` 且**非 Docker** 的开发环境下，服务端在握手后立即回
+`{"type": "auth_ok"}` 并放行（不等待客户端发送认证帧）。
+
+> 实现见 `backend/src/auth.py` 的 `get_current_user_for_ws`。
 
 ### 11.1 通用通知通道
 
@@ -931,39 +1058,49 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ## 12. 错误响应格式
 
+所有错误由 `backend/src/main.py` 的异常处理器统一输出，字段固定为三个：
+
 ```json
 {
+  "error_code": "HTTP_ERROR",
   "detail": "错误描述信息",
-  "code": "错误代码",
-  "timestamp": "2024-01-01T12:00:00"
+  "request_id": "请求追踪ID"
 }
 ```
+
+- `request_id` 与日志中的追踪 ID 一致，排查问题时提供给运维即可定位
+- 500 级错误的 `detail` 一律为固定文案（"Internal Server Error"），**内部异常细节只进日志不回显**；若某个端点返回了具体异常信息，属缺陷（见 `docs/archive/code-review-2026-09.md` P0-10）
+- 请求体校验失败（422）时 `detail` 为 Pydantic 的错误数组，而非字符串
 
 ### HTTP状态码汇总
 
 | 状态码 | 含义 | 说明 |
 |--------|------|------|
-| 200 | OK | 请求成功 |
-| 201 | Created | 创建成功 |
-| 400 | Bad Request | 请求参数错误 |
-| 401 | Unauthorized | 未授权 |
-| 403 | Forbidden | 禁止访问 |
+| 200 | OK | 请求成功（**删除/批量操作亦返回 200 + `{"message": ...}`，未使用 204**） |
+| 201 | Created | 创建成功（仅 `POST /api/auth/register` 使用） |
+| 400 | Bad Request | 请求参数错误 / 非法 UUID |
+| 401 | Unauthorized | 未认证或凭据无效 |
+| 403 | Forbidden | 已认证但无权限（非资源所有者 / 缺少 `X-Admin-Key`） |
 | 404 | Not Found | 资源不存在 |
-| 422 | Unprocessable Entity | 请求格式错误 |
+| 413 | Payload Too Large | 上传文件超出 `MAX_UPLOAD_SIZE_MB` |
+| 422 | Unprocessable Entity | 请求体校验失败 |
 | 500 | Internal Server Error | 服务器内部错误 |
 
 ### 错误代码说明
 
-| 代码 | 说明 |
-|------|------|
-| VALIDATION_ERROR | 参数验证失败 |
-| NOT_FOUND | 资源不存在 |
-| UNAUTHORIZED | 未授权访问 |
-| DATABASE_ERROR | 数据库操作失败 |
-| SERVICE_ERROR | 服务内部错误 |
-| TIMEOUT | 请求超时 |
-| SEARCH_ENGINE_ERROR | 搜索引擎调用失败 |
-| SEARCH_FETCH_ERROR | 网页内容抓取失败 |
+`error_code` 取自异常对象，定义分两处：
+
+| 代码 | 来源 | 触发条件 |
+|------|------|------|
+| `VALIDATION_ERROR` | `main.py` 处理器 / `ValidationException` | 请求体未通过 Pydantic 校验（422） |
+| `HTTP_ERROR` | `main.py` 处理器 | 任意裸 `HTTPException`（400/401/403/404/413 等） |
+| `INTERNAL_ERROR` | `main.py` 处理器 / `AppException` 基类 | 未捕获异常（500） |
+| `NOT_FOUND` | `ResourceNotFoundException` | 资源不存在（404） |
+| `BAD_REQUEST` | `BadRequestException` | 请求参数错误（400） |
+| `AUTHENTICATION_ERROR` | `AuthenticationException` | 认证失败（401） |
+| `AUTHORIZATION_ERROR` | `AuthorizationException` | 权限不足（403） |
+
+> ⚠️ **已知问题**：`AppException` 体系（`src/exceptions.py`）在 API 层**零使用**——已 grep 确认全部端点直接用裸 `HTTPException`。因此后 5 个错误码与 `AppException` 处理器分支目前是死代码，客户端实际只会收到 `VALIDATION_ERROR` / `HTTP_ERROR` / `INTERNAL_ERROR` 三者。详见 `docs/archive/code-review-2026-09.md` P1-C1。
 
 ---
 
@@ -1029,12 +1166,80 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ---
 
+## 15. Wiki 编译层接口
+
+前缀 `/api/knowledge_bases/{kb_id}/wiki`。Wiki 编译层由 LLM 将知识库文档预编译为结构化页面
+（`WIKI_COMPILE_ENABLED` 控制，默认关闭）。全部端点需登录，且校验 `kb_id` 归属。
+
+### 15.1 列出编译页
+
+**GET** `/api/knowledge_bases/{kb_id}/wiki/pages` → `WikiPageListResponse`
+
+### 15.2 获取编译页正文
+
+**GET** `/api/knowledge_bases/{kb_id}/wiki/pages/{page_id}/content` → `WikiPageContentResponse`
+
+### 15.3 一致性检查
+
+**GET** `/api/knowledge_bases/{kb_id}/wiki/lint` → `WikiLintResponse`
+
+检查页面间的矛盾、断链等一致性问题（编译期矛盾抽查由 `WIKI_CONTRADICTION_CHECK` 控制）。
+
+### 15.4 重建
+
+**POST** `/api/knowledge_bases/{kb_id}/wiki/rebuild` → `WikiRebuildResponse`
+
+```json
+{ "upload_id": "任务ID", "message": "Wiki 全量重编译任务已提交" }
+```
+
+异步任务：提交后立即返回，进度经 WebSocket `task:{upload_id}` 频道推送。
+
+---
+
+## 16. 请求追踪接口
+
+前缀 `/api/traces`。记录每次问答的完整链路（意图路由、检索、搜索、生成各阶段耗时）。
+全部端点需登录，结果限定为当前用户。
+
+### 16.1 获取追踪列表
+
+**GET** `/api/traces`
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| session_id | string | 否 | 按会话 ID 过滤 |
+| start | datetime | 否 | 起始时间（含） |
+| end | datetime | 否 | 结束时间（含） |
+| limit | int | 否 | 每页数量，默认 20，范围 1~100 |
+| offset | int | 否 | 偏移量，默认 0 |
+
+**成功响应** (200)：`{"total": 100, "items": [...]}`（按创建时间倒序）
+
+> 注意：该接口路径为 `@router.get("")`，且应用以 `redirect_slashes=False` 启动，
+> 因此**只能使用 `/api/traces`，带尾斜杠的 `/api/traces/` 会返回 404**。
+> 这与其余集合端点使用 `/`（如 `/api/documents/`）的风格不一致，属已知问题
+> （见 `docs/archive/code-review-2026-09.md` P1-C3）。
+
+### 16.2 获取追踪详情
+
+**GET** `/api/traces/{trace_id}`
+
+**越权语义**：访问他人的 trace 返回 **404 而非 403**，刻意不泄露资源是否存在。
+
+---
+
 ## 附录：API 端点汇总
 
-> 与代码核对至 2026-09-01（backend/src/api/ 共 14 个路由模块）。
+> 与代码核对至 2026-09-16（`backend/src/api/` 共 16 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 111 条路由）。
 
 | 模块 | 方法 | 端点 | 说明 |
 |------|------|------|------|
+| 认证 | POST | `/api/auth/register` | 注册（201；受 `AUTH_ALLOW_REGISTRATION` 控制） |
+| 认证 | POST | `/api/auth/login` | 登录换取 JWT |
+| 认证 | GET | `/api/auth/me` | 获取当前用户信息 |
 | 聊天 | POST | `/api/chat/messages` | 发送消息（非流式） |
 | 聊天 | POST | `/api/chat/stream` | 流式回答（SSE） |
 | 聊天 | POST | `/api/chat/suggestions` | 获取推荐问题 |
@@ -1051,8 +1256,12 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 知识库 | DELETE | `/api/knowledge_bases/{kb_id}` | 删除知识库 |
 | 知识库 | POST | `/api/knowledge_bases/batch-delete` | 批量删除知识库 |
 | 知识库 | POST | `/api/knowledge_bases/{kb_id}/set_default` | 设为默认知识库 |
-| 知识库 | POST | `/api/knowledge_bases/recommend` | 知识库推荐 |
-| 知识库 | POST | `/api/knowledge_bases/knowledge_graph` | 生成知识图谱 |
+| 知识库 | POST | `/api/knowledge_bases/recommend` | 知识库推荐（候选范围限定为当前用户） |
+| 知识库 | POST | `/api/knowledge_bases/knowledge_graph` | 生成知识图谱（范围限定为当前用户） |
+| Wiki | GET | `/api/knowledge_bases/{kb_id}/wiki/pages` | 列出编译页 |
+| Wiki | GET | `/api/knowledge_bases/{kb_id}/wiki/pages/{page_id}/content` | 获取编译页正文 |
+| Wiki | GET | `/api/knowledge_bases/{kb_id}/wiki/lint` | Wiki 一致性检查 |
+| Wiki | POST | `/api/knowledge_bases/{kb_id}/wiki/rebuild` | 重建 Wiki |
 | 文档 | POST | `/api/documents/upload` | 上传文档（后台异步处理） |
 | 文档 | POST | `/api/documents/batch` | 批量上传 |
 | 文档 | GET | `/api/documents/upload/progress/{upload_id}` | 轮询上传/解析进度 |
@@ -1136,4 +1345,6 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 健康检查 | GET | `/health` | 健康检查 |
 | 健康检查 | GET | `/health/detail` | 详细健康检查（含数据库、Redis） |
 | 监控 | GET | `/metrics` | 获取 Prometheus 监控指标 |
-| 监控 | POST | `/metrics/reset` | 重置监控指标 |
+| 监控 | POST | `/metrics/reset` | 重置监控指标（需 `X-Admin-Key`） |
+| 追踪 | GET | `/api/traces` | 获取请求追踪列表 |
+| 追踪 | GET | `/api/traces/{trace_id}` | 获取单条追踪详情 |

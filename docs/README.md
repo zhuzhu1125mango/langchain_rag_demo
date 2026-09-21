@@ -45,9 +45,12 @@ docs/
 │   ├── chat-latency-and-model-config.md
 │   ├── frontend-test-plan.md
 │   ├── semantic-cache.md
-│   └── severe-fixes.md
+│   ├── severe-fixes.md
+│   ├── agent-evolution.md
+│   └── agent-ab-evaluation.md
 └── archive/             # 归档（一次性报告）
-    └── code-review-2026-08.md      # 代码审查报告（已全部修复）
+    ├── code-review-2026-08.md      # 代码审查报告（已全部修复）
+    └── code-review-2026-09.md      # 代码审查报告（4 项阻断问题已修复；文档漂移已全量回写）
 ```
 
 ## design/ 文档状态表
@@ -57,14 +60,16 @@ docs/
 | [improvement-roadmap.md](design/improvement-roadmap.md) | 部分实施 | 执行计划；P0-1/P1-1/P1-2/P1-3/P2-6 已完成，进度以各条目 ✅ 标记为准 |
 | [rag-enhancement.md](design/rag-enhancement.md) | 部分实施 | 混合检索/重排序/评估闭环/意图路由已落地；分阶段进度并入 roadmap 推进 |
 | [intent-router-upgrade.md](design/intent-router-upgrade.md) | 已实施 | `backend/src/services/intent_router/`（LLMRouter / ConfidenceGate / 历史上下文增强） |
-| [search-optimization.md](design/search-optimization.md) | 待确认 | 通用联网搜索链路优化，未实施 |
-| [price-trustworthiness.md](design/price-trustworthiness.md) | 已实施 | 垂类结构化工具（金价/汇率/天气/时间）已落地于 `backend/src/tools/` |
-| [llm-wiki-compile.md](design/llm-wiki-compile.md) | 已实施 | Phase 1~4 全部完成（2026-09-07 ~ 09-09），实施记录见 §8/§10/§11/§13 |
+| [search-optimization.md](design/search-optimization.md) | 已实施 | 通用联网搜索链路优化（Query 改写 / 引用补全 / AnswerVerifier）；逐项核对见 §5.1 |
+| [price-trustworthiness.md](design/price-trustworthiness.md) | 已实施 | 垂类结构化工具（金价/汇率/天气/时间）已落地于 `backend/src/services/tools/plugins/` |
+| [llm-wiki-compile.md](design/llm-wiki-compile.md) | 已实施 | Phase 1~5 全部完成（2026-09-07 ~ 09-09），实施记录见 §8/§10/§11/§13/§14 |
 | [env-isolation-and-workflow-refactor.md](design/env-isolation-and-workflow-refactor.md) | 已实施 | P0+P1 完成（2026-09-08），dev/prod 双栈并存验证通过，CI 已接入 env-consistency |
 | [chat-latency-and-model-config.md](design/chat-latency-and-model-config.md) | 已实施 | 首字延迟治理 + 模型配置去硬编码（2026-09-07），记录见 §10 |
 | [frontend-test-plan.md](design/frontend-test-plan.md) | 已实施 | 前端单测 + E2E 体系（P2-6，2026-09-06） |
 | [semantic-cache.md](design/semantic-cache.md) | 已实施 | 语义缓存 P1-3（2026-09-07），记录见 §8 |
 | [severe-fixes.md](design/severe-fixes.md) | 已实施 | 严重问题 1~9 修复；来源报告归档于 archive/code-review-2026-08.md |
+| [agent-evolution.md](design/agent-evolution.md) | 部分实施 | Agent 有界循环 Phase 1/2 已落地；正文头部状态行待回写，L1-a 记忆已实施（见 archive/code-review-2026-09.md §6.5） |
+| [agent-ab-evaluation.md](design/agent-ab-evaluation.md) | 已执行验收 | A/B 两臂 live 对比完成（2026-09-14），结果与未达标项见 §7.1 |
 
 ## 按场景查找
 

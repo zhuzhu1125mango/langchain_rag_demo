@@ -289,7 +289,11 @@ async def stream_answer(
             session = result.scalar_one_or_none()
             if not session:
                 logger.warning(f"保存助手消息时未找到会话: {current_session_id}")
-                return generated_title
+                # 会话不存在（可能被并发删除）：无需生成标题。
+                # 此前这里 return generated_title，但该变量仅在 send_message（非流式）
+                # 作用域定义，stream_answer 内并不存在 → 并发删除会话时会抛 NameError，
+                # 被外层 except Exception 吞成"回答已生成但保存失败"。
+                return False
 
             # 记录策略执行到学习引擎（失败不影响消息保存）
             execution_id = None
@@ -621,7 +625,7 @@ async def enhance_context(
     rag_chain = await RAGChain.get_instance(vector_store)
 
     try:
-        result = await rag_chain.enhance_context(request.question, history)
+        result = await rag_chain.enhance_context(request.question, history, request.session_id)
         return result
     except Exception as e:
         logger.error(f"上下文增强失败: {str(e)}", exc_info=True)
@@ -666,20 +670,11 @@ async def submit_message_feedback(
     # 映射 rating 到 feedback_score (-1.0 ~ 1.0)
     feedback_score = (rating - 3) / 2.0
 
-    feedback = Feedback(
-        session_id=_parse_session_id(request.session_id),
-        message_id=message_id,
-        owner_id=current_user.user_id,
-        rating=rating,
-        reason=request.reason
-    )
-    db.add(feedback)
-    await db.commit()
-    await db.refresh(feedback)
-
-    # 查找关联的 execution_id 并记录反馈到学习引擎
+    # 先校验会话归属并解析 execution_id，再写入反馈。
+    # 此前先 commit 反馈、后 require_owner，导致对他人 session_id 提交反馈时
+    # 数据已落库、响应却是 403（部分写入）。现在把归属校验前置到写入之前。
+    execution_id = None
     try:
-        execution_id = None
         if request.session_id:
             result = await db.execute(
                 select(SessionModel).filter(SessionModel.id == _parse_session_id(request.session_id))
@@ -709,7 +704,24 @@ async def submit_message_feedback(
                             break
                 if execution_id:
                     break
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"解析反馈关联会话失败: {e}", exc_info=True)
 
+    feedback = Feedback(
+        session_id=_parse_session_id(request.session_id),
+        message_id=message_id,
+        owner_id=current_user.user_id,
+        rating=rating,
+        reason=request.reason
+    )
+    db.add(feedback)
+    await db.commit()
+    await db.refresh(feedback)
+
+    # 记录反馈到学习引擎（失败不影响反馈已提交的事实）
+    try:
         if execution_id:
             await learning_engine.record_feedback(
                 execution_id=execution_id,

@@ -300,16 +300,27 @@ class WikiCompiler:
         vectors = await self._get_embeddings().aembed_documents(texts)
         cand_vecs = vectors[: len(pending_idx)]
         page_vecs = vectors[len(pending_idx):]
+        # 页面与向量配对成元组列表，消费时同步删除，保证下标不错位
+        pairs = list(zip(remaining, page_vecs))
 
         for pos, i in enumerate(pending_idx):
             best_score, best = 0.0, None
-            for j, page in enumerate(list(remaining)):
-                score = _cosine(cand_vecs[pos], page_vecs[j])
+            best_idx = -1
+            # 关键：page_vecs 在循环外按 remaining 的初始顺序一次性算出。
+            # 必须把「页面」与「向量」配对成元组列表一起消费、一起删除，
+            # 否则循环内 remaining.remove(best) 改变列表下标后，后续候选的
+            # page_vecs[j] 会与错位的向量比较——命中一次后余下候选都在跟
+            # "别人的向量"比相似度，匹配到错误既有页并静默合并。
+            for idx, (page, vec) in enumerate(pairs):
+                score = _cosine(cand_vecs[pos], vec)
                 if score > best_score:
-                    best_score, best = score, page
+                    best_score = score
+                    best = page
+                    best_idx = idx
             if best is not None and best_score >= TITLE_MATCH_THRESHOLD:
                 matched[i] = best
                 remaining.remove(best)
+                pairs.pop(best_idx)  # 同步移除向量，保持配对不错位
         return matched
 
     async def _generate_page(

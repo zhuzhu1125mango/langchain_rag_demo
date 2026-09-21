@@ -4,14 +4,18 @@
 提供学习引擎的管理和查询功能
 """
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
-from src.auth import get_current_user, CurrentUser
+from src.auth import get_current_user, require_admin, CurrentUser
 from src.services.learning_engine import learning_engine
 from src.services.strategy_manager import create_default_strategy_manager
 
 router = APIRouter(prefix="/learning", tags=["learning"])
+
+logger = logging.getLogger("rag_system")
 
 
 class LearningConfigUpdate(BaseModel):
@@ -44,7 +48,8 @@ async def get_learning_stats(current_user: CurrentUser = Depends(get_current_use
         }
         return {"success": True, "data": adapted_stats}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("学习引擎操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.get("/misclassification", summary="获取误分类分析")
@@ -70,18 +75,20 @@ async def get_misclassification_analysis(
             })
         return {"success": True, "data": adapted_cases}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("学习引擎操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/trigger", summary="触发学习")
-async def trigger_learning(current_user: CurrentUser = Depends(get_current_user)):
-    """手动触发学习流程"""
+async def trigger_learning(current_user: CurrentUser = Depends(require_admin)):
+    """手动触发学习流程（全局操作，需管理员权限）"""
     try:
         strategy_manager = await create_default_strategy_manager()
         result = await learning_engine.trigger_learning(strategy_manager)
         return {"success": True, "data": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("学习引擎操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/record-execution", summary="记录执行")
@@ -106,7 +113,8 @@ async def record_execution(
         )
         return {"success": True, "execution_id": execution_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("学习引擎操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.post("/record-feedback", summary="记录反馈")
@@ -125,15 +133,16 @@ async def record_feedback(
         )
         return {"success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("学习引擎操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.put("/config", summary="更新学习引擎配置")
 async def update_learning_config(
     config: LearningConfigUpdate,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
-    """更新学习引擎配置"""
+    """更新学习引擎配置（全局操作，需管理员权限）"""
     try:
         await learning_engine.load_config()
         if config.enabled is not None:
@@ -155,7 +164,8 @@ async def update_learning_config(
             }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("学习引擎操作失败", exc_info=True)
+        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 @router.get("/config", summary="获取学习引擎配置")
@@ -173,8 +183,8 @@ async def get_learning_config(current_user: CurrentUser = Depends(get_current_us
 
 
 @router.post("/enable", summary="启用学习引擎")
-async def enable_learning(current_user: CurrentUser = Depends(get_current_user)):
-    """启用学习引擎"""
+async def enable_learning(current_user: CurrentUser = Depends(require_admin)):
+    """启用学习引擎（全局操作，需管理员权限）"""
     await learning_engine.load_config()
     learning_engine.enable()
     await learning_engine.save_config()
@@ -182,8 +192,8 @@ async def enable_learning(current_user: CurrentUser = Depends(get_current_user))
 
 
 @router.post("/disable", summary="禁用学习引擎")
-async def disable_learning(current_user: CurrentUser = Depends(get_current_user)):
-    """禁用学习引擎"""
+async def disable_learning(current_user: CurrentUser = Depends(require_admin)):
+    """禁用学习引擎（全局操作，需管理员权限）"""
     await learning_engine.load_config()
     learning_engine.disable()
     await learning_engine.save_config()

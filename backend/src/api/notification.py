@@ -19,6 +19,7 @@ from starlette.websockets import WebSocketState
 
 from src.auth import get_current_user_for_ws, require_owner, CurrentUser
 from src.database import get_db
+from src.exceptions import BadRequestException, ResourceNotFoundException
 from src.models.knowledge_base import KnowledgeBase
 from src.services.notification_service import (
     subscribe,
@@ -29,6 +30,40 @@ from src.services.notification_service import (
 )
 
 router = APIRouter(tags=["notifications"])
+
+
+def _is_owned_doc_channel(channel: str) -> Optional[str]:
+    """若为按知识库归属的频道（doc:{kb_id}），返回 kb_id；否则返回 None。
+
+    全局/任务类频道（kb:*、doc:*、task:* 及自定义）不属于越权面，
+    仅对需要知识库归属校验的 doc:{kb_id} 频道进行所有权校验。
+    """
+    prefix = "doc:"
+    if channel.startswith(prefix):
+        kb_id = channel[len(prefix):]
+        # 排除通配符全局频道
+        if kb_id and kb_id != "*":
+            return kb_id
+    return None
+
+
+async def _assert_doc_channel_owned(
+    db: AsyncSession, channel: str, current_user: CurrentUser
+) -> None:
+    """校验 doc:{kb_id} 频道对应知识库属于当前用户，否则抛 AuthorizationException(403)。"""
+    kb_id = _is_owned_doc_channel(channel)
+    if kb_id is None:
+        return
+    try:
+        kb_uuid = uuid.UUID(kb_id)
+    except ValueError:
+        raise BadRequestException("无效的知识库ID")
+    kb = (
+        await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid))
+    ).scalar_one_or_none()
+    if not kb:
+        raise ResourceNotFoundException("知识库不存在")
+    require_owner(kb.owner_id, current_user)
 
 
 class ConnectionManager:
@@ -96,7 +131,8 @@ manager = ConnectionManager()
 @router.websocket("/ws/notifications")
 async def websocket_notifications(
     websocket: WebSocket,
-    channels: str = Query(default="kb:*,doc:*", description="逗号分隔的订阅频道，支持通配符如 kb:*")
+    channels: str = Query(default="kb:*,doc:*", description="逗号分隔的订阅频道，支持通配符如 kb:*"),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     通用通知WebSocket端点
@@ -120,6 +156,14 @@ async def websocket_notifications(
     # 解析频道列表
     channel_list = [c.strip() for c in channels.split(",") if c.strip()]
 
+    # 越权校验：doc:{kb_id} 频道要求知识库归属当前用户，否则拒绝建立连接
+    for channel in channel_list:
+        try:
+            await _assert_doc_channel_owned(db, channel, current_user)
+        except HTTPException:
+            await websocket.close(code=1008, reason="无权订阅该频道")
+            return
+
     await manager.connect(websocket, connection_id, channel_list, user_id=current_user.user_id)
 
     try:
@@ -137,12 +181,19 @@ async def websocket_notifications(
                 # 处理频道订阅变更
                 elif message.get("type") == "subscribe":
                     new_channels = message.get("channels", [])
+                    valid_new = []
                     for channel in new_channels:
+                        try:
+                            await _assert_doc_channel_owned(db, channel, current_user)
+                        except HTTPException:
+                            # 越权频道：拒绝订阅，但不中断连接
+                            continue
                         subscribe(channel, websocket)
                         manager.active_connections[connection_id]["channels"].add(channel)
+                        valid_new.append(channel)
                     await websocket.send_json({
                         "type": "subscribed",
-                        "channels": list(new_channels)
+                        "channels": valid_new
                     })
 
                 elif message.get("type") == "unsubscribe":

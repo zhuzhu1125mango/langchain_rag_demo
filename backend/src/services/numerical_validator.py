@@ -156,9 +156,12 @@ class NumericalValidator:
         unit = re.sub(r"[\d\.\s,]+", "", unit).strip()
         return multiplier, unit or ""
 
-    def _infer_metric(self, text: str, window: str) -> str:
-        """根据上下文窗口推断指标名。"""
-        combined = (text + " " + window).lower()
+    def _infer_metric(self, window: str) -> str:
+        """根据数字附近局部上下文窗口推断指标名。
+
+        仅基于局部窗口，避免整篇文本中无关指标词污染判断。
+        """
+        combined = window.lower()
         for metric, keywords in self._METRIC_KEYWORDS.items():
             if any(kw.lower() in combined for kw in keywords):
                 return metric
@@ -202,7 +205,7 @@ class NumericalValidator:
 
             multiplier, unit = self._normalize_unit(unit_window)
             value = base_value * multiplier
-            metric = self._infer_metric(content, window)
+            metric = self._infer_metric(window)
 
             facts.append(
                 NumericalFact(

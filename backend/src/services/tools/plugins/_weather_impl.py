@@ -16,10 +16,29 @@ import logging
 logger = logging.getLogger("rag_system")
 
 
+# 模块级共享 HTTP 客户端：懒加载复用连接，避免每次请求新建+关闭的 TCP/TLS 握手开销
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=10.0)
+    return _http_client
+
+
 # Open-Meteo 地理编码 API：将城市名解析为经纬度
 OPEN_METEO_GEO_URL = "https://geocoding-api.open-meteo.com/v1/search"
 # Open-Meteo 预报 API：获取当前天气和预报
 OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
+
+# 句首时间前缀：剥除后再提取城市，避免被并入城市名（"今天上海" -> "今天上"）
+_TIME_PREFIX_RE = re.compile(r"^(今天|明天|后天|昨天|现在|当前|今晚|明晚|今早|明早){1,2}")
+
+# 诊断/故障类问题标记：含这些词时（如"服务器温度过高怎么办"）不当作天气问法
+_DIAGNOSTIC_RE = re.compile(
+    r"(过高|过低|偏高|偏低|怎么办|怎么处理|如何处理|如何解决|报警|告警|故障|异常|超标|太高|太低)"
+)
 
 
 def _extract_city_name(question: str) -> Optional[str]:
@@ -40,6 +59,15 @@ def _extract_city_name(question: str) -> Optional[str]:
         return None
 
     q = question.strip()
+
+    # 排除诊断/故障类问题（"服务器温度过高怎么办"、"温度偏低"）：
+    # 这类含"温度/气温"但非真实天气问法，不应路由到天气工具。
+    if _DIAGNOSTIC_RE.search(q):
+        return None
+
+    # 先剥离句首时间前缀（今天上海天气 -> 上海天气），
+    # 避免惰性匹配把时间并进城市（"今天上"）。
+    q = _TIME_PREFIX_RE.sub("", q)
 
     # 常见模式：{城市}天气 / 天气{城市} / {城市}今天天气 / 今天{城市}天气
     # 同时支持气温、温度、下雪、下雨等天气相关词
@@ -72,23 +100,23 @@ async def _geocode_city(city: str) -> Optional[Dict[str, Any]]:
         dict | None: 包含 latitude, longitude, name, country, timezone 的字典。
     """
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                OPEN_METEO_GEO_URL,
-                params={
-                    "name": city,
-                    "count": 1,
-                    "language": "zh",
-                    "format": "json",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            results = data.get("results") or []
-            if not results:
-                logger.warning(f"Open-Meteo 未找到城市: {city}")
-                return None
-            return results[0]
+        client = _get_http_client()
+        resp = await client.get(
+            OPEN_METEO_GEO_URL,
+            params={
+                "name": city,
+                "count": 1,
+                "language": "zh",
+                "format": "json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("results") or []
+        if not results:
+            logger.warning(f"Open-Meteo 未找到城市: {city}")
+            return None
+        return results[0]
     except Exception as e:
         logger.warning(f"Open-Meteo 地理编码失败 [{city}]: {e}")
         return None
@@ -112,48 +140,48 @@ async def get_weather_by_city(city: str) -> Optional[Dict[str, Any]]:
     timezone = geo.get("timezone", "auto")
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                OPEN_METEO_FORECAST_URL,
-                params={
-                    "latitude": lat,
-                    "longitude": lon,
-                    "current": [
-                        "temperature_2m",
-                        "relative_humidity_2m",
-                        "apparent_temperature",
-                        "weather_code",
-                        "wind_speed_10m",
-                        "wind_direction_10m",
-                        "pressure_msl",
-                    ],
-                    "daily": [
-                        "weather_code",
-                        "temperature_2m_max",
-                        "temperature_2m_min",
-                        "sunrise",
-                        "sunset",
-                        "precipitation_sum",
-                    ],
-                    "timezone": timezone,
-                    "forecast_days": 3,
-                    "language": "zh",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return {
-                "city": city,
-                "resolved_name": geo.get("name"),
-                "country": geo.get("country"),
+        client = _get_http_client()
+        resp = await client.get(
+            OPEN_METEO_FORECAST_URL,
+            params={
                 "latitude": lat,
                 "longitude": lon,
+                "current": [
+                    "temperature_2m",
+                    "relative_humidity_2m",
+                    "apparent_temperature",
+                    "weather_code",
+                    "wind_speed_10m",
+                    "wind_direction_10m",
+                    "pressure_msl",
+                ],
+                "daily": [
+                    "weather_code",
+                    "temperature_2m_max",
+                    "temperature_2m_min",
+                    "sunrise",
+                    "sunset",
+                    "precipitation_sum",
+                ],
                 "timezone": timezone,
-                "current": data.get("current", {}),
-                "daily": data.get("daily", {}),
-                "units": data.get("current_units", {}),
-                "fetched_at": datetime.now().isoformat(),
-            }
+                "forecast_days": 3,
+                "language": "zh",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return {
+            "city": city,
+            "resolved_name": geo.get("name"),
+            "country": geo.get("country"),
+            "latitude": lat,
+            "longitude": lon,
+            "timezone": timezone,
+            "current": data.get("current", {}),
+            "daily": data.get("daily", {}),
+            "units": data.get("current_units", {}),
+            "fetched_at": datetime.now().isoformat(),
+        }
     except Exception as e:
         logger.warning(f"Open-Meteo 天气查询失败 [{city}]: {e}")
         return None

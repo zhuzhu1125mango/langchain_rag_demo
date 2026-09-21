@@ -20,7 +20,10 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
+import threading
+from datetime import date
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Set
 from urllib.parse import urlparse
@@ -213,8 +216,9 @@ class SearchQueryRewriter:
         if any(kw in q for kw in _CODE_KEYWORDS):
             return "site:github.com OR site:stackoverflow.com"
         if any(kw in q for kw in _RECENT_KEYWORDS):
-            # SearXNG/DuckDuckGo 对时间过滤支持不一，这里加年份增强实时性
-            return "2024 OR 2025"
+            # SearXNG/DuckDuckGo 对时间过滤支持不一，这里加当年与去年增强实时性
+            yr = date.today().year
+            return f"{yr} OR {yr - 1}"
         return ""
 
     def _normalize(self, query: str) -> str:
@@ -279,6 +283,8 @@ class WebReranker:
         self._ollama_reranker = None
         self._embeddings = None
         self._fallback_loaded = False
+        # B3：模型加载锁，防止并发请求重复加载
+        self._model_load_lock = threading.Lock()
 
     def _load_model(self):
         """加载 Cross-Encoder 或 Ollama 重排序模型；失败时置空，由 rerank 走嵌入兜底"""
@@ -307,6 +313,28 @@ class WebReranker:
             except Exception as e:
                 logger.warning(f"重排模型加载失败: {e}，将使用嵌入兜底")
                 self._model = None
+
+    async def _load_model_async(self):
+        """异步加载重排模型。
+
+        B3：模型加载为首次调用的 CPU/IO 密集操作，移入线程池避免阻塞事件循环；
+        用锁保证并发请求下仅加载一次（double-checked）。
+        """
+        if (self.provider == "ollama" and self._ollama_reranker is not None) or (
+            self.provider != "ollama" and self._model is not None
+        ):
+            return
+
+        def _guarded():
+            with self._model_load_lock:
+                # double-checked：并发下仅首个线程真正加载
+                if (self.provider == "ollama" and self._ollama_reranker is not None) or (
+                    self.provider != "ollama" and self._model is not None
+                ):
+                    return
+                self._load_model()
+
+        await asyncio.to_thread(_guarded)
 
     def _load_embeddings_fallback(self):
         """加载 OllamaEmbeddings 作为 rerank 兜底（增强4：嵌入兜底）"""
@@ -352,7 +380,7 @@ class WebReranker:
         if not settings.search.SEARCH_ENABLE_RERANK or not self.model_name:
             return contents[:top_k]
 
-        self._load_model()
+        await self._load_model_async()
         # C1：与知识库 rerank 对齐——先截断候选再打分，减少打分次数
         rerank_n = max(top_k, settings.search.SEARCH_RERANK_TOP_K)
         candidates = contents[:rerank_n]
@@ -411,6 +439,12 @@ class WebSearchService:
 
         self._ddgs_client = None
         self._tavily_client = None
+        # Persistent HTTP 客户端：复用 TCP/TLS 连接，避免每次请求新建+关闭的握手开销
+        self._http = httpx.AsyncClient(
+            timeout=httpx.Timeout(self.fetch_timeout),
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; RAG-Bot/1.0)"},
+        )
 
     def _cache_key(self, prefix: str, text: str) -> str:
         hash_value = hashlib.md5(text.encode("utf-8")).hexdigest()
@@ -436,6 +470,12 @@ class WebSearchService:
     async def search(self, query: str, max_results: Optional[int] = None) -> List[SearchResult]:
         """执行单 Query 搜索，按配置路由到对应搜索引擎。"""
         max_results = max_results or self.max_results
+
+        # 受控 web 仿真：设 AB_WEB_MOCK_FILE 时从预置文件返回匹配片段，完全绕开网络，
+        # 用于 plan on/off 对拍排除 SearXNG 反爬噪声；不设则走真实搜索（生产行为不变）。
+        mock_file = os.environ.get("AB_WEB_MOCK_FILE")
+        if mock_file:
+            return self._search_mock(query, max_results, mock_file)
 
         if self.search_provider == "searxng":
             return await self._search_searxng(query, max_results)
@@ -497,6 +537,40 @@ class WebSearchService:
         processed = self.postprocessor.process(merged, top_k=self.context_results)
         return processed
 
+    def _search_mock(self, query: str, max_results: int, mock_file: str) -> List[SearchResult]:
+        """从预置 JSON 按关键词匹配返回仿真网页；无匹配返回空（模拟无结果）。
+
+        该路径仅由 AB_WEB_MOCK_FILE 显式启用（受控 web 仿真对拍），一旦命中
+        即在 search 层直接返回，不会触达任一真实搜索引擎。
+        """
+        data = getattr(self, "_web_mock_data", None)
+        if data is None:
+            data = {"matches": []}
+            try:
+                with open(mock_file, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict) and isinstance(loaded.get("matches"), list):
+                    data = loaded
+            except (OSError, ValueError) as e:
+                logger.warning(f"web mock 读取失败 {mock_file}: {e}")
+            self._web_mock_data = data
+
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+        for entry in data.get("matches", []):
+            if any(kw and kw.lower() in q for kw in entry.get("keywords", [])):
+                results = []
+                for r in entry.get("results", [])[:max_results]:
+                    results.append(SearchResult(
+                        title=r.get("title", ""),
+                        url=r.get("url", ""),
+                        content=r.get("content", ""),
+                        engine="mock",
+                    ))
+                return results
+        return []
+
     async def _search_searxng(self, query: str, max_results: int) -> List[SearchResult]:
         if not self.searxng_base_url:
             raise WebSearchError("SEARXNG_BASE_URL 未配置", engine="searxng")
@@ -513,10 +587,9 @@ class WebSearchService:
             logger.debug(f"SearXNG 时效过滤: query='{query}', time_range={time_range}")
 
         try:
-            async with httpx.AsyncClient(timeout=self.searxng_timeout, follow_redirects=True) as client:
-                response = await client.get(f"{base_url}/search", params=params)
-                response.raise_for_status()
-                data = response.json()
+            response = await self._http.get(f"{base_url}/search", params=params)
+            response.raise_for_status()
+            data = response.json()
         except Exception as e:
             raise WebSearchError(f"SearXNG 请求失败: {e}", engine="searxng", cause=e)
 
@@ -608,14 +681,9 @@ class WebSearchService:
             )
 
         try:
-            async with httpx.AsyncClient(
-                timeout=self.fetch_timeout,
-                follow_redirects=True,
-                headers={"User-Agent": "Mozilla/5.0 (compatible; RAG-Bot/1.0)"},
-            ) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                html = response.text
+            response = await self._http.get(url)
+            response.raise_for_status()
+            html = response.text
         except Exception as e:
             logger.debug(f"抓取页面失败 {url}: {e}")
             return None
@@ -837,6 +905,27 @@ class WebSearchService:
         if max_results is None:
             max_results = self.context_results
 
+        # 结果级缓存：键含 query 与会话上下文散列（避免相同 query 复用
+        # 了不同 context 改写的结果），命中则跳过 LLM 改写 + N 路搜索 + N 次抓取。
+        context_cache_key = self._cache_key("web_search:context_enhanced", query)
+        if conversation_context:
+            ctx_hash = hashlib.md5(
+                json.dumps(conversation_context, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            ).hexdigest()[:8]
+            context_cache_key += f":{ctx_hash}"
+        cached = await self._get_cache(context_cache_key)
+        if isinstance(cached, dict):
+            logger.debug("命中增强搜索上下文缓存")
+            return (
+                cached.get("context", ""),
+                cached.get("sources", []),
+                cached.get("cross_source_data", {
+                    "validated_values": [],
+                    "single_source_values": [],
+                    "conflicting_values": [],
+                }),
+            )
+
         # 多 Query 搜索（带多轮上下文）
         try:
             results = await self.search_multi(query, conversation_context=conversation_context)
@@ -892,6 +981,13 @@ class WebSearchService:
             })
 
         context = "\n\n".join(context_parts)
+
+        # 缓存最终结果（context + sources + 交叉验证），需与来源随请求返回
+        await self._set_cache(
+            context_cache_key,
+            {"context": context, "sources": sources, "cross_source_data": cross_source_data},
+            self.cache_ttl,
+        )
         return context, sources, cross_source_data
 
     async def build_search_context(self, query: str, max_results: int = 3) -> str:

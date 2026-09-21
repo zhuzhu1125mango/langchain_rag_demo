@@ -100,7 +100,14 @@ async def _get_owned_document(
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=400, detail="无效的文档ID")
 
-    result = await db.execute(select(Document).filter(Document.id == doc_uuid))
+    result = await db.execute(
+        select(Document)
+        .options(
+            joinedload(Document.knowledge_base),
+            joinedload(Document.category),
+        )
+        .filter(Document.id == doc_uuid)
+    )
     doc = result.scalar_one_or_none()
     if not doc:
         raise HTTPException(status_code=404, detail="文档不存在")
@@ -291,19 +298,18 @@ async def process_document_async(
             await notify_task_progress(task_upload_id, 92, "正在进行智能分析...")
 
             try:
-                llm_classify_result = await classify_document_with_llm(full_content)
-                if llm_classify_result:
-                    # LLM分类成功，覆盖规则分析结果
-                    doc.document_type_label = llm_classify_result.get("document_type", doc.document_type_label)
-                    doc.topics = llm_classify_result.get("topics", doc.topics)
-                    doc.domain_label = llm_classify_result.get("domain", doc.domain_label)
-                    doc.summary = llm_classify_result.get("summary", "")
-
-                llm_quality_result = await evaluate_quality_with_llm(full_content)
-                if llm_quality_result:
-                    doc.quality_score = int(llm_quality_result.get("overall_score", doc.quality_score))
-                    doc.quality_grade = llm_quality_result.get("overall_grade", doc.quality_grade)
-                    doc.quality_details = llm_quality_result
+                # 智能分析：单次 LLM 调用同时完成「分类 + 质量评估」，92% 阶段约提速一半
+                llm_result = await analyze_document_with_llm(full_content)
+                if llm_result:
+                    # 分类字段（LLM 成功则覆盖规则分析结果）
+                    doc.document_type_label = llm_result.get("document_type", doc.document_type_label)
+                    doc.topics = llm_result.get("topics", doc.topics)
+                    doc.domain_label = llm_result.get("domain", doc.domain_label)
+                    doc.summary = llm_result.get("summary", doc.summary)
+                    # 质量字段（overall_grade 已在分析层推导，整个 dict 作为 quality_details 覆盖）
+                    doc.quality_score = int(llm_result.get("overall_score", doc.quality_score))
+                    doc.quality_grade = llm_result.get("overall_grade", doc.quality_grade)
+                    doc.quality_details = llm_result
 
                 await db.commit()
                 logger.info(f"文档LLM智能分析完成: {doc.filename}")
@@ -553,7 +559,7 @@ async def upload_document(
         minio_service = await MinioService.get_instance()
 
         # 更新状态：开始上传
-        create_upload_progress(task_upload_id, file.filename, actual_size)
+        create_upload_progress(task_upload_id, file.filename, actual_size, owner_id=current_user.user_id)
         update_upload_progress(task_upload_id, status="uploading", message="正在上传文件...")
 
         # 先创建文档记录，标记为上传中
@@ -694,7 +700,7 @@ async def batch_upload(
             await db.commit()
 
             task_upload_id = f"batch_{doc_id}"
-            create_upload_progress(task_upload_id, file.filename, actual_size)
+            create_upload_progress(task_upload_id, file.filename, actual_size, owner_id=current_user.user_id)
             update_upload_progress(task_upload_id, status="processing", message="正在处理文档...")
 
             # 将文档处理添加到后台任务
@@ -754,6 +760,37 @@ def get_status_display(status: str) -> str:
         "archived": "inactive"
     }
     return status_map.get(status, "inactive")
+
+
+def serialize_document(doc: Document) -> DocumentResponse:
+    """将文档 ORM 对象序列化为对外响应模型。
+
+    集中转发字段映射，屏蔽 file_path/owner_id/quality_details 等内部字段。
+    """
+    return DocumentResponse(
+        id=str(doc.id),
+        filename=doc.filename,
+        file_type=doc.file_type,
+        size=doc.size,
+        kb_id=str(doc.kb_id) if doc.kb_id else None,
+        kb_name=doc.knowledge_base.name if doc.knowledge_base else None,
+        status=get_status_display(doc.status),
+        processing_status=doc.processing_status,
+        processing_message=doc.processing_message,
+        processing_progress=doc.processing_progress,
+        chunks_count=doc.chunks_count,
+        created_at=doc.created_at.isoformat(),
+        category_name=doc.category.name if doc.category else None,
+        tags=doc.tags if doc.tags else [],
+        document_type=doc.document_type or None,
+        document_type_label=doc.document_type_label or None,
+        domain=doc.domain or None,
+        domain_label=doc.domain_label or None,
+        topics=doc.topics if doc.topics else [],
+        summary=doc.summary or None,
+        quality_score=doc.quality_score if doc.quality_score else None,
+        quality_grade=doc.quality_grade or None,
+    )
 
 
 class SearchResult(BaseModel):
@@ -1102,7 +1139,7 @@ async def reprocess_document(
         await db.commit()
 
         # 创建进度记录
-        create_upload_progress(task_upload_id, doc.filename, doc.size)
+        create_upload_progress(task_upload_id, doc.filename, doc.size, owner_id=current_user.user_id)
         update_upload_progress(task_upload_id, status="processing", message="正在重新处理文档...")
 
         # 将文档处理添加到后台任务
@@ -1127,6 +1164,10 @@ async def reprocess_document(
         }
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的文档ID")
+    except HTTPException:
+        # _get_owned_document 抛 400/404/403，必须原样上抛，不能被下面的
+        # except Exception 吞成 500（否则越权/不存在语义丢失，前端无法区分）
+        raise
     except Exception as e:
         logger.error(f"重新处理文档失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="重新处理文档失败，请稍后重试")
@@ -1193,6 +1234,9 @@ async def classify_document(
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        # _get_owned_document 抛 400/404/403，原样上抛，避免被吞成 500
+        raise
     except Exception as e:
         logger.error(f"文档分类失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="文档分类失败，请稍后重试")
@@ -1224,19 +1268,22 @@ async def evaluate_document_quality(
         return DocumentQualityResponse(**result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        # _get_owned_document 抛 400/404/403，原样上抛，避免被吞成 500
+        raise
     except Exception as e:
         logger.error(f"文档质量评估失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="文档质量评估失败，请稍后重试")
 
 
-@router.get("/{doc_id}")
+@router.get("/{doc_id}", response_model=DocumentResponse)
 async def get_document(
     doc_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     doc = await _get_owned_document(db, doc_id, current_user)
-    return doc
+    return serialize_document(doc)
 
 
 @router.put("/{doc_id}")
@@ -1306,7 +1353,7 @@ async def delete_document(
         task_id = f"delete_{doc_id}_{uuid.uuid4().hex[:8]}"
 
         # 创建进度记录
-        create_upload_progress(task_id, doc.filename, 0)
+        create_upload_progress(task_id, doc.filename, 0, owner_id=current_user.user_id)
         update_upload_progress(task_id, status="processing", message="正在删除...")
 
         # 立即返回，后台删除
@@ -1333,7 +1380,7 @@ async def delete_document(
 
 @router.post("/batch/delete")
 async def batch_delete(
-    body: dict = Body(...),
+    body: BatchDeleteRequest = Body(...),
     background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
@@ -1346,7 +1393,7 @@ async def batch_delete(
     2. 在后台异步删除文档
     3. 通过WebSocket实时推送删除进度
     """
-    ids = body.get("ids", [])
+    ids = body.ids
     deleted_docs = []
     deleted_count = 0
     task_ids = []
@@ -1362,7 +1409,7 @@ async def batch_delete(
                 task_ids.append(task_id)
 
                 # 创建进度记录
-                create_upload_progress(task_id, doc.filename, 0)
+                create_upload_progress(task_id, doc.filename, 0, owner_id=current_user.user_id)
                 update_upload_progress(task_id, status="processing", message="正在删除...")
 
                 # 立即返回，后台删除
@@ -1391,10 +1438,16 @@ async def batch_delete(
 
 
 @router.get("/upload/progress/{upload_id}")
-def get_upload_progress_endpoint(upload_id: str):
+def get_upload_progress_endpoint(
+    upload_id: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     """获取上传进度（轮询方式）"""
     progress = get_upload_progress(upload_id)
     if not progress:
+        raise HTTPException(status_code=404, detail="上传任务不存在")
+    # 归属校验：非本人的进度任务视同不存在，避免探测他人任务
+    if progress.owner_id and progress.owner_id != current_user.user_id:
         raise HTTPException(status_code=404, detail="上传任务不存在")
     return progress.to_dict()
 
@@ -1407,7 +1460,13 @@ async def upload_progress_ws(websocket: WebSocket, upload_id: str):
     避免密钥进入反向代理访问日志）。认证失败或超时以 1008 关闭连接。
     """
     # accept 与首帧鉴权均在 get_current_user_for_ws 内完成
-    await get_current_user_for_ws(websocket)
+    current_user = await get_current_user_for_ws(websocket)
+
+    # 归属校验：非本人的进度任务拒绝订阅
+    progress = get_upload_progress(upload_id)
+    if progress and progress.owner_id and progress.owner_id != current_user.user_id:
+        await websocket.close(code=1008, reason="无权访问该上传任务")
+        return
 
     # 注册 WebSocket 连接
     register_ws_connection(upload_id, websocket)
@@ -1524,60 +1583,30 @@ async def detect_duplicates(
         return results[:20]
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        # _get_owned_document 抛 400/404/403，原样上抛，避免被吞成 500
+        raise
     except Exception as e:
         logger.error(f"重复检测失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="重复检测失败，请稍后重试")
 
 
-async def classify_document_with_llm(content: str) -> dict:
+async def analyze_document_with_llm(content: str) -> dict:
     """
-    使用LLM对文档进行智能分类（委托给 DocumentAnalyzer）
+    使用LLM对文档进行一次「分类 + 质量评估」智能分析（委托给 DocumentAnalyzer）
 
     Args:
         content: 文档内容
 
     Returns:
-        dict: 分类结果
+        dict: 分类 + 质量评估合并结果；失败时返回 None 以保留规则分析结果
     """
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
-    result = await rag_chain.classify_document(content)
+    result = await rag_chain.analyze_document(content)
     # DocumentAnalyzer 在解析失败或异常时返回兜底结果；保持原行为：失败时返回 None 以保留规则分析结果
-    if result.get("summary") in ("无法解析文档内容", "分类失败"):
+    if result.get("summary") in ("无法解析评估结果", "评估失败", "无法解析文档内容", "分类失败"):
         return None
-    return result
-
-
-async def evaluate_quality_with_llm(content: str) -> dict:
-    """
-    使用LLM评估文档质量（委托给 DocumentAnalyzer）
-
-    Args:
-        content: 文档内容
-
-    Returns:
-        dict: 质量评估结果
-    """
-    vector_store = await VectorStoreManager.get_instance()
-    rag_chain = await RAGChain.get_instance(vector_store)
-    result = await rag_chain.evaluate_document_quality(content)
-    summary = result.get("summary")
-    # DocumentAnalyzer 在解析失败或异常时返回兜底结果；保持原行为：失败时返回 None 以保留规则分析结果
-    if summary in ("无法解析评估结果", "评估失败"):
-        return None
-    # DocumentAnalyzer 的提示词未要求 overall_grade，按原逻辑从分数推导等级
-    overall_score = float(result.get("overall_score", 0))
-    if not result.get("overall_grade"):
-        if overall_score >= 90:
-            result["overall_grade"] = "优秀"
-        elif overall_score >= 80:
-            result["overall_grade"] = "良好"
-        elif overall_score >= 70:
-            result["overall_grade"] = "中等"
-        elif overall_score >= 60:
-            result["overall_grade"] = "及格"
-        else:
-            result["overall_grade"] = "需改进"
     return result
 
 

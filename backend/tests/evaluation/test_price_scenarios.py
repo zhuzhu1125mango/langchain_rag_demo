@@ -56,22 +56,27 @@ class MockResponse:
         return self._json
 
 
-def _mock_async_client(responses):
-    """生成按顺序返回responses的 AsyncClient mock。"""
+def _mock_client(responses):
+    """生成按顺序返回 responses 的共享客户端实例。"""
     class _MockClient:
-        def __init__(self, *args, **kwargs):
+        def __init__(self, responses):
             self._responses = list(responses)
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args, **kwargs):
-            pass
 
         async def get(self, *args, **kwargs):
             return self._responses.pop(0)
 
-    return _MockClient
+    return _MockClient(list(responses))
+
+
+def _patch_http_client(module, responses):
+    """将目标模块的共享 HTTP 客户端工厂替换为返回 mock 客户端的补丁。
+
+    插件改用模块级共享客户端后不再直接 patch httpx.AsyncClient，
+    而是 patch 提供客户端实例的 _get_http_client 接口（单元测试隔离点）。
+    """
+    from unittest.mock import patch
+
+    return patch(f"{module}._get_http_client", return_value=_mock_client(responses))
 
 
 # =============================================================================
@@ -142,7 +147,7 @@ class TestGoldPriceFetching:
                 "updated_at": "2026-06-27T14:32:00Z",
             }
         )
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.gold_price_tool", [mock_resp]):
             point = await _fetch_xaus("CNY", "gram")
         assert point is not None
         assert point.value == Decimal("780.5")
@@ -153,7 +158,7 @@ class TestGoldPriceFetching:
     async def test_fetch_xaus_failure(self):
         """xaus.com 返回异常时应返回 None。"""
         mock_resp = MockResponse({}, status_code=500)
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.gold_price_tool", [mock_resp]):
             point = await _fetch_xaus("CNY", "gram")
         assert point is None
 
@@ -167,7 +172,7 @@ class TestGoldPriceFetching:
                 "timestamp": 1719496320,
             }
         )
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.gold_price_tool", [mock_resp]):
             point = await _fetch_goldapi("XAU", "USD", "gram", "fake-key")
         assert point is not None
         assert point.currency == "USD"
@@ -217,7 +222,7 @@ class TestGoldPriceToolExecute:
                 "updated_at": recent_ts,
             }
         )
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.gold_price_tool", [mock_resp]):
             tool = GoldPriceTool()
             result = await tool.execute(question="今日金价")
         assert result.success is True
@@ -229,7 +234,7 @@ class TestGoldPriceToolExecute:
     async def test_execute_all_sources_fail(self):
         """所有数据源失败时 success 应为 False。"""
         mock_resp = MockResponse({}, status_code=500)
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.gold_price_tool", [mock_resp]):
             tool = GoldPriceTool()
             result = await tool.execute(question="今日银价")
         assert result.success is False
@@ -279,7 +284,7 @@ class TestExchangeRateFetching:
                 "date": "2026-06-27",
             }
         )
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.exchange_rate_tool", [mock_resp]):
             point = await _fetch_frankfurter("USD", "CNY")
         assert point is not None
         assert point.value == Decimal("7.25")
@@ -311,7 +316,7 @@ class TestExchangeRateToolExecute:
                 "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             }
         )
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.exchange_rate_tool", [mock_resp]):
             tool = ExchangeRateTool()
             result = await tool.execute(question="美元兑人民币汇率")
         assert result.success is True
@@ -329,7 +334,7 @@ class TestExchangeRateToolExecute:
                 "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
             }
         )
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.exchange_rate_tool", [mock_resp]):
             tool = ExchangeRateTool()
             result = await tool.execute(question="100美元等于多少人民币")
         assert result.success is True
@@ -339,7 +344,7 @@ class TestExchangeRateToolExecute:
     async def test_execute_all_sources_fail(self):
         """所有数据源失败时 success 应为 False。"""
         mock_resp = MockResponse({}, status_code=500)
-        with patch("httpx.AsyncClient", _mock_async_client([mock_resp])):
+        with _patch_http_client("src.services.tools.plugins.exchange_rate_tool", [mock_resp]):
             tool = ExchangeRateTool()
             result = await tool.execute(question="美元兑人民币汇率")
         assert result.success is False

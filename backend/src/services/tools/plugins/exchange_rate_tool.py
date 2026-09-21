@@ -27,6 +27,17 @@ from src.services.tools.tool_manager import BaseTool, ToolResult
 logger = logging.getLogger("rag_system")
 
 
+# 模块级共享 HTTP 客户端：懒加载复用连接，避免每次请求新建+关闭的 TCP/TLS 握手开销
+_http_client: Optional[httpx.AsyncClient] = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    global _http_client
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=8.0)
+    return _http_client
+
+
 # 货币名称到 ISO 代码映射
 _CURRENCY_MAP = {
     "usd": "USD", "美元": "USD", "$": "USD",
@@ -261,10 +272,10 @@ async def _fetch_frankfurter(from_currency: str, to_currency: str) -> Optional[P
     url = "https://api.frankfurter.dev/v1/latest"
     params = {"from": from_currency, "to": to_currency}
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(url, params=params)
-            resp.raise_for_status()
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
 
         rates = data.get("rates", {})
         rate = _to_decimal(rates.get(to_currency))
@@ -295,10 +306,10 @@ async def _fetch_exchangerate_api(
     """
     url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/{from_currency}"
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+        client = _get_http_client()
+        resp = await client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
 
         rates = data.get("conversion_rates", {})
         rate = _to_decimal(rates.get(to_currency))

@@ -22,6 +22,7 @@ class Experiment(Base):
     __tablename__ = "experiments"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    owner_id = Column(String, nullable=False, default="")       # 所有者（对象级授权，空串=遗留放行）
     name = Column(String, nullable=False)                        # 实验名称
     description = Column(String)                                 # 实验描述
     status = Column(String, default="created")                   # 状态: created, running, stopped
