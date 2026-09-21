@@ -33,6 +33,7 @@ virtualenv/
 # =============== IDE Configurations ===============
 .idea/
 .vscode/
+.trae/
 *.swp
 *.swo
 *~

@@ -15,7 +15,7 @@
 | 🧩 **结构化分块** | 按类型路由分块策略（Markdown / HTML / Word / 代码 / 表格行），保留标题层级 | ✅ |
 | ⚡ **语义缓存** | 高相似度问题直接回放答案，Redis 不可用时 fail-open | ✅ |
 | 📖 **LLM-Wiki 编译层** | 将文档预编译为结构化页面（增量编译 / 交叉链接 / 一致性检查） | ✅ |
-| 🌐 **联网搜索** | 支持 DuckDuckGo / SearXNG / Tavily，Query 改写 + 重排 + Redis 缓存 | ✅ |
+| 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
 | 🤖 **搜索 Agent** | Function Calling / ReAct Agent，支持多步推理与网页抓取 | ✅ |
 | 💬 **流式输出** | 实时打字效果，提升用户体验 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
