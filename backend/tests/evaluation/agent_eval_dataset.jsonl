@@ -1,0 +1,29 @@
+{"id":"kb_01","category":"kb","question":"员工请假需要提前多久申请？","golden_documents":["leave_policy"],"web_topic":"","expected_points":["提前3个工作日","OA系统提交","主管审批"]}
+{"id":"kb_02","category":"kb","question":"公司年终奖什么时候发放？","golden_documents":["bonus_policy"],"web_topic":"","expected_points":["春节前","最后一个工作日","随当月工资"]}
+{"id":"kb_03","category":"kb","question":"试用期员工是否享受带薪年假？","golden_documents":["leave_policy"],"web_topic":"","expected_points":["转正后","按比例","试用期按事假"]}
+{"id":"kb_04","category":"kb","question":"如何申请报销差旅费？","golden_documents":["reimbursement"],"web_topic":"","expected_points":["OA系统","发票","两级审批"]}
+{"id":"kb_05","category":"kb","question":"办公时间是什么时候？","golden_documents":["work_hours"],"web_topic":"","expected_points":["9:00","18:00","五天工作制"]}
+{"id":"kb_06","category":"kb","question":"年终奖金额与绩效考核等级有什么关系？","golden_documents":["bonus_policy"],"web_topic":"","expected_points":["A等级3个月","B等级2个月","C等级1个月"]}
+{"id":"web_01","category":"web","question":"2026年米兰冬奥会什么时候开幕？","golden_documents":[],"web_topic":"米兰冬奥会","expected_points":["米兰","冬奥会","2026"]}
+{"id":"web_02","category":"web","question":"华为最新发布的旗舰手机是哪款？","golden_documents":[],"web_topic":"华为旗舰手机","expected_points":["华为","旗舰"]}
+{"id":"web_03","category":"web","question":"2026年世界人工智能大会什么时候举办？","golden_documents":[],"web_topic":"世界人工智能大会","expected_points":["世界人工智能大会","2026"]}
+{"id":"web_04","category":"web","question":"新能源汽车购置税减免政策最新规定是什么？","golden_documents":[],"web_topic":"新能源车购置税","expected_points":["购置税","新能源"]}
+{"id":"web_05","category":"web","question":"阿里巴巴最近一个季度的营收是多少？","golden_documents":[],"web_topic":"阿里巴巴季度营收","expected_points":["阿里巴巴","营收"]}
+{"id":"web_06","category":"web","question":"中国空间站最近有哪些新进展？","golden_documents":[],"web_topic":"中国空间站","expected_points":["空间站"]}
+{"id":"hybrid_01","category":"hybrid","question":"公司试用期年假规定与国家法定标准的区别是什么？","golden_documents":["leave_policy"],"web_topic":"年假 法定标准","expected_points":["试用期按事假","国家法定年假"]}
+{"id":"hybrid_02","category":"hybrid","question":"公司年终奖发放方式与行业常见做法有什么不同？","golden_documents":["bonus_policy"],"web_topic":"年终奖 行业做法","expected_points":["绩效考核挂钩","春节前发放"]}
+{"id":"hybrid_03","category":"hybrid","question":"公司差旅费报销流程相比标准企业做法需要注意什么？","golden_documents":["reimbursement"],"web_topic":"差旅报销 企业标准","expected_points":["发票原件","两级审批","跨年度不报"]}
+{"id":"hybrid_04","category":"hybrid","question":"公司弹性打卡制度与法定工作时间制度是否冲突？","golden_documents":["work_hours"],"web_topic":"弹性工作 劳动法","expected_points":["弹性打卡","工作时间"]}
+{"id":"hybrid_05","category":"hybrid","question":"公司连续旷工的处理规定与劳动合同法相关条款如何对照？","golden_documents":["attendance"],"web_topic":"旷工 劳动合同法","expected_points":["旷工","解除劳动合同"]}
+{"id":"hybrid_06","category":"hybrid","question":"公司办公时间安排与法定每日工作时间上限的关系？","golden_documents":["work_hours"],"web_topic":"法定工作时间","expected_points":["办公时间","法定工时"]}
+{"id":"tool_01","category":"tool","question":"计算 128 乘以 4.5 等于多少？","golden_documents":[],"web_topic":"","expected_points":["576"]}
+{"id":"tool_02","category":"tool","question":"2 的 10 次方等于多少？","golden_documents":[],"web_topic":"","expected_points":["1024"]}
+{"id":"tool_03","category":"tool","question":"今天的黄金价格是多少？","golden_documents":[],"web_topic":"","expected_points":["金价"]}
+{"id":"tool_04","category":"tool","question":"100 美元可以兑换多少人民币？","golden_documents":[],"web_topic":"","expected_points":["人民币"]}
+{"id":"fast_01","category":"fast_path","question":"今天是几号？","golden_documents":[],"web_topic":"","expected_points":[]}
+{"id":"fast_02","category":"fast_path","question":"现在几点了？","golden_documents":[],"web_topic":"","expected_points":[]}
+{"id":"memory_01","category":"memory","question":"那也就是说试用期内请事假不算年假？我刚才说的那两个说法对吗？","golden_documents":[],"web_topic":"","prior_question":"试用期员工是否享受带薪年假？","prior_answer":"试用期员工不享受带薪年假，试用期请事假按事假处理，转正后按比例享受。","expected_points":["试用期按事假","转正后按比例"]}
+{"id":"memory_02","category":"memory","question":"那上面提到的报销流程里，跨年度的发票还能报吗？","golden_documents":[],"web_topic":"","prior_question":"如何申请报销差旅费？","prior_answer":"通过OA系统提交、附发票，需两级审批；跨年度发票不予报销。","expected_points":["跨年度不报","两级审批"]}
+{"id":"multi_01","category":"multi","question":"公司年终奖发放时间与法定节假日天数安排是否一致？","golden_documents":["bonus_policy"],"web_topic":"法定节假日安排","expected_points":["年终奖春节前最后工作日","法定节假日安排"]}
+{"id":"multi_02","category":"multi","question":"公司年终奖的发放依据是什么，与行业惯例相比有何异同？","golden_documents":["bonus_policy"],"web_topic":"年终奖发放惯例","expected_points":["年终奖发放依据","行业惯例异同"]}
+{"id":"multi_03","category":"multi","question":"办公时间与法定每日工作时长的限制之间如何权衡？","golden_documents":["work_hours"],"web_topic":"法定工作时间上限","expected_points":["办公时间","法定工作时间"]}

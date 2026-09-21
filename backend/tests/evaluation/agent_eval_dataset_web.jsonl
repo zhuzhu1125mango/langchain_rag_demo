@@ -1,0 +1,6 @@
+{"id": "web_01", "category": "web", "question": "2026年米兰冬奥会什么时候开幕？", "golden_documents": [], "web_topic": "米兰冬奥会", "expected_points": ["米兰", "冬奥会", "2026"]}
+{"id": "web_02", "category": "web", "question": "华为最新发布的旗舰手机是哪款？", "golden_documents": [], "web_topic": "华为旗舰手机", "expected_points": ["华为", "旗舰"]}
+{"id": "web_03", "category": "web", "question": "2026年世界人工智能大会什么时候举办？", "golden_documents": [], "web_topic": "世界人工智能大会", "expected_points": ["世界人工智能大会", "2026"]}
+{"id": "web_04", "category": "web", "question": "新能源汽车购置税减免政策最新规定是什么？", "golden_documents": [], "web_topic": "新能源车购置税", "expected_points": ["购置税", "新能源"]}
+{"id": "web_05", "category": "web", "question": "阿里巴巴最近一个季度的营收是多少？", "golden_documents": [], "web_topic": "阿里巴巴季度营收", "expected_points": ["阿里巴巴", "营收"]}
+{"id": "web_06", "category": "web", "question": "中国空间站最近有哪些新进展？", "golden_documents": [], "web_topic": "中国空间站", "expected_points": ["空间站"]}
