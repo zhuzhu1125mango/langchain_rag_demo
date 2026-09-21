@@ -13,8 +13,9 @@ groups:
   - name: fastapi_alerts
     rules:
       # 错误率告警：1 分钟内错误率 > 5% 持续 1 分钟触发
+      # 语义修正：错误率 = 错误计数速率 ÷ 总请求计数速率（rate>0.05 单独看是"每秒错误数"）
       - alert: FastAPIHighErrorRate
-        expr: rate(rag_request_errors_total[1m]) > 0.05
+        expr: rate(rag_request_errors_total[1m]) / clamp_min(rate(rag_request_total[1m]), 1e-9) > 0.05
         for: 1m
         labels:
           severity: warning
@@ -55,15 +56,17 @@ groups:
           summary: "Milvus 服务不可用"
           description: "Milvus 服务已停止响应"
 
-      # 查询延迟告警：平均查询延迟 > 2 秒持续 1 分钟触发
+      # 查询延迟告警：平均查询延迟 > 2000ms 持续 1 分钟触发
+      # 指标名修正：Milvus 暴露的是 milvus_proxy_sq_latency_milliseconds_*（毫秒），
+      # 非 milvus_query_latency_seconds_*（原规则引用了不存在的指标，恒不触发）
       - alert: MilvusHighQueryLatency
-        expr: rate(milvus_query_latency_seconds_sum[1m]) / rate(milvus_query_latency_seconds_count[1m]) > 2
+        expr: rate(milvus_proxy_sq_latency_milliseconds_sum[1m]) / rate(milvus_proxy_sq_latency_milliseconds_count[1m]) > 2000
         for: 1m
         labels:
           severity: warning
         annotations:
           summary: "Milvus 查询延迟过高"
-          description: "平均查询延迟超过 2 秒"
+          description: "平均查询延迟超过 2000ms"
 
   # LLM 调用告警组
   - name: llm_alerts

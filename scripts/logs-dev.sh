@@ -12,6 +12,7 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.dev.yml"
+ENV_FILE="$SCRIPT_DIR/../.env.dev"
 
 # Determine docker compose command
 if docker compose version &> /dev/null; then
@@ -41,12 +42,12 @@ echo ""
 if [[ -n "${1:-}" ]]; then
     echo "Viewing logs for: $1"
     echo ""
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" logs -f --tail=200 "$1"
+    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs -f --tail=200 "$1"
 else
     echo "Viewing logs for all services (Ctrl+C to exit)"
     echo ""
     echo "Tip: Use './scripts/logs-dev.sh <service>' to view specific service logs"
-    echo "     Available services: backend, frontend, postgres, minio, milvus-standalone, redis, searxng, prometheus, grafana"
+    echo "     Available services: backend, frontend, postgres, minio, milvus-standalone, redis, prometheus, grafana"
     echo ""
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" logs -f --tail=100
+    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs -f --tail=100
 fi

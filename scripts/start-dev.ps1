@@ -150,6 +150,10 @@ function Load-EnvVars {
         if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
             $name = $matches[1].Trim()
             $value = $matches[2].Trim()
+            # 剥析行内注释（"　#" 前缀的说明文字），避免展示/注入到含注释的值
+            if ($value -match '\s+#') {
+                $value = ($value -replace '\s+#.*$', '').Trim()
+            }
             [System.Environment]::SetEnvironmentVariable($name, $value)
         }
     }
@@ -256,21 +260,6 @@ function Wait-ForHealth {
     # Print container status table
     Print-ContainerStatus
 
-    # SearXNG 应用层健康检查（Docker healthy 不代表 /healthz 返回 200）
-    try {
-        $searxngResponse = Invoke-WebRequest -Uri "http://localhost:8080/healthz" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop
-        if ($searxngResponse.StatusCode -eq 200) {
-            Write-OK "SearXNG 搜索引擎健康检查通过"
-        } else {
-            Write-Warn "SearXNG 返回状态码 $($searxngResponse.StatusCode)，搜索功能可能不可用"
-            $allHealthy = $false
-        }
-    } catch {
-        Write-Warn "SearXNG 健康检查失败: $_"
-        Write-Info "请检查日志: docker logs searxng-dev"
-        $allHealthy = $false
-    }
-
     Write-Host ""
     return $allHealthy
 }
@@ -290,12 +279,10 @@ function Print-AccessInfo {
     Write-Step "5/5" "输出访问信息..."
     Write-Host ""
 
-    # Read env vars for display (dev mode shows actual values)
+    # Read env vars for display (dev mode shows actual values；不展示敏感密码)
     $pgDb = $env:POSTGRES_DB ?? "rag_demo"
     $pgUser = $env:POSTGRES_USER ?? "postgres"
-    $pgPwd = $env:POSTGRES_PASSWORD ?? "postgres"
     $minioUser = $env:MINIO_ROOT_USER ?? "minioadmin"
-    $minioPwd = $env:MINIO_ROOT_PASSWORD ?? "minioadmin"
     $grafanaPwd = $env:GF_SECURITY_ADMIN_PASSWORD ?? "admin"
 
     Write-Host "${Bold}========================================${Reset}"
@@ -311,10 +298,8 @@ function Print-AccessInfo {
     Write-Host "    PostgreSQL   : localhost:5433"
     Write-Host "                  数据库: $pgDb"
     Write-Host "                  用户名: $pgUser"
-    Write-Host "                  密码  : $pgPwd"
     Write-Host "    MinIO 控制台 : http://localhost:9001"
     Write-Host "                  用户名: $minioUser"
-    Write-Host "                  密码  : $minioPwd"
     Write-Host "    Milvus       : localhost:19530"
     Write-Host ""
     Write-Host "  ${Cyan}监控服务${Reset}"

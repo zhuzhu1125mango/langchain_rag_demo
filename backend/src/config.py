@@ -6,6 +6,7 @@
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 from typing import Optional, List, Dict
 import os
 
@@ -99,7 +100,19 @@ class CorsSettings(BaseSettings):
     ALLOW_CREDENTIALS: bool = True
     ALLOW_METHODS: List[str] = ["*"]
     ALLOW_HEADERS: List[str] = ["*"]
-    
+
+    @field_validator("ALLOWED_ORIGINS", "ALLOW_METHODS", "ALLOW_HEADERS", mode="before")
+    @classmethod
+    def _split_csv(cls, v):
+        """pydantic-settings 对 List[str] 默认按 JSON 解析 .env 值，会拒绝逗号分隔字符串。
+
+        常见的 .env 写法一直是 ``ALLOWED_ORIGINS=a,b``，这里降级：非列表值按逗号分隔成列表，
+        兼容 JSON 数组与逗号分隔两种写法。
+        """
+        if isinstance(v, str):
+            return [item.strip() for item in v.split(",") if item.strip()]
+        return v
+
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 class ModelSettings(BaseSettings):
@@ -146,6 +159,12 @@ class ProcessingSettings(BaseSettings):
     KB_RERANK_PROVIDER: str = "ollama"
     # rerank 分数相关性阈值（C8）：所有检索结果分数均低于此值时判定"无高度相关内容"
     KB_RELEVANCE_SCORE_THRESHOLD: float = 0.3
+
+    # 多查询并行检索（P2-2）：QueryRewriter 改写出多个查询并行召回，跨查询 RRF 融合，
+    # 单次 rerank 仍用原始问题。默认关闭，评估确认有增益后开启
+    KB_MULTI_QUERY_ENABLED: bool = False
+    # 多查询时每个 query 每路（dense/sparse）的召回数；单查询路径仍用 KB_HYBRID_SEARCH_TOP_K
+    KB_MULTI_QUERY_CHANNEL_TOP_K: int = 10
 
     # 上下文构建相关配置
     CONTEXT_TOKEN_BUDGET: int = 4000
@@ -237,7 +256,7 @@ class OcrSettings(BaseSettings):
 
 
 class SearchSettings(BaseSettings):
-    SEARCH_PROVIDER: str = "searxng"
+    SEARCH_PROVIDER: str = "tavily"   # searxng | tavily；SearXNG 已弃用，默认 tavily
     SEARCH_API_KEY: Optional[str] = None
     SEARCH_MAX_RESULTS: int = 10
     SEARXNG_BASE_URL: Optional[str] = None
@@ -263,6 +282,26 @@ class SearchSettings(BaseSettings):
     SEARCH_ENABLE_REACT: bool = False
     SEARCH_REACT_MAX_STEPS: int = 3
     SEARCH_AGENT_FALLBACK_TO_PHASE2: bool = True
+    # 原生 function calling（Ollama tools API）；模型不支持/未返回 tool_calls 时
+    # 自动回退 prompt 约定 JSON 模式
+    SEARCH_AGENT_NATIVE_FC: bool = True
+
+    # Agent 演进（P2 有界循环，默认关闭灰度开启）
+    AGENT_ORCHESTRATOR_ENABLED: bool = False
+    AGENT_TIME_BUDGET_MS: int = 30000          # 循环时间预算（毫秒）
+    AGENT_OBS_MAX_CHARS: int = 2000            # 单工具观察截断字符数
+    AGENT_TOOLS_ENABLED: str = "web_search,fetch_webpage,kb_search,wiki_lookup,calculator"
+
+    # L2 分层规划（默认关闭灰度开启）：循环首步产 ≤3 步提纲并注入后续 DECIDE。
+    # 仅 AGENT_RESEARCH/复杂 web 判定才启用，保 P95 不劣化（见 docs/design/agent-evolution.md §11.5）。
+    AGENT_PLAN_ENABLED: bool = False
+
+    # L1-a 跨请求记忆（默认关闭灰度开启）：
+    # 复用主 Milvus collection，source_kind="memory" + document_id="memory:{session_id}" 精确隔离会话，
+    # 零 schema 变更（见 docs/design/agent-evolution.md §11.2）
+    AGENT_MEMORY_ENABLED: bool = False
+    AGENT_MEMORY_TOP_K: int = 3            # 每次会话注入的最近记忆条数
+    AGENT_MEMORY_COLLECTION: str = ""      # 预留：为空则复用主 collection（当前实现）
 
     # 引用补全
     CITATION_MATCH_THRESHOLD: float = 0.65       # embedding 相似度阈值
@@ -385,7 +424,10 @@ settings = Settings()
 
 DATA_DIR = os.path.join(BASE_DIR, "data")
 VECTOR_DB_DIR = os.path.join(BASE_DIR, "vector_db")
-LOG_DIR = os.path.join(BASE_DIR, "logs")
+# 日志落盘目录统一为 backend/logs（后端根）。容器内 /app 即 backend，/app/logs 被
+# compose 挂载持久化；此前指向 BASE_DIR/logs（backend/src/logs）偏离挂载语义。
+# 注意用 BASE_DIR 的上级（后端根），PROJECT_ROOT 是项目根（其 logs 会落到外层）。
+LOG_DIR = os.path.join(BASE_DIR, "..", "logs")
 
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(VECTOR_DB_DIR, exist_ok=True)

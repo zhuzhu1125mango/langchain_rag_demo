@@ -1,0 +1,105 @@
+{
+  "title": "RAG System Overview",
+  "uid": "rag-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "timezone": "browser",
+  "tags": ["rag"],
+  "editable": true,
+  "graphTooltip": 0,
+  "panels": [
+    {
+      "id": 1,
+      "title": "HTTP 请求速率 (QPS)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(rag_request_total[$__rate_interval])) by (job)", "legendFormat": "{{job}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ops", "custom": { "fillOpacity": 20 } },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "HTTP 错误率 (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+      "targets": [
+        { "expr": "100 * rate(rag_request_errors_total[$__rate_interval]) / clamp_min(rate(rag_request_total[$__rate_interval]), 1e-9)", "legendFormat": "error %" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "HTTP P95 延迟 (s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(rag_request_duration_seconds_bucket[$__rate_interval])) by (le))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "LLM 调用延迟 P95 (s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(rag_llm_call_duration_seconds_bucket[$__rate_interval])) by (le))", "legendFormat": "llm p95" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 5,
+      "title": "LLM 调用错误率 (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "100 * rate(rag_llm_call_errors_total[$__rate_interval]) / clamp_min(rate(rag_llm_calls_total[$__rate_interval]), 1e-9)", "legendFormat": "llm error %" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percent", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 6,
+      "title": "Milvus 平均查询延迟 (ms)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "rate(milvus_proxy_sq_latency_milliseconds_sum[$__rate_interval]) / rate(milvus_proxy_sq_latency_milliseconds_count[$__rate_interval])", "legendFormat": "avg query latency" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "ms", "min": 0 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 7,
+      "title": "服务存活",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "max(time() - process_start_time_seconds{job=\"fastapi-app\"}) by (job)", "legendFormat": "{{job}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "noValue": "down" },
+        "overrides": []
+      }
+    }
+  ]
+}

@@ -2,15 +2,19 @@
 # 生产环境 Docker Compose 配置
 # -----------------------------------------------------------------------------
 # 用途：生产部署使用，包含 RAG 系统全部服务：
-#   - MinIO / Milvus / etcd / PostgreSQL / Redis / SearXNG  基础设施
+#   - MinIO / Milvus / etcd / PostgreSQL / Redis  基础设施
 #   - backend   后端 API（使用 Dockerfile.prod 多阶段构建）
 #   - frontend  前端（nginx 静态托管构建产物）
 #   - Prometheus / Alertmanager / Grafana / postgres-exporter  监控告警栈
 # 所有服务默认 restart: unless-stopped，确保异常退出后自动恢复。
 # 使用方式：docker compose -f docker-compose.yml --env-file .env.prod up -d
+# ⚠️ 说明：直接 up -d 只会拉起服务，不会执行数据库迁移（alembic）。请使用
+#    ./scripts/start-prod.sh 启动（重启 backend 前会自动 exec alembic upgrade head /
+#    stamp head 对齐 schema），或在重启 backend 后手动执行
+#    docker compose -f docker-compose.yml --env-file .env.prod exec backend alembic upgrade head。
 # 隔离说明：project name 固定为 rag-prod，与开发栈（rag-dev）容器/卷/网络完全隔离，可并存；
 #           宿主机端口与开发栈全部错开（backend 8001 / postgres 5434 / redis 6380 /
-#           minio 9002-9003 / milvus 19531 / searxng 8081 / prometheus 9094 /
+#           minio 9002-9003 / milvus 19531 / prometheus 9094 /
 #           grafana 3001 / alertmanager 9095），基础设施端口仅绑定回环地址。
 # =============================================================================
 
@@ -40,38 +44,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # searxng — 元搜索引擎，聚合多个搜索源供 RAG 检索增强使用
-  searxng:
-    image: searxng/searxng:2026.8.20-8d3dd0cd4   # 固定日期版本 tag，避免 latest 漂移引入不可控变更
-    container_name: searxng-prod
-    networks:
-      - monitoring
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
-    ports:
-      - "127.0.0.1:8081:8080"      # 与开发栈（8080）错开；仅绑定回环地址（后端经 docker 网络访问 searxng:8080，不受影响）
-    volumes:
-      - ./configs/searxng/settings.yml:/etc/searxng/settings.yml:ro
-    environment:
-      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
-      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY}  # SearXNG 会话加密密钥
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
-
   # backend — 后端 API 服务（生产镜像，构建产物精简）
   backend:
     build:
@@ -82,15 +54,16 @@ services:
     env_file:
       - .env.prod
     environment:          # 仅保留 docker 网络路由覆盖（优先级高于 env_file）
+      APP_ENV: "prod"                  # 显式 prod：不依赖 IN_DOCKER 回退判定生产
       IN_DOCKER: "true"
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       MINIO_ENDPOINT: minio:9000
+      MINIO_SECURE: "false"                 # MinIO 容器为明文 HTTP，覆盖 .env.prod 的 MINIO_SECURE=true 避免上传 500
       MILVUS_HOST: milvus-standalone
       MILVUS_PORT: "19530"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      SEARXNG_BASE_URL: http://searxng:8080
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问 Ollama
       SKIP_OLLAMA_CHECK: "true"
       NLTK_DATA: /app/data/nltk_data                   # nltk 语料离线目录（BM25 中文分词依赖 stopwords）
@@ -116,8 +89,6 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
-      searxng:
-        condition: service_started
     ports:
       - "127.0.0.1:8001:8000"      # 与开发栈（8000）错开；仅绑定回环地址，容器内仍为 8000
 
@@ -195,6 +166,8 @@ services:
       - "127.0.0.1:3001:3000"      # 与开发栈（3000）错开；仅绑定回环地址（远程访问请走 SSH 隧道或反向代理）
     volumes:
       - ./configs/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards
       - grafana_data_prod:/var/lib/grafana
     networks:
       - monitoring

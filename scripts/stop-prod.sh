@@ -11,6 +11,7 @@ set -e
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.yml"
+ENV_FILE="$SCRIPT_DIR/../.env.prod"
 
 # Determine docker compose command
 if docker compose version &> /dev/null; then
@@ -58,12 +59,12 @@ if [[ "${1:-}" == "--clean" ]]; then
     fi
     echo ""
     echo "停止服务并删除数据卷..."
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" down -v
+    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down -v
     echo ""
     echo -e "${GREEN}✓ 生产环境已停止，数据卷已删除${NC}"
 else
     echo "停止服务..."
-    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" down
+    $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" down
     echo ""
     echo -e "${GREEN}✓ 生产环境已停止${NC}"
     echo ""

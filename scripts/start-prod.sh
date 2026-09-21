@@ -60,6 +60,8 @@ REQUIRED_VARS=(
     "MINIO_SECRET_KEY"
     "GF_SECURITY_ADMIN_PASSWORD"
     "SECRET_KEY"
+    # SearXNG 已弃用（Tavily 替代），SEARCH_API_KEY 由搜索模块运行时读取
+    "REDIS_PASSWORD"
 )
 
 # ==============================================================================
@@ -419,8 +421,11 @@ main() {
     run_security_checks
     load_env_vars
     start_services
+    # 抑制 set -e：健康检查未全部就绪时返回 1，不能提前退出，需让下方提示可达
+    set +e
     wait_for_health
-    local health_result=$?
+    health_result=$?
+    set -e
     run_database_migration
     print_access_info
     

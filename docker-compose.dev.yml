@@ -7,7 +7,6 @@
 #   - etcd           Milvus 的元数据存储
 #   - PostgreSQL     关系型数据库，存放业务数据
 #   - Redis          缓存
-#   - SearXNG        元搜索引擎，提供 Web 搜索能力
 #   - Prometheus     监控指标采集
 #   - Grafana        监控可视化
 #   - postgres-exporter  PostgreSQL 指标导出
@@ -36,33 +35,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # searxng — 元搜索引擎，聚合多个搜索源供 RAG 检索增强使用
-  searxng:
-    image: searxng/searxng:2026.8.20-8d3dd0cd4   # 与生产对齐的固定版本 tag，避免 latest 漂移
-    container_name: searxng-dev
-    networks:
-      - monitoring
-    restart: no
-    ports:
-      - "8080:8080"
-    volumes:
-      - ./configs/searxng/settings.yml:/etc/searxng/settings.yml:ro
-    environment:
-      - SEARXNG_SETTINGS_PATH=/etc/searxng/settings.yml
-      - SEARXNG_SECRET_KEY=${SEARXNG_SECRET_KEY}  # SearXNG 会话加密密钥
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - SETGID
-      - SETUID
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
 
   # postgres — 关系型数据库，存放知识库/会话/实验等业务数据
   postgres:
@@ -171,6 +143,7 @@ services:
     env_file:
       - .env.dev
     environment:          # 仅保留 docker 网络路由覆盖（优先级高于 env_file）
+      APP_ENV: "dev"                  # 显式 dev：避免 IN_DOCKER=true 回退按生产校验
       IN_DOCKER: "true"
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
@@ -179,7 +152,6 @@ services:
       MILVUS_PORT: "19530"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      SEARXNG_BASE_URL: http://searxng:8080
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问本地 Ollama
       SKIP_OLLAMA_CHECK: "true"
       NLTK_DATA: /app/data/nltk_data                   # nltk 语料离线目录（BM25 中文分词依赖 stopwords）
@@ -203,8 +175,6 @@ services:
         condition: service_started
       redis:
         condition: service_healthy
-      searxng:
-        condition: service_started
     ports:
       - "8000:8000"
     healthcheck:
@@ -262,6 +232,8 @@ services:
       - "3000:3000"
     volumes:
       - ./configs/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./configs/grafana/dashboards:/var/lib/grafana/dashboards
       - grafana_data_dev:/var/lib/grafana
     networks:
       - monitoring

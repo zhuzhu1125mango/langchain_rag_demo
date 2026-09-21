@@ -246,15 +246,6 @@ wait_for_health() {
     # Print container status table
     print_container_status
     
-    # SearXNG 应用层健康检查（Docker healthy 不代表 /healthz 返回 200）
-    if curl -fsS "http://localhost:8080/healthz" >/dev/null 2>&1; then
-        log_ok "SearXNG 搜索引擎健康检查通过"
-    else
-        log_warn "SearXNG 健康检查失败，搜索功能可能不可用"
-        log_info "请检查日志: docker logs searxng-dev"
-        all_healthy=false
-    fi
-    
     echo ""
     
     # Return status code
@@ -329,8 +320,11 @@ main() {
     run_preflight_checks
     load_env_vars
     start_services
+    # 抑制 set -e：健康检查未全部就绪时返回 1，不能提前退出，需让下方提示可达
+    set +e
     wait_for_health
-    local health_result=$?
+    health_result=$?
+    set -e
     print_access_info
     
     if [[ $health_result -eq 0 ]]; then

@@ -48,9 +48,14 @@ backend/src/data/bm25/
 
 # =============== Logs ===============
 backend/logs/
-logs/
 *.log
-*.log.*
+
+# =============== Backups ===============
+backups/
+
+# =============== Environment Copy Dir ===============
+envs/*
+!envs/README.md
 
 # =============== Frontend ===============
 frontend/node_modules/
@@ -127,6 +132,7 @@ docker-compose.override.yml
 # =============== Sensitive Files ===============
 minio.license
 *.license
+!configs/license/*.license
 *.key
 *.pem
 credentials.json
