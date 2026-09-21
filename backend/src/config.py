@@ -259,6 +259,7 @@ class SearchSettings(BaseSettings):
     SEARCH_PROVIDER: str = "tavily"   # searxng | tavily；SearXNG 已弃用，默认 tavily
     SEARCH_API_KEY: Optional[str] = None
     SEARCH_MAX_RESULTS: int = 10
+    # SearXNG 已弃用；字段仍保留仅供 _search_searxng 分支向后兼容（默认 tavily 不触达）
     SEARXNG_BASE_URL: Optional[str] = None
     SEARXNG_TIMEOUT: int = 10
     SEARCH_FETCH_TIMEOUT: int = 10

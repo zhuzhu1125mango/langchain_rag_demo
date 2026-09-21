@@ -1983,34 +1983,6 @@ class RAGChain(AsyncSingleton["RAGChain"]):
         """
         return await self.document_analyzer.detect_duplicates(content, kb_id, threshold)
 
-    async def evaluate_document_quality(self, content: str) -> dict:
-        """
-        评估文档质量和完整性
-
-        委托给 DocumentAnalyzer 处理。
-
-        Args:
-            content: 文档内容
-
-        Returns:
-            dict: 质量评估结果
-        """
-        return await self.document_analyzer.evaluate_document_quality(content)
-
-    async def classify_document(self, content: str) -> dict:
-        """
-        自动识别文档类型和主题
-
-        委托给 DocumentAnalyzer 处理。
-
-        Args:
-            content: 文档内容
-
-        Returns:
-            dict: 分类结果
-        """
-        return await self.document_analyzer.classify_document(content)
-
     async def analyze_document(self, content: str) -> dict:
         """
         合并文档智能分析（分类 + 质量评估）为一次 LLM 调用。

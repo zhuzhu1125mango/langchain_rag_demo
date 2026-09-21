@@ -306,10 +306,10 @@ async def process_document_async(
                     doc.topics = llm_result.get("topics", doc.topics)
                     doc.domain_label = llm_result.get("domain", doc.domain_label)
                     doc.summary = llm_result.get("summary", doc.summary)
-                    # 质量字段（overall_grade 已在分析层推导，整个 dict 作为 quality_details 覆盖）
+                    # 质量字段（overall_grade 已在分析层推导；合并保留规则版独有键 readability/*_comment）
                     doc.quality_score = int(llm_result.get("overall_score", doc.quality_score))
                     doc.quality_grade = llm_result.get("overall_grade", doc.quality_grade)
-                    doc.quality_details = llm_result
+                    doc.quality_details = {**(doc.quality_details or {}), **llm_result}
 
                 await db.commit()
                 logger.info(f"文档LLM智能分析完成: {doc.filename}")

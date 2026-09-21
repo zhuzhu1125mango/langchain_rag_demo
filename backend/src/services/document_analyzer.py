@@ -95,137 +95,6 @@ class DocumentAnalyzer:
             logger.error(f"重复检测失败: {str(e)}", exc_info=True)
             return []
 
-    async def evaluate_document_quality(self, content: str) -> dict:
-        """
-        评估文档质量和完整性
-
-        Args:
-            content: 文档内容
-
-        Returns:
-            dict: 质量评估结果
-        """
-        template = """
-你是一个文档质量评估专家，请根据以下标准评估文档质量：
-
-文档内容:
-{content}
-
-请按照以下标准评估：
-1. 完整性(0-100): 内容是否完整覆盖主题
-2. 准确性(0-100): 信息是否准确可靠
-3. 结构清晰度(0-100): 组织结构是否清晰
-4. 语言质量(0-100): 语言表达是否规范
-5. 相关性(0-100): 内容是否与常见知识库主题相关
-
-请以JSON格式返回评估结果：
-{{
-    "overall_score": 综合评分,
-    "completeness": 完整性评分,
-    "accuracy": 准确性评分,
-    "structure": 结构清晰度评分,
-    "language_quality": 语言质量评分,
-    "relevance": 相关性评分,
-    "summary": "简短评估总结",
-    "suggestions": ["改进建议1", "改进建议2"]
-}}
-
-请直接返回JSON，不要添加其他内容。
-"""
-        prompt = template.format(content=content[:2000])
-
-        try:
-            llm = await self._get_aux_llm()
-            response = await llm.ainvoke(prompt)
-
-            content = response.content.strip()
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                result = json.loads(json_match.group())
-                return result
-            else:
-                return {
-                    "overall_score": 50,
-                    "completeness": 50,
-                    "accuracy": 50,
-                    "structure": 50,
-                    "language_quality": 50,
-                    "relevance": 50,
-                    "summary": "无法解析评估结果",
-                    "suggestions": ["建议重新评估"]
-                }
-        except Exception as e:
-            logger.error(f"文档质量评估失败: {str(e)}", exc_info=True)
-            return {
-                "overall_score": 50,
-                "completeness": 50,
-                "accuracy": 50,
-                "structure": 50,
-                "language_quality": 50,
-                "relevance": 50,
-                "summary": "评估失败",
-                "suggestions": ["建议重新评估"]
-            }
-
-    async def classify_document(self, content: str) -> dict:
-        """
-        自动识别文档类型和主题
-
-        Args:
-            content: 文档内容
-
-        Returns:
-            dict: 分类结果
-        """
-        template = """
-你是一个文档分类专家，请分析以下文档并给出分类结果：
-
-文档内容:
-{content}
-
-请按照以下格式分类：
-1. 文档类型: 技术文档/产品文档/报告/论文/手册/指南/其他
-2. 主题标签: 最多5个关键词
-3. 适用领域: 描述适用的业务领域
-4. 内容摘要: 简短摘要
-
-请以JSON格式返回：
-{{
-    "document_type": "文档类型",
-    "topics": ["标签1", "标签2", ...],
-    "domain": "适用领域",
-    "summary": "内容摘要"
-}}
-
-请直接返回JSON，不要添加其他内容。
-"""
-        prompt = template.format(content=content[:2000])
-
-        try:
-            llm = await self._get_aux_llm()
-            response = await llm.ainvoke(prompt)
-
-            content = response.content.strip()
-            json_match = re.search(r'\{[\s\S]*\}', content)
-            if json_match:
-                result = json.loads(json_match.group())
-                return result
-            else:
-                return {
-                    "document_type": "其他",
-                    "topics": ["未分类"],
-                    "domain": "未知",
-                    "summary": "无法解析文档内容"
-                }
-        except Exception as e:
-            logger.error(f"文档分类失败: {str(e)}", exc_info=True)
-            return {
-                "document_type": "其他",
-                "topics": ["未分类"],
-                "domain": "未知",
-                "summary": "分类失败"
-            }
-
     async def analyze_document(self, content: str) -> dict:
         """
         合并文档分类与质量评估为一次 LLM 调用（省一半排队与双 prompt 开销）。
@@ -299,12 +168,17 @@ class DocumentAnalyzer:
 
     @staticmethod
     def _derive_grade(result: dict) -> dict:
-        """按 overall_score 推导 overall_grade（档位与 api/document.py 现有实现逐字一致）。"""
-        score = result.get("overall_score")
+        """推导 overall_grade，并归一 overall_score 数值（档位与 api/document.py 一致）。
+
+        LLM 可能返回字符串分数（如 "85.5"），归一为 int 后写回，
+        避免下游 `int(result["overall_score"])` 抛 ValueError。
+        """
+        raw = result.get("overall_score")
         try:
-            score = float(score or 0)
+            score = float(raw or 0)
         except (TypeError, ValueError):
             score = 0
+        result["overall_score"] = int(score)
         if not result.get("overall_grade"):
             if score >= 90:
                 result["overall_grade"] = "优秀"

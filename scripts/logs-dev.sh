@@ -47,7 +47,7 @@ else
     echo "Viewing logs for all services (Ctrl+C to exit)"
     echo ""
     echo "Tip: Use './scripts/logs-dev.sh <service>' to view specific service logs"
-    echo "     Available services: backend, frontend, postgres, minio, milvus-standalone, redis, prometheus, grafana"
+    echo "     Available services: backend, frontend, postgres, minio, milvus-standalone, etcd, redis, prometheus, grafana, postgres-exporter"
     echo ""
     $DOCKER_COMPOSE_CMD -f "$COMPOSE_FILE" --env-file "$ENV_FILE" logs -f --tail=100
 fi

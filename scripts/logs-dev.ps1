@@ -23,7 +23,7 @@ param(
 
 $script:ScriptDir = Split-Path $MyInvocation.MyCommand.Path -Parent
 $script:ComposeFile = Join-Path $script:ScriptDir "../docker-compose.dev.yml"
-$script:Services = @("backend", "frontend", "postgres", "minio", "milvus-standalone", "redis", "prometheus", "grafana")
+$script:Services = @("backend", "frontend", "postgres", "minio", "milvus-standalone", "etcd", "redis", "prometheus", "grafana", "postgres-exporter")
 
 # ==============================================================================
 # Color Definitions
