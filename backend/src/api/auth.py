@@ -92,6 +92,15 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(user)
 
+    # P2-4 审计：用户注册（best-effort，失败不阻断）
+    from src.services.audit_service import record_audit
+    await record_audit(
+        action="auth.register",
+        resource_type="user",
+        resource_id=str(user.id),
+        detail={"username": data.username},
+    )
+
     logger.info(f"新用户注册: {data.username} ({user.id})")
     return TokenResponse(access_token=create_access_token(str(user.id)), user_id=str(user.id))
 

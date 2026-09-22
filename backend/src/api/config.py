@@ -127,7 +127,20 @@ async def update_processing_config(
                 detail="top_k 必须在 1 到 20 之间"
             )
         settings.processing.TOP_K = config.top_k
-    
+
+    # P2-4 审计：配置变更（best-effort）
+    from src.services.audit_service import record_audit
+    await record_audit(
+        action="config.update",
+        resource_type="config",
+        detail={
+            "chunk_size": settings.processing.CHUNK_SIZE,
+            "chunk_overlap": settings.processing.CHUNK_OVERLAP,
+            "top_k": settings.processing.TOP_K,
+        },
+        actor_user_id=current_user.user_id,
+    )
+
     return ProcessingConfig(
         chunk_size=settings.processing.CHUNK_SIZE,
         chunk_overlap=settings.processing.CHUNK_OVERLAP,
@@ -166,6 +179,15 @@ async def reset_config(current_user: CurrentUser = Depends(require_admin)):
     settings.processing.CHUNK_OVERLAP = 64
     settings.processing.TOP_K = 3
 
+    # P2-4 审计：配置重置（best-effort）
+    from src.services.audit_service import record_audit
+    await record_audit(
+        action="config.reset",
+        resource_type="config",
+        detail={"chunk_size": 512, "chunk_overlap": 64, "top_k": 3},
+        actor_user_id=current_user.user_id,
+    )
+
     return {"message": "配置已重置为默认值"}
 
 
@@ -182,8 +204,8 @@ async def get_system_info():
         "description": "RAG Knowledge Base QA System",
         "supported_extensions": SUPPORTED_EXTENSIONS,
         "processing_defaults": {
-            "chunk_size": 500,
-            "chunk_overlap": 50,
+            "chunk_size": 512,
+            "chunk_overlap": 64,
             "top_k": 3
         }
     }

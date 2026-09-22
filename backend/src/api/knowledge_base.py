@@ -162,6 +162,16 @@ async def create_knowledge_base(
 
     await invalidate_kb_list_cache(current_user.user_id)
 
+    # P2-4 审计：知识库创建（best-effort）
+    from src.services.audit_service import record_audit
+    await record_audit(
+        action="kb.create",
+        resource_type="knowledge_base",
+        resource_id=str(kb.id),
+        detail={"name": kb.name},
+        actor_user_id=current_user.user_id,
+    )
+
     return KnowledgeBaseResponse(
         id=str(kb.id),
         name=kb.name,

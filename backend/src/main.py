@@ -49,6 +49,7 @@ from src.api import (
     evaluation_router,
     auth_router,
     trace_router,
+    audit_router,
 )
 from src.middleware.metrics import MetricsMiddleware, get_metrics, reset_metrics
 
@@ -359,6 +360,7 @@ app.include_router(document_router, prefix="/api", dependencies=[Depends(get_cur
 # 认证路由：login/register 匿名可用，不挂全局鉴权依赖
 app.include_router(auth_router, prefix="/api")
 app.include_router(trace_router, prefix="/api", dependencies=[Depends(get_current_user)])
+app.include_router(audit_router, prefix="/api", dependencies=[Depends(get_current_user)])
 # document_ws_router 仅包含 WebSocket 端点，认证在端点内通过 get_current_user_for_ws 处理，
 # 原因同 notification_router：router 级 HTTP 依赖在 WebSocket 上下文中缺少 request 对象会失败。
 app.include_router(document_ws_router, prefix="/api")

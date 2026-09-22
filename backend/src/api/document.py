@@ -395,6 +395,18 @@ async def process_document_async(
             # 通知文档列表已更新
             await notify_doc_list_changed(kb_id, doc_id, "created")
 
+            # P2-4 审计：文档上传完成（best-effort，后台任务用 owner_id 作操作者；
+            # getattr 兼容测试桩/遗留数据缺该字段）
+            from src.services.audit_service import record_audit
+            owner_id = str(getattr(doc, "owner_id", "")) or None
+            await record_audit(
+                action="document.upload",
+                resource_type="document",
+                resource_id=str(doc_id),
+                detail={"filename": doc.filename, "kb_id": str(kb_id)},
+                actor_user_id=owner_id,
+            )
+
             # 使知识库列表缓存失效，确保文档数量实时更新
             try:
                 await invalidate_kb_list_cache(doc.owner_id)
@@ -1367,6 +1379,16 @@ async def delete_document(
 
         # 通知文档列表即将更新
         await notify_doc_list_changed(kb_id, doc_id, "deleting")
+
+        # P2-4 审计：文档删除请求（best-effort）
+        from src.services.audit_service import record_audit
+        await record_audit(
+            action="document.delete",
+            resource_type="document",
+            resource_id=doc_id,
+            detail={"filename": getattr(doc, "filename", None)},
+            actor_user_id=current_user.user_id,
+        )
 
         return {
             "message": "删除任务已提交",
