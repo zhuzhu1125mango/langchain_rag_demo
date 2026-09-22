@@ -162,8 +162,8 @@ async def reset_config(current_user: CurrentUser = Depends(require_admin)):
     Returns:
         dict: {"message": "配置已重置"}
     """
-    settings.processing.CHUNK_SIZE = 500
-    settings.processing.CHUNK_OVERLAP = 50
+    settings.processing.CHUNK_SIZE = 512
+    settings.processing.CHUNK_OVERLAP = 64
     settings.processing.TOP_K = 3
 
     return {"message": "配置已重置为默认值"}

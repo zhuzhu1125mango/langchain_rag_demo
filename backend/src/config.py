@@ -138,8 +138,8 @@ class ModelSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 class ProcessingSettings(BaseSettings):
-    CHUNK_SIZE: int = 500
-    CHUNK_OVERLAP: int = 50
+    CHUNK_SIZE: int = 512
+    CHUNK_OVERLAP: int = 64
     TOP_K: int = 3
 
     # 单文件上传大小上限（MB）。服务端按实际接收字节数校验，不信任客户端声明。
@@ -377,8 +377,8 @@ class WikiCompileSettings(BaseSettings):
     WIKI_DISTRIBUTED_LOCK: bool = False
     # P5 源文档删除后级联重写（从剩余来源重推导受影响页面；false 仅剪源）
     WIKI_CASCADE_REWRITE: bool = False
-    # P5 编译期 LLM 矛盾抽查（仅诊断：warning 日志 + 指标，不改页面内容）
-    WIKI_CONTRADICTION_CHECK: bool = False
+    # P5 编译期 LLM 矛盾抽查（仅诊断：warning 日志 + 指标，不改页面内容）；观察期默认开启
+    WIKI_CONTRADICTION_CHECK: bool = True
     # P5 级联重写材料上限（字符）：重写为低频操作，独立于编译的 8000 上限放宽
     WIKI_REWRITE_MATERIAL_CHARS: int = 16000
 

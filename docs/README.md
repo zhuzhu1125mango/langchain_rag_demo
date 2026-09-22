@@ -68,7 +68,7 @@ docs/
 | [frontend-test-plan.md](design/frontend-test-plan.md) | 已实施 | 前端单测 + E2E 体系（P2-6，2026-09-06） |
 | [semantic-cache.md](design/semantic-cache.md) | 已实施 | 语义缓存 P1-3（2026-09-07），记录见 §8 |
 | [severe-fixes.md](design/severe-fixes.md) | 已实施 | 严重问题 1~9 修复；来源报告归档于 archive/code-review-2026-08.md |
-| [agent-evolution.md](design/agent-evolution.md) | 部分实施 | Agent 有界循环 Phase 1/2 已落地；正文头部状态行待回写，L1-a 记忆已实施（见 archive/code-review-2026-09.md §6.5） |
+| [agent-evolution.md](design/agent-evolution.md) | 部分实施 | Agent 有界循环 Phase 1/2 已落地，L1-a 记忆已实施（见 archive/code-review-2026-09.md §6.5） |
 | [agent-ab-evaluation.md](design/agent-ab-evaluation.md) | 已执行验收 | A/B 两臂 live 对比完成（2026-09-14），结果与未达标项见 §7.1 |
 
 ## 按场景查找
