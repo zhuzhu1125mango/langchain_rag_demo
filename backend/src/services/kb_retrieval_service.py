@@ -92,7 +92,16 @@ class KBRetrievalService:
                         docs = await vector_store.search_hybrid(question, **search_kwargs)
                 except Exception as e:
                     logger.warning(f"混合检索失败，回退到 dense 检索: {e}")
-                    docs = await vector_store.search_dense(question, **search_kwargs)
+                    try:
+                        docs = await vector_store.search_dense(question, **search_kwargs)
+                    except Exception as e2:
+                        # P2-5：dense 兜底也失败 -> 检索失败埋点（best-effort，不阻断）
+                        from src.middleware.prometheus import record_retrieval_error
+                        try:
+                            record_retrieval_error()
+                        except Exception:
+                            pass
+                        raise e2 from e
             else:
                 docs = await vector_store.search_dense(question, **search_kwargs)
 

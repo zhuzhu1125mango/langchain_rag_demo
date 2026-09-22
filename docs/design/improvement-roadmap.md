@@ -29,10 +29,10 @@
 | P1-2 | 全链路 Trace 可视化（✅ 2026-09-02 完成） | 中 | 无（Trace 已带 user_id，查询 API 按用户过滤） |
 | P1-3 | 语义缓存（✅ 2026-09-07 完成） | 中 | 无 |
 | P2-1 | GraphRAG 检索增强（轻量版） | 中 | P0-1 |
-| P2-2 | 多查询并行检索 + RRF 融合 | 中 | P0-1（需评估验证增益） |
-| P2-3 | 引用溯源到原文高亮 | 中 | 无 |
-| P2-4 | 审计日志 | 中 | P1-1 |
-| P2-5 | 告警规则补齐 | 中 | 无 |
+| P2-2 | 多查询并行检索 + RRF 融合 | 中 | P0-1（已在 mq_eval_dataset 上离线 A/B，结论保持关闭，见 §P2-2 完成记录） |
+| P2-3 | 引用溯源到原文高亮 | 中 | ✅ 已实施（此前 P0/P1 阶段落地，见 §P2-3 说明） |
+| P2-4 | 审计日志 | 中 | ✅ 2026-09-22（见 §P2-4 完成记录） |
+| P2-5 | 告警规则补齐 | 中 | ✅ 2026-09-22（见 §P2-5 完成记录；Alertmanager 通知渠道沿用文档设计决策） |
 | P2-6 | 前端 E2E 核心链路（✅ 2026-09-06 完成，含前端单测体系） | 中 | 无 |
 | P3 | 股价工具落地 / 学习引擎闭环验收 / 缓存盘点 / 重排序升级 / chunk 级权限 | 低 | 按需 |
 
@@ -179,17 +179,45 @@
 
 **方案**：`query_rewriter` 改写出 3~5 个查询并行召回，RRF 合并去重。注意行业实测：有重排序兜底时多查询增益缩水，必须先在评估基线上对比单查询基线，确认有增益再合入。
 
+**完成记录（2026-09 评估收尾，结论：保持关闭，有据决策）**：
+- 新增全离线决策工具 `backend/scripts/run_multiquery_ab.py` + 数据集 `tests/evaluation/mq_eval_dataset.jsonl`（16 样本含 `query_variants`，不动 `kb_eval_dataset.jsonl` 的 CI 卡点）+ 单测 `test_multiquery_ab.py`（6 用例，仅校验逻辑不设增益卡点）。
+- RRF 口径与生产 `reciprocal_rank_fusion` 一致（k=`KB_RRF_K`=60、`channel_top_k`=`KB_MULTI_QUERY_CHANNEL_TOP_K`=10）。
+- 实测（BM25 离线，top-5，13 个语义正常问题 + 3 个改写敏感难题）：
+  ```
+  A(单查询)      hit@5=0.938  mrr@5=0.833  recall@5=0.938
+  B(多查询+RRF)  hit@5=0.938  mrr@5=0.825  recall@5=0.938
+  ```
+  hit/recall 无增益，mrr 反降；改写敏感难题 #16 单查询 miss 且多查询也救不回——实证"有重排序兜底时多查询增益缩水"。
+- **决策**：`KB_MULTI_QUERY_ENABLED=false` 保持关闭（本地单机还放大 N× 延迟）。如需复开，先在真实 QueryRewriter 改写下于同样本上复测有增益再合入。
+
 ### P2-3 引用溯源到原文高亮
 
 **方案**：引用信息中补充 chunk 定位数据（页码/偏移/heading path），前端 `DocumentPreviewDialog` 按引用定位并高亮原文片段（对标 RAGFlow 的可追溯答案）。
+
+**说明（2026-09 复核）：端到端已实现**。后端 `_docs_to_sources` 产出 `document_id`+`chunk_index`+`total_chunks`（rag_chain.py），`GET /documents/{doc_id}/source/{chunk_index}` 返回 `content/surrounding_content/highlight_offset/highlight_length`（api/document.py）；前端 MarkdownRenderer 注入 `[N]` → ChatMessageList → ChatView → `DocumentSourceModal` 调用该接口并用 `<mark>` 高亮命中片段。此前 P0/P1 阶段已落地，仅状态未回写。
 
 ### P2-4 审计日志
 
 **方案**：新增 `audit_log` 表，记录敏感操作（文档上传/删除、知识库增删、配置变更、用户管理），与调试性质的 `request_trace` 分离；提供按操作者/时间过滤的查询接口。
 
+**完成记录（2026-09-22）**：
+- 模型 `src/models/audit_log.py`（`JSONType` JSON/JSONB variant，同 request_trace；`create_all` 启动自动建表，无需迁移脚本）。
+- 服务 `src/services/audit_service.py`：`record_audit`（best-effort，异常永抛不阻断主流程）+ `query_audit_logs`（分页/计数/过滤）。
+- API `src/api/audit.py`：`GET /api/audit`（`require_admin`），按 action/resource_type/resource_id/user_id/时间过滤 + 分页；`main.py` 已挂载。
+- Hook 接入：用户注册（auth.register）、配置改/重置（config.update/reset）、知识库创建（kb.create）、文档上传/删除（document.upload/delete）——均 best-effort 记录操作者。
+- 单测 `tests/test_audit.py`（4 用例，FakeDb 内存态）。
+- 附带修正：`GET /config/info` 的 `processing_defaults` 由陈旧的 500/50 对齐为默认 512/64。
+
 ### P2-5 告警规则补齐
 
 **方案**：在 `configs/prometheus/alerts.yml` 补充关键链路告警：Milvus 连接失败、SSE 流式中断率、Ollama 请求超时率、检索失败率；配置 Alertmanager 通知渠道。
+
+**完成记录（2026-09-22）**：
+- `alerts.yml` 新增 3 条规则：`RetrievalFailureRate`（检索失败率，`rag_retrieval_errors_total`）、`SseStreamInterruptRate`（SSE 流中断，`rag_sse_interrupted_total`）、`OllamaTimeoutRate`（Ollama 超时/失败率，复用 `rag_llm_calls_total/rag_llm_call_errors_total`）。
+- Milvus 连接失败由既有 `MilvusDown`（`up{job="milvus"}==0`，30s）覆盖，未重复建规则。
+- 新增 2 个计数器埋点（均 best-effort，不阻断主流程）：`rag_retrieval_errors_total`（kb_retrieval_service：混合失败且 dense 兜底也失败时）；`rag_sse_interrupted_total`（rag_chain `arun_stream` 用 `except GeneratorExit` 捕获客户端中途断连，正常完成不触发）。
+- 校验测试 `tests/test_prometheus_alerts.py`（3 用例：结构合法 / alert 名唯一 / 新指标与 prometheus.py 定义一致，防拼写漂移）。
+- **Alertmanager 通知渠道**：沿用既有 `configs/alertmanager/alertmanager.yml`，webhook 接收端 URL 为空需部署时按文档/环境注入（P1-E 已定"webhook 静默跳过、通知渠道留待部署"），本项不再改动。
 
 ### P2-6 前端 E2E 核心链路
 

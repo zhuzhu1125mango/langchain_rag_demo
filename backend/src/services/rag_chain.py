@@ -1732,19 +1732,29 @@ class RAGChain(AsyncSingleton["RAGChain"]):
                 - source_metadata: 来源元信息列表（包含filename、chunk_index等）
                 - answer_type: 回答类型（"knowledge_base"、"llm_direct"、"web_search"、"hybrid_search"、"function_calling"、"agent_search"、"reasoning"或"thinking"）
         """
-        async for ev in self._pipeline(
-            question, kb_ids=kb_ids, history=history,
-            use_web_search=use_web_search, search_mode=search_mode,
-            user_id=user_id, session_id=session_id,
-            deep_thinking=deep_thinking,
-        ):
-            kind = ev[0]
-            if kind == "chunk":
-                yield ev[1], ev[2], ev[3], ev[4]
-            elif kind == "reasoning":
-                yield ev[1], [], [], "reasoning"
-            elif kind == "thinking":
-                yield ev[1], [], [], "thinking"
+        try:
+            async for ev in self._pipeline(
+                question, kb_ids=kb_ids, history=history,
+                use_web_search=use_web_search, search_mode=search_mode,
+                user_id=user_id, session_id=session_id,
+                deep_thinking=deep_thinking,
+            ):
+                kind = ev[0]
+                if kind == "chunk":
+                    yield ev[1], ev[2], ev[3], ev[4]
+                elif kind == "reasoning":
+                    yield ev[1], [], [], "reasoning"
+                elif kind == "thinking":
+                    yield ev[1], [], [], "thinking"
+        except GeneratorExit:
+            # P2-5：客户端中途断连（异步生成器被 aclose 关闭）触发，正常完成不触发；
+            # 计次供 "SSE 流式中断率" 告警，需先让管线 finally 完成 _finalize_side_effects
+            from src.middleware.prometheus import record_sse_interrupted
+            try:
+                record_sse_interrupted()
+            except Exception:
+                pass
+            raise
 
     async def _stream_with_retry(self, prompt, source_texts, source_metadata, answer_type, max_retries=2, state=None, think=None):
         """

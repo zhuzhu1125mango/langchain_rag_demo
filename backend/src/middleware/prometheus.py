@@ -87,6 +87,20 @@ VECTOR_SEARCH_COUNT = Counter(
     registry=registry
 )
 
+# P2-5：检索失败计数（Milvus 查询/混合检索异常），用于"检索失败率"告警
+RETRIEVAL_ERRORS = Counter(
+    "rag_retrieval_errors_total",
+    "Total number of knowledge-base retrieval failures",
+    registry=registry
+)
+
+# P2-5：SSE 流中断计数（客户端中途断连），用于"SSE 流式中断率"告警
+SSE_INTERRUPTED = Counter(
+    "rag_sse_interrupted_total",
+    "Total number of SSE streams interrupted by client disconnect",
+    registry=registry
+)
+
 # ==================== 文档处理指标 ====================
 
 DOCUMENTS_PROCESSED = Counter(
@@ -251,6 +265,16 @@ def record_vector_search(duration):
     """
     VECTOR_SEARCH_COUNT.inc()
     VECTOR_SEARCH_TIME.observe(duration)
+
+
+def record_retrieval_error():
+    """记录一次知识库检索失败（Milvus/混合查询异常，best-effort）。"""
+    RETRIEVAL_ERRORS.inc()
+
+
+def record_sse_interrupted():
+    """记录一次 SSE 流中断（客户端中途断开，best-effort）。"""
+    SSE_INTERRUPTED.inc()
 
 
 def record_document_process(file_type, duration):

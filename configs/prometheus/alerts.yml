@@ -43,6 +43,17 @@ groups:
           summary: "FastAPI 服务不可用"
           description: "FastAPI 服务已停止响应"
 
+      # SSE 流式中断率告警（P2-5）：客户端中途断开导致的流中断计数加速上升。
+      # 指标：rag_sse_interrupted_total（rag_chain.arun_stream 埋点）
+      - alert: SseStreamInterruptRate
+        expr: rate(rag_sse_interrupted_total[5m]) > 1
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "SSE 流式中断过高"
+          description: "过去 5 分钟 SSE 流中断速率超 1/s，当前 {{ $value }}/s（可能网络不稳或前端提前取消）"
+
   # Milvus 向量数据库告警组
   - name: milvus_alerts
     rules:
@@ -55,6 +66,18 @@ groups:
         annotations:
           summary: "Milvus 服务不可用"
           description: "Milvus 服务已停止响应"
+
+      # 检索失败率告警（P2-5）：后端混合检索失败且 dense 兜底也失败时计数
+      # 指标：rag_retrieval_errors_total（kb_retrieval_service 埋点）
+      # 注：Milvus 连接失败由上方 MilvusDown（up{job="milvus"}==0，30s 触发）覆盖
+      - alert: RetrievalFailureRate
+        expr: rate(rag_retrieval_errors_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "知识库检索持续失败"
+          description: "过去 5 分钟出现检索失败（Milvus 查询/混合检索异常且 dense 兜底也失败）：当前 {{ $value }}/s"
 
       # 查询延迟告警：平均查询延迟 > 2000ms 持续 1 分钟触发
       # 指标名修正：Milvus 暴露的是 milvus_proxy_sq_latency_milliseconds_*（毫秒），
@@ -71,6 +94,17 @@ groups:
   # LLM 调用告警组
   - name: llm_alerts
     rules:
+      # Ollama 请求超时率告警（P2-5）：LLM 调用错误率过高即视为 Ollama 超时/不可用。
+      # 指标：rag_llm_call_errors_total / rag_llm_calls_total（Tavily 用 model_manager 归并）
+      - alert: OllamaTimeoutRate
+        expr: sum(rate(rag_llm_call_errors_total[5m])) by (model_name) / clamp_min(sum(rate(rag_llm_calls_total[5m])) by (model_name), 1e-9) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Ollama 请求超时/失败率过高"
+          description: "模型 {{ $labels.model_name }} LLM 调用失败率超 10%（含超时），当前 {{ $value }}"
+
       # LLM 调用延迟告警：P95 延迟 > 30 秒持续 1 分钟触发
       - alert: LLMCallHighLatency
         expr: histogram_quantile(0.95, sum(rate(rag_llm_call_duration_seconds_bucket[5m])) by (le)) > 30
