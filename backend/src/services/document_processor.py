@@ -22,16 +22,20 @@ import time
 import tempfile
 
 logger = logging.getLogger("document_processor")
+# txt/md/csv/json/pdf 走本地直读（复用已装 pypdf，去 langchain-community 依赖，见
+# document_loaders.py）；unstructured 依赖的 Office/HTML/EPUB 仍走 community（warning 待迁）。
 from langchain_community.document_loaders import (
-    TextLoader,
-    PyPDFLoader,
     UnstructuredWordDocumentLoader,
     UnstructuredExcelLoader,
     UnstructuredPowerPointLoader,
-    CSVLoader,
-    JSONLoader,
     UnstructuredHTMLLoader,
     UnstructuredEPubLoader,
+)
+from src.services.document_loaders import (
+    TextFileLoader,
+    CsvFileLoader,
+    JsonFileLoader,
+    PdfFileLoader,
 )
 from enum import Enum
 from typing import List, Optional
@@ -58,18 +62,18 @@ except ImportError:
 # 供 MarkdownHeaderTextSplitter 识别标题层级；Unstructured 加载器会把
 # 标记剥离为纯文本导致标题切分失效。
 FILE_TYPE_MAPPING = {
-    ".txt": TextLoader,
-    ".pdf": PyPDFLoader,
+    ".txt": TextFileLoader,
+    ".pdf": PdfFileLoader,
     ".docx": UnstructuredWordDocumentLoader,
     ".doc": UnstructuredWordDocumentLoader,
     ".xlsx": UnstructuredExcelLoader,
     ".xls": UnstructuredExcelLoader,
     ".pptx": UnstructuredPowerPointLoader,
     ".ppt": UnstructuredPowerPointLoader,
-    ".md": TextLoader,
-    ".markdown": TextLoader,
-    ".csv": CSVLoader,
-    ".json": JSONLoader,
+    ".md": TextFileLoader,
+    ".markdown": TextFileLoader,
+    ".csv": CsvFileLoader,
+    ".json": JsonFileLoader,
     ".html": UnstructuredHTMLLoader,
     ".htm": UnstructuredHTMLLoader,
     ".epub": UnstructuredEPubLoader,
@@ -567,7 +571,7 @@ def load_document(file_path):
                     ]
                 except Exception as e:
                     logger.warning(f"OCR 解析失败，回退内置 PDF 解析器: {local_path}, 错误: {e}")
-            loader = PyPDFLoader(local_path)
+            loader = PdfFileLoader(local_path)
         elif ext == ".csv":
             loader = loader_class(local_path, encoding="utf-8")
         elif ext == ".json":

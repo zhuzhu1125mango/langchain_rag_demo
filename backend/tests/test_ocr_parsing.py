@@ -180,7 +180,7 @@ def test_load_document_text_pdf_skips_ocr(mocker, enable_deep_parsing, tmp_path)
     pdf.write_bytes(b"%PDF-fake")
     mocker.patch.object(document_processor, "is_scanned_pdf", return_value=False)
     mock_parse = mocker.patch.object(document_processor, "parse_pdf_ocr")
-    fake_loader = mocker.patch.object(document_processor, "PyPDFLoader")
+    fake_loader = mocker.patch.object(document_processor, "PdfFileLoader")
     fake_loader.return_value.load.return_value = [
         Document(page_content="正常文本", metadata={"source": str(pdf)})
     ]
@@ -196,7 +196,7 @@ def test_load_document_disabled_skips_ocr(mocker, monkeypatch, tmp_path):
     pdf.write_bytes(b"%PDF-fake")
     mock_detect = mocker.patch.object(document_processor, "is_scanned_pdf")
     mock_parse = mocker.patch.object(document_processor, "parse_pdf_ocr")
-    fake_loader = mocker.patch.object(document_processor, "PyPDFLoader")
+    fake_loader = mocker.patch.object(document_processor, "PdfFileLoader")
     fake_loader.return_value.load.return_value = [
         Document(page_content="fallback", metadata={"source": str(pdf)})
     ]
@@ -214,7 +214,7 @@ def test_load_document_ocr_failure_falls_back(mocker, enable_deep_parsing, tmp_p
         document_processor, "parse_pdf_ocr",
         side_effect=ocr_parser.OcrParseError("boom"),
     )
-    fake_loader = mocker.patch.object(document_processor, "PyPDFLoader")
+    fake_loader = mocker.patch.object(document_processor, "PdfFileLoader")
     fake_loader.return_value.load.return_value = [
         Document(page_content="fallback page", metadata={"source": str(pdf)})
     ]
