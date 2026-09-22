@@ -161,7 +161,9 @@ class ProcessingSettings(BaseSettings):
     KB_RELEVANCE_SCORE_THRESHOLD: float = 0.3
 
     # 多查询并行检索（P2-2）：QueryRewriter 改写出多个查询并行召回，跨查询 RRF 融合，
-    # 单次 rerank 仍用原始问题。默认关闭，评估确认有增益后开启
+    # 单次 rerank 仍用原始问题。默认关闭：已于 mq_eval_dataset 离线 A/B 验证无 hit/recall 增益
+    # 且 mrr 反降（见 docs/design/improvement-roadmap.md §P2-2 完成记录），保持关闭为有据决策；
+    # 复开前需在真实 QueryRewriter 改写下复测有增益。
     KB_MULTI_QUERY_ENABLED: bool = False
     # 多查询时每个 query 每路（dense/sparse）的召回数；单查询路径仍用 KB_HYBRID_SEARCH_TOP_K
     KB_MULTI_QUERY_CHANNEL_TOP_K: int = 10

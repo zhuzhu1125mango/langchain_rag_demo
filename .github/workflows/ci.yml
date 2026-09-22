@@ -199,12 +199,26 @@ jobs:
       - name: Run retrieval eval
         run: uv run python scripts/run_eval.py --report eval_report.json
 
+      # 多查询离线 A/B（P2-2 开关决策工具）：全离线，产出对比报告。
+      # 信息性、非卡点：若运行异常不阻断 CI，仅产出报告供复看（决策结论见
+      # docs/design/improvement-roadmap.md §P2-2 完成记录——保持关闭）。
+      - name: Run multi-query A/B (informational)
+        continue-on-error: true
+        run: uv run python scripts/run_multiquery_ab.py --report mq_ab_report.json
+
       - name: Upload eval report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eval-report
           path: backend/eval_report.json
+
+      - name: Upload multi-query A/B report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mq-ab-report
+          path: backend/mq_ab_report.json
 
   frontend:
     name: Frontend Build & Tests

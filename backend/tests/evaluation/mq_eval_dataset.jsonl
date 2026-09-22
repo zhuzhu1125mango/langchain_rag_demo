@@ -1,0 +1,16 @@
+{"question":"员工请假需要提前多久申请？","golden_documents":["leave_policy"],"query_variants":["员工请事假要提前几天申请？","员工申请请假需要提前多个工作日？"]}
+{"question":"公司年终奖什么时候发放？","golden_documents":["bonus_policy"],"query_variants":["年终奖什么时候打款？","公司年终奖的发放时间？"]}
+{"question":"试用期员工是否享受带薪年假？","golden_documents":["leave_policy"],"query_variants":["试用期有没有带薪年假？","还在试用期能休年假吗？"]}
+{"question":"办公时间是什么时候？","golden_documents":["work_hours"],"query_variants":["公司工作作息时间？","上班时间和几点下班？"]}
+{"question":"如何申请报销差旅费？","golden_documents":["reimbursement"],"query_variants":["差旅费用怎么报销？","出差花销如何申请报销？"]}
+{"question":"下午几点可以下班？","golden_documents":["work_hours"],"query_variants":["每天下午几点结束工作？","公司下班时间点？"]}
+{"question":"出差在外地住酒店的花费有报销标准吗？","golden_documents":["expense_standard"],"query_variants":["差旅住宿费用报销上限是多少？","外地出差住宿标准怎么规定？"]}
+{"question":"想申请异地居家办公要提前多久？","golden_documents":["remote_work"],"query_variants":["居家办公需要提前几天报备？","远程在家办公提前量多少？"]}
+{"question":"入职满一年每年能休多少天年假？","golden_documents":["leave_policy"],"query_variants":["工龄满一年年假有几天？","工作一整年后的年假天数？"]}
+{"question":"预定会议室一次最长可以用多久？","golden_documents":["meeting_policy"],"query_variants":["会议室单次能约几个小时？","开会的房间最久能订多长时间？"]}
+{"question":"离职时公司的笔记本电脑要归还吗？","golden_documents":["it_equipment"],"query_variants":["离职电脑设备要办理归还吗？","工作电脑离职时怎么处理？"]}
+{"question":"想加领公司笔记本外接键盘需要什么手续？","golden_documents":["it_equipment"],"query_variants":["申领外设机械键盘要审批吗？","额外显示器外设如何申请？"]}
+{"question":"接待客户吃饭的餐费标准每人是多少？","golden_documents":["customer_reception"],"query_variants":["客户接待用餐费用标准？","招待客户的餐费上限？"]}
+{"question":"今年年底公司财务会额外发一笔钱吗？","golden_documents":["bonus_policy"],"query_variants":["年终奖什么时候发放？","公司年度的绩效奖金何时发？"]}
+{"question":"每天傍晚公司几点收工？","golden_documents":["work_hours"],"query_variants":["公司下午几点下班？","每天的下班时间点？"]}
+{"question":"想休假出去旅游要按什么制度办？","golden_documents":["leave_policy"],"query_variants":["请带薪年假的申请流程？","休年假需要办理什么手续？"]}
