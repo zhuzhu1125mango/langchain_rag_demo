@@ -315,7 +315,7 @@ docker-compose down -v
 | 服务（Compose 服务名） | 容器名 | 镜像 | 宿主机端口 | 数据卷 | 说明 |
 |------|------|------|--------|--------|------|
 | postgres | postgres-dev | postgres:16.14 | 5433:5432 | postgres_data_dev | 开发数据库 |
-| minio | minio-dev | minio/minio:RELEASE.2025-09-07T16-13-09Z | 9000:9000（S3）/ 9001:9001（控制台） | minio_data_dev | 开发对象存储 |
+| minio | minio-dev | pgsty/minio:RELEASE.2026-06-18T00-00-00Z | 9000:9000（S3）/ 9001:9001（控制台） | minio_data_dev | 开发对象存储 |
 | milvus-standalone | milvus-standalone-dev | milvusdb/milvus:v2.6.17 | 19530:19530 / 9091:9091 | milvus_data_dev | 开发向量数据库 |
 | etcd | etcd-dev | quay.io/coreos/etcd:v3.5.30 | - | etcd_data_dev | Milvus 元数据 |
 | redis | redis-dev | redis:7.2-alpine | 6379:6379 | redis_data_dev | 开发缓存服务 |
@@ -336,7 +336,7 @@ docker-compose down -v
 | backend | backend-prod | - | 127.0.0.1:8001:8000 | - | 后端 API 服务 |
 | frontend | frontend-prod | - | **80:80**（唯一对外端口） | - | 前端界面（nginx） |
 | postgres | postgres-prod | postgres:16.14 | 127.0.0.1:5434:5432 | postgres_data_prod | 生产数据库 |
-| minio | minio-prod | minio/minio:RELEASE.2025-09-07T16-13-09Z | 127.0.0.1:9002:9000 / 9003:9001 | minio_data_prod | 生产对象存储 |
+| minio | minio-prod | pgsty/minio:RELEASE.2026-06-18T00-00-00Z | 127.0.0.1:9002:9000 / 9003:9001 | minio_data_prod | 生产对象存储 |
 | milvus-standalone | milvus-standalone-prod | milvusdb/milvus:v2.6.17 | 127.0.0.1:19531:19530 / 9092:9091 | milvus_data_prod | 生产向量数据库 |
 | etcd | etcd-prod | quay.io/coreos/etcd:v3.5.30 | - | etcd_data_prod | Milvus 元数据 |
 | redis | redis-prod | redis:7.2-alpine | 127.0.0.1:6380:6379 | redis_data_prod | 生产缓存服务 |

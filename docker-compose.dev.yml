@@ -64,7 +64,7 @@ services:
 
   # minio — 对象存储，存放上传的原始文档与文件
   minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z   # 与生产对齐的固定版本 tag，避免 latest 漂移
+    image: pgsty/minio:RELEASE.2026-06-18T00-00-00Z   # 社区 fork（MinIO 官方 2025-10 停发镜像，原 minio/minio tag 已从 Docker Hub 下架）
     container_name: minio-dev
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}              # MinIO 管理员账号
