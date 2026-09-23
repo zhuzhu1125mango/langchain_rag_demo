@@ -49,8 +49,10 @@ COMPOSE_VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::?-[^}]*)?\}")
 def read_env_keys(path: str) -> set:
     """解析 env 文件中实际定义（未注释）的键集合。"""
     if not os.path.exists(path):
-        print(f"错误: 文件不存在: {path}")
-        sys.exit(2)
+        # 容错：CI checkout 后 .env.dev/.env.prod 被 gitignore 不存在（不入库）。
+        # 遇缺失返回 None，由调用方决定跳过该校验，而非中止整个脚本。
+        print(f"提示: 文件不存在, 跳过对该文件的校验: {path}")
+        return None
     keys = set()
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -102,7 +104,9 @@ def main() -> int:
 
     used_keys = set()
     for compose_path, env_path in COMPOSE_ENV_PAIRS:
-        used_keys |= read_env_keys(env_path)
+        keys = read_env_keys(env_path)
+        if keys:
+            used_keys |= keys
 
     # 校验 A：example 覆盖 dev ∪ prod 实际使用的键
     missing_in_example = sorted(used_keys - example_keys)
@@ -115,6 +119,9 @@ def main() -> int:
     # 校验 B：compose 插值引用必须由对应 env 文件提供
     for compose_path, env_path in COMPOSE_ENV_PAIRS:
         env_keys = read_env_keys(env_path)
+        if not env_keys:
+            # env 文件缺失（如 CI checkout），跳过该 pair 的校验
+            continue
         compose_vars = read_compose_vars(compose_path)
         missing = sorted(v for v in compose_vars - env_keys if v not in OPTIONAL_COMPOSE_VARS)
         if missing:
