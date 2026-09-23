@@ -33,6 +33,7 @@ from bs4 import BeautifulSoup
 
 from src.config import settings
 from src.services.model_manager import model_manager
+from src.utils.security import UnsafeUrlError, validate_url_safe
 from .search_postprocessor import SearchPostprocessor
 from .search_types import SearchResult
 
@@ -668,6 +669,14 @@ class WebSearchService:
     # 网页正文提取
     # ------------------------------------------------------------------
     async def fetch_content(self, url: str, title: str, snippet: str) -> Optional[WebContent]:
+        # SSRF 防护（与 tools/plugins/fetch_webpage_tool.py 一致）：拒绝抓取内网/回环/云元数据地址，
+        # 防止搜索结果被污染为内网 URL（如 169.254.169.254）时打穿内网。校验失败直接跳过抓取。
+        try:
+            validate_url_safe(url)
+        except UnsafeUrlError:
+            logger.debug(f"拒绝抓取不安全 URL: {url}")
+            return None
+
         # 优先读取缓存
         cache_key = self._cache_key("web_search:content", url)
         cached = await self._get_cache(cache_key)

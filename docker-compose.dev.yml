@@ -29,7 +29,7 @@ services:
       - monitoring
     restart: no
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
@@ -54,7 +54,7 @@ services:
       - monitoring
     restart: no
     ports:
-      - "5433:5432"                                    # 宿主机 5433 避免与本地 PG 冲突
+      - "127.0.0.1:5433:5432"                            # 宿主机 5433 避免与本地 PG 冲突
     command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all", "-c", "client_encoding=UTF8", "-c", "listen_addresses=*"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
@@ -76,8 +76,8 @@ services:
     restart: no
     command: minio server /minio_data --console-address ":9001"
     ports:
-      - "9000:9000"                                    # S3 API 端口
-      - "9001:9001"                                    # 管理控制台端口
+      - "127.0.0.1:9000:9000"                            # S3 API 端口
+      - "127.0.0.1:9001:9001"                            # 管理控制台端口
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -125,8 +125,8 @@ services:
       - monitoring
     restart: no
     ports:
-      - "19530:19530"                                  # Milvus gRPC 端口
-      - "9091:9091"                                    # Milvus 健康检查/指标端口
+      - "127.0.0.1:19530:19530"                          # Milvus gRPC 端口
+      - "127.0.0.1:9091:9091"                            # Milvus 健康检查/指标端口
     depends_on:
       etcd:
         condition: service_started
@@ -176,7 +176,7 @@ services:
       redis:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -209,7 +209,7 @@ services:
     image: prom/prometheus:v3.5.0
     container_name: prometheus-dev
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./configs/prometheus/prometheus.dev.yml:/etc/prometheus/prometheus.yml
       - ./configs/prometheus/alerts.yml:/etc/prometheus/alerts.yml
@@ -222,14 +222,13 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/etc/prometheus/console_libraries'
       - '--web.console.templates=/etc/prometheus/consoles'
-      - '--web.enable-lifecycle'                        # 启用热重载 API
 
   # grafana — 监控可视化面板
   grafana:
     image: grafana/grafana:12.0.2
     container_name: grafana-dev
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     volumes:
       - ./configs/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./configs/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
