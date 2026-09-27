@@ -1,7 +1,7 @@
 # 开发与测试指南
 
 > 定位：本地开发、测试执行、CI 说明与已知踩坑。部署见 [deployment.md](deployment.md)。
-> 更新时间：2026-09-01
+> 更新时间：2026-09-24
 
 ## 1. 环境准备
 
@@ -28,7 +28,7 @@ uv run pytest -q            # 全量
 uv run pytest tests/test_rag_chain.py -q   # 单文件
 ```
 
-基线：552 passed / 97 skipped（2026-08-31）。
+基线：929 passed / 103 skipped（2026-09-24）。
 
 ### 2.2 集成测试（需容器）
 
@@ -40,7 +40,7 @@ uv run pytest tests/test_rag_chain.py -q   # 单文件
 | Redis | localhost:16379 | 密码 rag_ci_password |
 | MinIO | localhost:9001（API 9000） | rag_ci_minio / rag_ci_minio_password |
 
-需用环境变量覆盖根目录 `.env` 的开发配置后再跑集成测试；测试入口统一使用 `tests/conftest.py` 的 session 级 `integration_client` fixture（TestClient 共享，避免跨事件循环单例崩溃）。
+需用环境变量覆盖 `.env.dev`（后端默认读取，见 [deployment.md](deployment.md) §6.2）中的开发配置后再跑集成测试；测试入口统一使用 `tests/conftest.py` 的 session 级 `integration_client` fixture（TestClient 共享，避免跨事件循环单例崩溃）。
 
 ### 2.3 检索质量评估（全离线）
 
@@ -51,9 +51,12 @@ uv run python scripts/run_eval.py --report eval_report.json
 
 基于 `tests/evaluation/kb_eval_dataset.jsonl`（问题 + golden 文档）与 `eval_corpus.jsonl`（评估语料），使用与生产一致的 BM25 稀疏检索栈计算 hit_rate@5 / mrr@5 / recall@5，低于阈值（`EVAL_MIN_HIT_RATE` / `EVAL_MIN_MRR` / `EVAL_MIN_RECALL`，默认 0.8 / 0.5 / 0.5）时非零退出。同一逻辑以 `tests/evaluation/test_retrieval_quality.py` 纳入单测，CI 中另有独立 `rag-eval` job 输出指标报告并卡点。
 
+另有多查询检索离线 A/B（`scripts/run_multiquery_ab.py` + `tests/evaluation/mq_eval_dataset.jsonl`，16 题含 query_variants），实测无增益（RRF 口径），**多查询保持默认关闭**（`KB_MULTI_QUERY_ENABLED=false`）；CI `rag-eval` 中以信息性步骤运行（continue-on-error，产出 mq-ab-report），非卡点。
+
 ### 2.4 分块行为说明（P0-2a 结构化分块）
 
-- Markdown（`.md`，TextLoader 加载保留原始语法）：按标题栈切分，chunk 内容前置 `heading_path`（如 `员工手册 > 请假制度`），超长正文二次切分并传播路径；fenced 代码块整块保留；表格按行拆分（内容 = 表头 + 该行）
+- 文档加载：txt/md/csv/json/pdf 走本地直读加载器 `src/services/document_loaders.py`（PDF 基于 pypdf）；Office/HTML/EPUB 暂走 langchain-community unstructured（待迁）
+- Markdown（`.md`，TextFileLoader 直读保留原始语法）：按标题栈切分，chunk 内容前置 `heading_path`（如 `员工手册 > 请假制度`），超长正文二次切分并传播路径；fenced 代码块整块保留；表格按行拆分（内容 = 表头 + 该行）
 - HTML：header 切分 + 表格行级还原 + 正文二次切分
 - Word（elements 模式加载）：Title 元素构建章节路径（启发式标题栈），Table 整块保留
 - Milvus `heading_path` 字段对旧集合在线补加（`add_collection_field`），失败自动降级；检索结果 metadata 含 `heading_path`
@@ -61,7 +64,7 @@ uv run python scripts/run_eval.py --report eval_report.json
 
 ### 2.5 OCR 深度解析（P0-2b 扫描版 PDF）
 
-扫描版 PDF 自动检测（pypdf 字符密度）并分流 OCR 管线，输出 Markdown 后复用 Markdown 结构化分块；文本型 PDF 走内置 PyPDF 解析不变。OCR 后端为**可选依赖组**，默认不安装、CI 不装：
+扫描版 PDF 自动检测（pypdf 字符密度）并分流 OCR 管线，输出 Markdown 后复用 Markdown 结构化分块；文本型 PDF 走内置 PdfFileLoader（pypdf）解析不变。OCR 后端为**可选依赖组**，默认不安装、CI 不装：
 
 ```bash
 cd backend
@@ -89,9 +92,10 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 
 | Job | 内容 | 关键点 |
 |---|---|---|
+| env-consistency | 用 `.env.example` 生成占位 env 校验键集合一致 | `.env.dev/.env.prod` 被 gitignore 不入库；脚本对缺失文件容错跳过 |
 | backend-unit | `uv sync --frozen` + pytest 单测 | 干净安装，暴露隐性依赖缺失 |
-| backend-integration | docker run 启动 MinIO/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码 |
-| rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json |
+| backend-integration | docker run 启动 MinIO(pgsty fork)/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码 |
+| rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json；另有信息性多查询 A/B 步骤（continue-on-error，非卡点） |
 | frontend | pnpm build | 依赖变更时需 `--build` 重建镜像 |
 
 ## 4. 已知踩坑记录（改代码前先看）
@@ -103,6 +107,8 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 5. **异步处理**：文档上传接口为后台异步处理，返回「文件上传成功，正在后台处理」，测试断言用前缀匹配
 6. **事件循环作用域**：进程级单例（CacheService/DB engine）绑定首次创建的事件循环，测试中禁止每个用例新建 client，统一用 `integration_client`
 7. **沙箱删除限制**：PowerShell `Remove-Item` 对部分 site-packages 文件可能 Access denied，改用 .NET API `[System.IO.File]::Delete` / `[System.IO.Directory]::Delete`
+8. **scripts 目录脚本运行方式**：`scripts/` 下脚本（如 `run_agent_ab.py`）需用 `python -m scripts.run_agent_ab`（把 backend 加入 sys.path）运行；直接 `python scripts/xxx.py` 会 `ModuleNotFoundError: src`
+9. **pydantic-settings List[str] 解析**：.env 中 List 类型按 JSON 解析；对 CORS 等列表配置已加 `field_validator(mode="before")` 支持逗号分隔，新增 List 配置键时注意同样处理
 
 ## 5. 代码约定
 
@@ -111,4 +117,4 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 - 服务单例继承 `AsyncSingleton`，实现异步初始化/清理
 - 提示词放 `prompts/`，用 prompt_loader 异步加载
 - 新增依赖必须开源可离线；改动依赖后运行 `uv lock` 并提交 uv.lock
-- 重大设计改动先写 `docs/design_<主题>.md` 评审，再实施
+- 重大设计改动先写 `docs/design/<主题>.md`（小写 kebab-case）评审，再实施

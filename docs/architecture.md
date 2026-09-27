@@ -1,7 +1,7 @@
 # 架构总览
 
 > 定位：一页讲清系统拓扑、问答链路与数据流。细节实现以代码为准。
-> 更新时间：2026-09-16
+> 更新时间：2026-09-24
 
 ## 1. 技术栈
 
@@ -35,6 +35,7 @@
 - 开发环境：`docker-compose.dev.yml`（前端走 Vite dev server）
 - 生产环境：`docker-compose.yml`（前端 nginx，后端 FastAPI）
 - 两栈端口全域错开（dev backend 8000 / prod 8001 等），`name: rag-dev` / `rag-prod` 隔离容器与卷
+- 两栈基础设施端口均仅绑定 `127.0.0.1`（对外只暴露 dev frontend 5173 / prod frontend 80）；MinIO 镜像使用社区 fork `pgsty/minio`（官方 `minio/minio` 镜像已下架）
 - 后端启动约束（`src/main.py` 的 lifespan，按顺序）：
   1. 生产模式强制校验 `SECRET_KEY` 强度与关键凭据非空，缺失即拒绝启动
   2. 校验三个模型名非空且存在于本地 Ollama（`/api/tags`），缺失即拒绝启动
@@ -76,7 +77,7 @@
 
 | 存储 | 内容 |
 |---|---|
-| PostgreSQL | 用户（`users`）、知识库/文档元数据、会话与消息（JSONB）、反馈/坏例、实验（A/B）、标签/分类、请求 trace、Wiki 编译页（`wiki_pages`）、学习引擎配置 |
+| PostgreSQL | 用户（`users`）、知识库/文档元数据、会话与消息（JSONB）、反馈/坏例、实验（A/B）、标签/分类、请求 trace、Wiki 编译页（`wiki_pages`）、审计日志（`audit_logs`）、学习引擎配置 |
 | Milvus | 文档向量 + BM25 稀疏向量（含词表持久化）；Wiki 编译页切片以 `source_kind="wiki"` 同集合区分；Agent 记忆以 `source_kind="memory"` 复用同集合 |
 | MinIO | 文档原文件、Milvus 底层存储 |
 | Redis | 缓存（知识库列表、快捷问题等）；语义缓存条目；Wiki 分布式锁（`WIKI_DISTRIBUTED_LOCK`，Redis 不可用时降级为进程内锁）。注：Wiki 编译**去抖队列是进程内实现**（`wiki_compile_scheduler.py` 用 per-KB 集合 + asyncio 计时器，多副本部署时各 worker 独立去抖） |
@@ -85,18 +86,21 @@
 
 | 目录/模块 | 职责 |
 |---|---|
-| `api/` | 路由层（16 个模块，不写业务逻辑）：auth、chat、knowledge_base、wiki、document、session、trace、category、tag、feedback、badcase、learning、experiment、config、evaluation、notification |
+| `api/` | 路由层（17 个模块，不写业务逻辑）：auth、chat、knowledge_base、wiki、document、session、trace、audit、category、tag、feedback、badcase、learning、experiment、config、evaluation、notification |
 | `services/` | 业务核心：决策管线、检索、生成、搜索、工具、评估、学习引擎 |
 | `services/rag_chain.py` | RAG 决策管线编排（`_stage_*` 分阶段 + `_PipelineState`），约 2000 行，已偏大 |
+| `services/agent_orchestrator.py` | 有界 Agent 编排：plan-execute 循环（max_steps=3 + 时间预算熔断），KB/Wiki/搜索工具统一接入，`AGENT_ORCHESTRATOR_ENABLED` 默认灰度关闭 |
 | `services/context_enhancer.py` / `context_builder.py` | 历史摘要增强 / 上下文预算与 Lost-in-the-Middle 重排 |
 | `services/semantic_cache_service.py` | 语义缓存（P1-3）：命中直接回放，Redis 不可用时 fail-open |
 | `services/wiki_*.py` | LLM-Wiki 编译层：编译器、去抖调度、级联重写、交叉链接扩展、一致性 lint、分布式锁 |
 | `services/ocr_parser.py` | 扫描版 PDF OCR 深度解析：扫描版检测（字符密度）+ 双后端（MinerU pipeline / PaddleOCR PP-StructureV3，可选依赖）分流，输出 Markdown 复用结构化分块，失败回退内置解析 |
+| `services/document_loaders.py` | 本地直读文档加载器（txt/md/csv/json/pdf，PDF 基于 pypdf）；Office/HTML/EPUB 暂走 langchain-community unstructured（待迁） |
 | `services/intent_router/` | 意图识别：embedding 分类器、LLM 路由、置信度门控、工具注册表 |
 | `services/strategies/` | 检索策略：semantic / keyword / llm_inference + 策略管理器 |
 | `services/tools/plugins/` | 工具插件（9 个）：web_search、fetch_webpage、weather、datetime、gold_price、exchange_rate、calculator、kb_search、wiki_lookup |
 | `services/evaluation/` | 检索评估器 + 生成评估器（faithfulness/relevance） |
 | `services/trace_collector.py` | 请求链路追踪采集（对应 `/api/traces`） |
+| `services/audit_service.py` | 审计日志记录与查询（P2-4，best-effort 写入不阻断主流程，对应 `/api/audit`） |
 | `middleware/` | Prometheus 指标、自定义 Metrics 中间件 |
 | `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验） |
 | `auth.py` | 认证：`X-API-Key`（单实例）+ JWT 多用户（注册/登录/`/me`）+ `require_owner` 对象级授权 + WS 首帧鉴权 |

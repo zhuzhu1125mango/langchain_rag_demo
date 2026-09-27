@@ -314,18 +314,19 @@ docker-compose down -v
 
 | 服务（Compose 服务名） | 容器名 | 镜像 | 宿主机端口 | 数据卷 | 说明 |
 |------|------|------|--------|--------|------|
-| postgres | postgres-dev | postgres:16.14 | 5433:5432 | postgres_data_dev | 开发数据库 |
-| minio | minio-dev | pgsty/minio:RELEASE.2026-06-18T00-00-00Z | 9000:9000（S3）/ 9001:9001（控制台） | minio_data_dev | 开发对象存储 |
-| milvus-standalone | milvus-standalone-dev | milvusdb/milvus:v2.6.17 | 19530:19530 / 9091:9091 | milvus_data_dev | 开发向量数据库 |
+| postgres | postgres-dev | postgres:16.14 | 127.0.0.1:5433:5432 | postgres_data_dev | 开发数据库 |
+| minio | minio-dev | pgsty/minio:RELEASE.2026-06-18T00-00-00Z | 127.0.0.1:9000:9000（S3）/ 127.0.0.1:9001:9001（控制台） | minio_data_dev | 开发对象存储 |
+| milvus-standalone | milvus-standalone-dev | milvusdb/milvus:v2.6.17 | 127.0.0.1:19530:19530 / 127.0.0.1:9091:9091 | milvus_data_dev | 开发向量数据库 |
 | etcd | etcd-dev | quay.io/coreos/etcd:v3.5.30 | - | etcd_data_dev | Milvus 元数据 |
-| redis | redis-dev | redis:7.2-alpine | 6379:6379 | redis_data_dev | 开发缓存服务 |
-| prometheus | prometheus-dev | prom/prometheus:v3.5.0 | 9090:9090 | prometheus_data_dev | 监控指标采集 |
-| grafana | grafana-dev | grafana/grafana:12.0.2 | 3000:3000 | grafana_data_dev | 监控面板 |
-| backend | backend-dev | - | 8000:8000 | - | 后端 API 服务 |
+| redis | redis-dev | redis:7.2-alpine | 127.0.0.1:6379:6379 | redis_data_dev | 开发缓存服务 |
+| prometheus | prometheus-dev | prom/prometheus:v3.5.0 | 127.0.0.1:9090:9090 | prometheus_data_dev | 监控指标采集 |
+| grafana | grafana-dev | grafana/grafana:12.0.2 | 127.0.0.1:3000:3000 | grafana_data_dev | 监控面板 |
+| backend | backend-dev | - | 127.0.0.1:8000:8000 | - | 后端 API 服务 |
 | frontend | frontend-dev | - | 5173:5173 | - | 前端界面（Vite dev server） |
-| postgres-exporter | postgres-exporter-dev | prometheuscommunity/postgres-exporter:v0.20.1 | 9187 | - | PostgreSQL 指标导出 |
+| postgres-exporter | postgres-exporter-dev | prometheuscommunity/postgres-exporter:v0.20.1 | - | - | PostgreSQL 指标导出（仅容器网络内供 Prometheus 抓取） |
 
 > dev 栈**未部署** Alertmanager。
+> dev 栈基础设施端口同样仅绑定 `127.0.0.1`（对外只暴露 frontend 5173）。
 
 ### 5.2 生产环境 Docker Compose 服务说明
 
@@ -343,7 +344,7 @@ docker-compose down -v
 | prometheus | prometheus-prod | prom/prometheus:v3.5.0 | 127.0.0.1:9094:9090 | prometheus_data_prod | 监控指标采集 |
 | grafana | grafana-prod | grafana/grafana:12.0.2 | 127.0.0.1:3001:3000 | grafana_data_prod | 监控面板 |
 | alertmanager | alertmanager-prod | prom/alertmanager:v0.29.0 | 127.0.0.1:9095:9093 | alertmanager_data_prod | 告警管理 |
-| postgres-exporter | postgres-exporter-prod | prometheuscommunity/postgres-exporter:v0.20.1 | 9187 | - | PostgreSQL 指标导出 |
+| postgres-exporter | postgres-exporter-prod | prometheuscommunity/postgres-exporter:v0.20.1 | - | - | PostgreSQL 指标导出（仅容器网络内供 Prometheus 抓取） |
 
 ### 5.3 常用命令
 
@@ -428,35 +429,35 @@ services:
 
 ### 6.1 配置文件层次
 
-项目包含多个环境变量配置文件，用于不同层次的配置管理：
+项目使用「按环境分文件」的配置管理（不再使用单一 `.env` 复制流程）：
 
 | 文件 | 用途 | 优先级 | 使用场景 |
 |------|------|--------|---------|
-| **Docker Compose** | 生产环境配置 | 最高 | 生产环境启动时注入 |
-| **.env.dev / .env.prod** | 项目级环境配置 | 中 | 开发/生产环境启动时复制为 `.env` |
-| **.env** | 后端本地开发配置 | 最低 | 本地开发时提供默认值 |
+| **系统环境变量**（Compose `environment` 显式注入） | 容器运行时配置 | 最高 | `APP_ENV`、服务地址、部分凭据由 compose 显式注入 |
+| **`.env.dev` / `.env.prod`** | 项目级环境配置 | 中 | 后端按 `APP_ENV` 选择读取（dev→`.env.dev`，prod→`.env.prod`）；被 gitignore，不入库 |
+| **`.env.example`** | 配置模板 | - | 键集合参考；团队配置一致性靠该模板传播，CI 用它生成占位 env 校验 |
 
 ### 6.2 后端配置加载机制
 
 后端配置加载逻辑（`backend/src/config.py`）：
 
-**1. Docker 环境**（`IN_DOCKER=true`）：
-- 后端 `src/config.py` 读取项目根目录的 `.env` 文件作为兜底
-- 优先使用 Docker Compose `environment` 中显式注入的环境变量
-- **确保生产环境使用正确的配置**
-
-**2. 本地开发环境**（`IN_DOCKER` 未设置或为 `false`）：
-- 读取项目根目录的 `.env` 文件
-- 允许通过系统环境变量覆盖配置文件中的值
-- **允许通过系统环境变量覆盖默认值**
+- `APP_ENV`（`dev` | `prod`，默认 `dev`）决定读取项目根目录的 `.env.{APP_ENV}` 文件；
+- 所有子配置模型 `env_file` 统一指向该文件，真实系统环境变量（如 Docker Compose
+  `environment` 注入）优先于文件值；
+- **Docker 部署**：compose 通过 `env_file`（`.env.prod`/`.env.dev`）+ `environment`
+  注入配置，容器内无需 `.env` 兜底文件；
+- **本地裸跑**：默认读 `.env.dev`；非 Docker 生产部署设 `APP_ENV=prod` 读 `.env.prod`。
 
 ### 6.3 环境变量配置文件说明
 
 | 文件 | 用途 | 使用场景 |
 |------|------|---------|
-| `.env.dev` | 项目级开发环境配置 | 启动开发环境时复制为 `.env` |
-| `.env.prod` | 项目级生产环境配置 | 启动生产环境前必须配置 |
-| `.env` | 项目级运行时配置 | Docker Compose 实际读取；本地开发时提供默认值 |
+| `.env.dev` | 项目级开发环境配置 | 本地开发/开发栈默认读取（`APP_ENV=dev`） |
+| `.env.prod` | 项目级生产环境配置 | 生产栈启动前必须配置；compose `env_file` 注入 |
+| `.env.example` | 配置模板（入库） | 键集合参考与传播；CI 生成占位 env 做一致性校验 |
+
+> `.env.dev` / `.env.prod` 均被 gitignore 不入库（含凭据）；新增配置键时必须同步更新
+> `.env.example`，CI 的 env-consistency 步骤会校验键集合一致。
 
 ### 6.4 核心配置参数对比
 
@@ -474,7 +475,7 @@ services:
 | `REDIS_DB` | `0` | `0` | 否 |
 | `REDIS_PASSWORD` | `dev_redis_password` | **必须手动设置** | ✅ |
 | `SECRET_KEY` | 不设置（启动自动生成临时密钥） | **必须手动设置强密钥** | ✅ |
-| `APP_ENV` | 不设置 | Docker 部署不设置；非 Docker 生产部署必设 `production` | 否 |
+| `APP_ENV` | 不设置（默认 `dev`） | Docker 部署由 compose 注入 `prod`；非 Docker 生产部署必设 `prod`（兼容旧值 `production`） | 否 |
 | `MILVUS_REBUILD_ON_MISMATCH` | `false` | `false`（除非已确认可丢弃向量数据） | 否 |
 | `ADMIN_KEY` | 不设置（管理接口仅限开发模式） | 建议设置；未设置时管理接口一律 403 | ✅ |
 | `SEARCH_PROVIDER` | `tavily` | `tavily` | 否 |
@@ -506,7 +507,7 @@ python scripts/migrate_session_messages_jsonb.py
 满足以下任一条件即按生产标准执行启动校验，校验失败将拒绝启动：
 
 - Docker 部署（`IN_DOCKER=true`）；
-- 显式设置 `APP_ENV=production`（用于非 Docker 的生产部署，如直接 uvicorn/systemd 运行）。
+- 显式设置 `APP_ENV=prod`（兼容旧值 `production`；用于非 Docker 的生产部署，如直接 uvicorn/systemd 运行）。
 
 校验项：`SECRET_KEY` 强度（≥32 字符、≥3 种字符类型、不在弱密钥黑名单），
 `POSTGRES_PASSWORD` / `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY` 非空。
@@ -569,7 +570,7 @@ docker-compose exec postgres psql -U prod_user -d app_prod -c "SELECT 1"
 联网搜索相关配置位于 `.env.dev` / `.env.prod`：
 
 ```env
-# 搜索引擎：duckduckgo / searxng / tavily
+# 搜索引擎：duckduckgo / tavily（默认 tavily；searxng 已弃用，仅为遗留兼容保留）
 SEARCH_PROVIDER=tavily
 
 # Tavily 在线 API Key（SEARCH_PROVIDER=tavily 时必填）
@@ -585,8 +586,8 @@ SEARCH_MIN_CONTENT_LENGTH=100
 SEARCH_ENABLE_MULTI_QUERY=true
 SEARCH_NUM_QUERIES=3
 SEARCH_ENABLE_RERANK=true
-SEARCH_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
-SEARCH_RERANK_PROVIDER=ollama
+SEARCH_RERANK_MODEL=BAAI/bge-reranker-v2-m3
+SEARCH_RERANK_PROVIDER=sentence_transformers
 SEARCH_RERANK_TOP_K=5
 
 # Redis 缓存
@@ -601,7 +602,10 @@ SEARCH_AGENT_FALLBACK_TO_PHASE2=true
 ```
 
 **说明**：
-- 启用 `SEARCH_ENABLE_RERANK=true` 后，默认通过 Ollama 本地调用 `qllama/bge-reranker-v2-m3:latest`；若切换为 `SEARCH_RERANK_PROVIDER=sentence_transformers`，则需联网下载对应 HuggingFace 模型
+- 启用 `SEARCH_ENABLE_RERANK=true` 后，默认经 `sentence_transformers` 加载本地
+  HuggingFace 缓存中的 `BAAI/bge-reranker-v2-m3`（需已在 `HF_HOME` 指向的离线缓存中，
+  离线环境勿换未缓存模型）；如改用 `SEARCH_RERANK_PROVIDER=ollama`，模型名需为
+  Ollama 已拉取的 tag（如 `qllama/bge-reranker-v2-m3:latest`）
 - 联网搜索默认走 Tavily 在线 API，需确保 `SEARCH_API_KEY` 有效；如网络或配额受限可切换其它 provider
 - Function Calling / ReAct 对本地模型的指令遵循能力要求较高，建议充分测试后再开启
 

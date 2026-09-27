@@ -2,7 +2,7 @@
 
 > 定位：监控栈的使用入口——看什么面板、指标含义、告警规则与处置思路。
 > 配置文件：`configs/prometheus/`、`configs/alertmanager/`、`configs/grafana/`
-> 更新时间：2026-09-16
+> 更新时间：2026-09-24
 
 ## 1. 访问入口
 
@@ -15,8 +15,9 @@
 > 生产环境监控端口仅绑定 `127.0.0.1`，远程访问请走 SSH 隧道或反向代理。
 > 生产端口与开发栈**全部错开**（详见 [deployment.md](deployment.md) §2.2.1）。
 >
-> ⚠️ **Grafana 目前没有任何 dashboard**：`configs/grafana/` 只 provision 了 Prometheus
-> 数据源，面板需自行创建或补充 provision。
+> ✅ **Grafana 已 provision「RAG Overview」面板**：`configs/grafana/dashboards/rag_overview.json`
+> （经 `provisioning/dashboards/dashboards.yml` 自动加载），覆盖请求量/延迟/错误率、
+> LLM 调用、检索、语义缓存与 Wiki 编译指标；如需新增面板，补充该目录下的 JSON 即可。
 
 ## 2. 采集目标（prometheus.yml）
 
@@ -41,37 +42,44 @@
 | `rag_llm_call_duration_seconds` | Histogram | LLM 调用延迟 |
 | `rag_vector_search_duration_seconds` | Histogram | 向量检索延迟 |
 | `rag_vector_search_total` | Counter | 向量检索次数 |
-| `rag_documents_processed_total` | Counter | 已处理文档数 |
+| `rag_retrieval_errors_total` | Counter | 知识库检索失败数（混合失败且 dense 兜底也失败，P2-5） |
+| `rag_sse_interrupted_total` | Counter | SSE 流中断数（客户端中途断连，P2-5） |
+| `rag_documents_processed_total` / `rag_document_process_duration_seconds` | Counter/Histogram | 文档处理数/耗时（按 file_type） |
+| `rag_kb_queries_total` | Counter | 知识库问答数（按 answer_type） |
+| `rag_strategy_decisions_total` | Counter | 策略决策数（strategy_name × result） |
+| `semantic_cache_hits_total` / `misses_total` / `stores_total` / `lookup_seconds` | Counter/Histogram | 语义缓存命中/未命中/写入/查找延迟 |
+| `wiki_compilations_total` 等 wiki_* 指标族 | Counter/Histogram | Wiki 编译次数/产出页数/耗时/事实保留率/锁获取/矛盾发现 |
+
+> 完整定义以 `backend/src/middleware/prometheus.py` 为准（指标较多，此处列核心族）。
 
 ## 4. 告警规则（configs/prometheus/alerts.yml）
 
-| 告警 | 表达式（摘要） | 级别 | 含义 |
-|---|---|---|---|
-| FastAPIHighErrorRate | `rate(rag_request_errors_total[1m]) > 0.05` | warning | 接口大量报错 |
-| FastAPILatencyHigh | P95 延迟 > 5s 持续 1m | critical | 接口整体变慢 |
-| FastAPIDown | `up{job="fastapi-app"} == 0` 持续 30s | critical | 后端挂了/未启动 |
-| MilvusDown | `up{job="milvus"} == 0` 持续 30s | critical | 向量库不可用 |
-| MilvusHighQueryLatency | `rate(milvus_query_latency_seconds_sum[1m]) / rate(..._count[1m]) > 2` | warning | 检索变慢 |
-| LLMCallHighLatency | P95 > 30s 持续 1m | warning | 模型推理变慢（Ollama 过载/排队） |
-| LLMCallErrors | `rate(..._errors_total[1m]) / rate(..._calls_total[1m]) > 0.1` | critical | 模型调用大量失败 |
+共 10 条告警，分三组：
 
-**两点需要注意**（2026-09-16 复核）：
+| 组 | 告警 | 表达式（摘要） | 级别 | 含义 |
+|---|---|---|---|---|
+| fastapi | FastAPIHighErrorRate | `rate(errors_total[1m]) / clamp_min(rate(request_total[1m]), 1e-9) > 0.05` | warning | 接口错误率 > 5%（比值口径） |
+| fastapi | FastAPILatencyHigh | P95 延迟 > 5s 持续 1m | critical | 接口整体变慢 |
+| fastapi | FastAPIDown | `up{job="fastapi-app"} == 0` 持续 30s | critical | 后端挂了/未启动 |
+| fastapi | SseStreamInterruptRate（P2-5） | `rate(rag_sse_interrupted_total[5m]) > 1` 持续 3m | warning | SSE 流式中断过多（网络不稳/前端提前取消） |
+| milvus | MilvusDown | `up{job="milvus"} == 0` 持续 30s | critical | 向量库不可用 |
+| milvus | RetrievalFailureRate（P2-5） | `rate(rag_retrieval_errors_total[5m]) > 0` 持续 2m | warning | 检索持续失败（混合失败且 dense 兜底也失败；Milvus 连接失败由 MilvusDown 覆盖） |
+| milvus | MilvusHighQueryLatency | `milvus_proxy_sq_latency_milliseconds` 均值 > 2000 持续 1m | warning | 检索变慢（指标名已实测修正为毫秒口径） |
+| llm | OllamaTimeoutRate（P2-5） | 按模型分组失败率 > 10% 持续 2m | critical | Ollama 请求超时/失败率过高（含 Tavily，经 model_manager 归并） |
+| llm | LLMCallHighLatency | P95 > 30s 持续 1m | warning | 模型推理变慢（Ollama 过载/排队） |
+| llm | LLMCallErrors | 错误率 > 10% 持续 1m | critical | 模型调用大量失败 |
 
-1. `FastAPIHighErrorRate` 的表达式是**每秒错误数**（`rate(...)` 对 Counter 求导），
-   语义为「持续 1 分钟每秒 > 0.05 个错误」，即**约 3 个错误/分钟**就告警，
-   而非字面的"错误率 5%"。文件内 `LLMCallErrors` 用的是真正的比值写法，两者不一致。
-   若本意是 5% 错误率，应改为 `rate(errors_total[1m]) / rate(requests_total[1m]) > 0.05`。
-2. `MilvusHighQueryLatency` 引用的 `milvus_query_latency_seconds_*` **指标名待实测确认**：
-   Milvus 的指标命名规范为 `<ns>_<subsystem>_<name>`，`query` 不是合法 subsystem
-   （常见为 `milvus_proxy_sq_latency_*` / `milvus_querynode_*`）。若名称不存在，
-   该规则恒不触发。请在 Milvus 的 `/metrics` 端点（`127.0.0.1:9092/metrics`）
-   实际 grep 一次确认。
+> 规则文件经 `test_prometheus_alerts.py` 校验（YAML 合法、severity 在 labels 下、alert 名唯一、
+> 指标名与 prometheus.py 定义一致）。Alertmanager webhook URL 留空（通知渠道留待部署，见 §5）。
 
 ### 处置思路速查
 
 - **FastAPIDown / MilvusDown**：`docker compose ps` 看容器状态 → `logs backend / milvus-standalone`。Milvus 依赖 etcd + MinIO，先确认两者健康
 - **FastAPILatencyHigh**：结合 `rag_active_requests`（并发过高）与 `rag_llm_call_duration_seconds`（多数延迟来自 LLM）定位瓶颈层
-- **LLMCallErrors**：确认 Ollama 进程存活与模型已拉取；常见原因是模型未加载或显存/内存不足
+- **FastAPIHighErrorRate**：按 `endpoint`/`error_type` 标签拆分 `rag_request_errors_total` 定位具体接口
+- **RetrievalFailureRate**：查看 backend 日志中 Milvus 查询/混合检索异常；确认 Milvus 存活（MilvusDown 未触发则多为查询层错误，如集合 schema 不匹配）
+- **SseStreamInterruptRate**：多为网络不稳或前端提前取消（用户主动停止生成）；持续高位需排查网关超时配置
+- **OllamaTimeoutRate / LLMCallErrors**：确认 Ollama 进程存活与模型已拉取；常见原因是模型未加载或显存/内存不足（按 `model_name` 标签定位具体模型）
 - **MilvusHighQueryLatency**：检查集合数据量增长、是否有 rebuild 任务在后台执行
 
 ## 5. 告警通知（Alertmanager）

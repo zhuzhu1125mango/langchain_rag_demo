@@ -130,7 +130,21 @@ curl -X POST http://localhost:8000/api/documents/upload \
 请求体 `{"username": "...", "password": "..."}`，响应同上。
 用户名或密码错误统一返回 401，不区分具体原因。
 
-### 0.3 获取当前用户
+> 限流（W2-9）：login/register 按 IP 滑动窗口限流（默认 login 5 次/分钟、register 3 次/分钟，
+> `AUTH_RATE_LIMIT_LOGIN` / `AUTH_RATE_LIMIT_REGISTER` 可调，0 = 不限流），超限返回 429。
+
+### 0.3 刷新 Token（滑动窗口续期）
+
+**POST** `/api/auth/refresh`
+
+请求头 `Authorization: Bearer <access_token>`，响应同登录。
+
+- access token 有效期默认 60 分钟（`ACCESS_TOKEN_EXPIRE_MINUTES`）；
+- 首签（`orig_iat`）后 7 天内（`ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS`，0 = 关闭）可凭
+  签名有效的 token 换发新 token（允许原 token 已过期，`orig_iat` 保留并顺延有效期）；
+- 超过窗口或签名无效返回 401（需重新登录）。
+
+### 0.4 获取当前用户
 
 **GET** `/api/auth/me` → `{ "user_id": "...", "username": "..." }`
 
@@ -1223,6 +1237,32 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 > 这与其余集合端点使用 `/`（如 `/api/documents/`）的风格不一致，属已知问题
 > （见 `docs/archive/code-review-2026-09.md` P1-C3）。
 
+---
+
+## 17. 审计日志接口
+
+前缀 `/api/audit`（P2-4）。记录关键管理/数据操作（注册、配置变更/重置、知识库创建、
+文档上传/删除等），写入为 best-effort：审计记录失败不阻断业务主流程。
+仅管理员可查询（`require_admin`）。
+
+### 17.1 查询审计日志
+
+**GET** `/api/audit`
+
+**查询参数**:
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| action | string | 否 | 按操作类型过滤（如 `auth.register`、`document.upload`） |
+| resource_type | string | 否 | 按资源类型过滤 |
+| resource_id | string | 否 | 按资源 ID 过滤 |
+| user_id | string | 否 | 按操作者过滤 |
+| start / end | datetime (ISO) | 否 | 时间范围（含）；格式无效返回 422 |
+| page | int | 否 | 页码，默认 1 |
+| page_size | int | 否 | 每页数量，默认 50，范围 1~200 |
+
+**成功响应** (200)：`{"total": n, "page": 1, "page_size": 50, "items": [{id, user_id, username, action, resource_type, resource_id, detail, ip_address, created_at}]}`（按时间倒序）
+
 ### 16.2 获取追踪详情
 
 **GET** `/api/traces/{trace_id}`
@@ -1233,12 +1273,13 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ## 附录：API 端点汇总
 
-> 与代码核对至 2026-09-16（`backend/src/api/` 共 16 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 111 条路由）。
+> 与代码核对至 2026-09-24（`backend/src/api/` 共 17 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 111 条路由）。
 
 | 模块 | 方法 | 端点 | 说明 |
 |------|------|------|------|
-| 认证 | POST | `/api/auth/register` | 注册（201；受 `AUTH_ALLOW_REGISTRATION` 控制） |
-| 认证 | POST | `/api/auth/login` | 登录换取 JWT |
+| 认证 | POST | `/api/auth/register` | 注册（201；受 `AUTH_ALLOW_REGISTRATION` 控制；限流 3 次/分/IP） |
+| 认证 | POST | `/api/auth/login` | 登录换取 JWT（限流 5 次/分/IP） |
+| 认证 | POST | `/api/auth/refresh` | 滑动窗口续期：凭签名有效 token 换发（orig_iat+7d 硬上限） |
 | 认证 | GET | `/api/auth/me` | 获取当前用户信息 |
 | 聊天 | POST | `/api/chat/messages` | 发送消息（非流式） |
 | 聊天 | POST | `/api/chat/stream` | 流式回答（SSE） |
@@ -1276,8 +1317,6 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 文档 | GET | `/api/documents/{doc_id}/chunks` | 获取分块列表 |
 | 文档 | GET | `/api/documents/{doc_id}/source/{chunk_index}` | 引用溯源到原文片段 |
 | 文档 | POST | `/api/documents/{doc_id}/reprocess` | 重新解析 |
-| 文档 | POST | `/api/documents/{doc_id}/classify` | 文档分类 |
-| 文档 | POST | `/api/documents/{doc_id}/quality` | 文档质量检测 |
 | 文档 | POST | `/api/documents/batch/delete` | 批量删除文档 |
 | 文档 | POST | `/api/documents/duplicate-detect` | 重复文档检测 |
 | 会话 | POST | `/api/sessions` | 创建会话 |
@@ -1337,6 +1376,7 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 评估 | POST | `/api/evaluate/retrieval/batch` | 批量检索评估 |
 | 评估 | POST | `/api/evaluate/generation` | 单次生成评估 |
 | 评估 | POST | `/api/evaluate/generation/batch` | 批量生成评估 |
+| 审计 | GET | `/api/audit` | 审计日志分页查询（管理员，见 §17） |
 | 通知 | WS | `/api/ws/notifications` | 通用实时通知通道 |
 | 通知 | WS | `/api/ws/kb` | 知识库变更通知 |
 | 通知 | WS | `/api/ws/docs/{kb_id}` | 文档变更通知 |

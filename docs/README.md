@@ -47,17 +47,22 @@ docs/
 │   ├── semantic-cache.md
 │   ├── severe-fixes.md
 │   ├── agent-evolution.md
-│   └── agent-ab-evaluation.md
+│   ├── agent-ab-evaluation.md
+│   ├── evolution-research-2026-09.md
+│   ├── wiki-navigable-workspace.md
+│   └── fix-plan-2026-09-24.md
 └── archive/             # 归档（一次性报告）
     ├── code-review-2026-08.md      # 代码审查报告（已全部修复）
-    └── code-review-2026-09.md      # 代码审查报告（4 项阻断问题已修复；文档漂移已全量回写）
+    ├── code-review-2026-09.md      # 代码审查报告（4 项阻断问题已修复；文档漂移已全量回写）
+    ├── code-review-2026-09-23.md   # 代码审查报告（P0×1 + P1×5 + P2×17；P1 已修复入库）
+    └── code-review-2026-09-24.md   # 代码审查报告（处理中）
 ```
 
 ## design/ 文档状态表
 
 | 文档 | 状态 | 说明 |
 |---|---|---|
-| [improvement-roadmap.md](design/improvement-roadmap.md) | 部分实施 | 执行计划；P0-1/P1-1/P1-2/P1-3/P2-6 已完成，进度以各条目 ✅ 标记为准 |
+| [improvement-roadmap.md](design/improvement-roadmap.md) | 部分实施 | 执行计划；P0-1/P1-1/P1-2/P1-3 及 P2-3~P2-6 已完成（多查询检索经 A/B 评估保持默认关闭），进度以各条目 ✅ 标记为准 |
 | [rag-enhancement.md](design/rag-enhancement.md) | 部分实施 | 混合检索/重排序/评估闭环/意图路由已落地；分阶段进度并入 roadmap 推进 |
 | [intent-router-upgrade.md](design/intent-router-upgrade.md) | 已实施 | `backend/src/services/intent_router/`（LLMRouter / ConfidenceGate / 历史上下文增强） |
 | [search-optimization.md](design/search-optimization.md) | 已实施 | 通用联网搜索链路优化（Query 改写 / 引用补全 / AnswerVerifier）；逐项核对见 §5.1 |
@@ -70,6 +75,9 @@ docs/
 | [severe-fixes.md](design/severe-fixes.md) | 已实施 | 严重问题 1~9 修复；来源报告归档于 archive/code-review-2026-08.md |
 | [agent-evolution.md](design/agent-evolution.md) | 部分实施 | Agent 有界循环 Phase 1/2 已落地，L1-a 记忆已实施（见 archive/code-review-2026-09.md §6.5） |
 | [agent-ab-evaluation.md](design/agent-ab-evaluation.md) | 已执行验收 | A/B 两臂 live 对比完成（2026-09-14），结果与未达标项见 §7.1 |
+| [evolution-research-2026-09.md](design/evolution-research-2026-09.md) | 草稿 | 演进方向调研（2026-09-23）：从 RAG 问答到自进化知识运行时，含四阶段路线；待确认后实施 |
+| [wiki-navigable-workspace.md](design/wiki-navigable-workspace.md) | 已实施 | 阶段一：Wiki 升级为 Agent 可导航工作空间（D1/D3/D4 落地；D2/D5 经 A/B 证伪后回退默认值，见 §10） |
+| [fix-plan-2026-09-24.md](design/fix-plan-2026-09-24.md) | 执行中 | 四份评审综合修复计划（W0 用户操作 / W1 P0 / W2 安全 / W3 部署 / W4-W5 债务），进度以条目 ✅ 为准 |
 
 ## 按场景查找
 

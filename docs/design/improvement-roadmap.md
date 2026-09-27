@@ -1,6 +1,6 @@
 # 后续完善与优化执行计划
 
-> 状态：部分实施（执行中；P0-1 / P1-1 / P1-2 / P1-3 / P2-6 已完成，各条目以 ✅ 标记进度；遵循「设计先行 → 确认后实施」流程）
+> 状态：部分实施（执行中；P0-1 / P1-1 / P1-2 / P1-3 / P2-3~P2-6 已完成，各条目以 ✅ 标记进度；遵循「设计先行 → 确认后实施」流程）
 > 日期：2026-09-01
 > 依据：对标企业级 RAG 项目（RAGFlow / Dify / FastGPT / MaxKB）与 2026 年生产级 RAG 架构共识，结合本项目现状盘点
 
@@ -28,7 +28,7 @@
 | P1-1 | JWT 多用户认证落地（✅ 2026-09-02 完成，含数据隔离复核） | 高 | 无 |
 | P1-2 | 全链路 Trace 可视化（✅ 2026-09-02 完成） | 中 | 无（Trace 已带 user_id，查询 API 按用户过滤） |
 | P1-3 | 语义缓存（✅ 2026-09-07 完成） | 中 | 无 |
-| P2-1 | GraphRAG 检索增强（轻量版） | 中 | P0-1 |
+| P2-1 | GraphRAG 检索增强（轻量版） | 中（2026-09-23 A/B 决策：维持挂起） | P0-1 |
 | P2-2 | 多查询并行检索 + RRF 融合 | 中 | P0-1（已在 mq_eval_dataset 上离线 A/B，结论保持关闭，见 §P2-2 完成记录） |
 | P2-3 | 引用溯源到原文高亮 | 中 | ✅ 已实施（此前 P0/P1 阶段落地，见 §P2-3 说明） |
 | P2-4 | 审计日志 | 中 | ✅ 2026-09-22（见 §P2-4 完成记录） |
@@ -79,7 +79,7 @@
    - 参数参考：长文本 500-800 token、overlap 50-100；技术文档按结构 200-1500 token、代码 0 overlap。
 
    **完成记录**：
-   - Markdown：自研逐行扫描器（标题栈 + fenced 代码块保护 + 表格行级分块），超长正文二次切分并传播 heading_path；同时修复了 `.md` 原用 UnstructuredMarkdownLoader 剥离 `#` 标记导致标题切分失效的潜在 bug（改用 TextLoader + utf-8）
+   - Markdown：自研逐行扫描器（标题栈 + fenced 代码块保护 + 表格行级分块），超长正文二次切分并传播 heading_path；同时修复了 `.md` 原用 UnstructuredMarkdownLoader 剥离 `#` 标记导致标题切分失效的潜在 bug（改用 TextLoader + utf-8；注：txt/md/csv/json/pdf 加载器现已迁移为本地直读 `src/services/document_loaders.py`，此处为当时实施记录）
    - HTML：HTMLHeaderTextSplitter 切分 + 表格切分前占位符提取（裸占位符会丢失标题归属，用 `<p>` 包裹）+ 行级还原 + 正文二次切分
    - Word：UnstructuredWordDocumentLoader 改 `mode="elements"`，Title 元素经启发式标题栈构建层级路径（unstructured 不保留标题级别），Table 元素整块保留
    - Milvus schema 新增 `heading_path`（VARCHAR 512），旧集合经 `add_collection_field` 在线补加，失败自动降级不阻断；检索结果透出 heading_path
@@ -170,6 +170,19 @@
 ### P2-1 GraphRAG 检索增强（轻量版）
 
 **前置进展（2026-09-08 更新）**：共享实体抽取环节的 **LLM-Wiki 编译层 Phase 1（2026-09-07）与 Phase 2 级联/API/前端抽屉（2026-09-08）已完成**（编译页作为补充语料混入混合检索，默认关闭，变更待提交；见 `docs/design/llm-wiki-compile.md` §8/§10，运行时验证见 §12）。Phase 3 设计稿（覆盖先验/链接扩展/Lint）见 §11 待确认。按 §2.3 约定，P2-1 启动前需先评估编译页是否已解决跨文档推理问题——若已解决，P2-1 降级或合并。
+
+**决策记录（2026-09-23，跨文档多跳检索 A/B，维持挂起）**：
+
+- 工具：`backend/scripts/run_wiki_multihop_ab.py` + 数据集 `backend/tests/evaluation/wiki_multihop_eval_dataset.jsonl`（8 个需联合 ≥2 篇文档事实的跨文档问题，配套离线单测 `test_wiki_multihop_ab.py`），逻辑校验入 CI unit job。
+- 三臂结果（BM25 离线代理，top-5，编译模型 qwen3:4b-instruct-2507-q4_K_M，编译 12 篇语料产出 36 页）：
+  ```
+  A(仅原始chunk)      hit@5=1.000  mrr@5=1.000  recall@5=0.938
+  B(原始chunk+wiki)   hit@5=1.000  mrr@5=1.000  recall@5=0.875
+  C(仅wiki页,诊断)    hit@5=1.000  mrr@5=1.000  recall@5=0.875
+  ```
+- 解读：混入编译页对跨文档问题无增益（recall -0.062），编译页自身也未覆盖跨文档关联——per-doc 编译页不含文档间桥接信息，符合预期。
+- 局限（诚实声明）：① 语料仅 12 篇短文档，基线已近天花板（recall 0.938，8 题仅漏 1 个 golden 文档），增益空间本身很小；② 离线代理未建模管线内的 `WIKI_LINK_EXPANSION` 链接扩展阶段，B 臂是生产机制效果的下界。
+- **决策：P2-1 维持挂起，不启动轻量 GraphRAG**。理由：现有证据下投入产出比不足；Wiki 混入保持"非退化"底线（test_wiki_ab.py）。触发重启的条件：线上 trace/badcase 出现真实的跨文档问题占比（而非合成数据），或未来语料规模显著增长后复测本 A/B。
 
 **现状**：`knowledge_graph_generator.py` 已生成知识图谱，但仅用于前端展示，未参与检索。
 
