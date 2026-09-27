@@ -54,6 +54,7 @@ class KBRetrievalService:
         query_embedding: Optional[list] = None,
         queries: Optional[List[str]] = None,
         source_kind: Optional[str] = None,
+        exclude_source_kinds: Optional[tuple] = None,
     ):
         """根据问题检索相关文档。
 
@@ -64,6 +65,9 @@ class KBRetrievalService:
             query_embedding: 预计算的 query 向量（语义缓存场景），传入时跳过重复计算
             queries: 改写后的多查询列表（可选，首元素必须为 question）
             source_kind: 可选，限定切片来源类型（如 "wiki" 只检索编译页）
+            exclude_source_kinds: 可选，排除的切片来源类型集合。默认排除
+                synthesis 页（"wiki_syn"）——综合页仅经 wiki_lookup 导航入口
+                触达，不与原始 chunk 同池竞争（阶段一 D3）。
 
         Returns:
             list: 检索到的 Document 对象列表（截断到 TOP_K）
@@ -83,6 +87,10 @@ class KBRetrievalService:
                 search_kwargs["query_embedding"] = query_embedding
             if source_kind:
                 search_kwargs["source_kind"] = source_kind
+            else:
+                search_kwargs["exclude_source_kinds"] = tuple(
+                    exclude_source_kinds or ("wiki_syn",)
+                )
 
             if settings.processing.KB_ENABLE_HYBRID_SEARCH:
                 try:

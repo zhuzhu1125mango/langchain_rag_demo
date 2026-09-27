@@ -265,6 +265,15 @@ async def lifespan(app: FastAPI):
     learning_task = asyncio.create_task(_periodic_learning_task())
     logger.info("后台定时学习任务已启动")
 
+    # 阶段一 D4：Wiki lint 周期调度（WIKI_LINT_INTERVAL_HOURS=0 时不启动）
+    try:
+        from src.services.wiki_lint_scheduler import start_scheduler, stop_scheduler
+
+        if start_scheduler() is not None:
+            logger.info("Wiki lint 周期调度已启动")
+    except Exception as e:
+        logger.warning(f"Wiki lint 周期调度启动失败（不影响主流程）: {e}")
+
     yield
 
     # 应用关闭时取消后台任务
@@ -273,6 +282,13 @@ async def lifespan(app: FastAPI):
         await learning_task
     except asyncio.CancelledError:
         logger.info("后台定时学习任务已取消")
+
+    try:
+        from src.services.wiki_lint_scheduler import stop_scheduler
+
+        await stop_scheduler()
+    except Exception:
+        pass
 
 
 app = FastAPI(

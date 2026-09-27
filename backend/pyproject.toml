@@ -41,6 +41,13 @@ dependencies = [
     "trafilatura==2.1.0",
     "markdown==3.10.2",
     "unstructured==0.23.1",
+    # Windows 本地开发：python-magic 0.4.27 在无 libmagic 的 Windows 上
+    # import 即永久挂死（magic/compat.py 加载 magic DB 阶段；unstructured
+    # 的 ImportError 兜底拦不住挂死），导致 Word 解析与全量测试卡死。
+    # 用自带 libmagic 二进制的 python-magic-bin 替代（两者都提供 magic 包，
+    # 经下方 tool.uv.override-dependencies 在 Windows 上互斥）；Linux 容器
+    # 仍用 python-magic（系统 libmagic），行为不变。
+    "python-magic-bin>=0.4.14 ; sys_platform == 'win32'",
     "ollama==0.6.2",
     "sentence-transformers==5.5.1",
     # torch 原为 sentence-transformers 的传递依赖；提升为直接依赖是因为
@@ -129,6 +136,9 @@ ocr-paddle = [
 
 [tool.uv]
 package = false
+# 见 dependencies 中 python-magic-bin 注释：Windows 上以 python-magic-bin
+# 替代 python-magic（否则两者共存会文件冲突），非 Windows 平台保持原依赖。
+override-dependencies = ["python-magic; sys_platform != 'win32'"]
 
 # 镜像源配置：
 # - 默认 index 用清华 PyPI 镜像（国内下载稳定）

@@ -80,11 +80,11 @@ class TestSearchHybridMulti:
         service = self._make_service()
         calls = []
 
-        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
             calls.append(("dense", query, query_embedding))
             return [_make_result("d", len(calls), 0.9)]
 
-        async def fake_sparse(query, k=3, document_ids=None, kb_ids=None, source_kind=None):
+        async def fake_sparse(query, k=3, document_ids=None, kb_ids=None, source_kind=None, exclude_source_kinds=None):
             calls.append(("sparse", query, None))
             return []
 
@@ -112,10 +112,10 @@ class TestSearchHybridMulti:
         """rerank 语义基准必须是 queries[0]（原始问题），且只调用一次。"""
         service = self._make_service()
 
-        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
             return [_make_result("d1", 0, 0.9)]
 
-        async def fake_sparse(query, k=3, document_ids=None, kb_ids=None, source_kind=None):
+        async def fake_sparse(query, k=3, document_ids=None, kb_ids=None, source_kind=None, exclude_source_kinds=None):
             return []
 
         rerank_queries = []
@@ -136,12 +136,12 @@ class TestSearchHybridMulti:
         """首查询 dense 通道异常时降级跳过，其余通道照常融合。"""
         service = self._make_service()
 
-        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
             if query == "原始问题":
                 raise RuntimeError("embedding 服务不可用")
             return [_make_result("d1", 0, 0.9)]
 
-        async def fake_sparse(query, k=3, document_ids=None, kb_ids=None, source_kind=None):
+        async def fake_sparse(query, k=3, document_ids=None, kb_ids=None, source_kind=None, exclude_source_kinds=None):
             return [_make_result("d2", 0, 0.8)]
 
         monkeypatch.setattr(service, "search_dense", fake_dense)
@@ -237,7 +237,7 @@ class TestRetrieveDocumentsRouting:
         async def fake_multi(queries, **kwargs):
             raise RuntimeError("milvus 不可用")
 
-        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+        async def fake_dense(query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
             routed.append(("dense", query))
             return []
 

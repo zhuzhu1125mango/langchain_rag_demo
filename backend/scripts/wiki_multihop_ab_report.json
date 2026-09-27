@@ -1,0 +1,30 @@
+{
+  "num_questions": 8,
+  "top_k": 5,
+  "wiki_pages": 33,
+  "arm_A_raw": {
+    "num_questions": 8,
+    "num_corpus_docs": 12,
+    "top_k": 5,
+    "hit_rate": 1.0,
+    "mrr": 1.0,
+    "recall": 0.9375
+  },
+  "arm_B_mixed": {
+    "hit_rate": 1.0,
+    "mrr": 1.0,
+    "recall": 0.8125
+  },
+  "arm_C_wiki_only": {
+    "hit_rate": 1.0,
+    "mrr": 1.0,
+    "recall": 0.75
+  },
+  "arm_D_navigated": {
+    "hit_rate": 1.0,
+    "mrr": 1.0,
+    "recall": 0.5625
+  },
+  "recommendation": "混入无增益（hit +0.000 / recall -0.125），且 wiki 页自身跨文档召回（recall@5=0.750）低于原始 chunk 基线（0.938）：编译页未覆盖跨文档关联信息——若确认跨文档问答是核心场景，轻量 GraphRAG 有立项依据。",
+  "d_recommendation": "导航式 recall@5=0.562 低于基线 0.938：设计证伪，回退 WIKI_LINK_EXPANSION 默认值并重新评审（见 wiki-navigable-workspace.md §10）。"
+}

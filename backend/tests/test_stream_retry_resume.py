@@ -13,6 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
+import src.services.pipeline.generation as generation_module
+import src.services.pipeline.stages as stages_module
 import src.services.rag_chain as rag_chain_module
 from src.services.rag_chain import RAGChain
 from src.services.intent_router.models import PrimaryMode, SearchPipeline
@@ -90,16 +92,22 @@ def _make_chain(llm):
 
 @pytest.fixture
 def hermetic(monkeypatch):
-    """隔离外部副作用：Prometheus、日期工具、trace 落盘、重试等待。"""
-    monkeypatch.setattr(rag_chain_module, "PROMETHEUS_AVAILABLE", False)
-    monkeypatch.setattr(rag_chain_module, "build_datetime_answer", lambda q: None)
+    """隔离外部副作用：Prometheus、日期工具、trace 落盘、重试等待。
+
+    2026-09-23 rag_chain 拆分后：PROMETHEUS_AVAILABLE 与 asyncio.sleep
+    位于 pipeline.generation（_stream_with_retry），build_datetime_answer
+    位于 pipeline.stages（_pipeline_process）。
+    """
+    monkeypatch.setattr(generation_module, "PROMETHEUS_AVAILABLE", False)
+    monkeypatch.setattr(stages_module, "PROMETHEUS_AVAILABLE", False)
+    monkeypatch.setattr(stages_module, "build_datetime_answer", lambda q: None)
     monkeypatch.setattr(TraceCollector, "save_background", lambda self: None)
 
     async def _instant_sleep(_seconds):
         await asyncio.sleep(0)
 
     monkeypatch.setattr(
-        rag_chain_module, "asyncio", SimpleNamespace(sleep=_instant_sleep)
+        generation_module, "asyncio", SimpleNamespace(sleep=_instant_sleep)
     )
 
 

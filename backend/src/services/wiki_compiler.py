@@ -326,7 +326,12 @@ class WikiCompiler:
     async def _generate_page(
         self, cand: dict, existing: Optional[ExistingPage], material: str
     ) -> str:
-        """生成新页或增量合并既有页（约束：保留既有事实，矛盾显式标注）。"""
+        """生成新页或增量合并既有页（约束：保留既有事实，矛盾显式标注）。
+
+        注（2026-09-23）：曾试验在 prompt 中注入既有页标题要求 [[互链]]，
+        多跳 A/B 证伪（链接文本混入正文使 B/C 臂与 D 臂同步退化），已回退；
+        跨文档桥接的正规建法（图结构/独立链接元数据）待重新设计。
+        """
         title = cand["title"]
         facts = "\n".join(f"- {f}" for f in cand.get("key_facts", [])) or "（无）"
         if existing is not None:
@@ -356,6 +361,54 @@ class WikiCompiler:
         resp = await self._get_llm().ainvoke(prompt)
         content = _strip_think(resp.content).strip()
         return content or f"# {title}\n\n（内容生成失败）"
+
+    async def compile_synthesis_page(
+        self,
+        question: str,
+        answer: str,
+        cited_texts: List[str],
+        existing_titles: List[str],
+    ) -> Optional[CompiledPage]:
+        """D3 答案回流：把「问题 + 已验证答案 + 引用片段」合成为 synthesis 页。
+
+        与 compile_pages 的实体/主题抽取不同，synthesis 页直接以本次问答为
+        材料（答案已经过引用补全与事实校验），LLM 负责蒸馏成可复用的知识页
+        并用 [[既有页标题]] 与既有页面互链。失败返回 None（best-effort）。
+        """
+        try:
+            material_parts = [f"用户问题：{question}", f"已验证答案：{answer}"]
+            if cited_texts:
+                joined = "\n---\n".join(t[:2000] for t in cited_texts[:6])
+                material_parts.append(f"引用片段原文：\n{joined}")
+            existing = "、".join(existing_titles[:30]) if existing_titles else "（暂无）"
+            prompt = (
+                "你是 Wiki 编辑。请把下面这次问答沉淀为一篇 Markdown 综合知识页，"
+                "供后续直接回答同类问题使用。\n"
+                "规则：\n"
+                "- 第一行以「# 标题」开头，标题为该知识的主题名（不超过 20 字，不加书名号）\n"
+                "- 只使用材料中的信息，不要编造；分小节陈述，保留关键数值与结论\n"
+                "- 提到既有页面覆盖的概念时，用 [[既有页标题]] 引用\n"
+                "- 末尾加「## 来源」小节，注明来自用户问答沉淀\n\n"
+                f"既有页面标题（可用于 [[链接]]）：{existing}\n\n"
+                + "\n\n".join(material_parts)
+            )
+            resp = await self._get_llm().ainvoke(prompt)
+            content = _strip_think(resp.content).strip()
+            if not content:
+                return None
+            title = None
+            for line in content.splitlines():
+                if line.startswith("#"):
+                    title = line.lstrip("#").strip()
+                    break
+            if not title:
+                title = f"综合：{question[:24]}"
+                content = f"# {title}\n\n{content}"
+            title = title[:80]
+            return CompiledPage(title=title, page_type="synthesis", content=content)
+        except Exception as e:
+            logger.warning(f"synthesis 页合成失败（忽略）: {e}")
+            return None
 
     # ------------------------------------------------------------------
     # 持久化层
@@ -485,6 +538,9 @@ class WikiCompiler:
                 separators=["\n## ", "\n### ", "\n\n", "\n", "，", "。", ""],
             )
             pieces = splitter.split_text(page.content) or [page.content]
+            # synthesis 页标记独立 source_kind（wiki_syn）：不参与主检索混入，
+            # 仅经 wiki_lookup 导航入口触达（阶段一 D3，见 wiki-navigable-workspace.md）
+            source_kind = "wiki_syn" if page.page_type == "synthesis" else "wiki"
             docs = [
                 Document(
                     page_content=text,
@@ -493,7 +549,7 @@ class WikiCompiler:
                         "source": f"wiki://{page.title}",
                         "chunk_index": i,
                         "heading_path": page.title,
-                        "source_kind": "wiki",
+                        "source_kind": source_kind,
                     },
                 )
                 for i, text in enumerate(pieces)
@@ -735,7 +791,7 @@ class WikiCompiler:
                     .filter(
                         WikiPage.kb_id == str(kb_id),
                         WikiPage.status == "active",
-                        WikiPage.page_type.in_(("entity", "topic")),
+                        WikiPage.page_type.in_(("entity", "topic", "synthesis")),
                     )
                     .order_by(WikiPage.page_type, WikiPage.title)
                 )
@@ -743,9 +799,10 @@ class WikiCompiler:
 
             lines = ["# 知识库索引", ""]
             current_type = None
+            type_labels = {"entity": "实体", "topic": "主题", "synthesis": "综合"}
             for row in rows:
                 if row.page_type != current_type:
-                    label = "实体" if row.page_type == "entity" else "主题"
+                    label = type_labels.get(row.page_type, "主题")
                     lines += [f"## {label}页", ""]
                     current_type = row.page_type
                 lines.append(f"- [[{row.title}]]（revision {row.revision}）")

@@ -513,7 +513,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         """
         return await self.search_dense(query, k=k, document_ids=document_ids, kb_ids=kb_ids)
 
-    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+    async def search_dense(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
         """Dense 向量检索通道。
 
         Args:
@@ -526,7 +526,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             "metric_type": "IP",
             "params": {"ef": settings.milvus.MILVUS_EF}
         }
-        filter_expr = self._build_filter_expr(document_ids, kb_ids, source_kind=source_kind)
+        filter_expr = self._build_filter_expr(document_ids, kb_ids, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds)
 
         results = await self.client.search(
             collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
@@ -539,7 +539,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         )
         return self._parse_search_results(results)
 
-    async def search_sparse(self, query, k=3, document_ids=None, kb_ids=None, source_kind=None):
+    async def search_sparse(self, query, k=3, document_ids=None, kb_ids=None, source_kind=None, exclude_source_kinds=None):
         """Sparse BM25 关键词检索通道。
 
         若 BM25 未启用或初始化失败，返回空列表并记录日志。
@@ -561,7 +561,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             "metric_type": "IP",
             "params": {"drop_ratio_search": 0.2}
         }
-        filter_expr = self._build_filter_expr(document_ids, kb_ids, source_kind=source_kind)
+        filter_expr = self._build_filter_expr(document_ids, kb_ids, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds)
 
         try:
             results = await self.client.search(
@@ -578,7 +578,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             logger.warning(f"Sparse 检索失败: {e}")
             return []
 
-    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+    async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
         """混合检索入口：dense + sparse，返回经 RRF 融合与 Cross-Encoder 重排序后的结果。
 
         Args:
@@ -588,6 +588,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             kb_ids: 可选，限定只在这些知识库中检索。
             query_embedding: 预计算的 query 向量，传入时跳过 aembed_query 避免重复计算。
             source_kind: 可选，限定切片来源类型（如 "wiki" 只检索编译页）。
+            exclude_source_kinds: 可选，排除的切片来源类型集合（如 synthesis 页不混入主检索）。
 
         Returns:
             list[dict]: 包含额外字段 `dense_score` / `sparse_score` / `rrf_score` / `rerank_score` 的结果列表。
@@ -598,8 +599,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
 
         # B2：dense/sparse 检索彼此独立，并行执行减少 IO 串行等待
         dense_results, sparse_results = await asyncio.gather(
-            self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind),
-            self.search_sparse(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind),
+            self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds),
+            self.search_sparse(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds),
         )
 
         fused = reciprocal_rank_fusion(
@@ -620,7 +621,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         reranked = await rerank_results(query, fused[:rerank_n], top_k=k)
         return reranked
 
-    async def search_hybrid_multi(self, queries, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None):
+    async def search_hybrid_multi(self, queries, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
         """多查询并行混合检索（P2-2）：N query × (dense+sparse) → 跨查询 RRF → 单次 rerank。
 
         与 search_hybrid 的区别：接收改写后的多查询列表并行召回，
@@ -648,8 +649,8 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         tasks = []
         for i, q in enumerate(queries):
             emb = query_embedding if i == 0 else None
-            tasks.append(self.search_dense(q, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=emb, source_kind=source_kind))
-            tasks.append(self.search_sparse(q, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind))
+            tasks.append(self.search_dense(q, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=emb, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds))
+            tasks.append(self.search_sparse(q, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds))
         channel_outputs = await asyncio.gather(*tasks, return_exceptions=True)
 
         # 单通道失败降级：可用通道照常融合（sparse 通道内部已自行兜底为空列表）
@@ -697,11 +698,11 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         return v
 
     @classmethod
-    def _build_filter_expr(cls, document_ids=None, kb_ids=None, source_kind=None):
+    def _build_filter_expr(cls, document_ids=None, kb_ids=None, source_kind=None, exclude_source_kinds=None):
         """根据 document_ids、kb_ids 与 source_kind 构建 Milvus filter 表达式。
 
-        source_kind 仅允许字母/数字/下划线（≤16 字符，与 schema 一致），
-        防止拼接注入篡改过滤语义。
+        source_kind / exclude_source_kinds 仅允许字母/数字/下划线（≤16 字符，
+        与 schema 一致），防止拼接注入篡改过滤语义。
         """
         conditions = []
         if kb_ids and len(kb_ids) > 0:
@@ -713,6 +714,14 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             if len(sk) > 16 or not all(c.isalnum() or c == "_" for c in sk):
                 raise ValueError(f"非法 source_kind，已拒绝进入过滤表达式: {sk[:32]}")
             conditions.append(f'source_kind == "{sk}"')
+        if exclude_source_kinds:
+            kinds = []
+            for sk in exclude_source_kinds:
+                sk = str(sk)
+                if len(sk) > 16 or not all(c.isalnum() or c == "_" for c in sk):
+                    raise ValueError(f"非法 exclude_source_kind，已拒绝进入过滤表达式: {sk[:32]}")
+                kinds.append(f'"{sk}"')
+            conditions.append(f"source_kind not in [{','.join(kinds)}]")
         return " && ".join(conditions) if conditions else None
 
     @staticmethod
