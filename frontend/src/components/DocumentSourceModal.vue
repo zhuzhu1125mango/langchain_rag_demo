@@ -142,7 +142,11 @@ function escapeHtml(str: string): string {
 }
 
 const highlightedContent = computed(() => {
-  if (!sourceData.value?.surrounding_content || !sourceData.value.highlight_offset) {
+  if (!sourceData.value?.surrounding_content) {
+    return ''
+  }
+  // 注意用 null 判断而非 truthy：highlight_offset=0（命中在开头）是合法值
+  if (sourceData.value.highlight_offset == null) {
     return ''
   }
 
@@ -150,6 +154,8 @@ const highlightedContent = computed(() => {
   const offset = sourceData.value.highlight_offset
   const length = sourceData.value.highlight_length || 0
 
+  // v-html 加固结论（W5-28）：三段内容全部先 escapeHtml 再拼接，唯一注入的
+  // <mark> 为组件内受控字面量——管道等价于标签白名单，无需再引 DOMPurify
   return escapeHtml(content.substring(0, offset)) +
          '<mark class="bg-yellow-200 dark:bg-yellow-800/50 text-gray-900 dark:text-yellow-100 px-0.5 rounded">' +
          escapeHtml(content.substring(offset, offset + length)) +

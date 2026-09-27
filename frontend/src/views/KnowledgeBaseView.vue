@@ -104,7 +104,7 @@
                   v-model="searchQuery"
                   type="text"
                   placeholder="搜索文档..."
-                  @keyup.enter="performSearch"
+                  @keyup.enter="onPerformSearch"
                   class="px-3 py-1.5 text-sm bg-gray-100 dark:bg-dark-700 border border-gray-200 dark:border-dark-600 rounded-lg text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
                 <select
@@ -127,7 +127,7 @@
             <div class="flex items-center gap-3">
               <button
                 v-if="searchQuery && searchMode === 'content'"
-                @click="clearSearch"
+                @click="onClearSearch"
                 class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
               >
                 清除搜索
@@ -167,7 +167,7 @@
             :results="searchResults"
             :query="searchQuery"
             :is-searching="isSearching"
-            @close="clearSearch"
+            @close="onClearSearch"
             @preview="previewDocumentById"
           />
         </div>
@@ -304,24 +304,11 @@
 <script setup lang="ts">
 import { ref, watch, computed, onMounted } from 'vue'
 import { useKBStore } from '@/stores/kb'
-import { api } from '@/utils/axios'
-import {
-  useDocuments,
-  useDeleteDocument,
-  useBatchDeleteDocuments,
-  useUpdateDocument,
-  useKnowledgeBases,
-  useCreateKnowledgeBase,
-  useUpdateKnowledgeBase,
-  useDeleteKnowledgeBase,
-  useBatchDeleteKnowledgeBases,
-  useSearchDocuments
-} from '@/queries/kb'
-import type { KnowledgeBase, Document, SearchResult } from '@/queries/kb'
+import { useDocuments, useKnowledgeBases } from '@/queries/kb'
+import type { KnowledgeBase } from '@/queries/kb'
 import { Trash2, Upload, Edit3, FileText, Network, Search, FolderOpen, Database, BookOpen } from '@lucide/vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useToast } from '@/composables/useToast'
-import { ElMessageBox } from 'element-plus'
 import { useWebSocketNotifications } from '@/composables/useNotifications'
 import KnowledgeGraph from '@/components/KnowledgeGraph.vue'
 import KnowledgeBaseSidebar from '@/components/knowledge-base/KnowledgeBaseSidebar.vue'
@@ -330,13 +317,19 @@ import DocumentSearchResults from '@/components/knowledge-base/DocumentSearchRes
 import UploadDocumentDialog from '@/components/knowledge-base/UploadDocumentDialog.vue'
 import DocumentPreviewDialog from '@/components/knowledge-base/DocumentPreviewDialog.vue'
 import DocumentAnalysisDialogs from '@/components/knowledge-base/DocumentAnalysisDialogs.vue'
+import { useDocumentActions } from '@/composables/useDocumentActions'
+import { useKbManage } from '@/composables/useKbManage'
+import { useDocumentDialogs } from '@/composables/useDocumentDialogs'
+import { useContentSearch } from '@/composables/useContentSearch'
 
 /**
- * 知识库管理页面主视图。
+ * 知识库管理页面主视图（编排层）。
  *
- * 负责知识库与文档列表的整体编排：侧边栏、文档表格、全文搜索、知识图谱，
- * 以及上传/预览/分类/质量/查重等弹窗的显隐控制。具体交互与 API 调用已拆分至
- * components/knowledge-base 下的子组件中。
+ * 模板与页面状态在此汇聚；具体逻辑已拆分至 composables：
+ * - useDocumentActions：文档删除/批量删除/重处理/上下架/全选
+ * - useKbManage：知识库创建/编辑/删除/批量删除弹窗与 CRUD
+ * - useDocumentDialogs：预览/分类/质量/查重弹窗状态
+ * - useContentSearch：全文搜索
  */
 
 const kbStore = useKBStore()
@@ -346,28 +339,8 @@ const searchQuery = ref('')
 const searchMode = ref<'filename' | 'content'>('filename')
 const filterStatus = ref('all')
 const showUploadDialog = ref(false)
-const showPreviewDialog = ref(false)
-const showCreateKBModal = ref(false)
-const showEditKBModal = ref(false)
 const showWikiDrawer = ref(false)
-const previewDocId = ref('')
-const previewFilename = ref('')
-const newKBName = ref('')
-const newKBDescription = ref('')
-const editKBName = ref('')
-const editKBDescription = ref('')
 const activeTab = ref<'documents' | 'graph'>('documents')
-
-// 全文搜索相关状态
-const searchResults = ref<SearchResult[]>([])
-const isSearching = ref(false)
-const showSearchResults = ref(false)
-
-// 文档操作弹窗显隐与目标文档
-const showClassifyModal = ref(false)
-const showQualityModal = ref(false)
-const showDuplicateModal = ref(false)
-const selectedDocForAction = ref<Document | null>(null)
 
 // WebSocket实时通知
 const { onNotification } = useWebSocketNotifications()
@@ -405,14 +378,6 @@ const { data: knowledgeBases } = useKnowledgeBases()
 const { data: documentsData } = useDocuments({
   status: computed(() => filterStatus.value === 'all' ? undefined : filterStatus.value)
 })
-const deleteMutation = useDeleteDocument()
-const batchDeleteMutation = useBatchDeleteDocuments()
-const updateMutation = useUpdateDocument()
-const createKBMutation = useCreateKnowledgeBase()
-const updateKBMutation = useUpdateKnowledgeBase()
-const deleteKBMutation = useDeleteKnowledgeBase()
-const batchDeleteKBMutation = useBatchDeleteKnowledgeBases()
-const searchDocuments = useSearchDocuments()
 
 const currentKB = computed(() => kbStore.currentKB)
 
@@ -430,305 +395,69 @@ watch(knowledgeBases, (newKbs) => {
   }
 }, { immediate: true })
 
+// 文档操作：删除/批量删除/重处理/上下架/全选
+const {
+  toggleSelectAll,
+  deleteDocument,
+  reprocessDocument,
+  batchDelete,
+  toggleStatus
+} = useDocumentActions(documentsData)
+
+// 知识库管理：创建/编辑/删除/批量删除弹窗与 CRUD
+const {
+  showCreateKBModal,
+  showEditKBModal,
+  newKBName,
+  newKBDescription,
+  editKBName,
+  editKBDescription,
+  createKnowledgeBase,
+  updateKnowledgeBase,
+  deleteKnowledgeBaseConfirm,
+  batchDeleteKnowledgeBases
+} = useKbManage(currentKB)
+
+// 文档弹窗：预览/分类/质量/查重
+const {
+  showPreviewDialog,
+  previewDocId,
+  previewFilename,
+  showClassifyModal,
+  showQualityModal,
+  showDuplicateModal,
+  selectedDocForAction,
+  previewDocument,
+  previewDocumentById,
+  classifyDocument,
+  evaluateQuality,
+  detectDuplicates
+} = useDocumentDialogs()
+
+// 全文搜索
+const {
+  searchResults,
+  isSearching,
+  showSearchResults,
+  performSearch,
+  clearSearch
+} = useContentSearch(computed(() => kbStore.currentKB?.id))
+
+/** 清除搜索：视图侧同时清空输入框内容（输入框 v-model 在本视图）。 */
+function onClearSearch(): void {
+  searchQuery.value = ''
+  clearSearch()
+}
+
+/** 回车触发搜索（转发当前输入与模式）。 */
+function onPerformSearch(): void {
+  void performSearch(searchQuery.value, searchMode.value)
+}
+
 /** 切换当前选中的知识库并清空文档选择。 */
 function selectKnowledgeBase(kb: KnowledgeBase): void {
   kbStore.setCurrentKB(kb)
   kbStore.clearSelection()
-}
-
-/** 文档列表全选/取消全选。 */
-function toggleSelectAll(event: Event): void {
-  const target = event.target as HTMLInputElement
-  const data = documentsData.value
-
-  if (target.checked && data?.items?.length) {
-    kbStore.selectAllDocuments(data.items)
-  } else {
-    kbStore.clearSelection()
-  }
-}
-
-/**
- * 删除单个文档，采用乐观更新策略。
- *
- * 整体流程：1) 二次确认后立即从 queryClient 缓存中移除该文档（乐观更新），
- * 让 UI 即时反馈；2) 调用 deleteMutation 异步删除；3) 若 API 失败则
- * 通过 invalidateQueries 刷新文档与知识库列表以回滚到真实状态。
- */
-function deleteDocument(doc: Document): void {
-  if (confirm(`确定要删除文档 "${doc.filename}" 吗？`)) {
-    // 立即提示用户
-    toast.info('正在删除文档...', `正在后台删除 ${doc.filename}`)
-
-    // 立即重拉文档列表（D2）：实际 query key 为 ['documents', effectiveParams]
-    // （queries/kb.ts），不能写死 ['documents'] 做乐观 setQueryData——
-    // 此前写入无人读取的键导致删除不生效。失效命中前缀即可触发精确重拉（既有惯例）。
-    queryClient.invalidateQueries({ queryKey: ['documents'] })
-
-    // 调用API删除
-    deleteMutation.mutate(doc.id, {
-      onSuccess: () => {
-        // API已返回，但后端是异步删除
-        console.log('[Delete] Delete task submitted')
-      },
-      onError: (error) => {
-        // 如果API失败，恢复文档列表
-        toast.error('删除失败', error instanceof Error ? error.message : '未知错误')
-        queryClient.invalidateQueries({ queryKey: ['documents'] })
-        queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
-      }
-    })
-  }
-}
-
-/** 提交文档重新处理任务。 */
-async function reprocessDocument(doc: Document): Promise<void> {
-  if (confirm(`确定要重新处理文档 "${doc.filename}" 吗？`)) {
-    try {
-      const response = await api.post<{ message?: string }>(`/documents/${doc.id}/reprocess`)
-      toast.success('重新处理任务已提交', response.message || '文档将在后台重新处理')
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-    } catch (error) {
-      toast.error('重新处理失败', error instanceof Error ? error.message : '未知错误')
-    }
-  }
-}
-
-/** 批量删除选中的文档。 */
-async function batchDelete(): Promise<void> {
-  const selectedCount = kbStore.selectedCount
-
-  if (selectedCount === 0) {
-    toast.warning('请先选择要删除的文档')
-    return
-  }
-
-  if (confirm(`确定要删除选中的 ${selectedCount} 个文档吗？`)) {
-    const ids = kbStore.selectedDocuments
-
-    // 立即提示用户
-    toast.info('正在删除文档...', `正在后台删除 ${selectedCount} 个文档`)
-
-    // 清空选择（乐观更新）
-    kbStore.clearSelection()
-
-    // 调用API删除
-    batchDeleteMutation.mutate(ids, {
-      onSuccess: () => {
-        // API已返回，但后端是异步删除
-        console.log('[Batch Delete] Delete tasks submitted')
-      },
-      onError: (error) => {
-        // 如果API失败，恢复文档列表
-        toast.error('批量删除失败', error instanceof Error ? error.message : '未知错误')
-        queryClient.invalidateQueries({ queryKey: ['documents'] })
-        queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
-      }
-    })
-  }
-}
-
-/** 切换文档上下架状态。 */
-function toggleStatus(doc: Document): void {
-  const backendStatus = doc.status === 'active' ? 'draft' : 'published'
-  const newStatusText = doc.status === 'active' ? '下架' : '上架'
-  updateMutation.mutate({
-    id: doc.id,
-    data: { status: backendStatus }
-  }, {
-    onSuccess: () => {
-      toast.success(`文档已成功${newStatusText}`)
-    },
-    onError: (error: unknown) => {
-      toast.error(`${newStatusText}失败`, error instanceof Error ? error.message : '未知错误')
-    }
-  })
-}
-
-/** 打开文档预览弹窗。 */
-function previewDocument(doc: Document): void {
-  previewDocId.value = doc.id
-  previewFilename.value = doc.filename || '未知文件'
-  showPreviewDialog.value = true
-}
-
-/** 根据文档 ID 打开预览弹窗（用于搜索结果）。 */
-function previewDocumentById(docId: string): void {
-  previewDocId.value = docId
-  previewFilename.value = '加载中...'
-  showPreviewDialog.value = true
-}
-
-/** 触发文档智能分类弹窗。 */
-function classifyDocument(doc: Document): void {
-  selectedDocForAction.value = doc
-  showClassifyModal.value = true
-}
-
-/** 触发文档质量评估弹窗。 */
-function evaluateQuality(doc: Document): void {
-  selectedDocForAction.value = doc
-  showQualityModal.value = true
-}
-
-/** 触发文档重复检测弹窗。 */
-function detectDuplicates(doc: Document): void {
-  selectedDocForAction.value = doc
-  showDuplicateModal.value = true
-}
-
-/** 执行全文搜索并展示结果。 */
-async function performSearch(): Promise<void> {
-  if (!searchQuery.value.trim() || searchMode.value !== 'content') {
-    return
-  }
-
-  isSearching.value = true
-  showSearchResults.value = true
-
-  try {
-    const results = await searchDocuments(searchQuery.value.trim(), kbStore.currentKB?.id)
-    searchResults.value = results
-    if (results.length === 0) {
-      toast.info('未找到匹配的文档内容')
-    }
-  } catch (error) {
-    toast.error('搜索失败', error instanceof Error ? error.message : '未知错误')
-    searchResults.value = []
-  } finally {
-    isSearching.value = false
-  }
-}
-
-/** 清空全文搜索状态并返回文档列表。 */
-function clearSearch(): void {
-  searchQuery.value = ''
-  searchResults.value = []
-  showSearchResults.value = false
-}
-
-/** 创建新知识库并切换到该知识库。 */
-function createKnowledgeBase(): void {
-  if (!newKBName.value.trim()) {
-    toast.warning('请输入知识库名称')
-    return
-  }
-
-  createKBMutation.mutate({
-    name: newKBName.value.trim(),
-    description: newKBDescription.value.trim() || undefined
-  }, {
-    onSuccess: (newKB) => {
-      toast.success('知识库创建成功')
-      newKBName.value = ''
-      newKBDescription.value = ''
-      showCreateKBModal.value = false
-      queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
-      if (newKB) {
-        kbStore.setCurrentKB(newKB)
-      }
-    },
-    onError: (error) => {
-      toast.error('创建失败', error instanceof Error ? error.message : '未知错误')
-    }
-  })
-}
-
-watch(currentKB, (kb) => {
-  if (kb) {
-    editKBName.value = kb.name
-    editKBDescription.value = kb.description || ''
-  }
-})
-
-/** 更新当前知识库名称与描述。 */
-function updateKnowledgeBase(): void {
-  if (!editKBName.value.trim()) {
-    toast.warning('请输入知识库名称')
-    return
-  }
-
-  if (!kbStore.currentKB) return
-
-  updateKBMutation.mutate({
-    id: kbStore.currentKB.id,
-    data: {
-      name: editKBName.value.trim(),
-      description: editKBDescription.value.trim() || undefined
-    }
-  }, {
-    onSuccess: () => {
-      toast.success('知识库更新成功')
-      showEditKBModal.value = false
-      queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
-    },
-    onError: (error) => {
-      toast.error('更新失败', error instanceof Error ? error.message : '未知错误')
-    }
-  })
-}
-
-/** 删除当前选中的知识库及其全部文档。 */
-function deleteKnowledgeBaseConfirm(): void {
-  if (!kbStore.currentKB) return
-
-  if (confirm(`确定要删除知识库 "${kbStore.currentKB.name}" 吗？这将删除该知识库中的所有文档。`)) {
-    deleteKBMutation.mutate(kbStore.currentKB.id, {
-      onSuccess: () => {
-        toast.success('知识库删除成功')
-        kbStore.setCurrentKB(null)
-        queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
-        queryClient.invalidateQueries({ queryKey: ['documents'] })
-      },
-      onError: (error) => {
-        toast.error('删除失败', error instanceof Error ? error.message : '未知错误')
-      }
-    })
-  }
-}
-
-/** 批量删除选中的知识库。 */
-async function batchDeleteKnowledgeBases(): Promise<void> {
-  const selectedCount = kbStore.selectedKBCount
-
-  if (selectedCount === 0) {
-    toast.warning('请先选择要删除的知识库')
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除选中的 ${selectedCount} 个知识库吗？其中的所有文档也将被删除，操作不可恢复。`,
-      '批量删除确认',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        confirmButtonClass: 'el-button--danger'
-      }
-    )
-  } catch {
-    return
-  }
-
-  const ids = kbStore.selectedKBs
-  toast.info('正在删除知识库...', `正在后台删除 ${selectedCount} 个知识库`)
-
-  batchDeleteKBMutation.mutate(ids, {
-    onSuccess: (result) => {
-      toast.success(
-        '批量删除成功',
-        `已删除 ${result.deleted_count} 个知识库${result.skipped_ids.length ? `，跳过 ${result.skipped_ids.length} 个` : ''}`
-      )
-      kbStore.exitBatchKBMode()
-      queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
-      queryClient.invalidateQueries({ queryKey: ['documents'] })
-    },
-    onError: (error) => {
-      toast.error('批量删除失败', error instanceof Error ? error.message : '未知错误')
-      queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
-    }
-  })
 }
 
 /** 上传完成回调：文档列表由 WebSocket 通知自动刷新，此处无需手动处理。 */
