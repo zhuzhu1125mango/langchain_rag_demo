@@ -155,6 +155,7 @@ const { data: knowledgeBases } = useKnowledgeBases()
 // 输入辅助：问题重写/分类、防抖推荐、答案对比
 const {
   rewriteResult,
+  isRewritingQuestion,
   questionClassification,
   handleRewriteQuestion,
   useRewrittenQuestion,
