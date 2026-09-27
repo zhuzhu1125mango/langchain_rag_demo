@@ -48,10 +48,20 @@ class TestSecretKeyValidation:
 class TestUrlValidation:
     """URL SSRF 防护测试。"""
 
-    def test_http_url_is_safe(self):
+    def test_http_url_is_safe(self, monkeypatch):
+        """mock 解析为公网 IP：本机代理（Fake-IP 198.18.0.0/15 会判受限）
+        与 CI DNS 差异不应影响该用例，与文件内其余 DNS 用例口径一致。"""
+        monkeypatch.setattr(
+            socket, "getaddrinfo",
+            lambda host, port, **kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+        )
         assert is_url_safe("http://example.com/path") is True
 
-    def test_https_url_is_safe(self):
+    def test_https_url_is_safe(self, monkeypatch):
+        monkeypatch.setattr(
+            socket, "getaddrinfo",
+            lambda host, port, **kw: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))],
+        )
         assert is_url_safe("https://example.com/path") is True
 
     def test_javascript_url_is_unsafe(self):

@@ -156,6 +156,11 @@ class ModelManager:
                 seen.add(name)
                 unique_candidates.append(name)
 
+        if not unique_candidates:
+            # 候选全为空值（如环境缺省导致解析出的模型名为空）时，
+            # 与上方 `not candidates` 分支同口径回退主模型，避免 [0] 越界
+            return settings.model.OLLAMA_MODEL_NAME
+
         for name in unique_candidates:
             try:
                 if await self.check_availability(name):

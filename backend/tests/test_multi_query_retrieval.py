@@ -127,6 +127,10 @@ class TestSearchHybridMulti:
         monkeypatch.setattr(service, "search_dense", fake_dense)
         monkeypatch.setattr(service, "search_sparse", fake_sparse)
         monkeypatch.setattr("src.services.hybrid_search.rerank_results", fake_rerank)
+        # 显式开启 rerank：CI 环境无模型名配置（KB_RERANK_MODEL 为空）时
+        # search_hybrid_multi 会短路跳过 rerank 分支，mock 不触发
+        monkeypatch.setattr(settings.processing, "KB_RERANK_ENABLED", True)
+        monkeypatch.setattr(settings.processing, "KB_RERANK_MODEL", "test-rerank-model")
 
         await service.search_hybrid_multi(["原始问题", "改写A", "改写B"], k=3)
 

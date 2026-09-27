@@ -53,6 +53,14 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      # 模型名占位：config 无内置默认（A2），测试环境缺省时 model_manager 等
+      # 边界分支行为与本地（有 .env.dev）不一致；SKIP_OLLAMA_CHECK 短路
+      # _validate_model_config 的 Ollama 连接校验（W3-15），CI 无 Ollama 服务
+      OLLAMA_MODEL_NAME: ci_placeholder_model
+      FAST_LLM_MODEL_NAME: ci_placeholder_model
+      EMBEDDING_MODEL_NAME: ci_placeholder_model
+      SKIP_OLLAMA_CHECK: "true"
     steps:
       - uses: actions/checkout@v5
 
@@ -122,6 +130,13 @@ jobs:
       MILVUS_PORT: "19530"
       # 应用启动时 Ollama 未就绪属预期：预热为 best-effort，连接失败仅告警不阻塞
       OLLAMA_HOST: http://localhost:11434
+      # 模型名占位：缺失会让 _validate_model_config 启动即抛 RuntimeError（A2），
+      # 所有依赖 TestClient lifespan 的 API/WS 用例集体 ERROR；SKIP_OLLAMA_CHECK
+      # 跳过 Ollama 连接与模型存在性校验（占位名无真实模型）
+      OLLAMA_MODEL_NAME: ci_placeholder_model
+      FAST_LLM_MODEL_NAME: ci_placeholder_model
+      EMBEDDING_MODEL_NAME: ci_placeholder_model
+      SKIP_OLLAMA_CHECK: "true"
 
     steps:
       - uses: actions/checkout@v5
