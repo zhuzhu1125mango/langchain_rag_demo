@@ -10,6 +10,19 @@ import tempfile
 import os
 import uuid
 
+import httpx
+
+from src.config import settings
+
+
+def _ollama_available() -> bool:
+    """探测 Ollama 服务是否可达（kb_ids 触发真实检索链路，需 Embedding）。"""
+    host = (settings.model.OLLAMA_HOST or "http://localhost:11434").rstrip("/")
+    try:
+        return httpx.get(f"{host}/api/version", timeout=3.0).status_code == 200
+    except Exception:
+        return False
+
 # 历史上此处为模块级 `client = TestClient(app)`：无 lifespan 且每次请求使用
 # 独立临时事件循环，asyncpg 连接跨循环复用导致 "Event loop is closed"。
 # 改为每测试把模块全局 client 指向进程级共享 TestClient（见 conftest.integration_client）。
@@ -56,6 +69,8 @@ class TestChatAPI:
     
     def test_send_message_with_knowledge_base(self):
         """测试指定知识库发送消息"""
+        if not _ollama_available():
+            pytest.skip("Ollama 服务不可用，无法执行真实检索 Embedding（CI 环境）")
         kb_response = client.post(
             "/api/knowledge_bases/",
             json={"name": f"测试KB-{uuid.uuid4().hex[:8]}"}
