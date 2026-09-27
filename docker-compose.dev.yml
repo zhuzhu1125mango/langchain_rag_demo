@@ -158,6 +158,8 @@ services:
       HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
       HF_HUB_OFFLINE: "1"                              # 容器内强制离线用缓存
       TRANSFORMERS_OFFLINE: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"            # Linux 宿主机上该 DNS 名默认不存在，显式映射到网关
     volumes:
       - ./backend:/app
       - /app/.venv                                       # 匿名卷防止宿主机 Windows .venv 覆盖容器内 Linux venv

@@ -215,11 +215,21 @@ class CacheService(AsyncSingleton["CacheService"]):
         return False
 
     async def clear_pattern(self, pattern: str) -> None:
-        """按模式批量删除缓存键；失败时静默忽略。"""
+        """按模式批量删除缓存键；失败时静默忽略。
+
+        用 SCAN 游标增量遍历而非 KEYS：KEYS 会一次性遍历整个键空间并阻塞
+        Redis 单线程，键量大时拖垮线上查询；SCAN 分批返回不阻塞。
+        """
         try:
-            keys = await self._execute(self.client.keys(pattern))
-            if keys:
-                await self._execute(self.client.delete(*keys))
+            cursor = 0
+            while True:
+                cursor, keys = await self._execute(
+                    self.client.scan(cursor=cursor, match=pattern, count=100)
+                )
+                if keys:
+                    await self._execute(self.client.delete(*keys))
+                if cursor == 0:
+                    break
         except Exception as exc:
             logger.warning("按模式清除缓存失败 [pattern=%s]: %s", pattern, exc)
             self._mark_unavailable()

@@ -116,8 +116,9 @@ groups:
           description: "P95 LLM 调用延迟超过 30 秒，当前值 {{ $value }}s"
 
       # LLM 调用错误率告警：错误率 > 10% 持续 1 分钟触发
+      # clamp_min 防小样本噪声：分母接近 0 时比值虚高误报（口径同 OllamaTimeoutRate）
       - alert: LLMCallErrors
-        expr: rate(rag_llm_call_errors_total[1m]) / rate(rag_llm_calls_total[1m]) > 0.1
+        expr: rate(rag_llm_call_errors_total[1m]) / clamp_min(rate(rag_llm_calls_total[1m]), 1e-9) > 0.1
         for: 1m
         labels:
           severity: critical

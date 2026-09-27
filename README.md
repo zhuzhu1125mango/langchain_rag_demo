@@ -27,7 +27,7 @@
 | 🧠 **动态学习** | 基于用户反馈的规则学习引擎 | ✅ |
 | 🔎 **答案可信度** | 引用补全（embedding 匹配补 `[n]`）+ 数值幻觉校验 + 分档置信度提示 | ✅ |
 | 🧭 **意图路由** | 规则 + Embedding 分类 + LLM 路由三层，置信度门控与歧义澄清 | ✅ |
-| 📈 **监控告警** | 集成 Prometheus + Alertmanager 监控体系（**Grafana 已部署但尚无 dashboard**） | ⚠️ |
+| 📈 **监控告警** | 集成 Prometheus + Alertmanager + Grafana（rag_overview 仪表盘已 provision） | ✅ |
 | 🧾 **请求追踪** | 每次问答的完整链路耗时记录，经 `/api/traces` 查询 | ✅ |
 | 🏷️ **标签分类** | 文档分类和标签管理 | ✅ |
 | ⭐ **评价反馈** | 用户评价收集和反馈学习 | ✅ |
@@ -51,7 +51,7 @@
 | 向量数据库客户端 | pymilvus | 3.0.0 | 与上者版本号不同步，注意区分 |
 | LLM 集成 | Ollama（Python 客户端） | 0.6.2 | 本地模型运行 |
 | 嵌入模型 | bge-m3 | latest | 离线多语言向量嵌入，1024 维 |
-| 对象存储 | MinIO | RELEASE.2025-09-07T16-13-09Z | 分布式对象存储 |
+| 对象存储 | MinIO（pgsty/minio 社区 fork） | RELEASE.2026-06-18T00-00-00Z（镜像 tag） | 官方 2025-10 停发镜像并归档仓库，改用仍在维护的 drop-in 兼容 fork |
 | 前端框架 | Vue 3 | ^3.5.35 | 现代前端框架 |
 | 状态管理 | Pinia | ^3.0.4 | 状态管理 |
 | 数据缓存 | Vue Query | ^5.100.14 | 客户端数据缓存 |
@@ -104,8 +104,8 @@ OLLAMA_MODEL_NAME=deepseek-r1:7b-qwen-distill-q4_K_M
 FAST_LLM_MODEL_NAME=qwen2.5:7b
 EMBEDDING_MODEL_NAME=bge-m3:latest
 EMBEDDING_DIMENSION=1024
-KB_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
-SEARCH_RERANK_MODEL=qllama/bge-reranker-v2-m3:latest
+KB_RERANK_MODEL=BAAI/bge-reranker-v2-m3
+SEARCH_RERANK_MODEL=BAAI/bge-reranker-v2-m3
 ```
 
 > ⚠️ **Embedding 维度变更注意**：默认 Embedding 从 `nomic-embed-text`（768 维）切换为 `bge-m3`（1024 维）。现有 Milvus 集合会在服务启动时自动检测维度不一致并重建，旧知识库数据将丢失。请在启动前运行 `cd backend && uv run python scripts/migrate_embedding_model.py --backup` 备份并重新上传文档。
@@ -691,10 +691,10 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `SEARCH_ENABLE_RERANK` | 是否启用 Cross-Encoder 语义重排 | `true` | true/false |
 | `EMBEDDING_DIMENSION` | Embedding 向量维度 | `1024` | 需与 `EMBEDDING_MODEL_NAME` 对应 |
 | `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:7b` | 意图路由/标题/Query 改写 |
-| `KB_RERANK_MODEL` | 知识库重排模型 | `qllama/bge-reranker-v2-m3:latest` | - |
-| `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `ollama` | `sentence_transformers` / `ollama` |
-| `SEARCH_RERANK_MODEL` | 搜索重排模型 | `qllama/bge-reranker-v2-m3:latest` | - |
-| `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `ollama` | `sentence_transformers` / `ollama` |
+| `KB_RERANK_MODEL` | 知识库重排模型 | `BAAI/bge-reranker-v2-m3` | sentence_transformers 从 HF_HOME 离线缓存加载 |
+| `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
+| `SEARCH_RERANK_MODEL` | 搜索重排模型 | `BAAI/bge-reranker-v2-m3` | 同上 |
+| `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
 | `SEARCH_RERANK_TOP_K` | 重排后返回 Top-K | 5 | - |
 | `SEARCH_CACHE_TTL` | 搜索结果缓存时间（秒） | 3600 | - |
 | `SEARCH_CONTENT_CACHE_TTL` | 网页内容缓存时间（秒） | 86400 | - |
@@ -909,7 +909,7 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 3. **SECRET_KEY**: 生产环境必须在 `.env.prod` 中设置强密钥，否则后端容器启动失败
 4. **数据卷管理**: 使用 `docker-compose down -v` 会删除数据卷，**谨慎操作**
 5. **模型下载**: 首次运行需要下载 Ollama 模型，可能需要较长时间
-6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qllama/bge-reranker-v2-m3:latest`、`ollama pull qwen2.5:7b` 与 `ollama pull deepseek-r1:7b-qwen-distill-q4_K_M`，耗时较长
+6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qwen2.5:7b` 与 `ollama pull deepseek-r1:7b-qwen-distill-q4_K_M`，耗时较长；重排序模型 `BAAI/bge-reranker-v2-m3` 不走 Ollama——由 sentence_transformers 从 `HF_HOME`（容器内挂载卷）的离线缓存加载，离线部署请先用支持网络的环境预热该缓存
 7. **内存要求**: 建议至少 8GB 内存，模型越大需要内存越多
 8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 8080, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8081, 9002, 9003, 19531, 9092, 3001, 9094, 9095, 80，均仅绑定回环地址）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换

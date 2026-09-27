@@ -7,6 +7,7 @@
 import asyncio
 import io
 import logging
+import os
 import uuid
 from minio import Minio
 from minio.error import S3Error
@@ -55,6 +56,10 @@ class MinioService(AsyncSingleton["MinioService"]):
     def upload_file(self, file, file_id=None):
         """同步上传文件到 MinIO。
 
+        对象键不含用户上传的原始文件名（可含空格/中文/超长/路径混淆字符，
+        且属用户可控输入），改用扩展名 + 文档 ID 定位；展示名以 DB filename
+        字段为准。存量对象的键已固化在 DB file_path，按原键照常读写。
+
         Args:
             file: FastAPI UploadFile 对象或类似文件对象。
             file_id: 可选文件 ID，默认自动生成 UUID。
@@ -62,7 +67,9 @@ class MinioService(AsyncSingleton["MinioService"]):
         Returns:
             str: minio:// 协议的文件访问地址。
         """
-        file_key = f"documents/{file_id or uuid.uuid4()}/{file.filename}"
+        file_id = file_id or uuid.uuid4()
+        ext = os.path.splitext(file.filename or "")[1].lower() or ".bin"
+        file_key = f"documents/{file_id}/source{ext}"
 
         file.file.seek(0)
 

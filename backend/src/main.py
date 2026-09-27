@@ -143,6 +143,10 @@ async def _validate_model_config() -> None:
 
     模型是核心依赖（开发/生产一致执行）：三项模型名必填，且必须已存在于本地
     Ollama（/api/tags）；缺失或不可用时拒绝启动，避免配错模型在首次调用才暴露。
+
+    SKIP_OLLAMA_CHECK=true 时跳过 Ollama 连接与模型存在性校验（仅保留模型名
+    非空校验）：容器内 Ollama 位于宿主机（host.docker.internal），宿主机服务
+    未就绪不应阻塞容器启动；模型缺失将在首次调用时暴露。
     """
     import ollama
 
@@ -157,6 +161,13 @@ async def _validate_model_config() -> None:
         raise RuntimeError(
             f"启动失败: 模型配置缺失 {', '.join(missing)}，请在 .env 中填写对应模型名（无内置默认）"
         )
+
+    if os.getenv("SKIP_OLLAMA_CHECK", "").lower() == "true":
+        logger.warning(
+            "SKIP_OLLAMA_CHECK=true: 跳过 Ollama 连接与模型存在性校验"
+            "（模型缺失将在首次调用时暴露）"
+        )
+        return
 
     try:
         client = ollama.Client(host=m.OLLAMA_HOST) if m.OLLAMA_HOST else ollama.Client()
@@ -234,8 +245,20 @@ async def lifespan(app: FastAPI):
     # 模型配置校验（A2）：模型名必填且存在于本地 Ollama，缺失即启动失败
     await _validate_model_config()
 
-    await init_db()
-    logger.info("Database tables created successfully")
+    if settings.IS_PRODUCTION:
+        # 生产 schema 由 alembic 统一管理（scripts/start-prod.sh：upgrade head /
+        # stamp head 对齐）。此处 create_all 会与迁移竞争：全新库上 create_all
+        # 先建全量表（无 alembic_version），随后的 upgrade head 撞 DuplicateTable
+        # 只能靠 stamp 兜底对齐——schema 出现两个写入方。跳过后 alembic 为唯一来源。
+        logger.info("生产模式：跳过 init_db 建表（schema 由 alembic 迁移管理）")
+    else:
+        await init_db()
+        logger.info("Database tables created successfully")
+
+    # W4-23：加载运行时配置覆盖（UI 修改的 processing 调优参数落盘于
+    # backend/data/runtime_config.json，重启不丢失）
+    from src.services.runtime_config_service import load_runtime_overrides
+    load_runtime_overrides()
 
     # 预热核心异步服务，避免首次请求阻塞事件循环
     try:

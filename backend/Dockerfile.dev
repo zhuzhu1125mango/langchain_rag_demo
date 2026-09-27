@@ -19,8 +19,10 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.o
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 uv（直接从官方镜像复制二进制，无需容器内 pip 下载）
+# 版本钉死 0.6.3（与 Dockerfile.prod 一致）：避免 :latest 漂移导致构建不可复现、
+# 以及新版 uv 的 lock 格式与 uv.lock 不兼容
 # pypi 源已在 pyproject.toml/uv.lock 中锁定为清华镜像，无需环境变量
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.6.3 /uv /usr/local/bin/uv
 
 # 复制依赖清单（利用 Docker 缓存层，依赖不变时跳过后续安装）
 COPY pyproject.toml uv.lock ./

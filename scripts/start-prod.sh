@@ -334,9 +334,12 @@ run_database_migration() {
     log_step "6/7" "执行数据库迁移（alembic upgrade head）..."
 
     # 容器内 POSTGRES_HOST=postgres 直连数据库（alembic 为主依赖，prod 镜像可用）
+    # 注：生产模式 backend 启动不再 init_db 建表（schema 由 alembic 单一来源管理），
+    # 全新库直接 upgrade head 即可；stamp 分支仅作为历史库（曾由 create_all 建表）
+    # 的兜底保留
     if ! $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" exec -T backend alembic upgrade head; then
-        # 全新数据库：backend 启动时 init_db(create_all) 已建全量表但无 alembic_version，
-        # upgrade 撞 DuplicateTableError；此时 schema 与当前镜像模型一致，stamp 对齐即可
+        # 历史遗留库：create_all 曾建全量表但无 alembic_version，upgrade 撞
+        # DuplicateTableError；此时 schema 与当前镜像模型一致，stamp 对齐即可
         log_warn "upgrade 未执行，尝试按全新库对齐 alembic 版本（stamp head）..."
         if ! $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" exec -T backend alembic stamp head; then
             log_error "数据库迁移失败，请检查 backend 容器日志"

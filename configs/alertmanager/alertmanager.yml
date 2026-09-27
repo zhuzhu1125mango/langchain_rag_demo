@@ -44,4 +44,4 @@ inhibit_rules:
       severity: 'critical'    # 抑制源告警级别
     target_match:
       severity: 'warning'    # 被抑制的告警级别
-    equal: ['alertname', 'dev', 'instance']  # 仅当这些标签相等时才抑制
+    equal: ['alertname', 'instance']  # 仅当这些标签相等时才抑制

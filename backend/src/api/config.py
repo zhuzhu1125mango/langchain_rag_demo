@@ -128,6 +128,10 @@ async def update_processing_config(
             )
         settings.processing.TOP_K = config.top_k
 
+    # W4-23：运行时覆盖落盘（重启后仍生效）；失败仅告警，内存值不受影响
+    from src.services.runtime_config_service import save_runtime_overrides
+    save_runtime_overrides()
+
     # P2-4 审计：配置变更（best-effort）
     from src.services.audit_service import record_audit
     await record_audit(
@@ -178,6 +182,10 @@ async def reset_config(current_user: CurrentUser = Depends(require_admin)):
     settings.processing.CHUNK_SIZE = 512
     settings.processing.CHUNK_OVERLAP = 64
     settings.processing.TOP_K = 3
+
+    # W4-23：重置后同步清除落盘的运行时覆盖，避免重启后覆盖值复活
+    from src.services.runtime_config_service import save_runtime_overrides
+    save_runtime_overrides()
 
     # P2-4 审计：配置重置（best-effort）
     from src.services.audit_service import record_audit

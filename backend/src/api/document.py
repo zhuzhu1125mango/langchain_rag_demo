@@ -593,15 +593,23 @@ async def upload_document(
         db.add(doc)
         await db.commit()
 
+        # MinIO 上传可达数十秒（大文件）：先释放请求级 DB 连接再上传，
+        # 避免 session 横跨网络 I/O 占死连接池；后续更新改用独立短事务。
+        await db.close()
+
         # 上传文件到 MinIO（异步变体：网络 I/O 不阻塞事件循环）
         file_path = await minio_service.upload_file_async(file, doc_id)
 
-        # 更新文档记录
-        doc.file_path = file_path
-        doc.processing_status = "processing"
-        doc.processing_message = "正在处理文档..."
-        doc.processing_progress = 5
-        await db.commit()
+        # 独立短事务更新文档记录（请求 session 已在上传前释放）
+        async with async_session_maker() as _s:
+            result = await _s.execute(select(Document).filter(Document.id == doc_id))
+            doc = result.scalars().first()
+            if doc is not None:
+                doc.file_path = file_path
+                doc.processing_status = "processing"
+                doc.processing_message = "正在处理文档..."
+                doc.processing_progress = 5
+                await _s.commit()
 
         # 立即返回，后台处理
         update_upload_progress(task_upload_id, status="processing", message="正在处理文档...")
@@ -679,6 +687,10 @@ async def batch_upload(
 
     results = []
     minio_service = await MinioService.get_instance()
+
+    # 结束 kb 校验遗留的隐式事务并释放连接：上传循环可达数十秒，
+    # 不得让 session 带着打开的事务/连接横跨 MinIO I/O（close 后复用 session 会自动重新 begin）
+    await db.close()
 
     for file in files:
         _, ext = os.path.splitext(file.filename)
@@ -913,16 +925,28 @@ async def search_documents(
 async def list_documents(
     kb_id: Optional[str] = Query(None, description="知识库ID，不传则查询所有知识库的文档"),
     status: Optional[str] = Query(None, description="文档状态筛选：active（已上架）、inactive（已下架）"),
+    limit: int = Query(200, ge=1, le=500, description="单页条数上限（1-500，默认 200）"),
+    offset: int = Query(0, ge=0, description="偏移量（配合 limit 翻页）"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
+    """
+    文档列表（支持 limit/offset 分页）。
+
+    响应仍为扁平数组以保持前端兼容；无上限全表拉取已被 limit 硬顶（默认
+    200，最大 500）。排序固定 created_at 降序，保证翻页窗口稳定。
+    """
     try:
         logger.info(f"list_documents called with kb_id: {kb_id}, status: {status}")
 
-        query = select(Document).options(
-            joinedload(Document.knowledge_base),
-            joinedload(Document.category)
-        ).filter(Document.owner_id == current_user.user_id)
+        query = (
+            select(Document)
+            .options(
+                joinedload(Document.knowledge_base),
+                joinedload(Document.category),
+            )
+            .filter(Document.owner_id == current_user.user_id)
+        )
 
         if kb_id:
             try:
@@ -939,7 +963,10 @@ async def list_documents(
             elif status == "inactive":
                 query = query.filter(Document.status.in_(["draft", "archived"]))
                 logger.info("Filtering by status: draft or archived")
-        
+
+        # 排序固定 created_at 降序（翻页窗口稳定），分页截断收尾
+        query = query.order_by(Document.created_at.desc()).limit(limit).offset(offset)
+
         result = await db.execute(query)
         docs = result.scalars().all()
         logger.info(f"Found {len(docs)} documents")

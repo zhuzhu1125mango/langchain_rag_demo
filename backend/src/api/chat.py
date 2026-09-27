@@ -70,15 +70,17 @@ def _parse_session_id(raw: Optional[str]) -> Optional[uuid.UUID]:
 @router.post("/messages")
 async def send_message(
     request: MessageRequest,
-    db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     发送消息并获取回答（非流式）
 
+    数据库访问拆分为三段独立短会话（口径同 /stream 端点）：kb 校验、
+    会话+用户消息落库、回答落库——LLM 生成（可达数十秒）期间不持有
+    DB 连接，避免并发请求饿死连接池。
+
     Args:
         request: 请求数据（问题、会话ID、知识库ID列表）
-        db: 数据库会话
         current_user: 当前认证用户
 
     Returns:
@@ -89,57 +91,61 @@ async def send_message(
     if detected:
         raise HTTPException(status_code=400, detail=f"输入包含敏感内容 [{category}]: {word}")
 
-    # 知识库 ID 校验：格式 + 归属
+    # 知识库 ID 校验：格式 + 归属（独立短会话）
     kb_ids = parse_uuid_list(request.kb_ids)
-    await validate_kb_ownership(db, kb_ids, current_user)
+    async with async_session() as db:
+        await validate_kb_ownership(db, kb_ids, current_user)
 
     # 加载向量库和RAG链
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
 
-    # 获取或创建会话
-    if request.session_id:
-        result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(request.session_id)))
-        session = result.scalar_one_or_none()
-        if not session:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        require_owner(session.user_id, current_user)
-        history = session.messages.copy()
-    else:
-        session = SessionModel(
-            user_id=current_user.user_id,
-            title=request.question[:50],
-            messages=[],
-            kb_ids=kb_ids,
-            updated_at=datetime.now()
-        )
-        db.add(session)
-        await db.commit()
-        await db.refresh(session)
-        history = []
-
     # 生成消息ID
     user_message_id = str(uuid.uuid4())
     assistant_message_id = str(uuid.uuid4())
 
-    # 保存用户消息（在生成回答之前保存，以便后续历史记录完整）
+    # 获取或创建会话 + 保存用户消息（短会话 1；生成回答之前保存，保证历史完整）
     # 原子追加：并发写同一会话时由 PG 行锁串行化，不丢消息
-    user_msg_count = await append_session_message(db, session.id, {
-        "id": user_message_id,
-        "role": "user",
-        "content": request.question,
-        "timestamp": datetime.now().isoformat()
-    })
-    await db.commit()
-    logger.info(f"用户消息保存成功: session={session.id}, message_id={user_message_id}, messages_count={user_msg_count}")
+    async with async_session() as db:
+        if request.session_id:
+            result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(request.session_id)))
+            session = result.scalar_one_or_none()
+            if not session:
+                raise HTTPException(status_code=404, detail="会话不存在")
+            require_owner(session.user_id, current_user)
+            history = session.messages.copy()
+            session_title = session.title
+        else:
+            session = SessionModel(
+                user_id=current_user.user_id,
+                title=request.question[:50],
+                messages=[],
+                kb_ids=kb_ids,
+                updated_at=datetime.now()
+            )
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+            history = []
+            session_title = session.title
+        session_uuid = session.id
 
-    # 生成回答（传递历史消息和搜索参数）
+        user_msg_count = await append_session_message(db, session_uuid, {
+            "id": user_message_id,
+            "role": "user",
+            "content": request.question,
+            "timestamp": datetime.now().isoformat()
+        })
+        await db.commit()
+    logger.info(f"用户消息保存成功: session={session_uuid}, message_id={user_message_id}, messages_count={user_msg_count}")
+
+    # 生成回答（传递历史消息和搜索参数）——此处不持有任何 DB 会话
     answer, sources, source_metadata, answer_type = await rag_chain.run(
         request.question, kb_ids, history,
         use_web_search=request.use_web_search,
         search_mode=request.search_mode or "simple",
         user_id=current_user.user_id,
-        session_id=str(session.id)
+        session_id=str(session_uuid)
     )
 
     # 记录策略执行到学习引擎
@@ -148,7 +154,7 @@ async def send_message(
         decision = rag_chain.get_last_decision()
         if decision:
             execution_id = await learning_engine.record_execution(
-                session_id=str(session.id),
+                session_id=str(session_uuid),
                 question=request.question,
                 final_decision=decision.should_use_kb,
                 final_confidence=decision.confidence,
@@ -158,33 +164,42 @@ async def send_message(
     except Exception as e:
         logger.error(f"记录策略执行失败: {e}", exc_info=True)
 
-    # 保存助手消息（附带 execution_id 用于后续反馈关联）；原子追加，理由同用户消息
-    assistant_msg_count = await append_session_message(db, session.id, {
-        "id": assistant_message_id,
-        "role": "assistant",
-        "content": answer,
-        "sources": sources,
-        "source_metadata": source_metadata,
-        "timestamp": datetime.now().isoformat(),
-        "execution_id": execution_id
-    })
-
-    # 若会话仍为默认标题，根据首条问题生成标题
+    # 保存助手消息（附带 execution_id 用于后续反馈关联）+ 生成会话标题（短会话 2）
+    # 原子追加，理由同用户消息
     generated_title = None
-    title_generator = await TitleGenerator.get_instance()
-    if title_generator.is_default_title(session.title):
-        try:
-            session.title = await title_generator.generate_title(request.question)
-            generated_title = session.title
-            logger.info(f"会话标题已生成(非流式): session={session.id}, title={session.title}")
-        except Exception as title_err:
-            logger.warning(f"生成会话标题失败(非流式): {title_err}")
+    async with async_session() as db:
+        result = await db.execute(select(SessionModel).filter(SessionModel.id == session_uuid))
+        session = result.scalars().first()
+        if session is None:
+            # 会话在生成期间被删除：跳过持久化，回答仍返回给调用方
+            logger.warning(f"会话在回答生成期间被删除，跳过助手消息落库: session={session_uuid}")
+            assistant_msg_count = 0
+        else:
+            assistant_msg_count = await append_session_message(db, session_uuid, {
+                "id": assistant_message_id,
+                "role": "assistant",
+                "content": answer,
+                "sources": sources,
+                "source_metadata": source_metadata,
+                "timestamp": datetime.now().isoformat(),
+                "execution_id": execution_id
+            })
 
-    await db.commit()
-    logger.info(f"助手消息保存成功(非流式): session={session.id}, message_id={assistant_message_id}, messages_count={assistant_msg_count}")
+            # 若会话仍为默认标题，根据首条问题生成标题
+            title_generator = await TitleGenerator.get_instance()
+            if title_generator.is_default_title(session_title):
+                try:
+                    session.title = await title_generator.generate_title(request.question)
+                    generated_title = session.title
+                    logger.info(f"会话标题已生成(非流式): session={session_uuid}, title={session.title}")
+                except Exception as title_err:
+                    logger.warning(f"生成会话标题失败(非流式): {title_err}")
+
+            await db.commit()
+    logger.info(f"助手消息保存成功(非流式): session={session_uuid}, message_id={assistant_message_id}, messages_count={assistant_msg_count}")
 
     return {
-        "session_id": str(session.id),
+        "session_id": str(session_uuid),
         "message_id": assistant_message_id,
         "answer": answer,
         "sources": sources,

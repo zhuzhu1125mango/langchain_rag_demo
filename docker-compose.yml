@@ -70,6 +70,8 @@ services:
       HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
       HF_HUB_OFFLINE: "1"                              # 容器内强制离线用缓存
       TRANSFORMERS_OFFLINE: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"            # Linux 宿主机上该 DNS 名默认不存在，显式映射到网关
     volumes:
       - ./backend/data:/app/data
     networks:
@@ -80,6 +82,12 @@ services:
         limits:
           memory: 2G
           cpus: "2.0"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -107,7 +115,8 @@ services:
           memory: 128M
           cpus: "0.5"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     ports:
       - "80:80"                                        # nginx 默认 HTTP 端口
 

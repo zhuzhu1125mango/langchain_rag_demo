@@ -19,7 +19,6 @@ datasources:
       httpMethod: POST        # 查询使用的 HTTP 方法
       manageAlerts: true      # 启用 Grafana 告警管理
       prometheusType: Prometheus
-      prometheusVersion: 2.40.0
+      prometheusVersion: 3.5.0   # 与镜像 tag（prom/prometheus:v3.5.0）一致
       cacheLevel: 'High'      # 缓存级别（减少重复查询压力）
-    secureJsonData:
-      tlsSkipVerify: true     # 跳过 TLS 证书校验（容器内通信）
+      tlsSkipVerify: true     # 跳过 TLS 证书校验（容器内通信；属 jsonData 字段，secureJsonData 仅存密钥类数据）
