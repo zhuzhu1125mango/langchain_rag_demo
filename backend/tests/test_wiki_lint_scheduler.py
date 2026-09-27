@@ -88,5 +88,8 @@ async def test_start_scheduler_disabled_when_interval_zero(monkeypatch):
     """WIKI_LINT_INTERVAL_HOURS=0 时不启动循环（仅手动触发）。"""
     from src.config import settings
 
+    # 隔离：其它测试（如触发 app lifespan 的 TestClient，默认间隔 24h>0）
+    # 会设置模块级 _task；不清理则幂等分支先命中、返回遗留 Task 而非 None
+    monkeypatch.setattr(sched, "_task", None)
     monkeypatch.setattr(settings.wiki_compile, "WIKI_LINT_INTERVAL_HOURS", 0)
     assert sched.start_scheduler() is None

@@ -6,6 +6,7 @@ import pytest
 
 # 依赖真实 PostgreSQL（实验记录读写），默认跳过；与 asyncio 标记合并
 import asyncio
+import uuid
 from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -101,8 +102,8 @@ class TestExperimentManager:
         assert 0.4 <= avg_hash <= 0.6
 
     async def test_analyze_experiment_no_data(self):
-        """测试分析无数据实验"""
-        result = await self.manager.analyze_experiment("exp_no_data")
+        """测试分析无数据实验（不存在但格式合法的 UUID → 查无实验 → no_data 分支）"""
+        result = await self.manager.analyze_experiment(str(uuid.uuid4()))
 
         assert result["status"] == "no_data"
 
