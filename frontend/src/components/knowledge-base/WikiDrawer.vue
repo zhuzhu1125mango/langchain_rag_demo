@@ -157,6 +157,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { ElMessageBox } from 'element-plus'
 import { RefreshCw, Loader2, BookOpen, ChevronDown, Stethoscope, X } from '@lucide/vue'
 import { buildWsUrl } from '@/utils/ws'
+import { getToken } from '@/utils/auth'
 import { useToast } from '@/composables/useToast'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import {
@@ -309,8 +310,8 @@ async function onRebuild(): Promise<void> {
  * 连接后服务端先推送当前快照，终态（completed/failed）后关闭并刷新列表。
  */
 function trackRebuildProgress(uploadId: string): void {
-  const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
-  const token = localStorage.getItem('token')
+  const apiKey = localStorage.getItem('api_key')
+  const token = getToken()
   const ws = new WebSocket(buildWsUrl(`/api/documents/upload/progress/ws/${uploadId}`))
 
   let finished = false

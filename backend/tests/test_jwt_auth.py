@@ -11,6 +11,7 @@ import jwt as pyjwt
 import pytest
 from fastapi import HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
+from starlette.requests import Request as StarletteRequest
 
 from src.auth import (
     _extract_user_from_jwt,
@@ -133,9 +134,24 @@ class TestJwtToken:
 class TestAuthEndpoints:
     """register/login/me 端点逻辑（假 DB）。"""
 
+    @pytest.fixture(autouse=True)
+    def _reset_rate_limit_buckets(self):
+        """限流为进程级状态：测试间清空，避免跨用例累计触发 429。"""
+        from src.utils.rate_limit import reset_rate_limits
+
+        reset_rate_limits()
+        yield
+        reset_rate_limits()
+
+    @staticmethod
+    def _request() -> StarletteRequest:
+        return StarletteRequest({"type": "http", "client": ("127.0.0.1", 123)})
+
     async def test_register_success(self):
         db = FakeDb(scalar_result=None)  # 用户名不存在
-        resp = await register(RegisterRequest(username="alice", password="secret123"), db=db)
+        resp = await register(
+            RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+        )
         assert resp.token_type == "bearer"
         assert len(db.added) == 1
         assert db.committed is True
@@ -146,27 +162,33 @@ class TestAuthEndpoints:
     async def test_register_duplicate_username_conflict(self):
         db = FakeDb(scalar_result=uuid.uuid4())  # 用户名已存在
         with pytest.raises(HTTPException) as exc:
-            await register(RegisterRequest(username="alice", password="secret123"), db=db)
+            await register(
+                RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+            )
         assert exc.value.status_code == 409
 
     async def test_register_closed_forbidden(self):
         settings.security.AUTH_ALLOW_REGISTRATION = False
         db = FakeDb()
         with pytest.raises(HTTPException) as exc:
-            await register(RegisterRequest(username="alice", password="secret123"), db=db)
+            await register(
+                RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+            )
         assert exc.value.status_code == 403
 
     async def test_register_without_secret_key_unavailable(self):
         settings.security.SECRET_KEY = ""
         db = FakeDb()
         with pytest.raises(HTTPException) as exc:
-            await register(RegisterRequest(username="alice", password="secret123"), db=db)
+            await register(
+                RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+            )
         assert exc.value.status_code == 503
 
     async def test_login_success(self):
         user_id = uuid.uuid4()
         db = FakeDb(scalar_result=type("U", (), {"id": user_id, "password_hash": hash_password("pw123456")})())
-        resp = await login(LoginRequest(username="alice", password="pw123456"), db=db)
+        resp = await login(LoginRequest(username="alice", password="pw123456"), request=self._request(), db=db)
         assert resp.user_id == str(user_id)
         assert verify_jwt_token(resp.access_token).user_id == str(user_id)
 
@@ -174,14 +196,25 @@ class TestAuthEndpoints:
         user_id = uuid.uuid4()
         db = FakeDb(scalar_result=type("U", (), {"id": user_id, "password_hash": hash_password("pw123456")})())
         with pytest.raises(HTTPException) as exc:
-            await login(LoginRequest(username="alice", password="wrong-password"), db=db)
+            await login(LoginRequest(username="alice", password="wrong-password"), request=self._request(), db=db)
         assert exc.value.status_code == 401
 
     async def test_login_unknown_user(self):
         db = FakeDb(scalar_result=None)
         with pytest.raises(HTTPException) as exc:
-            await login(LoginRequest(username="ghost", password="pw123456"), db=db)
+            await login(LoginRequest(username="ghost", password="pw123456"), request=self._request(), db=db)
         assert exc.value.status_code == 401
+
+    async def test_login_rate_limited_429(self):
+        """超限请求返回 429（限流在凭据校验之前）。"""
+        from src.utils.rate_limit import check_rate_limit
+
+        for _ in range(5):
+            check_rate_limit("login:127.0.0.1", 5)
+        db = FakeDb()
+        with pytest.raises(HTTPException) as exc:
+            await login(LoginRequest(username="alice", password="pw123456"), request=self._request(), db=db)
+        assert exc.value.status_code == 429
 
     async def test_me_with_jwt_user(self):
         from src.auth import CurrentUser

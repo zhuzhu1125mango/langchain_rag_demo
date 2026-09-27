@@ -71,11 +71,14 @@ def verify_password(plain_password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(user_id: str) -> str:
+def create_access_token(user_id: str, orig_iat: Optional[datetime.datetime] = None) -> str:
     """为指定用户签发 JWT access token。
 
     Args:
         user_id: 用户 ID（即资源 owner_id）。
+        orig_iat: 刷新链首签时间（None = 新登录，取当前时间）。
+            /auth/refresh 换发时透传，保证滑动窗口（ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS）
+            从首次登录起算而非从每次刷新起算。
 
     Returns:
         编码后的 JWT 字符串。
@@ -88,14 +91,72 @@ def create_access_token(user_id: str) -> str:
         raise ValueError("SECRET_KEY 未配置，无法签发 JWT")
     now = datetime.datetime.now(datetime.timezone.utc)
     expire_minutes = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", None) or getattr(
-        settings.security, "ACCESS_TOKEN_EXPIRE_MINUTES", 1440
+        settings.security, "ACCESS_TOKEN_EXPIRE_MINUTES", 60
     )
+    # NumericDate（epoch 秒）：pyjwt 2.13 起不再自动序列化 datetime
     payload = {
         "sub": user_id,
-        "iat": now,
-        "exp": now + datetime.timedelta(minutes=expire_minutes),
+        "iat": int(now.timestamp()),
+        "exp": int((now + datetime.timedelta(minutes=expire_minutes)).timestamp()),
+        "orig_iat": int((orig_iat or now).timestamp()),
     }
     return pyjwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> Optional[dict]:
+    """解码并校验 JWT（签名 + 有效期），返回 payload；无效返回 None。"""
+    secret = _get_secret_key()
+    if not secret:
+        return None
+    try:
+        return pyjwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
+    except pyjwt.PyJWTError:
+        return None
+
+
+def refresh_access_token(token: str) -> Optional[str]:
+    """滑动窗口刷新：凭签名有效的 token 换发新 token。
+
+    规则：
+    - 仅校验签名（options 关闭 verify_exp）：允许原 token 已过有效期——
+      前端 401 触发续期时手里的正是过期 token，若此处仍校验 exp 则续期
+      永远无法救回过期会话；
+    - 滑动窗口硬上限：首签时间取 orig_iat（旧 token 无该字段时回退 iat，
+      向后兼容），距今超过 ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS 天即拒绝，
+      因此被盗 token 最长存活受该窗口约束而非无限续期；
+    - ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS=0 时刷新整体禁用。
+
+    Returns:
+        新签发的 JWT（orig_iat 保留）；不可刷新时返回 None。
+    """
+    secret = _get_secret_key()
+    if not secret:
+        return None
+    try:
+        payload = pyjwt.decode(
+            token, secret, algorithms=[JWT_ALGORITHM], options={"verify_exp": False}
+        )
+    except pyjwt.PyJWTError:
+        return None
+    sub = payload.get("sub")
+    if not sub:
+        return None
+    max_age_days = getattr(settings, "ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS", None) or getattr(
+        settings.security, "ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS", 7
+    )
+    if max_age_days <= 0:
+        return None
+    orig_iat = payload.get("orig_iat") or payload.get("iat")
+    if orig_iat is None:
+        return None
+    try:
+        orig_dt = datetime.datetime.fromtimestamp(int(orig_iat), tz=datetime.timezone.utc)
+    except (ValueError, OSError, OverflowError):
+        return None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if now - orig_dt > datetime.timedelta(days=max_age_days):
+        return None
+    return create_access_token(str(sub), orig_iat=orig_dt)
 
 
 def _extract_user_from_jwt(credentials: HTTPAuthorizationCredentials) -> Optional[CurrentUser]:
@@ -152,9 +213,10 @@ async def get_current_user(
     校验顺序：
     1. X-API-Key 头；
     2. Authorization: Bearer <JWT>（有效则返回对应用户）；
-    3. 未配置 API_KEY 且非 Docker 环境时，返回默认用户（开发模式匿名放行）。
+    3. 未配置 API_KEY 且非生产环境时，返回默认用户（开发模式匿名放行）。
 
-    Docker 生产环境必须配置 API_KEY，否则除有效 JWT 外拒绝所有请求。
+    生产环境（含非 Docker 裸跑 APP_ENV=prod）必须配置 API_KEY，
+    否则除有效 JWT 外拒绝所有请求。
 
     Args:
         api_key: API Key 头内容。
@@ -176,9 +238,11 @@ async def get_current_user(
         if user:
             return user
 
-    # 未配置 API_KEY 且非 Docker 环境：开发模式允许匿名访问。
+    # 未配置 API_KEY 且非生产环境：开发模式允许匿名访问。
+    # 按 IS_PRODUCTION（APP_ENV）判定而非 IN_DOCKER：非 Docker 裸跑的
+    # 生产部署（APP_ENV=prod）同样拒绝匿名，堵住绕过 Docker 判定的缺口。
     # 注意置于 JWT 校验之后，避免已登录 JWT 用户被并入默认用户。
-    if not configured_key and not settings.IN_DOCKER:
+    if not configured_key and not settings.IS_PRODUCTION:
         return _DEFAULT_USER
 
     raise HTTPException(
@@ -197,7 +261,7 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
 
     流程：
     1. accept 接受连接（握手阶段不校验，凭据不落 URL）；
-    2. 开发模式（未配置 API_KEY 且非 Docker）直接放行；
+    2. 开发模式（未配置 API_KEY 且非生产环境）直接放行；
     3. 等待首帧 auth（超时 ``WS_AUTH_TIMEOUT_SECONDS`` 秒）；
     4. 校验通过发送 ``{"type": "auth_ok"}``，失败以 1008 关闭连接。
 
@@ -215,8 +279,8 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
 
     configured_key = getattr(settings, "API_KEY", None) or getattr(settings.security, "API_KEY", None)
 
-    # 未配置 API_KEY 且非 Docker 环境：开发模式允许匿名访问
-    if not configured_key and not settings.IN_DOCKER:
+    # 未配置 API_KEY 且非生产环境：开发模式允许匿名访问（判定口径同 get_current_user）
+    if not configured_key and not settings.IS_PRODUCTION:
         await websocket.send_json({"type": "auth_ok"})
         return _DEFAULT_USER
 

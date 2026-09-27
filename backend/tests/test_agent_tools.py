@@ -154,26 +154,52 @@ async def test_kb_search_tool_formats_results():
 @pytest.mark.asyncio
 async def test_wiki_lookup_tool_filters_wiki(monkeypatch):
     from src.services.tools.plugins.wiki_lookup_tool import WikiLookupTool
+    from src.services.wiki_navigator import WikiNavigator
 
-    captured = {}
+    captured = []
 
     class _CaptureStore(_FakeVectorStore):
         async def search_hybrid(self, query, **kwargs):
-            captured.update(kwargs)
-            return [_doc("wiki 页", kind="wiki")]
+            captured.append(kwargs)
+            return [_doc("wiki 页", source=f"wiki://主题", kind=kwargs.get("source_kind", "wiki"))]
 
     svc = KBRetrievalService(vector_store=_CaptureStore())
-
-    async def _ensure():
-        return svc
+    monkeypatch.setattr(
+        "src.database.async_session_maker", _FakeSessionMakerForLinks()
+    )
 
     tool = WikiLookupTool(kb_retrieval_service=svc, kb_ids=["kb1"])
-    tool._ensure_service = _ensure
     result = await tool.execute(query="主题")
 
     assert result.success
-    assert captured.get("source_kind") == "wiki"
+    # 导航式入口检索：wiki 与 wiki_syn（synthesis 页）两路并行召回
+    kinds = {c.get("source_kind") for c in captured}
+    assert kinds == {"wiki", "wiki_syn"}
     assert result.sources[0]["source_kind"] == "wiki"
+
+
+class _FakeSessionMakerForLinks:
+    """空页表：Related 附加在无 DB 环境下 fail-soft。"""
+
+    def __call__(self):
+        return self
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_a):
+        return False
+
+    async def execute(self, *_a, **_k):
+        class _R:
+            def scalars(self):
+                class _S:
+                    def all(self):
+                        return []
+
+                return _S()
+
+        return _R()
 
 
 @pytest.mark.asyncio

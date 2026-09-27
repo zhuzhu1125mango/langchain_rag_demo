@@ -7,6 +7,8 @@
  */
 import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
+import { getToken, isTokenValid } from '@/utils/auth'
+import { tryRefreshToken } from '@/utils/axios'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -95,16 +97,24 @@ router.beforeEach(async (to) => {
     document.title = `${to.meta.title} - RAG 知识库问答系统`
   }
 
-  // 认证守卫：公开页面直接放行；业务页面要求存在 JWT token 或 API Key。
-  // 已登录用户访问 /login 时回跳对话页。
+  // 认证守卫：公开页面直接放行；业务页面要求有效 JWT（未过期）或 API Key。
+  // token 校验含 exp 解析（仅查存在性不够——过期/伪造 token 只会换来必然 401）。
+  // 已登录（token 有效）用户访问 /login 时回跳对话页。
   if (to.meta.public) {
-    if (to.name === 'Login' && localStorage.getItem('token')) {
+    if (to.name === 'Login' && isTokenValid(getToken())) {
       return { name: 'Chat' }
     }
     return true
   }
-  const hasToken = !!localStorage.getItem('token')
-  const hasApiKey = !!localStorage.getItem('api_key') || !!import.meta.env.VITE_API_KEY
+  const hasApiKey = !!localStorage.getItem('api_key')
+  // api_key 仅支持 localStorage 中手动设置（自托管 API-Key 模式）；
+  // 不再回退 import.meta.env.VITE_API_KEY（会被打包进产物公开泄露）
+  let hasToken = isTokenValid(getToken())
+  if (!hasToken && !hasApiKey && getToken()) {
+    // token 过期（非伪造缺失）：尝试滑动窗口续期（W2-10），成功则放行本次导航，
+    // 避免活跃用户在 access token 到期后被守卫踢回登录页
+    hasToken = await tryRefreshToken()
+  }
   if (!hasToken && !hasApiKey) {
     return { name: 'Login' }
   }

@@ -116,9 +116,13 @@ export function sseBody(events: object[]): string {
 /** 预置登录态并安装全部 API mock。注意 async：addInitScript 必须 await，
  * 否则与随后的 page.goto 存在竞态，登录态脚本可能未注册即开始导航。 */
 export async function installMocks(page: Page, state: MockState = createMockState()): Promise<void> {
-  // 登录态：路由守卫要求 token 或 api_key
+  // 登录态：路由守卫要求有效 token（sessionStorage，含 exp 校验）或 api_key
   await page.addInitScript(() => {
-    localStorage.setItem('token', 'e2e-token')
+    const enc = (obj: object) =>
+      btoa(JSON.stringify(obj)).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+    const exp = Math.floor(Date.now() / 1000) + 3600
+    const jwt = `${enc({ alg: 'HS256', typ: 'JWT' })}.${enc({ exp })}.e2e-signature`
+    sessionStorage.setItem('token', jwt)
     localStorage.setItem('api_key', 'e2e-key')
   })
 

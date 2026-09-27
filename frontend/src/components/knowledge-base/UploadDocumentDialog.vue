@@ -104,6 +104,7 @@ import { ref } from 'vue'
 import { Upload, X } from '@lucide/vue'
 import { api } from '@/utils/axios'
 import { buildWsUrl } from '@/utils/ws'
+import { getToken } from '@/utils/auth'
 import { useToast } from '@/composables/useToast'
 
 const props = defineProps<{
@@ -251,7 +252,7 @@ function setupProgressWebSocket(uploadId: string): Promise<void> {
   return new Promise((resolve) => {
     // 首帧鉴权：api_key 不走 URL query（避免进反向代理访问日志），
     // 连接建立后发送 auth 帧，收到服务端 auth_ok 确认后再开始上传流程
-    const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
+    const apiKey = localStorage.getItem('api_key')
     const wsUrl = buildWsUrl(`/api/documents/upload/progress/ws/${uploadId}`)
     const ws = new WebSocket(wsUrl)
 
@@ -259,7 +260,7 @@ function setupProgressWebSocket(uploadId: string): Promise<void> {
 
     ws.onopen = () => {
       // token 与 api_key 二选一（后端先校验 api_key，再校验 JWT token）
-      const token = localStorage.getItem('token')
+      const token = getToken()
       ws.send(JSON.stringify({ type: 'auth', token: token || undefined, api_key: apiKey || '' }))
     }
 

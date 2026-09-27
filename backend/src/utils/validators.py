@@ -72,3 +72,31 @@ async def validate_kb_ownership(
     # 集合比较而非长度比较：调用方传入重复 ID 时长度比较会误判为无权
     if owned != normalized:
         raise HTTPException(status_code=403, detail="无权访问部分知识库")
+
+
+async def kb_ids_owned(kb_ids: List[str], owner_id: str) -> bool:
+    """无 HTTP 语义的知识库归属校验（供服务层/Agent 工具使用）。
+
+    与 validate_kb_ownership 同一 SQL 口径（owner_id 过滤 + UUID 归一化），
+    但以布尔结果返回而非抛异常，便于工具层 fail-closed 拒绝越权检索。
+
+    Args:
+        kb_ids: 待校验的知识库 ID 列表。
+        owner_id: 当前用户 ID（资源 owner）。
+
+    Returns:
+        bool: 全部 kb_id 均属于该用户时 True；任一非法/越权时 False。
+    """
+    if not kb_ids:
+        return True
+    try:
+        from src.database import async_session_maker
+
+        async with async_session_maker() as db:
+            await validate_kb_ownership(
+                db, list(kb_ids), CurrentUser(user_id=owner_id, is_authenticated=True)
+            )
+        return True
+    except HTTPException:
+        # 400（非法 UUID）与 403（越权）统一拒绝
+        return False

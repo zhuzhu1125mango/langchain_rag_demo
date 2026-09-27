@@ -340,11 +340,14 @@ class AgentOrchestrator:
     async def _execute_actions(
         self, actions: List[Dict[str, Any]], loop: AgentLoopState,
         kb_ids: Optional[List[str]] = None,
+        owner_id: Optional[str] = None,
     ):
         """执行本步全部工具调用（去重后并行），返回 (results, observations)。
 
-        kb_search / wiki_lookup 由模型发起时模型无法得知会话 KB ID，
-        此处统一注入当前会话 kb_ids（工具侧仍允许显式传参覆盖）。
+        kb_search / wiki_lookup 的 KB 范围一律以编排层注入为准：
+        - 剥离模型显式传入的 kb_ids（不可信，可能指向他人知识库）；
+        - 会话 kb_ids（已经 API 层 validate_kb_ownership 校验）注入为检索白名单；
+        - 注入 _owner_id 供支持 supports_owner_scope 的工具做二道归属校验（纵深防御）。
         """
         from src.services.tools.tool_manager import ToolResult
 
@@ -353,8 +356,14 @@ class AgentOrchestrator:
         for action in actions:
             name = action["name"]
             args = action.get("args") or {}
-            if name in ("kb_search", "wiki_lookup") and kb_ids and not args.get("kb_ids"):
-                args = {**args, "kb_ids": list(kb_ids)}
+            if name in ("kb_search", "wiki_lookup"):
+                # 安全（W1-4）：模型不可信，剥离其显式 kb_ids；仅当会话已绑定 KB 时注入白名单
+                args = {k: v for k, v in args.items() if k != "kb_ids"}
+                if kb_ids:
+                    args = {**args, "kb_ids": list(kb_ids)}
+                tool = self.tool_manager.registry.get(name)
+                if owner_id and getattr(tool, "supports_owner_scope", False):
+                    args = {**args, "_owner_id": owner_id}
             key = self._call_key(name, args)
             if key in loop.seen_calls:
                 observations.append({
@@ -397,6 +406,7 @@ class AgentOrchestrator:
         think: bool = False,
         answer_type: str = "agent_orchestrator",
         memory_context: str = "",
+        owner_id: Optional[str] = None,
     ) -> AsyncIterator[Tuple]:
         """有界循环 + 综合。
 
@@ -407,6 +417,8 @@ class AgentOrchestrator:
             think: 综合阶段是否启用深度思考（deep_thinking 开关透传）。
             memory_context: 跨请求记忆（L1-a）。由外部（rag_chain）检索当前会话的历史
                           摘要注入，附加到决策 prompt，实现会话级记忆。
+            owner_id: 当前用户 ID（资源 owner）。透传给 kb_search/wiki_lookup
+                      做工具侧 kb 归属校验（安全 W1-4，纵深防御）。
         """
         # perf_counter：单调时钟，避免 time.time() 在 Windows 上的粗粒度/回退问题
         loop = AgentLoopState(
@@ -486,7 +498,7 @@ class AgentOrchestrator:
 
             # ---- ACT + OBSERVE ----
             step_start = time.time()
-            results, observations = await self._execute_actions(actions, loop, kb_ids=kb_ids)
+            results, observations = await self._execute_actions(actions, loop, kb_ids=kb_ids, owner_id=owner_id)
             all_results.extend(results)
             for obs in observations:
                 loop.scratchpad.append({"step": step, **obs})

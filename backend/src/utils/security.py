@@ -5,6 +5,7 @@
 
 import ipaddress
 import re
+import socket
 from typing import Optional, Set
 from urllib.parse import urlparse
 
@@ -152,14 +153,23 @@ _METADATA_HOSTS: Set[str] = {
 }
 
 
+# 域名保留后缀黑名单：本地/内网专用域名后缀，无需 DNS 解析直接拒绝
+_RESERVED_HOST_SUFFIXES: tuple = (".localhost", ".local", ".internal", ".localdomain")
+
+
 def validate_url_safe(url: str) -> None:
     """校验 URL 是否安全，防止 SSRF。
 
     规则：
     1. scheme 必须为 http 或 https；
     2. 禁止空主机；
-    3. 禁止私有 IP、回环地址、链路本地地址；
-    4. 禁止云厂商元数据地址。
+    3. 禁止云厂商元数据地址与 localhost/保留后缀域名；
+    4. 禁止私有 IP、回环地址、链路本地地址（含域名解析出的全部地址，
+       防止攻击者域名解析到内网 IP 的 DNS 重绑定绕过）。
+
+    注意：校验时刻解析与实际连接时刻存在 TOCTOU 窗口（攻击者可在两次
+    解析间切换 DNS 记录）；彻底封死需将校验时解析的 IP 钉入连接层，
+    当前按"解析-校验"闭环提供纵深防御。
 
     Args:
         url: 待校验的 URL。
@@ -183,10 +193,33 @@ def validate_url_safe(url: str) -> None:
     if hostname_lower in _METADATA_HOSTS:
         raise UnsafeUrlError("URL 指向云元数据服务，已被禁止")
 
+    if hostname_lower == "localhost" or hostname_lower.endswith(_RESERVED_HOST_SUFFIXES):
+        raise UnsafeUrlError(f"URL 指向本地/保留域名: {hostname_lower}")
+
     try:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
-        # 主机名不是 IP，视为安全（DNS 重绑定风险由后续网络层控制）
+        # 主机名不是 IP 字面量：DNS 解析后逐一校验结果地址。
+        # 解析失败（gaierror）时放行——此时后续真实连接同样无法建立，
+        # 不损失可用性；解析成功则任意一个受限地址即拒绝。
+        try:
+            addrinfos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+        except (socket.gaierror, OSError):
+            return
+        for info in addrinfos:
+            addr = info[4][0]
+            try:
+                resolved = ipaddress.ip_address(addr)
+            except ValueError:
+                continue
+            if (
+                resolved.is_private
+                or resolved.is_loopback
+                or resolved.is_link_local
+                or resolved.is_multicast
+                or resolved.is_reserved
+            ):
+                raise UnsafeUrlError(f"URL 解析到受限地址: {resolved}")
         return
 
     if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:

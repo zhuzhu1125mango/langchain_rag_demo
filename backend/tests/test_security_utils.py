@@ -1,5 +1,7 @@
 """安全工具函数单元测试。"""
 
+import socket
+
 import pytest
 from src.utils.security import (
     validate_secret_key,
@@ -73,3 +75,48 @@ class TestUrlValidation:
     def test_validate_url_safe_raises_on_unsafe(self):
         with pytest.raises(UnsafeUrlError):
             validate_url_safe("ftp://internal.server")
+
+    def test_localhost_url_is_unsafe(self):
+        assert is_url_safe("http://localhost:8000/metrics") is False
+
+    def test_reserved_suffix_domain_is_unsafe(self):
+        assert is_url_safe("http://db.internal/query") is False
+        assert is_url_safe("http://nas.local/files") is False
+
+    def test_domain_resolving_private_ip_is_unsafe(self, monkeypatch):
+        """域名解析到内网 IP 时拒绝（DNS 重绑定防护）。"""
+
+        def fake_getaddrinfo(host, port, **kwargs):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        assert is_url_safe("http://attacker.example.com/secret") is False
+
+    def test_domain_multi_answer_one_private_is_unsafe(self, monkeypatch):
+        """解析结果多条地址、任一命中受限网段即拒绝。"""
+
+        def fake_getaddrinfo(host, port, **kwargs):
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0)),
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 0)),
+            ]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        with pytest.raises(UnsafeUrlError):
+            validate_url_safe("http://rebind.example.com/")
+
+    def test_domain_resolving_public_ip_is_safe(self, monkeypatch):
+        def fake_getaddrinfo(host, port, **kwargs):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        assert is_url_safe("http://example.com/path") is True
+
+    def test_domain_dns_failure_is_safe(self, monkeypatch):
+        """解析失败时保持放行（后续真实连接同样无法建立，不损失可用性）。"""
+
+        def fake_getaddrinfo(host, port, **kwargs):
+            raise socket.gaierror("DNS failure")
+
+        monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+        assert is_url_safe("http://example.com/path") is True

@@ -82,8 +82,16 @@ class RedisSettings(BaseSettings):
 class SecuritySettings(BaseSettings):
     # 无默认值：生产模式缺失/弱值时启动失败；开发模式由启动逻辑生成临时随机密钥
     SECRET_KEY: str = ""
-    # JWT access token 有效期（分钟），P1-1 多用户认证使用
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
+    # JWT access token 有效期（分钟）。P2 收紧为 60：短时 access token +
+    # /auth/refresh 滑动窗口续期（ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS），
+    # 被盗 token 最长存活受刷新窗口约束而非 24h
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    # 刷新窗口（天）：首签（orig_iat）后 N 天内可凭未过期 token 换新；
+    # 0 = 关闭刷新接口（到期即重新登录）
+    ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS: int = 7
+    # 认证接口限流（次/分钟/IP）：login 暴力破解、register 滥刷防护；0 = 不限流
+    AUTH_RATE_LIMIT_LOGIN: int = 5
+    AUTH_RATE_LIMIT_REGISTER: int = 3
     API_KEY: Optional[str] = None  # 全局 API Key（自托管单实例认证）
     # 管理操作密钥（全局配置修改、/metrics/reset 等）。
     # 生产模式未设置时管理接口一律 403；设置后请求须携带匹配的 X-Admin-Key 头。
@@ -94,12 +102,24 @@ class SecuritySettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 
 class CorsSettings(BaseSettings):
-    """跨域配置。"""
+    """跨域配置。
+
+    ALLOW_METHODS/ALLOW_HEADERS 不用 "*"：ALLOW_CREDENTIALS=true 时通配符
+    不符合 CORS 规范（浏览器会拒绝），星号仅依赖中间件回退实现；显式清单
+    覆盖前端实际使用的 Authorization / Content-Type / X-API-Key 等头。
+    """
 
     ALLOWED_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173"]
     ALLOW_CREDENTIALS: bool = True
-    ALLOW_METHODS: List[str] = ["*"]
-    ALLOW_HEADERS: List[str] = ["*"]
+    ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    ALLOW_HEADERS: List[str] = [
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "X-Requested-With",
+        "X-API-Key",
+        "X-Admin-Key",
+    ]
 
     @field_validator("ALLOWED_ORIGINS", "ALLOW_METHODS", "ALLOW_HEADERS", mode="before")
     @classmethod
@@ -371,7 +391,10 @@ class WikiCompileSettings(BaseSettings):
     WIKI_COMPILE_REFINEMENT_ITERATIONS: int = 0
     # P3 KB 推荐覆盖先验权重：final = chunk_avg×(1−w) + index_sim×w（0 = 关闭）
     WIKI_ROUTE_PRIOR_WEIGHT: float = 0.3
-    # P3 交叉链接检索扩展（rerank 后按 wiki 页 links 追加目标页分块）
+    # P3 交叉链接检索扩展（rerank 后按 wiki 页 links 追加目标页分块）。
+    # 默认 false：2026-09-23 多跳 A/B D 臂证伪（recall 0.562 < 基线 0.938，
+    # 且互链正文稀释 BM25 使 B/C 臂同步退化），证据见
+    # docs/design/wiki-navigable-workspace.md §10；机制保留可配置启用
     WIKI_LINK_EXPANSION: bool = False
     # P5 编译去抖（秒）：>0 时上传管线不再立即编译，由调度器合并窗口内文档一次编译
     WIKI_COMPILE_DEBOUNCE_SECONDS: int = 20
@@ -383,6 +406,14 @@ class WikiCompileSettings(BaseSettings):
     WIKI_CONTRADICTION_CHECK: bool = True
     # P5 级联重写材料上限（字符）：重写为低频操作，独立于编译的 8000 上限放宽
     WIKI_REWRITE_MATERIAL_CHARS: int = 16000
+    # 阶段一 D1 导航式 wiki_lookup：按页取读时的正文截断上限（字符）
+    WIKI_NAV_PAGE_MAX_CHARS: int = 4000
+    # 阶段一 D3 答案回流（synthesis 页）：灰度开关，默认关
+    WIKI_SYNTHESIS_ENABLED: bool = False
+    # 回流最短答案长度（字符）：过短答案不值得合成
+    WIKI_SYNTHESIS_MIN_ANSWER_CHARS: int = 200
+    # 阶段一 D4 lint 周期调度（小时；0 = 关闭，仅保留手动 GET /api/wiki/lint）
+    WIKI_LINT_INTERVAL_HOURS: int = 24
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
 

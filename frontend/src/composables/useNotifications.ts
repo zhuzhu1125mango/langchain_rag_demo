@@ -10,6 +10,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useToast } from './useToast'
 import { buildWsUrl } from '@/utils/ws'
+import { getToken } from '@/utils/auth'
 
 export interface Notification {
   /** 通知类型，如 connected、kb.created 等。 */
@@ -69,7 +70,7 @@ export function useWebSocketNotifications() {
     manualClose = false
 
     const channelParam = subscribedChannels.value.join(',') || defaultChannels.join(',')
-    const apiKey = localStorage.getItem('api_key') || import.meta.env.VITE_API_KEY
+    const apiKey = localStorage.getItem('api_key')
     const queryParams = new URLSearchParams({ channels: channelParam })
     const wsUrl = buildWsUrl(`/api/ws/notifications?${queryParams.toString()}`)
 
@@ -81,7 +82,7 @@ export function useWebSocketNotifications() {
         // 首帧鉴权：api_key 不再走 URL query（避免进反向代理访问日志），
         // 连接建立后立即发送 auth 帧（token 与 api_key 二选一，均空时
         // 开发模式服务端会不经校验直接回发 auth_ok）。
-        const token = localStorage.getItem('token')
+        const token = getToken()
         ws?.send(JSON.stringify({
           type: 'auth',
           token: token || undefined,

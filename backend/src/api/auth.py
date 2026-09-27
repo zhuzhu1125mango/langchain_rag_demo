@@ -1,15 +1,18 @@
 """用户认证API - Auth API（P1-1 JWT 多用户认证）
 
-提供用户注册/登录/当前用户信息接口：
+提供用户注册/登录/当前用户信息/滑动窗口刷新接口：
 1. POST /auth/register - 注册新用户（AUTH_ALLOW_REGISTRATION 控制）
-2. POST /auth/login - 登录签发 JWT access token
-3. GET  /auth/me - 获取当前认证用户信息
+2. POST /auth/login    - 登录签发 JWT access token
+3. POST /auth/refresh  - 凭未过期 token 换发新 token（滑动窗口续期）
+4. GET  /auth/me       - 获取当前认证用户信息
 
-注意：本路由不挂全局 get_current_user 依赖（login/register 为匿名接口），
+注意：本路由不挂全局 get_current_user 依赖（login/register/refresh 为匿名接口），
 /me 由路由内自行声明依赖。
+login/register 带进程内滑动窗口限流（W2-9，AUTH_RATE_LIMIT_*）。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel, Field
@@ -19,13 +22,17 @@ import uuid
 from src.auth import (
     CurrentUser,
     create_access_token,
+    decode_access_token,
     get_current_user,
     hash_password,
+    jwt_bearer,
+    refresh_access_token,
     verify_password,
 )
 from src.config import settings
 from src.database import get_db
 from src.models import User
+from src.utils.rate_limit import enforce_auth_rate_limit, get_auth_rate_limits
 
 logger = logging.getLogger("auth")
 
@@ -72,8 +79,10 @@ def _get_jwt_settings():
 
 
 @router.post("/register", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
-async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(data: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """注册新用户并直接签发 token（是否开放由 AUTH_ALLOW_REGISTRATION 控制）。"""
+    login_limit, register_limit = get_auth_rate_limits()
+    enforce_auth_rate_limit(request, "register", register_limit)
     secret, allow_registration = _get_jwt_settings()
     if not secret:
         raise HTTPException(
@@ -106,8 +115,10 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
+async def login(data: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """校验用户名密码，签发 JWT access token。"""
+    login_limit, _ = get_auth_rate_limits()
+    enforce_auth_rate_limit(request, "login", login_limit)
     secret, _ = _get_jwt_settings()
     if not secret:
         raise HTTPException(
@@ -121,6 +132,30 @@ async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户名或密码错误")
 
     return TokenResponse(access_token=create_access_token(str(user.id)), user_id=str(user.id))
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh_token(jwt_credentials: HTTPAuthorizationCredentials = Depends(jwt_bearer)):
+    """滑动窗口刷新：凭签名有效的 access token 换发新 token（orig_iat 保留）。
+
+    规则见 auth.refresh_access_token：允许原 token 已过有效期（401 续期场景），
+    首签距今不超过 ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS 天；0 = 刷新禁用。
+    """
+    if not jwt_credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少认证凭据",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    new_token = refresh_access_token(jwt_credentials.credentials)
+    if not new_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="登录已过期，请重新登录",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = decode_access_token(new_token) or {}
+    return TokenResponse(access_token=new_token, user_id=str(payload.get("sub", "")))
 
 
 @router.get("/me", response_model=MeResponse)

@@ -440,12 +440,16 @@ class WebSearchService:
 
         self._ddgs_client = None
         self._tavily_client = None
-        # Persistent HTTP 客户端：复用 TCP/TLS 连接，避免每次请求新建+关闭的握手开销
+        # Persistent HTTP 客户端：复用 TCP/TLS 连接，避免每次请求新建+关闭的握手开销。
+        # follow_redirects=False（安全 W1-5）：重定向目标可能是内网/元数据地址，
+        # 自动跟随会绕过入口 SSRF 校验；正文抓取改用 _fetch_html 逐跳校验。
         self._http = httpx.AsyncClient(
             timeout=httpx.Timeout(self.fetch_timeout),
-            follow_redirects=True,
+            follow_redirects=False,
             headers={"User-Agent": "Mozilla/5.0 (compatible; RAG-Bot/1.0)"},
         )
+        # 重定向逐跳校验的跳数上限
+        self.max_redirect_hops = 5
 
     def _cache_key(self, prefix: str, text: str) -> str:
         hash_value = hashlib.md5(text.encode("utf-8")).hexdigest()
@@ -588,7 +592,9 @@ class WebSearchService:
             logger.debug(f"SearXNG 时效过滤: query='{query}', time_range={time_range}")
 
         try:
-            response = await self._http.get(f"{base_url}/search", params=params)
+            response = await self._http.get(
+                f"{base_url}/search", params=params, follow_redirects=True
+            )
             response.raise_for_status()
             data = response.json()
         except Exception as e:
@@ -668,6 +674,32 @@ class WebSearchService:
     # ------------------------------------------------------------------
     # 网页正文提取
     # ------------------------------------------------------------------
+    async def _fetch_html(self, url: str) -> str:
+        """GET 页面 HTML，重定向不自动跟随，逐跳重新做 SSRF 校验（安全 W1-5）。
+
+        初始 URL 校验通过不代表安全：302 可指向 169.254.169.254 等内网地址。
+        每一跳都重新 validate_url_safe，超限抛 UnsafeUrlError。
+
+        Raises:
+            UnsafeUrlError: 任一跳的 URL 不安全，或重定向次数超限/缺 Location。
+            httpx.HTTPError: 网络请求失败。
+        """
+        current = url
+        for _ in range(self.max_redirect_hops):
+            validate_url_safe(current)
+            # follow_redirects=False 由共享客户端全局保证；此处显式传参双保险
+            response = await self._http.get(current, follow_redirects=False)
+            if response.is_redirect:
+                location = response.headers.get("location", "")
+                if not location:
+                    break
+                # 相对重定向（Location: /path 或 //host/path）按 RFC 3986 基于当前 URL 解析
+                current = str(response.url.join(location))
+                continue
+            response.raise_for_status()
+            return response.text
+        raise UnsafeUrlError("重定向跳数超限或响应缺少 Location")
+
     async def fetch_content(self, url: str, title: str, snippet: str) -> Optional[WebContent]:
         # SSRF 防护（与 tools/plugins/fetch_webpage_tool.py 一致）：拒绝抓取内网/回环/云元数据地址，
         # 防止搜索结果被污染为内网 URL（如 169.254.169.254）时打穿内网。校验失败直接跳过抓取。
@@ -690,9 +722,11 @@ class WebSearchService:
             )
 
         try:
-            response = await self._http.get(url)
-            response.raise_for_status()
-            html = response.text
+            html = await self._fetch_html(url)
+        except UnsafeUrlError as e:
+            # 重定向链中出现内网/元数据地址：拒绝抓取（与入口校验同一口径）
+            logger.debug(f"拒绝抓取重定向至不安全地址的 URL {url}: {e}")
+            return None
         except Exception as e:
             logger.debug(f"抓取页面失败 {url}: {e}")
             return None

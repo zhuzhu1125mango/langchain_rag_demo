@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/utils/axios'
+import { setToken, getToken, clearToken } from '@/utils/auth'
 
 export interface User {
   /** 用户唯一 ID。 */
@@ -23,7 +24,6 @@ export interface AuthResponse {
 }
 
 const STORAGE_KEY = 'vueuse-dark'
-const TOKEN_KEY = 'token'
 
 /**
  * 全局应用状态管理。
@@ -74,10 +74,10 @@ export const useAppStore = defineStore('app', () => {
     currentUser.value = user
   }
 
-  /** 登录：签发 JWT 并写入本地存储。 */
+  /** 登录：签发 JWT 并写入 sessionStorage（安全 W1-3：不落 localStorage）。 */
   async function login(username: string, password: string): Promise<User> {
     const data = await api.post<AuthResponse>('/auth/login', { username, password })
-    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setToken(data.access_token)
     const user: User = { id: data.user_id, username }
     currentUser.value = user
     return user
@@ -86,15 +86,15 @@ export const useAppStore = defineStore('app', () => {
   /** 注册新用户并直接登录。 */
   async function register(username: string, password: string): Promise<User> {
     const data = await api.post<AuthResponse>('/auth/register', { username, password })
-    localStorage.setItem(TOKEN_KEY, data.access_token)
+    setToken(data.access_token)
     const user: User = { id: data.user_id, username }
     currentUser.value = user
     return user
   }
 
-  /** 拉取当前认证用户信息（无 token 时静默跳过）。 */
+  /** 拉取当前认证用户信息（无有效 token 时静默跳过）。 */
   async function fetchMe(): Promise<void> {
-    if (!localStorage.getItem(TOKEN_KEY)) {
+    if (!getToken()) {
       return
     }
     try {
@@ -108,7 +108,7 @@ export const useAppStore = defineStore('app', () => {
   /** 退出登录：清空用户状态并移除本地 token。 */
   function logout() {
     currentUser.value = null
-    localStorage.removeItem(TOKEN_KEY)
+    clearToken()
   }
 
   /** 切换侧边栏折叠状态。 */
