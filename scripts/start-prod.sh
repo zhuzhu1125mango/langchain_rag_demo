@@ -230,6 +230,38 @@ load_env_vars() {
 }
 
 # ==============================================================================
+# Docker Secrets Preflight（W2-11）
+# ==============================================================================
+
+check_secrets() {
+    log_step "3.5/7" "检查 Docker Secrets 文件..."
+
+    local secrets_dir="${PROJECT_ROOT}/secrets"
+    local required=(
+        postgres_password minio_root_user minio_root_password redis_password
+        secret_key admin_key search_api_key metrics_token grafana_admin_password
+    )
+    local missing=()
+
+    for name in "${required[@]}"; do
+        [[ -s "${secrets_dir}/${name}" ]] || missing+=("${name}")
+    done
+
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log_error "以下 secrets 文件缺失或为空（./secrets/ 目录）:"
+        for name in "${missing[@]}"; do
+            echo "    - ${name}"
+        done
+        log_info "生成命令: pwsh ./scripts/gen_secrets.ps1 -FromEnv .env.prod"
+        log_info "（或 bash ./scripts/gen_secrets.sh --from-env .env.prod；随机生成则省略参数，同时完成凭据轮换）"
+        exit 1
+    fi
+
+    log_ok "全部 ${#required[@]} 个 secrets 文件就绪"
+    echo ""
+}
+
+# ==============================================================================
 # Start Docker Compose Services
 # ==============================================================================
 
@@ -423,6 +455,7 @@ main() {
     run_preflight_checks
     run_security_checks
     load_env_vars
+    check_secrets
     start_services
     # 抑制 set -e：健康检查未全部就绪时返回 1，不能提前退出，需让下方提示可达
     set +e

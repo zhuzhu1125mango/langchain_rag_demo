@@ -16,7 +16,41 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(BASE_DIR))
 APP_ENV = os.getenv("APP_ENV", "dev")          # dev | prod
 ENV_FILE = os.path.join(PROJECT_ROOT, f".env.{APP_ENV}")
 
-class DatabaseSettings(BaseSettings):
+# Docker secrets 注入目录（W2-11）：prod compose 将凭据以文件形式挂载到
+# /run/secrets/<FIELD_NAME>，pydantic-settings 的 secrets_dir 按字段名读取
+# 并以最高优先级覆盖 env 文件值。目录不存在（本地裸跑/CI/开发容器）时为
+# None，全部配置回退 .env.{APP_ENV}，行为不变。
+# 凭据与字段的对应关系见 docs/guide/deployment.md「Docker Secrets」章节。
+_DOCKER_SECRETS_DIR = "/run/secrets"
+SECRETS_DIR: Optional[str] = _DOCKER_SECRETS_DIR if os.path.isdir(_DOCKER_SECRETS_DIR) else None
+
+
+class SecretsFirstMixin:
+    """Docker secrets 优先 mixin（W2-11）。
+
+    pydantic-settings 默认优先级为 init > env > dotenv > secrets_dir，
+    即 env 文件残留的旧凭据会覆盖 secrets 注入值——与"凭据以 secrets 为
+    唯一事实来源"的迁移目标相悖。本 mixin 将 secrets source 提到最高：
+    /run/secrets/<FIELD> 存在即胜出，env 文件仅作回退。
+    """
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings,
+        env_settings,
+        dotenv_settings,
+        file_secret_settings,
+    ):
+        return (
+            file_secret_settings,
+            init_settings,
+            env_settings,
+            dotenv_settings,
+        )
+
+class DatabaseSettings(SecretsFirstMixin, BaseSettings):
     """PostgreSQL 数据库连接配置。"""
 
     POSTGRES_USER: str = "postgres"
@@ -27,9 +61,9 @@ class DatabaseSettings(BaseSettings):
     # SQLAlchemy 回显 SQL 语句；生产保持 False（默认），开发可在 .env.dev 打开
     SQL_ECHO: bool = False
     
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
-class MinIOSettings(BaseSettings):
+class MinIOSettings(SecretsFirstMixin, BaseSettings):
     MINIO_ENDPOINT: str = "localhost:9000"
     # 无默认凭据：缺失时由启动校验拦截（生产模式），避免弱凭据静默上线
     MINIO_ACCESS_KEY: str = ""
@@ -37,7 +71,7 @@ class MinIOSettings(BaseSettings):
     MINIO_BUCKET_NAME: str = "documents"
     MINIO_SECURE: bool = False
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class MilvusSettings(BaseSettings):
     MILVUS_HOST: str = "localhost"
@@ -69,17 +103,17 @@ class MilvusSettings(BaseSettings):
     # 确认可接受数据丢失（或已完成迁移备份）后显式设为 true 重启以自动重建。
     MILVUS_REBUILD_ON_MISMATCH: bool = False
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
-class RedisSettings(BaseSettings):
+class RedisSettings(SecretsFirstMixin, BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
     
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
-class SecuritySettings(BaseSettings):
+class SecuritySettings(SecretsFirstMixin, BaseSettings):
     # 无默认值：生产模式缺失/弱值时启动失败；开发模式由启动逻辑生成临时随机密钥
     SECRET_KEY: str = ""
     # JWT access token 有效期（分钟）。P2 收紧为 60：短时 access token +
@@ -96,10 +130,14 @@ class SecuritySettings(BaseSettings):
     # 管理操作密钥（全局配置修改、/metrics/reset 等）。
     # 生产模式未设置时管理接口一律 403；设置后请求须携带匹配的 X-Admin-Key 头。
     ADMIN_KEY: Optional[str] = None
+    # /metrics 抓取令牌（W2-12）：prod compose 经 secrets 注入后强制鉴权，
+    # Prometheus 以 authorization.credentials_file 携带同名令牌；
+    # 留空 = 不鉴权（本地/开发/无 Prometheus 场景）
+    METRICS_TOKEN: str = ""
     # 是否开放 /api/auth/register 注册接口（关闭后仅能由已有账号或直接写库建号）
     AUTH_ALLOW_REGISTRATION: bool = True
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class CorsSettings(BaseSettings):
     """跨域配置。
@@ -133,7 +171,7 @@ class CorsSettings(BaseSettings):
             return [item.strip() for item in v.split(",") if item.strip()]
         return v
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class ModelSettings(BaseSettings):
     # 模型名一律由 .env 提供（无内置默认，A1 去硬编码），启动时经 /api/tags 校验存在性
@@ -155,7 +193,7 @@ class ModelSettings(BaseSettings):
     # Ollama 默认约 4096 易截断检索内容；4GB 显存 + q8_0 KV cache 下 6144 为稳妥值。
     OLLAMA_NUM_CTX: int = 6144
     
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class ProcessingSettings(BaseSettings):
     CHUNK_SIZE: int = 512
@@ -195,7 +233,7 @@ class ProcessingSettings(BaseSettings):
     # 历史上下文仍随提示词携带；true 时含指代词的问题走 LLM 消解
     CONTEXT_RESOLVE_USE_LLM: bool = False
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class TitleGenerationSettings(BaseSettings):
     TITLE_GENERATION_ENABLED: bool = True
@@ -204,7 +242,7 @@ class TitleGenerationSettings(BaseSettings):
     # 覆盖默认模型（None 则使用 settings.model.FAST_LLM_MODEL_NAME）
     TITLE_GENERATION_MODEL: Optional[str] = None
     
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class IntentRouterSettings(BaseSettings):
     """意图路由配置。"""
@@ -232,7 +270,7 @@ class IntentRouterSettings(BaseSettings):
     # Embedding 分类歧义阈值，最高与次高分差小于此值触发澄清
     INTENT_ROUTER_EMBEDDING_AMBIGUITY_GAP: float = 0.08
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class EvaluationSettings(BaseSettings):
     """检索与生成评估配置。"""
@@ -248,7 +286,7 @@ class EvaluationSettings(BaseSettings):
     # 自动评估时 relevance 低分阈值
     EVALUATION_RELEVANCE_LOW: float = 0.4
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 
 class OcrSettings(BaseSettings):
@@ -274,7 +312,7 @@ class OcrSettings(BaseSettings):
     MINERU_MODEL_SOURCE: str = "modelscope"
     PADDLE_MODEL_SOURCE: str = "modelscope"
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 
 class SearchSettings(BaseSettings):
@@ -340,7 +378,7 @@ class SearchSettings(BaseSettings):
     QUERY_REWRITE_MAX_QUERIES: int = 4            # 改写后最多保留的 query 数
     QUERY_REWRITE_CONTEXT_TURNS: int = 3          # 上下文补全回溯轮数
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class DecisionSettings(BaseSettings):
     """问答决策与策略投票配置。"""
@@ -354,7 +392,7 @@ class DecisionSettings(BaseSettings):
     # 策略投票 LLM 调用超时（秒，C4）：超时按弃权处理（低置信度），不阻塞决策
     STRATEGY_LLM_TIMEOUT: float = 5.0
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 
 class SemanticCacheSettings(BaseSettings):
@@ -371,7 +409,7 @@ class SemanticCacheSettings(BaseSettings):
     # 命中回放切片长度（字符）
     SEMANTIC_CACHE_REPLAY_CHUNK_CHARS: int = 120
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class WikiCompileSettings(BaseSettings):
     """LLM-Wiki 编译层配置（P2 前置编译增强，Phase 1）。默认全关，零风险合入。"""
@@ -415,7 +453,7 @@ class WikiCompileSettings(BaseSettings):
     # 阶段一 D4 lint 周期调度（小时；0 = 关闭，仅保留手动 GET /api/wiki/lint）
     WIKI_LINT_INTERVAL_HOURS: int = 24
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 class Settings(BaseSettings):
     """聚合所有子配置的根配置类。"""
@@ -445,7 +483,7 @@ class Settings(BaseSettings):
     # 任务级模型角色映射（可选），key 为任务名，value 为 settings.model 中的字段名
     MODEL_TASK_ROLES: Optional[Dict[str, str]] = None
 
-    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore")
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
     @property
     def IS_PRODUCTION(self) -> bool:

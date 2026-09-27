@@ -17,11 +17,12 @@ RAG Knowledge Base QA System API - FastAPI入口文件
 import logging
 import os
 import secrets
+import hmac
 import time
 import asyncio
 from logging.handlers import RotatingFileHandler
 from uuid import uuid4
-from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi import FastAPI, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -466,8 +467,24 @@ async def health_check_detail(current_user: CurrentUser = Depends(require_admin)
 
 
 @app.get("/metrics")
-def get_metrics_endpoint():
-    """获取服务监控指标接口（支持 Prometheus 格式）"""
+def get_metrics_endpoint(request: Request):
+    """获取服务监控指标接口（支持 Prometheus 格式，W2-12）。
+
+    鉴权：METRICS_TOKEN 非空时要求 Authorization: Bearer <token>
+    （hmac 常量时间比较；Prometheus 侧经 authorization.credentials_file
+    携带同一令牌，两者均由 Docker secrets 注入）。令牌为空（本地/开发/
+    无 Prometheus 部署）时不鉴权，保持开箱可用。
+    """
+    expected = settings.security.METRICS_TOKEN
+    if expected:
+        provided = request.headers.get("authorization", "")
+        provided_token = provided[7:] if provided.startswith("Bearer ") else ""
+        if not provided_token or not hmac.compare_digest(provided_token.encode(), expected.encode()):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid metrics token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
     if PROMETHEUS_AVAILABLE:
         return get_prometheus_metrics()
     return get_metrics()

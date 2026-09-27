@@ -29,6 +29,11 @@ scrape_configs:
       - targets: ['backend:8000']
     metrics_path: /metrics
     scheme: http
+    # W2-12：后端 /metrics 要求 Bearer 令牌（secrets 注入），与 backend 的
+    # METRICS_TOKEN 同源；credentials_file 每次抓取重读，轮换免重启
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/METRICS_TOKEN
 
   # 采集 Milvus 向量数据库指标
   - job_name: 'milvus'

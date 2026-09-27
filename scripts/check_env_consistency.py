@@ -36,7 +36,7 @@ COMPOSE_ENV_PAIRS = [
 OPTIONAL_COMPOSE_VARS: set = set()
 
 # config.py 中声明的、但非 env 可覆盖的模块级 Python 常量/类变量（内部实现，无需进模板）
-CONFIG_INTERNAL_FIELDS = {"ENV_FILE"}
+CONFIG_INTERNAL_FIELDS = {"ENV_FILE", "SECRETS_DIR"}
 
 # 匹配未注释的 KEY= 行（忽略内联注释；值允许为空）
 ENV_KEY_RE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")

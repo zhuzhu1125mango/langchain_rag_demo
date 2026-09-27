@@ -30,6 +30,9 @@ virtualenv/
 .env.backup.*
 .env.*.backup.*
 
+# =============== Docker Secrets（W2-11，凭据文件严禁入库） ===============
+secrets/
+
 # =============== IDE Configurations ===============
 .idea/
 .vscode/

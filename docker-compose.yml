@@ -20,12 +20,45 @@
 
 name: rag-prod
 
+# =============================================================================
+# Docker Secrets（W2-11）：凭据不再以明文存在于 .env.prod / compose 插值，
+# 改由宿主机 ./secrets/ 目录下的文件挂载到容器 /run/secrets/。
+# 生成方式：./scripts/gen_secrets.ps1（或 -FromEnv .env.prod 导出存量值）
+# 明细与字段映射见 docs/guide/deployment.md「Docker Secrets」章节。
+# =============================================================================
+secrets:
+  POSTGRES_PASSWORD:
+    file: ./secrets/postgres_password
+  MINIO_ROOT_USER:
+    file: ./secrets/minio_root_user
+  MINIO_ROOT_PASSWORD:
+    file: ./secrets/minio_root_password
+  # backend 字段名为 MINIO_ACCESS_KEY / MINIO_SECRET_KEY，secret 名与字段对齐，
+  # file 指向同一源文件（值与 minio root 一致）
+  MINIO_ACCESS_KEY:
+    file: ./secrets/minio_root_user
+  MINIO_SECRET_KEY:
+    file: ./secrets/minio_root_password
+  REDIS_PASSWORD:
+    file: ./secrets/redis_password
+  SECRET_KEY:
+    file: ./secrets/secret_key
+  ADMIN_KEY:
+    file: ./secrets/admin_key
+  SEARCH_API_KEY:
+    file: ./secrets/search_api_key
+  METRICS_TOKEN:
+    file: ./secrets/metrics_token
+  GRAFANA_ADMIN_PASSWORD:
+    file: ./secrets/grafana_admin_password
+
 services:
   # redis — 缓存服务，用于会话/搜索结果/向量缓存
   redis:
     image: redis:7.2-alpine
     container_name: redis-prod
-    command: redis-server --requirepass ${REDIS_PASSWORD}
+    # 密码经 secrets 注入（redis-server 无 *_FILE 原生支持，shell 运行时读取）
+    command: sh -c 'redis-server --requirepass "$$(cat /run/secrets/REDIS_PASSWORD)"'
     volumes:
       - redis_data_prod:/data
     networks:
@@ -38,8 +71,10 @@ services:
           cpus: "0.5"
     ports:
       - "127.0.0.1:6380:6379"      # 与开发栈（6379）错开；仅绑定回环地址，避免基础设施端口暴露到外部网络
+    secrets:
+      - REDIS_PASSWORD
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$(cat /run/secrets/REDIS_PASSWORD)\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -82,6 +117,18 @@ services:
         limits:
           memory: 2G
           cpus: "2.0"
+    # 凭据经 secrets 挂载到 /run/secrets/，pydantic-settings secrets_dir 按字段名读取
+    # （POSTGRES_PASSWORD / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / REDIS_PASSWORD /
+    #  SECRET_KEY / ADMIN_KEY / SEARCH_API_KEY / METRICS_TOKEN），优先级高于 env_file
+    secrets:
+      - POSTGRES_PASSWORD
+      - MINIO_ACCESS_KEY
+      - MINIO_SECRET_KEY
+      - REDIS_PASSWORD
+      - SECRET_KEY
+      - ADMIN_KEY
+      - SEARCH_API_KEY
+      - METRICS_TOKEN
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
@@ -138,6 +185,9 @@ services:
         limits:
           memory: 512M
           cpus: "1.0"
+    # /metrics 抓取令牌（W2-12）：fastapi-app job 经 credentials_file 携带
+    secrets:
+      - METRICS_TOKEN
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -187,8 +237,10 @@ services:
           memory: 256M
           cpus: "0.5"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}  # Grafana 管理员密码
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=/run/secrets/GRAFANA_ADMIN_PASSWORD  # 密码经 secrets 注入（grafana 原生 __FILE 支持）
       - GF_USERS_ALLOW_SIGN_UP=false                              # 生产环境禁用自助注册
+    secrets:
+      - GRAFANA_ADMIN_PASSWORD
 
   # etcd — Milvus 的元数据存储（键值对数据库）
   etcd:
@@ -221,8 +273,8 @@ services:
     image: pgsty/minio:RELEASE.2026-06-18T00-00-00Z   # 社区 fork（MinIO 官方 2025-10 停发镜像并归档仓库，原 minio/minio 冻结 tag 已从 Docker Hub 下架无法拉取；pgsty/minio 为 drop-in 兼容、仍在维护）
     container_name: minio-prod
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}              # MinIO 管理员账号
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}      # MinIO 管理员密码
+      MINIO_ROOT_USER_FILE: /run/secrets/MINIO_ROOT_USER       # 凭据经 secrets 注入（原生 *_FILE 支持）
+      MINIO_ROOT_PASSWORD_FILE: /run/secrets/MINIO_ROOT_PASSWORD
     volumes:
       - minio_data_prod:/minio_data
     networks:
@@ -237,6 +289,9 @@ services:
     ports:
       - "127.0.0.1:9002:9000"      # S3 API 端口，与开发栈（9000）错开；仅绑定回环地址（后端经 docker 网络访问 minio:9000，不受影响）
       - "127.0.0.1:9003:9001"      # 管理控制台端口，与开发栈（9001）错开；仅绑定回环地址
+    secrets:
+      - MINIO_ROOT_USER
+      - MINIO_ROOT_PASSWORD
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
@@ -247,12 +302,13 @@ services:
   milvus-standalone:
     image: milvusdb/milvus:v2.6.17
     container_name: milvus-standalone-prod
-    command: ["milvus", "run", "standalone"]
+    command:
+      - /bin/sh
+      - -c
+      - 'export MINIO_ACCESS_KEY_ID="$$(cat /run/secrets/MINIO_ROOT_USER)" MINIO_SECRET_ACCESS_KEY="$$(cat /run/secrets/MINIO_ROOT_PASSWORD)"; exec milvus run standalone'
     environment:
       ETCD_ENDPOINTS: etcd:2379
       MINIO_ADDRESS: minio:9000
-      MINIO_ACCESS_KEY_ID: ${MINIO_ROOT_USER}          # 复用 MinIO 管理员账号
-      MINIO_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}  # 复用 MinIO 管理员密码
       # 调整单集合 flush 限流阈值。Milvus 默认对单集合 flush 限流 0.1 QPS，
       # 批量删除等高频 flush 场景会触发 rate limit。此处放宽到 2.0 QPS，
       # 仍远低于正常刷盘能力，但可显著降低批量操作耗时。
@@ -272,6 +328,9 @@ services:
     ports:
       - "127.0.0.1:19531:19530"    # Milvus gRPC 端口，与开发栈（19530）错开；仅绑定回环地址（后端经 docker 网络访问，不受影响）
       - "127.0.0.1:9092:9091"      # 健康检查/指标端口，与开发栈（9091）错开；仅绑定回环地址
+    secrets:
+      - MINIO_ROOT_USER
+      - MINIO_ROOT_PASSWORD
     depends_on:
       etcd:
         condition: service_started
@@ -285,7 +344,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB}                      # 初始化数据库名
       POSTGRES_USER: ${POSTGRES_USER}                  # 数据库用户名
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}          # 数据库密码
+      POSTGRES_PASSWORD_FILE: /run/secrets/POSTGRES_PASSWORD   # 密码经 secrets 注入（官方镜像原生支持）
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
       LANG: en_US.utf8
       LC_ALL: C.UTF-8
@@ -303,6 +362,8 @@ services:
     ports:
       - "127.0.0.1:5434:5432"      # 与开发栈（5433）错开；仅绑定回环地址，避免基础设施端口暴露到外部网络
     command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements", "-c", "pg_stat_statements.track=all", "-c", "client_encoding=UTF8", "-c", "listen_addresses=*"]
+    secrets:
+      - POSTGRES_PASSWORD
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -313,9 +374,12 @@ services:
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.20.1   # 固定版本 tag，避免 latest 漂移
     container_name: postgres-exporter-prod
+    # DATA_SOURCE_NAME 无 *_FILE 原生支持：覆盖 entrypoint，运行时拼接
+    # 连接串（user/db 为非敏感值仍走 env 插值，密码从 secrets 读取）
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - 'export DATA_SOURCE_NAME="postgresql://${POSTGRES_USER}:$$(cat /run/secrets/POSTGRES_PASSWORD)@postgres:5432/${POSTGRES_DB}?sslmode=disable"; exec /bin/postgres_exporter --extend.query-path=/etc/postgres_exporter/queries.yaml'
     environment:
-      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
-      PG_EXPORTER_EXTEND_QUERIES: "true"               # 启用扩展查询（queries.yaml）
       PG_EXPORTER_DISABLE_DEFAULT_METRICS: "false"
     volumes:
       - ./configs/postgres/queries.yaml:/etc/postgres_exporter/queries.yaml
@@ -327,6 +391,8 @@ services:
         limits:
           memory: 128M
           cpus: "0.25"
+    secrets:
+      - POSTGRES_PASSWORD
     depends_on:
       postgres:
         condition: service_healthy

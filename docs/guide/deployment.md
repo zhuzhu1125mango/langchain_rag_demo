@@ -631,13 +631,63 @@ TITLE_GENERATION_MODEL=
 
 **生产环境安全建议**:
 
-1. **修改默认密码**: 不要使用默认密码，修改 `.env.prod` 中的所有密码
+1. **修改默认密码**: 不要使用默认密码，密码经 Docker Secrets 注入（见 §6.9），轮换时重新生成 secrets 文件即可
 2. **设置强 SECRET_KEY**: `SECRET_KEY` 必须设置为长随机字符串，否则后端容器会拒绝启动
 3. **限制网络访问**: 仅允许必要的端口对外访问
 4. **启用 HTTPS**: 使用 HTTPS 加密传输
 5. **配置防火墙**: 使用 ufw 或 iptables 限制访问
 6. **定期备份**: 定期备份数据库和 MinIO 数据
 7. **最小权限原则**: 为数据库用户分配最小必要权限
+
+### 6.9 Docker Secrets（凭据文件化）
+
+生产凭据不以明文存放于 `.env.prod`，改由宿主机 `./secrets/` 目录下的文件
+经 compose `secrets:` 挂载到容器 `/run/secrets/<名称>`（W2-11）。`./secrets/`
+已被 `.gitignore` 忽略，严禁入库。
+
+**生成**：
+
+```bash
+# 方式一：从现有 .env.prod 导出存量值（不轮换，用于先行切换部署形态）
+pwsh ./scripts/gen_secrets.ps1 -FromEnv .env.prod     # Windows
+bash ./scripts/gen_secrets.sh --from-env .env.prod    # Linux
+
+# 方式二：随机生成全部凭据（即完成 W0-2 凭据轮换；已存在的文件跳过）
+pwsh ./scripts/gen_secrets.ps1
+```
+
+**凭据 → 消费方映射**：
+
+| secrets 文件 | 值的消费方 | 机制 |
+|---|---|---|
+| postgres_password | postgres 容器（`POSTGRES_PASSWORD_FILE`）、backend、postgres-exporter | 原生 `_FILE` / pydantic secrets_dir / entrypoint 拼接 |
+| minio_root_user / minio_root_password | minio 容器（`*_FILE`）、milvus（shell wrapper export）、backend（对应字段 `MINIO_ACCESS_KEY` / `MINIO_SECRET_KEY`） | 原生 / wrapper / secrets_dir |
+| redis_password | redis 容器（`command` 内 `cat` 读取）、backend | wrapper / secrets_dir |
+| secret_key | backend JWT 签名密钥 | secrets_dir |
+| admin_key | backend 管理接口（可为空文件 = 未配置） | secrets_dir |
+| search_api_key | backend Tavily 联网搜索（可为空） | secrets_dir |
+| metrics_token | backend `/metrics` 鉴权 + Prometheus `authorization.credentials_file` | secrets_dir + 原生 |
+| grafana_admin_password | grafana（`GF_SECURITY_ADMIN_PASSWORD__FILE`） | 原生 `__FILE` |
+
+**后端侧机制**：`config.py` 所有配置类启用 `secrets_dir=/run/secrets`（目录
+不存在时自动关闭），并通过 `SecretsFirstMixin` 将 secrets source 提到最高
+优先级——`/run/secrets/<字段名>` 存在即胜出，`.env.prod` 中的同名键仅作回退
+（迁移完成后应从 `.env.prod` 删除凭据键）。本地裸跑/CI/开发容器无该目录，
+行为与旧版完全一致。
+
+**切换步骤**：
+
+1. `pwsh ./scripts/gen_secrets.ps1 -FromEnv .env.prod`（导出存量值）
+2. 从 `.env.prod` 删除已 secrets 化的凭据键（POSTGRES_PASSWORD /
+   MINIO_ROOT_USER / MINIO_ROOT_PASSWORD / REDIS_PASSWORD / SECRET_KEY /
+   ADMIN_KEY / SEARCH_API_KEY / GF_SECURITY_ADMIN_PASSWORD）
+3. `./scripts/start-prod.sh`（内置预检：9 个 secrets 文件缺失或为空时拒绝启动）
+4. 轮换凭据 = 更新对应 secrets 文件 + 重启对应服务（Prometheus 的
+   metrics_token 每次抓取重读，无需重启）
+
+**/metrics 鉴权（W2-12）**：`metrics_token` 非空时后端 `/metrics` 要求
+`Authorization: Bearer <token>`（hmac 常量时间比较），Prometheus 抓取配置
+自带同一令牌；令牌为空（本地/开发）时不鉴权。
 
 ---
 
