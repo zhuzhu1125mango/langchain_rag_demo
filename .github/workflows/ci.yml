@@ -202,8 +202,11 @@ jobs:
           echo "--- milvus logs ---"; docker logs milvus 2>&1 | tail -n 100
           exit 1
 
+      # pytest-timeout：单个用例 120s 超时（thread 方法可打断 gRPC/网络挂起），
+      # 防止个别测试挂死耗尽 job 6h 上限后无任何失败明细可查
       - name: Run integration tests
-        run: uv run pytest --run-integration -q
+        run: uv run pytest --run-integration -q --timeout=120 --timeout-method=thread
+        timeout-minutes: 40
 
   rag-eval:
     name: RAG Retrieval Eval
