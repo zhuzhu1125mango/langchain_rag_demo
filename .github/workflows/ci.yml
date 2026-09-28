@@ -57,6 +57,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Install uv
+        # uvx 依赖 uv（W6 #64 首轮 CI 复盘：runner 无预装，exit 127）
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: false
+
       - name: Backend ruff (syntax & pyflakes core)
         run: uvx ruff@0.9.3 check --select E9,F63,F7,F82 backend
 

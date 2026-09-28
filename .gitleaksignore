@@ -1,0 +1,13 @@
+# gitleaks 误报登记（W6 #64 secrets scan）
+# 格式：<file>:<rule-id>:<line>，与告警输出的 Fingerprint 一致。
+# 新增登记须注明原因；若对应文件内容变化导致行号漂移，需同步更新。
+
+# README 技术栈表格行，sidekiq 规则对表格内容误报（仓库无 sidekiq/BUNDLE 变量）
+README.md:sidekiq-secret:50
+
+# MinIO 社区版许可证文件（W0-3 待处置决策项），JWT 格式许可凭证非访问凭据
+configs/license/minio.license:jwt:1
+
+# 测试桩假凭据（"strong-db-pass-123"/"prod-secret-123456"），非真实密钥
+backend/tests/test_startup_validation.py:generic-api-key:115
+backend/tests/test_startup_validation.py:generic-api-key:116
