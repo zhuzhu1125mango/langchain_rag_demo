@@ -133,6 +133,8 @@ def parse_pdf_with_mineru(pdf_path: str) -> str:
 
     logger.info(f"mineru 开始解析: {os.path.basename(pdf_path)}, 设备: {device}")
     started = time.time()
+    # W6 #18：workdir 含 PDF 图片等中间产物（可达数百 MB），成功/失败/超时
+    # 一律在 finally 清理，消除长期运行下的磁盘残留泄漏
     try:
         result = subprocess.run(
             cmd,
@@ -143,25 +145,27 @@ def parse_pdf_with_mineru(pdf_path: str) -> str:
             timeout=settings.ocr.MINERU_TIMEOUT_SECONDS,
             env=env,
         )
+        if result.returncode != 0:
+            stderr_tail = (result.stderr or "")[-500:]
+            raise OcrParseError(f"mineru 退出码 {result.returncode}: {stderr_tail}")
+
+        md_files = sorted(
+            Path(workdir).rglob("*.md"), key=lambda p: p.stat().st_size, reverse=True
+        )
+        if not md_files:
+            raise OcrParseError(f"mineru 未产出 Markdown 文件: {workdir}")
+        text = md_files[0].read_text(encoding="utf-8", errors="replace")
+        logger.info(
+            f"mineru 解析完成: {os.path.basename(pdf_path)}, "
+            f"用时 {time.time() - started:.1f}s, 输出 {len(text)} 字符"
+        )
+        return text
     except subprocess.TimeoutExpired as e:
         raise OcrParseError(
             f"mineru 解析超时（>{settings.ocr.MINERU_TIMEOUT_SECONDS}s）: {pdf_path}"
         ) from e
-    if result.returncode != 0:
-        stderr_tail = (result.stderr or "")[-500:]
-        raise OcrParseError(f"mineru 退出码 {result.returncode}: {stderr_tail}")
-
-    md_files = sorted(
-        Path(workdir).rglob("*.md"), key=lambda p: p.stat().st_size, reverse=True
-    )
-    if not md_files:
-        raise OcrParseError(f"mineru 未产出 Markdown 文件: {workdir}")
-    text = md_files[0].read_text(encoding="utf-8", errors="replace")
-    logger.info(
-        f"mineru 解析完成: {os.path.basename(pdf_path)}, "
-        f"用时 {time.time() - started:.1f}s, 输出 {len(text)} 字符"
-    )
-    return text
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 # PaddleOCR pipeline 实例全局复用（模型加载耗时数十秒，进程内只加载一次）

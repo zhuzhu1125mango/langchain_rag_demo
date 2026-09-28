@@ -61,6 +61,8 @@ jobs:
       FAST_LLM_MODEL_NAME: ci_placeholder_model
       EMBEDDING_MODEL_NAME: ci_placeholder_model
       SKIP_OLLAMA_CHECK: "true"
+      # Unit job 无 minio 容器，对齐默认（W6 #11 默认改 true，显式关闭防本地 http 连接歧义）
+      MINIO_SECURE: "false"
     steps:
       - uses: actions/checkout@v5
 
@@ -126,6 +128,8 @@ jobs:
       MINIO_ACCESS_KEY: rag_ci_minio
       MINIO_SECRET_KEY: rag_ci_minio_password
       MINIO_BUCKET_NAME: documents
+      # CI minio 容器为 http；config 默认已改 secure=true（W6 #11 安全默认），需显式关闭
+      MINIO_SECURE: "false"
       MILVUS_HOST: localhost
       MILVUS_PORT: "19530"
       # 应用启动时 Ollama 未就绪属预期：预热为 best-effort，连接失败仅告警不阻塞

@@ -5,9 +5,14 @@
 
 存储结构：Redis HASH，每 scope（user + kb 范围）一个 key，
 field 为条目 uuid，value 为条目 JSON（含 1024 维问题 embedding）。
+
+安全（W6 #17）：value 含用户问题与答案全文，Redis 落盘前以 Fernet 对称
+加密（密钥由 SECRET_KEY 经 SHA-256 派生）；读取时优先解密，解密失败回退
+明文 JSON（旧版条目平滑过渡），无法解析即跳过该条目。
 """
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -40,6 +45,55 @@ REDIS_OPERATION_TIMEOUT = 3.0
 # question embedding 计算超时（秒）。LLM 与 embedding 模型在显存互换时
 # Ollama 需重新加载模型，远慢于常规 Redis 操作，需独立更长超时
 EMBEDDING_TIMEOUT_SECONDS = 10.0
+
+
+# ---------------------------------------------------------------------------
+# value 加密（W6 #17）：缓存条目含用户问题/答案全文，落 Redis 前加密
+# ---------------------------------------------------------------------------
+_fernet_instance = None
+
+
+def _get_fernet():
+    """懒加载 Fernet 实例：密钥由 SECRET_KEY 经 SHA-256 派生（32 字节 → urlsafe）。
+
+    SECRET_KEY 未配置时为 None（开发兜底会生成临时随机密钥，重启后旧缓存
+    解密失败——仅损失缓存命中，fail-open 无功能影响）。
+    """
+    global _fernet_instance
+    if _fernet_instance is None:
+        from cryptography.fernet import Fernet
+
+        secret = getattr(settings, "SECRET_KEY", "") or getattr(settings.security, "SECRET_KEY", "")
+        if not secret:
+            logger.warning("语义缓存加密跳过：SECRET_KEY 未配置，条目将明文存储")
+            return None
+        key = base64.urlsafe_b64encode(hashlib.sha256(secret.encode("utf-8")).digest())
+        _fernet_instance = Fernet(key)
+    return _fernet_instance
+
+
+def _encode_entry(entry: Dict[str, Any]) -> str:
+    """条目序列化 + 加密；加密不可用时降级明文 JSON（保持可用性）。"""
+    payload = json.dumps(entry, ensure_ascii=False)
+    fernet = _get_fernet()
+    if fernet is None:
+        return payload
+    return fernet.encrypt(payload.encode("utf-8")).decode("ascii")
+
+
+def _decode_entry(value: str) -> Optional[Dict[str, Any]]:
+    """条目解码：优先 Fernet 解密，失败回退明文 JSON（旧版条目平滑过渡）。"""
+    try:
+        fernet = _get_fernet()
+        if fernet is not None:
+            try:
+                value = fernet.decrypt(value.encode("ascii")).decode("utf-8")
+            except Exception:
+                pass  # 非 Fernet token（旧明文条目）→ 用原始值继续
+        entry = json.loads(value)
+        return entry if isinstance(entry, dict) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
 
 
 @dataclass
@@ -164,9 +218,8 @@ class SemanticCacheService:
             now = time.time()
             ttl_seconds = settings.semantic_cache.SEMANTIC_CACHE_TTL_HOURS * 3600
             for field_id, value in raw.items():
-                try:
-                    entry = json.loads(value)
-                except (json.JSONDecodeError, TypeError):
+                entry = _decode_entry(value)
+                if entry is None:
                     continue
                 if now - entry.get("created_at", 0) > ttl_seconds:
                     continue  # 惰性过期：读取时跳过，写入时清理
@@ -271,7 +324,7 @@ class SemanticCacheService:
                 "created_at": time.time(),
             }
             field_id = uuid.uuid4().hex
-            await self._execute(cache, cache.client.hset(key, field_id, json.dumps(entry, ensure_ascii=False)))
+            await self._execute(cache, cache.client.hset(key, field_id, _encode_entry(entry)))
             await self._execute(cache, cache.client.expire(key, settings.semantic_cache.SEMANTIC_CACHE_TTL_HOURS * 3600 + 3600))
             await self._trim(cache, key)
             if _METRICS_AVAILABLE:
@@ -294,9 +347,8 @@ class SemanticCacheService:
         parsed: List[tuple[str, float]] = []
         expired: List[str] = []
         for field_id, value in raw.items():
-            try:
-                entry = json.loads(value)
-            except (json.JSONDecodeError, TypeError):
+            entry = _decode_entry(value)
+            if entry is None:
                 expired.append(field_id)
                 continue
             created_at = entry.get("created_at", 0)
@@ -335,9 +387,8 @@ class SemanticCacheService:
                     continue
                 to_delete: List[str] = []
                 for field_id, value in raw.items():
-                    try:
-                        entry = json.loads(value)
-                    except (json.JSONDecodeError, TypeError):
+                    entry = _decode_entry(value)
+                    if entry is None:
                         continue
                     entry_kb_ids = entry.get("kb_ids") or []
                     if kb_id in entry_kb_ids or "all" in entry_kb_ids:

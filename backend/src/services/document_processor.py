@@ -533,27 +533,40 @@ def get_local_file_path(file_path):
 def load_document(file_path):
     """
     根据文件类型加载文档
-    
+
     Args:
         file_path: 文件路径（本地路径或 MinIO 路径）
-        
+
     Returns:
         list: LangChain Document对象列表
-        
+
     Raises:
-        ValueError: 不支持的文件类型
+        ValueError: 不支持的文件类型，或文档超出大小/字符数上限
     """
     local_path, is_temp = get_local_file_path(file_path)
-    
+
     try:
         _, ext = os.path.splitext(local_path)
         ext = ext.lower()
-        
+
         if ext not in FILE_TYPE_MAPPING:
             raise ValueError(f"不支持的文件类型: {ext}。支持的格式: {', '.join(SUPPORTED_EXTENSIONS)}")
-        
+
+        # W6 #19：加载前兜底文件大小校验——API 层对上传文件已有 MAX_UPLOAD_SIZE_MB
+        # 限制，此处覆盖绕过 API 直接以本地路径调用的场景（如重新处理/批处理）
+        max_bytes = settings.processing.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+        try:
+            file_size = os.path.getsize(local_path)
+        except OSError:
+            file_size = 0
+        if file_size > max_bytes:
+            raise ValueError(
+                f"文档大小 {file_size / 1024 / 1024:.1f}MB 超过上限 "
+                f"{settings.processing.MAX_UPLOAD_SIZE_MB}MB: {os.path.basename(local_path)}"
+            )
+
         loader_class = FILE_TYPE_MAPPING[ext]
-        
+
         if ext in (".txt", ".md", ".markdown"):
             # 显式 utf-8：Windows 默认 GBK 会导致中文文档解码失败
             loader = loader_class(local_path, encoding="utf-8")
@@ -582,8 +595,19 @@ def load_document(file_path):
             loader = loader_class(local_path, mode="elements")
         else:
             loader = loader_class(local_path)
-        
+
         documents = loader.load()
+
+        # W6 #19：加载后总字符数上限（loader 均为全量加载，用上限拒绝超大文档，
+        # 防止内存膨胀；上限可经 MAX_DOCUMENT_CHARS 调整）
+        total_chars = sum(len(doc.page_content or "") for doc in documents)
+        if total_chars > settings.processing.MAX_DOCUMENT_CHARS:
+            raise ValueError(
+                f"文档解析后共 {total_chars} 字符，超过上限 "
+                f"{settings.processing.MAX_DOCUMENT_CHARS}（MAX_DOCUMENT_CHARS），"
+                f"请拆分后上传: {os.path.basename(local_path)}"
+            )
+
         return documents
     finally:
         if is_temp and os.path.exists(local_path):

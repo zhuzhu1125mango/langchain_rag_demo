@@ -20,6 +20,7 @@ import secrets
 import hmac
 import time
 import asyncio
+from contextvars import ContextVar
 from logging.handlers import RotatingFileHandler
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request, Depends, status
@@ -60,19 +61,39 @@ try:
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        # 根日志轮转：单文件 10MB、保留 5 份，与 start.py 的 rag_system.log 策略一致
+# W6 #16：request_id 经 contextvars 贯穿到 services/ 层日志（此前仅中间件自身
+# 打的日志带 request_id，服务层日志无法关联到具体请求）
+_request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
+
+
+class RequestIdLogFilter(logging.Filter):
+    """把当前请求的 request_id 注入每条日志记录（非请求上下文时为 '-'）。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = _request_id_var.get()
+        return True
+
+
+# W6 #14：生产日志统一 stdout（由 Docker/外部采集收敛），规避多 worker 场景下
+# RotatingFileHandler 轮转丢日志；开发环境保留文件轮转（backend/logs/app.log）
+_log_handlers: list = [logging.StreamHandler()]
+if not settings.IS_PRODUCTION:
+    _log_handlers.append(
         RotatingFileHandler(
             os.path.join(LOG_DIR, "app.log"),
             maxBytes=10 * 1024 * 1024,
             backupCount=5,
             encoding="utf-8",
-        ),
-    ]
+        )
+    )
+_request_filter = RequestIdLogFilter()
+for _h in _log_handlers:
+    _h.addFilter(_request_filter)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s [%(request_id)s] - %(message)s",
+    handlers=_log_handlers,
 )
 logger = logging.getLogger("rag_system")
 
@@ -80,14 +101,16 @@ logger = logging.getLogger("rag_system")
 class RequestTracingMiddleware:
     def __init__(self, app):
         self.app = app
-    
+
     async def __call__(self, scope, receive, send):
         request_id = str(uuid4())
-        
+        # W6 #16：写入 contextvar，服务层日志经 RequestIdLogFilter 自动关联
+        token = _request_id_var.set(request_id)
+
         if scope["type"] == "http":
             request = Request(scope, receive)
             request.state.request_id = request_id
-            
+
             start_time = time.time()
             # 仅记录 path，不记录 query string（其中可能携带 api_key 等凭据）
             logger.info(f"Request started: {request.method} {request.url.path} [{request_id}]")
@@ -101,19 +124,21 @@ class RequestTracingMiddleware:
                         f"Status: {status_code} Duration: {duration:.2f}s"
                     )
                 await send(message)
-            
+
             await self.app(scope, receive, send_wrapper)
         elif scope["type"] == "websocket":
             logger.info(f"WebSocket connection started: {scope.get('path', '/')} [{request_id}]")
-            
+
             async def send_wrapper(message):
                 if message["type"] == "websocket.close":
                     logger.info(f"WebSocket connection closed: {scope.get('path', '/')} [{request_id}]")
                 await send(message)
-            
+
             await self.app(scope, receive, send_wrapper)
         else:
             await self.app(scope, receive, send)
+
+        _request_id_var.reset(token)
 
 
 async def _periodic_learning_task():
@@ -234,6 +259,14 @@ async def lifespan(app: FastAPI):
             _msg = f"生产环境启动失败: 关键凭据为空: {', '.join(_missing_creds)}，请在环境配置中设置强密码"
             logger.error(_msg)
             raise RuntimeError(_msg)
+
+        # W6 #11：生产未启用 MinIO TLS 时告警（compose 内网明文为已知取舍，
+        # 须显式设置 MINIO_SECURE=false 声明；暴露公网必须启用 TLS）
+        if not settings.minio.MINIO_SECURE:
+            logger.warning(
+                "MINIO_SECURE=false：MinIO 走明文 HTTP 传输，仅应在受信任内网使用；"
+                "如暴露公网必须启用 TLS 并设置 MINIO_SECURE=true"
+            )
     else:
         # 开发模式兜底：未设置 SECRET_KEY 时生成临时随机密钥（重启后签名失效）
         if not settings.security.SECRET_KEY:
@@ -360,8 +393,10 @@ async def app_exception_handler(request: Request, exc: AppException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     request_id = getattr(request.state, "request_id", str(uuid4()))
+    # W6 #15：消息体只记异常类型——str(exc) 可能携带 SQL 片段、文件路径、
+    # 内部拓扑等敏感信息；完整堆栈经 exc_info 落服务端日志供排障
     logger.error(
-        f"Request {request_id} failed with unexpected error: {str(exc)}",
+        f"Request {request_id} failed with {type(exc).__name__}",
         exc_info=True
     )
     return JSONResponse(
@@ -461,7 +496,41 @@ async def health_check_detail(current_user: CurrentUser = Depends(require_admin)
     except Exception as e:
         logger.error(f"健康检查 Redis 异常: {e}", exc_info=True)
         checks["redis"] = {"status": "unhealthy", "error": "Redis 连接失败"}
-    
+
+    # W6 #13：补关键依赖健康探测（Milvus / MinIO / Ollama）。
+    # 探测为轻量操作且带 3s 超时；错误详情仅进日志，客户端只见通用文案。
+    async def _probe(name: str, coro_factory) -> None:
+        try:
+            await asyncio.wait_for(coro_factory(), timeout=3.0)
+            checks[name] = {"status": "healthy"}
+        except Exception as e:
+            logger.error(f"健康检查 {name} 异常: {e}", exc_info=True)
+            checks[name] = {"status": "unhealthy", "error": f"{name} 连接失败"}
+
+    async def _probe_milvus():
+        from src.services.milvus_service import MilvusService
+        milvus = await MilvusService.get_instance()
+        await milvus.client.has_collection(settings.milvus.MILVUS_COLLECTION_NAME)
+
+    async def _probe_minio():
+        from src.services.minio_service import MinioService
+        minio = await MinioService.get_instance()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, minio._client.bucket_exists, settings.minio.MINIO_BUCKET_NAME
+        )
+
+    async def _probe_ollama():
+        import httpx
+        host = (settings.model.OLLAMA_HOST or "http://localhost:11434").rstrip("/")
+        async with httpx.AsyncClient(timeout=2.5) as client:
+            resp = await client.get(f"{host}/api/version")
+            resp.raise_for_status()
+
+    await _probe("milvus", _probe_milvus)
+    await _probe("minio", _probe_minio)
+    await _probe("ollama", _probe_ollama)
+
     overall_status = "healthy" if all(c["status"] == "healthy" for c in checks.values()) else "unhealthy"
     
     return {

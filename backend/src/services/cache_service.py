@@ -55,10 +55,18 @@ class CacheService(AsyncSingleton["CacheService"]):
 
     async def _async_init(self):
         """初始化异步 Redis 连接，并立即验证连通性。"""
+        # W6 #10：空密码仅允许本地开发（本地无密码 Redis 开箱可用）；
+        # 生产模式强制非空，防止裸奔 Redis 上线
         password = settings.redis.REDIS_PASSWORD
         if not password:
-            raise ValueError(
-                "REDIS_PASSWORD 未配置。Redis 密码为必填项，请在 .env 中设置 REDIS_PASSWORD。"
+            if settings.IS_PRODUCTION:
+                raise ValueError(
+                    "REDIS_PASSWORD 未配置。生产环境 Redis 密码为必填项，"
+                    "请通过 secrets/env 设置 REDIS_PASSWORD。"
+                )
+            logger.warning(
+                "REDIS_PASSWORD 未配置，将以无密码模式连接 Redis（仅限开发环境；"
+                "生产模式启动会直接失败）"
             )
 
         # 先清理可能存在的旧客户端，避免重复初始化时残留坏连接
@@ -73,7 +81,8 @@ class CacheService(AsyncSingleton["CacheService"]):
             host=settings.redis.REDIS_HOST,
             port=settings.redis.REDIS_PORT,
             db=settings.redis.REDIS_DB,
-            password=password,
+            # 空密码传 None（等同无密码）；传空串 redis-py 会尝试发送空 AUTH 报错
+            password=password or None,
             decode_responses=True,
             protocol=2,
             socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT,

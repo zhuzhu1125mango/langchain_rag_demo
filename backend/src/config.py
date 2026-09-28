@@ -72,7 +72,8 @@ class MinIOSettings(SecretsFirstMixin, BaseSettings):
     MINIO_ACCESS_KEY: str = ""
     MINIO_SECRET_KEY: str = ""
     MINIO_BUCKET_NAME: str = "documents"
-    MINIO_SECURE: bool = False
+    # W6 #11：安全默认 True（TLS）；compose 内网部署在 .env 显式设 false（明文仅限内网）
+    MINIO_SECURE: bool = True
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
@@ -205,6 +206,11 @@ class ProcessingSettings(BaseSettings):
 
     # 单文件上传大小上限（MB）。服务端按实际接收字节数校验，不信任客户端声明。
     MAX_UPLOAD_SIZE_MB: int = 100
+
+    # W6 #19：单文档解析后总字符数上限——loader 层（pypdf/unstructured）为全量
+    # 加载，无法流式；超限直接拒绝处理，防止超大文档把内存打爆（API 层已有
+    # 文件字节上限，此处在直接以本地路径调用 load_document 时兜底）
+    MAX_DOCUMENT_CHARS: int = 2000000
 
     # 混合检索相关配置
     KB_ENABLE_HYBRID_SEARCH: bool = True

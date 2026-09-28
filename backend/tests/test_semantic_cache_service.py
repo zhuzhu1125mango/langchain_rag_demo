@@ -5,13 +5,14 @@ fail-open 降级、scope key 稳定性、余弦边界。
 """
 
 import asyncio
-import json
 
 import pytest
 
 from src.services.semantic_cache_service import (
     SemanticCacheHit,
     SemanticCacheService,
+    _decode_entry,
+    _encode_entry,
     schedule_invalidation,
 )
 
@@ -218,9 +219,9 @@ class TestLookup:
         # 直接回拨条目时间戳（Windows time.time() 粒度粗，动态构造过期不可靠）
         key = SemanticCacheService.scope_key("u1", ["kb-a"])
         for field_id, value in fake_cache.client.store[key].items():
-            entry = json.loads(value)
+            entry = _decode_entry(value)
             entry["created_at"] -= 25 * 3600  # 超过默认 TTL 24h
-            fake_cache.client.store[key][field_id] = json.dumps(entry, ensure_ascii=False)
+            fake_cache.client.store[key][field_id] = _encode_entry(entry)
 
         hit, _ = await service.lookup("u1", ["kb-a"], "问题A")
         assert hit is None
@@ -271,7 +272,7 @@ class TestStore:
         key = SemanticCacheService.scope_key("u1", ["kb-a"])
         raw = fake_cache.client.store[key]
         assert len(raw) == 1
-        entry = json.loads(next(iter(raw.values())))
+        entry = _decode_entry(next(iter(raw.values())))
         assert entry["kb_ids"] == ["kb-a"]
         assert entry["answer_type"] == "knowledge_base"
         assert entry["question_norm"] == "问题a"
@@ -279,7 +280,7 @@ class TestStore:
     async def test_store_empty_kb_ids_marks_all(self, fake_cache, service, monkeypatch):
         patch_embeddings(monkeypatch, service, {"__default__": [1.0, 0.0]})
         await service.store("u1", [], "问题A", "答案", [], [])
-        entry = json.loads(next(iter(
+        entry = _decode_entry(next(iter(
             fake_cache.client.store[SemanticCacheService.scope_key("u1", [])].values()
         )))
         assert entry["kb_ids"] == ["all"]
