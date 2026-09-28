@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func as sql_func
 from sqlalchemy.orm import joinedload
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Literal, Optional
 import os
 import re
 import math
@@ -1009,14 +1009,12 @@ async def list_documents(
 @router.put("/{doc_id}/status")
 async def update_status(
     doc_id: str,
-    status: str,
+    # W6 #28：Literal 限制合法值（非法值 422），与 Document.status 枚举对齐
+    status: Literal["draft", "published", "archived"],
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     doc = await _get_owned_document(db, doc_id, current_user)
-
-    if status not in ["draft", "published", "archived"]:
-        raise HTTPException(status_code=400, detail="无效的状态值")
 
     doc.status = status
     await db.commit()

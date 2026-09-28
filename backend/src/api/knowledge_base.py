@@ -14,11 +14,11 @@
 注：重复文档检测、文档质量评估、文档自动分类已统一由 document 模块提供。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Body, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func, delete
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Literal, Optional
 from datetime import timedelta
 import uuid
 import asyncio
@@ -58,7 +58,8 @@ class KnowledgeBaseUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     embedding_model: Optional[str] = None
-    status: Optional[str] = None
+    # W6 #28：Literal 限制合法值（非法值 422），与 KB.status 的 active/inactive 对齐
+    status: Optional[Literal["active", "inactive"]] = None
 
 
 class KnowledgeBaseResponse(BaseModel):
@@ -501,9 +502,56 @@ async def delete_knowledge_base(
         raise HTTPException(status_code=400, detail="无效的知识库ID")
 
 
+async def _cleanup_kb_artifacts(
+    doc_file_paths: List[tuple],
+    kb_ids: List[str],
+) -> None:
+    """批量删除知识库的遗留产物清理（W6 #78b 后台任务）。
+
+    - MinIO 原始文件：按 BATCH_DELETE_CHUNK_SIZE 分批并发删除（file_path 为
+      请求内快照，DB 行已删除）；
+    - Wiki 级联：on_kb_deleted 清理 wiki_pages 行与 MinIO 正文（独立会话）。
+
+    失败仅记录告警，不重试、不抛出——后台清理失败可后续人工清理，
+    不影响已完成的删除语义。
+    """
+    from src.database import async_session_maker
+    from src.services.minio_service import MinioService
+    from src.services.wiki_cascade import on_kb_deleted
+
+    if doc_file_paths:
+        try:
+            minio_service = await MinioService.get_instance()
+            for i in range(0, len(doc_file_paths), BATCH_DELETE_CHUNK_SIZE):
+                batch = doc_file_paths[i:i + BATCH_DELETE_CHUNK_SIZE]
+                await asyncio.gather(
+                    *(
+                        minio_service.delete_file_async(file_path)
+                        for _, file_path in batch
+                    )
+                )
+        except Exception as exc:
+            logger.warning("批量删除知识库后台 MinIO 清理失败: %s", exc)
+
+    if kb_ids:
+        try:
+            async with async_session_maker() as db:
+                for kb_id in kb_ids:
+                    await on_kb_deleted(db, kb_id)
+        except Exception as exc:
+            logger.warning("批量删除知识库后台 Wiki 级联清理失败: %s", exc)
+
+    logger.info(
+        "批量删除知识库后台清理完成: MinIO文件=%d KB=%d",
+        len(doc_file_paths),
+        len(kb_ids),
+    )
+
+
 @router.post("/batch-delete", response_model=BatchDeleteKnowledgeBasesResponse)
 async def batch_delete_knowledge_bases(
     request: BatchDeleteKnowledgeBasesRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
@@ -512,8 +560,9 @@ async def batch_delete_knowledge_bases(
 
     仅删除当前用户拥有的知识库。若待删除列表包含默认知识库，会自动将默认标记
     转移到该用户的其他知识库；若用户选择删除其全部知识库，则返回 400。
-    所有数据库操作在同一事务中执行，MinIO 文件与向量清理采用异步并行方式，
-    降低长耗时任务对响应时间的影响。
+    数据库记录与向量清理在请求内完成（毫秒级）；MinIO 原始文件清理与 Wiki
+    级联下沉到后台任务（W6 #78b，独立 DB 会话）——上限 1000 KB 的长耗时
+    IO 不再阻塞响应。后台清理失败仅告警，不影响删除语义与已返回的计数。
     """
     if not request.ids:
         return BatchDeleteKnowledgeBasesResponse(deleted_count=0, skipped_ids=[])
@@ -565,8 +614,6 @@ async def batch_delete_knowledge_bases(
             raise HTTPException(status_code=400, detail="不能删除最后一个知识库")
         remaining[0].is_default = True
 
-    from src.services.minio_service import MinioService
-
     # 批量删除向量：合并为一个 delete 表达式并统一 flush 一次，
     # 避免每个知识库单独 flush 触发 Milvus 单集合 0.1 QPS 限流。
     # 向量清理失败不应阻塞数据库记录删除，仅记录告警，避免服务抖动导致知识库无法删除。
@@ -579,26 +626,17 @@ async def batch_delete_knowledge_bases(
                 "批量删除知识库时向量存储清理失败，继续删除数据库记录: %s", exc
             )
 
-    # 删除 MinIO 中的原始文件，按 BATCH_DELETE_CHUNK_SIZE 分批并发，避免单次任务过多。
-    # MinIO 清理失败不应阻塞数据库记录删除，仅记录告警。
+    # 删除 MinIO 中的原始文件：W6 #78b 下沉到后台任务（独立会话 + 分批并发），
+    # 请求内仅快照 file_path（DB 行即将被删）。MinIO 清理失败不影响删除语义。
     doc_result = await db.execute(
         select(Document).filter(Document.kb_id.in_(found_ids))
     )
     docs = doc_result.scalars().all()
-
-    async def cleanup_minio_file(doc: Document) -> None:
-        if not doc.file_path or not doc.file_path.startswith("minio://"):
-            return
-        try:
-            minio_service = await MinioService.get_instance()
-            await minio_service.delete_file_async(doc.file_path)
-        except Exception as exc:
-            logger.warning("删除 MinIO 文件 %s 失败: %s", doc.file_path, exc)
-
-    if docs:
-        for i in range(0, len(docs), BATCH_DELETE_CHUNK_SIZE):
-            batch = docs[i:i + BATCH_DELETE_CHUNK_SIZE]
-            await asyncio.gather(*(cleanup_minio_file(doc) for doc in batch))
+    doc_file_paths = [
+        (str(doc.id), doc.file_path)
+        for doc in docs
+        if doc.file_path and doc.file_path.startswith("minio://")
+    ]
 
     # 分批删除数据库记录，避免超大 IN 子句；先删 Document，再删 KnowledgeBase，防止外键冲突。
     found_ids_list = list(found_ids)
@@ -622,11 +660,11 @@ async def batch_delete_knowledge_bases(
     for kb in kbs:
         _schedule_semantic_cache_invalidation(str(kb.id))
 
-    # P2：Wiki 级联清理（wiki_pages 行 + MinIO 正文），失败不阻断删除主流程
-    from src.services.wiki_cascade import on_kb_deleted
-
-    for kb in kbs:
-        await on_kb_deleted(db, str(kb.id))
+    # P2 + W6 #78b：Wiki 级联清理与 MinIO 文件清理统一为后台任务（独立 DB 会话，
+    # 不复用请求级会话——P1-9/P1-10 教训：后台任务不得占用请求连接）
+    if doc_file_paths or kbs:
+        kb_ids_str = [str(kb.id) for kb in kbs]
+        background_tasks.add_task(_cleanup_kb_artifacts, doc_file_paths, kb_ids_str)
 
     logger.info(
         "批量删除知识库成功: 用户=%s 删除数量=%d 跳过数量=%d",

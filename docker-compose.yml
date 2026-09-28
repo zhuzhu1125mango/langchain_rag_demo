@@ -62,8 +62,10 @@ services:
     volumes:
       - redis_data_prod:/data
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -110,8 +112,11 @@ services:
     volumes:
       - ./backend/data:/app/data
     networks:
-      - monitoring
+      - backend-net
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -154,8 +159,16 @@ services:
       dockerfile: Dockerfile.prod
     container_name: frontend-prod
     networks:
-      - monitoring
+      - backend-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
@@ -178,8 +191,10 @@ services:
       - ./configs/prometheus/alerts.yml:/etc/prometheus/alerts.yml
       - prometheus_data_prod:/prometheus
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -212,8 +227,10 @@ services:
       - ./configs/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
       - alertmanager_data_prod:/alertmanager
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -241,8 +258,10 @@ services:
       - ./configs/grafana/dashboards:/var/lib/grafana/dashboards
       - grafana_data_prod:/var/lib/grafana
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -271,8 +290,10 @@ services:
     volumes:
       - etcd_data_prod:/etcd
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -296,8 +317,10 @@ services:
     volumes:
       - minio_data_prod:/minio_data
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -336,8 +359,10 @@ services:
     volumes:
       - milvus_data_prod:/var/lib/milvus
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -376,8 +401,10 @@ services:
       - postgres_data_prod:/var/lib/postgresql/data
       - ./configs/postgres/init-pg-stat-statements.sh:/docker-entrypoint-initdb.d/init-pg-stat-statements.sh
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -408,8 +435,10 @@ services:
     volumes:
       - ./configs/postgres/queries.yaml:/etc/postgres_exporter/queries.yaml
     networks:
-      - monitoring
+      - infra-net
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     deploy:
       resources:
         limits:
@@ -438,7 +467,11 @@ volumes:
   postgres_data_prod:
   redis_data_prod:
 
-# 网络：所有服务共用 monitoring 桥接网络
+# 网络：按职责拆分（W6 #68）
+#   backend-net: frontend ↔ backend（/api 反向代理）
+#   infra-net:   backend ↔ 基础设施（DB/缓存/存储/向量库/监控抓取）
+# backend 双网挂载：同时服务 frontend 反代与基础设施访问/prometheus 抓取
 networks:
-  monitoring:
+  backend-net:
+  infra-net:
     driver: bridge

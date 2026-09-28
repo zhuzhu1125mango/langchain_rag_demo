@@ -126,6 +126,7 @@ build/
 htmlcov/
 .hypothesis/
 .nox/
+frontend/coverage/
 
 # =============== Docker ===============
 docker-compose.override.yml

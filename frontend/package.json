@@ -33,6 +33,7 @@
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^25.9.1",
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vitest/coverage-v8": "^4.1.7",
     "@vitest/eslint-plugin": "^1.6.19",
     "@vue/eslint-config-typescript": "^14.7.0",
     "@vue/test-utils": "^2.5.0",

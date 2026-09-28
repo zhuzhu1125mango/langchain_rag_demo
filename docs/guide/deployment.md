@@ -634,10 +634,28 @@ TITLE_GENERATION_MODEL=
 1. **修改默认密码**: 不要使用默认密码，密码经 Docker Secrets 注入（见 §6.9），轮换时重新生成 secrets 文件即可
 2. **设置强 SECRET_KEY**: `SECRET_KEY` 必须设置为长随机字符串，否则后端容器会拒绝启动
 3. **限制网络访问**: 仅允许必要的端口对外访问
-4. **启用 HTTPS**: 使用 HTTPS 加密传输
+4. **启用 HTTPS**: 使用 HTTPS 加密传输（见下方 §6.8.1 TLS 终结建议）
 5. **配置防火墙**: 使用 ufw 或 iptables 限制访问
 6. **定期备份**: 定期备份数据库和 MinIO 数据
 7. **最小权限原则**: 为数据库用户分配最小必要权限
+
+#### 6.8.1 TLS 终结建议（W6 #72）
+
+生产前端 nginx 监听 80（容器内 8080）为纯 HTTP，且未启用 HTTP/2 与证书管理。
+推荐不在应用容器内配置 TLS，而是由**前置反向代理或 CDN 承担 TLS 终结**：
+前置层（Nginx/Caddy/Traefik/云 LB）负责 443 证书与 HTTP→HTTPS 跳转，
+经内网 HTTP 转发到 frontend 容器的 8080 端口（宿主 80，见 compose 映射）。应用侧安全头
+（X-Frame-Options/X-Content-Type-Options/Referrer-Policy/CSP，W6 #59）
+已由 nginx.conf 下发，前置层无需重复添加；若前置层也注入 HSTS 需确认
+与内网明文跳转策略一致。
+
+**MinIO 镜像来源说明（W6 #70）**：compose 全栈使用社区 fork
+`pgsty/minio:RELEASE.2026-06-18T00-00-00Z`（固定 tag）——MinIO 官方自
+2025-10 停发 Docker 镜像并归档仓库，原 `minio/minio` tag 已从 Docker Hub
+下架无法拉取。pgsty 为 Pigsty 项目维护的 MinIO 再打包（源码同上游
+minio/minio RELEASE.2026-06-18T00-00-00Z，仅重打发行渠道），部署前应按
+自身供应链策略审计；切回官方渠道需等待上游恢复发版或改用
+`quay.io/minio/minio` 镜像源（若恢复）。
 
 ### 6.9 Docker Secrets（凭据文件化）
 
