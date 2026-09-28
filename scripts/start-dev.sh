@@ -274,7 +274,6 @@ print_access_info() {
     local pg_db="${POSTGRES_DB:-rag_demo}"
     local pg_user="${POSTGRES_USER:-postgres}"
     local minio_user="${MINIO_ROOT_USER:-minioadmin}"
-    local grafana_pwd="${GF_SECURITY_ADMIN_PASSWORD:-admin}"
     
     echo -e "${BOLD}========================================${NC}"
     echo -e "${BOLD}  访问地址汇总${NC}"
@@ -297,7 +296,7 @@ print_access_info() {
     echo "    Prometheus   : http://localhost:9090"
     echo "    Grafana      : http://localhost:3000"
     echo "                  用户名: admin"
-    echo "                  密码  : $grafana_pwd"
+    echo "                  密码  : 见 .env.dev 的 GF_SECURITY_ADMIN_PASSWORD"
     echo ""
     echo -e "${BOLD}========================================${NC}"
     echo -e "  ${YELLOW}常用命令${NC}"

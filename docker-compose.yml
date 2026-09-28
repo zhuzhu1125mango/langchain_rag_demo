@@ -188,6 +188,12 @@ services:
     # /metrics 抓取令牌（W2-12）：fastapi-app job 经 credentials_file 携带
     secrets:
       - METRICS_TOKEN
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
@@ -216,6 +222,12 @@ services:
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   # grafana — 监控可视化面板
   grafana:
@@ -241,6 +253,12 @@ services:
       - GF_USERS_ALLOW_SIGN_UP=false                              # 生产环境禁用自助注册
     secrets:
       - GRAFANA_ADMIN_PASSWORD
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # etcd — Milvus 的元数据存储（键值对数据库）
   etcd:
@@ -331,6 +349,12 @@ services:
     secrets:
       - MINIO_ROOT_USER
       - MINIO_ROOT_PASSWORD
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
     depends_on:
       etcd:
         condition: service_started
@@ -393,6 +417,12 @@ services:
           cpus: "0.25"
     secrets:
       - POSTGRES_PASSWORD
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9187/metrics"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy

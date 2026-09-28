@@ -248,6 +248,7 @@ services:
     container_name: postgres-exporter-dev
     environment:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
+      PG_EXPORTER_EXTEND_QUERIES: "true"
     volumes:
       - ./configs/postgres/queries.yaml:/etc/postgres_exporter/queries.yaml
     networks:

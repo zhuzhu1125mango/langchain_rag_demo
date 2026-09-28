@@ -12,15 +12,11 @@ if %ERRORLEVEL% equ 0 (
     exit /b %ERRORLEVEL%
 )
 
-REM Fallback to PowerShell 5.1 with warning
+REM PowerShell 7 is required (PS1 scripts are not compatible with 5.1)
 echo ========================================
-echo   警告: PowerShell 7 未找到
+echo   错误: PowerShell 7 (pwsh) 未找到
 echo ========================================
-echo 建议安装 PowerShell 7 以获得更好的体验
+echo 本项目脚本需要 PowerShell 7 及以上版本，请安装后重试。
 echo 下载地址: https://github.com/PowerShell/PowerShell/releases
 echo ========================================
-echo 尝试使用 PowerShell 5.1 运行...
-echo.
-
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0start-dev.ps1" %*
-exit /b %ERRORLEVEL%
+exit /b 1
