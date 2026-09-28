@@ -57,10 +57,8 @@ class Notification:
 
 
 def get_channel(channel: str) -> Set:
-    """获取频道的所有连接"""
-    if channel not in channel_connections:
-        channel_connections[channel] = set()
-    return channel_connections[channel]
+    """获取频道的所有连接（W6 #21：setdefault 一步完成创建，消除 check-then-set 竞态）"""
+    return channel_connections.setdefault(channel, set())
 
 
 def subscribe(channel: str, websocket) -> None:
@@ -104,9 +102,12 @@ async def broadcast(channel: str, notification: Notification) -> None:
             # 标记无效连接
             dead_connections.add(ws)
 
-    # 从原集合中移除无效连接
+    # 从原集合中移除无效连接（W6 #21）：此前用
+    # `channel_connections[channel] = connections - dead_connections` 替换集合，
+    # 会覆盖 copy 之后新 subscribe 加入原集合的连接（订阅静默丢失）；
+    # 改为对原集合 difference_update，只移除发送失败的连接，不影响并发新增
     if dead_connections:
-        channel_connections[channel] = connections - dead_connections
+        channel_connections.setdefault(channel, set()).difference_update(dead_connections)
 
 
 async def broadcast_all(notification: Notification) -> None:

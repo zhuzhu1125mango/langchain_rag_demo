@@ -8,13 +8,35 @@
 """
 
 import asyncio
+import logging
+import threading
 from typing import Dict, Optional, Any
 from uuid import UUID
+
+logger = logging.getLogger("rag_system")
 
 # 全局进度存储
 progress_store: Dict[str, dict] = {}
 # WebSocket 连接存储（上传ID -> 连接列表）
 ws_connections: Dict[str, list] = {}
+
+# 主事件循环引用（W6 #22：lifespan 启动时经 set_main_loop 注册）。
+# update_upload_progress 可能从工作线程调用，需要主循环引用才能投递通知。
+_main_loop: Optional[asyncio.AbstractEventLoop] = None
+_loop_lock = threading.Lock()
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """注册主事件循环（应用 lifespan 启动时调用）。"""
+    global _main_loop
+    with _loop_lock:
+        _main_loop = loop
+
+
+def get_main_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """获取已注册的主事件循环（未注册返回 None）。"""
+    with _loop_lock:
+        return _main_loop
 
 
 class UploadProgress:
@@ -85,23 +107,37 @@ PROGRESS_RETENTION_SECONDS = 60.0
 
 
 def update_upload_progress(upload_id: str, **kwargs):
-    """更新上传进度"""
+    """更新上传进度并调度 WS 通知。
+
+    线程模型（W6 #22）：
+    - 事件循环内调用：call_soon 调度通知（原行为）；
+    - 工作线程调用：此前 get_running_loop() 抛 RuntimeError 被静默吞掉，
+      通知直接丢失；现改用 run_coroutine_threadsafe 投递到主事件循环；
+      主循环未注册（如单测直调）时记录 debug 日志后放弃。
+    """
     progress = progress_store.get(upload_id)
-    if progress:
-        for key, value in kwargs.items():
-            if hasattr(progress, key):
-                setattr(progress, key, value)
-        # 通知所有 WebSocket 连接（使用线程池执行异步代码）
-        try:
-            loop = asyncio.get_running_loop()
-            # 如果已经在事件循环中，调度任务
-            loop.call_soon(lambda: asyncio.create_task(notify_ws_clients_async(upload_id)))
-            # 到达终态后调度延迟清理
-            if progress.status in TERMINAL_STATUSES:
-                _schedule_terminal_cleanup(upload_id)
-        except RuntimeError:
-            # 如果没有事件循环，创建新事件循环
-            pass
+    if not progress:
+        return
+    for key, value in kwargs.items():
+        if hasattr(progress, key):
+            setattr(progress, key, value)
+    # 到达终态后调度延迟清理
+    if progress.status in TERMINAL_STATUSES:
+        _schedule_terminal_cleanup(upload_id)
+    _schedule_notify(upload_id)
+
+
+def _schedule_notify(upload_id: str):
+    """把 WS 通知调度到事件循环执行；支持从工作线程投递（W6 #22）。"""
+    try:
+        loop = asyncio.get_running_loop()
+        loop.call_soon(lambda: asyncio.create_task(notify_ws_clients_async(upload_id)))
+    except RuntimeError:
+        main_loop = get_main_loop()
+        if main_loop is not None and main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(notify_ws_clients_async(upload_id), main_loop)
+        else:
+            logger.debug(f"进度 WS 通知丢弃（无可用事件循环）: upload_id={upload_id}")
 
 
 def _schedule_terminal_cleanup(upload_id: str):
@@ -109,6 +145,17 @@ def _schedule_terminal_cleanup(upload_id: str):
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
+        # 工作线程路径：把延迟清理挂到主循环的 timer 上（W6 #22）
+        main_loop = get_main_loop()
+        if main_loop is not None and main_loop.is_running():
+            main_loop.call_later(
+                PROGRESS_RETENTION_SECONDS,
+                lambda: asyncio.run_coroutine_threadsafe(
+                    _cleanup_terminal_progress(upload_id), main_loop
+                ),
+            )
+        else:
+            logger.debug(f"终态进度清理调度丢弃（无可用事件循环）: upload_id={upload_id}")
         return
     loop.call_later(
         PROGRESS_RETENTION_SECONDS,

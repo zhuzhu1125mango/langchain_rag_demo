@@ -5,7 +5,7 @@
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import func, update, bindparam
 from sqlalchemy.dialects.postgresql import JSONB
@@ -35,7 +35,7 @@ async def append_session_message(db: AsyncSession, session_id: uuid.UUID, payloa
         .values(
             messages=SessionModel.messages
             + bindparam("m", value=[payload], type_=JSONB),
-            updated_at=datetime.now(),
+            updated_at=datetime.now(timezone.utc),
         )
         .returning(func.jsonb_array_length(SessionModel.messages))
         .execution_options(synchronize_session=False)

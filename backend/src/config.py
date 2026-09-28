@@ -58,6 +58,9 @@ class DatabaseSettings(SecretsFirstMixin, BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "langchain_rag_db"
+    # SQLAlchemy 连接池参数（W6 #77：由硬编码抽出为环境变量，可按部署规格调优）
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 50
     # SQLAlchemy 回显 SQL 语句；生产保持 False（默认），开发可在 .env.dev 打开
     SQL_ECHO: bool = False
     

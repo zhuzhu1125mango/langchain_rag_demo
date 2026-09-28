@@ -132,13 +132,13 @@ async def create_session(
     title = request.title if request else None
     kb_ids = request.kb_ids if request else None
 
-    from datetime import datetime
+    from datetime import datetime, timezone
     session = SessionModel(
         user_id=current_user.user_id,
         title=title or "新会话",
         messages=[],
         kb_ids=kb_ids or [],
-        updated_at=datetime.now()
+        updated_at=datetime.now(timezone.utc)
     )
     db.add(session)
     await db.commit()

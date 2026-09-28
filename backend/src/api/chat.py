@@ -18,7 +18,7 @@ import asyncio
 import uuid
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from src.database import get_db, async_session
 from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback, KnowledgeBase
@@ -121,7 +121,7 @@ async def send_message(
                 title=request.question[:50],
                 messages=[],
                 kb_ids=kb_ids,
-                updated_at=datetime.now()
+                updated_at=datetime.now(timezone.utc)
             )
             db.add(session)
             await db.commit()
@@ -237,7 +237,7 @@ async def _prepare_stream_session(
                 title=question[:50],
                 messages=[],
                 kb_ids=kb_ids or [],
-                updated_at=datetime.now()
+                updated_at=datetime.now(timezone.utc)
             )
             db.add(session)
             await db.commit()
@@ -721,23 +721,26 @@ async def submit_message_feedback(
                         execution_id = msg.get("execution_id")
                         break
         else:
-            # 未提供 session_id 时仅在当前用户最近的会话中回溯，
-            # 限定范围与条数，避免全表扫描和读取他人会话
+            # 未提供 session_id 时仅在当前用户会话中回溯 execution_id。
+            # W6 #78：用 JSONB @> 在服务端定位包含该消息的会话（可命中 GIN 索引），
+            # 取代拉取最近 200 个会话的全部 messages 再 Python 遍历——此前每条
+            # 反馈都要全量加载大量消息 JSON，开销随会话长度线性放大。
             result = await db.execute(
                 select(SessionModel)
-                .filter(SessionModel.user_id == current_user.user_id)
+                .filter(
+                    SessionModel.user_id == current_user.user_id,
+                    SessionModel.messages.contains([{"id": message_id}]),
+                )
                 .order_by(SessionModel.updated_at.desc())
-                .limit(200)
+                .limit(1)
             )
-            sessions = result.scalars().all()
-            for session in sessions:
-                if session.messages:
-                    for msg in session.messages:
-                        if msg.get("id") == message_id:
-                            execution_id = msg.get("execution_id")
-                            break
-                if execution_id:
-                    break
+            session = result.scalars().first()
+            if session:
+                require_owner(session.user_id, current_user)
+                for msg in (session.messages or []):
+                    if msg.get("id") == message_id:
+                        execution_id = msg.get("execution_id")
+                        break
     except HTTPException:
         raise
     except Exception as e:

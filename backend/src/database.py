@@ -17,8 +17,9 @@ SQLALCHEMY_ASYNC_DATABASE_URL = (
 async_engine = create_async_engine(
     SQLALCHEMY_ASYNC_DATABASE_URL,
     echo=settings.database.SQL_ECHO,
-    pool_size=20,
-    max_overflow=50,
+    # W6 #77：连接池参数可经 DB_POOL_SIZE / DB_MAX_OVERFLOW 环境变量调整
+    pool_size=settings.database.DB_POOL_SIZE,
+    max_overflow=settings.database.DB_MAX_OVERFLOW,
     pool_timeout=30,
     pool_recycle=3600,
     # F7：从连接池取出连接时先做 ping，剔除失效连接，避免复用断开的连接

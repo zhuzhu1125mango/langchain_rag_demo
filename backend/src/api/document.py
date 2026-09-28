@@ -844,9 +844,18 @@ async def search_documents(
             raise HTTPException(status_code=404, detail="知识库不存在")
         require_owner(kb.owner_id, current_user)
         kb_ids = [kb_id]
+    else:
+        # W6 #23：归属过滤下推到向量库——未指定 kb_id 时传当前用户全部 kb_ids，
+        # 让 Milvus 在检索层过滤，避免 limit 名额被其他用户的文档占据后在应用层丢弃
+        kb_rows = await db.execute(
+            select(KnowledgeBase.id).filter(KnowledgeBase.owner_id == current_user.user_id)
+        )
+        kb_ids = [str(row[0]) for row in kb_rows.all()]
+        if not kb_ids:
+            return []
 
     try:
-        results = await vector_store.search(query, k=limit, kb_ids=kb_ids if kb_ids else None)
+        results = await vector_store.search(query, k=limit, kb_ids=kb_ids)
 
         search_results = []
 

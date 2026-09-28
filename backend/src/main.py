@@ -285,6 +285,10 @@ async def lifespan(app: FastAPI):
         logger.error(f"核心异步服务预热失败: {e}", exc_info=True)
         raise RuntimeError(f"核心异步服务预热失败: {e}")
 
+    # W6 #22：注册主事件循环，供 progress_manager 从工作线程投递 WS 通知与延迟清理
+    from src.services.progress_manager import set_main_loop
+    set_main_loop(asyncio.get_running_loop())
+
     # 启动后台定时学习任务
     learning_task = asyncio.create_task(_periodic_learning_task())
     logger.info("后台定时学习任务已启动")
