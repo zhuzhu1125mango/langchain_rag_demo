@@ -56,7 +56,6 @@ from src.services.notification_service import (
     notify_task_completed,
     notify_task_failed
 )
-from src.config import settings
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -170,8 +169,59 @@ class DocumentSourceResponse(BaseModel):
     highlight_length: int
 
 
-# P1-3 语义缓存：内容变更后的失效调度器（fire-and-forget，见 semantic_cache_service）
-from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
+# 文档类型/领域 → 中文标签映射（DocumentAnalyzer 规则分析结果的展示名；
+# 智能分析(LLM)与独立分类端点两处消费，避免硬编码漂移）
+TYPE_LABELS = {
+    "technical": "技术文档",
+    "business": "业务文档",
+    "report": "报告文档",
+    "manual": "操作手册",
+    "policy": "政策文件",
+    "news": "新闻资讯",
+    "other": "其他文档",
+}
+DOMAIN_LABELS = {
+    "it": "信息技术",
+    "finance": "金融",
+    "healthcare": "医疗健康",
+    "education": "教育",
+    "legal": "法律",
+    "government": "政府",
+    "enterprise": "企业管理",
+    "other": "其他领域",
+}
+
+
+async def _resolve_target_kb(db: AsyncSession, kb_id: Optional[str], current_user: CurrentUser) -> KnowledgeBase:
+    """解析上传目标知识库（单文件/批量上传共用，W6 #3）。
+
+    显式 kb_id：校验格式、存在性、归属；缺省：回退当前用户默认知识库。
+
+    Raises:
+        HTTPException: 400 无效格式/不存在/无默认知识库；403 非归属。
+    """
+    if kb_id:
+        try:
+            kb_uuid = uuid.UUID(kb_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="无效的知识库ID")
+        result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid))
+        kb = result.scalars().first()
+        if not kb:
+            raise HTTPException(status_code=400, detail="知识库不存在")
+        require_owner(kb.owner_id, current_user)
+        return kb
+
+    result = await db.execute(
+        select(KnowledgeBase).filter(
+            KnowledgeBase.is_default == True,
+            KnowledgeBase.owner_id == current_user.user_id,
+        )
+    )
+    kb = result.scalars().first()
+    if not kb:
+        raise HTTPException(status_code=400, detail="没有找到默认知识库，请先创建知识库")
+    return kb
 
 
 async def process_document_async(
@@ -249,32 +299,13 @@ async def process_document_async(
             # 规则分析：质量评估
             quality_result = DocumentAnalyzer.evaluate_quality(full_content)
 
-            # 类型和领域标签映射
-            type_labels = {
-                "technical": "技术文档",
-                "business": "业务文档",
-                "report": "报告文档",
-                "manual": "操作手册",
-                "policy": "政策文件",
-                "news": "新闻资讯",
-                "other": "其他文档"
-            }
-            domain_labels = {
-                "it": "信息技术",
-                "finance": "金融",
-                "healthcare": "医疗健康",
-                "education": "教育",
-                "legal": "法律",
-                "government": "政府",
-                "enterprise": "企业管理",
-                "other": "其他领域"
-            }
+            # 类型和领域标签映射（见模块级 TYPE_LABELS / DOMAIN_LABELS）
 
             # 保存规则分析结果
             doc.document_type = document_type
-            doc.document_type_label = type_labels.get(document_type, "其他文档")
+            doc.document_type_label = TYPE_LABELS.get(document_type, "其他文档")
             doc.domain = domain
-            doc.domain_label = domain_labels.get(domain, "其他领域")
+            doc.domain_label = DOMAIN_LABELS.get(domain, "其他领域")
             doc.topics = topics if topics else []
             doc.quality_score = int(quality_result.get("overall_score", 0))
             doc.quality_grade = quality_result.get("overall_grade", "")
@@ -537,30 +568,9 @@ async def upload_document(
     # 大小上限校验（实测字节数，不信任客户端声明）
     actual_size = _ensure_upload_size(file)
 
-    # 验证知识库ID
-    kb_uuid = None
-    if kb_id:
-        try:
-            kb_uuid = uuid.UUID(kb_id)
-            result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid))
-            kb = result.scalars().first()
-            if not kb:
-                raise HTTPException(status_code=400, detail="知识库不存在")
-            require_owner(kb.owner_id, current_user)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="无效的知识库ID")
-    else:
-        # 使用当前用户的默认知识库
-        result = await db.execute(
-            select(KnowledgeBase).filter(
-                KnowledgeBase.is_default == True,
-                KnowledgeBase.owner_id == current_user.user_id,
-            )
-        )
-        kb = result.scalars().first()
-        if not kb:
-            raise HTTPException(status_code=400, detail="没有找到默认知识库，请先创建知识库")
-        kb_uuid = kb.id
+    # 验证知识库 ID（显式 kb_id 校验归属；缺省回退用户默认知识库）
+    kb = await _resolve_target_kb(db, kb_id, current_user)
+    kb_uuid = kb.id
 
     # 生成上传ID（如果没有提供）
     task_upload_id = upload_id if upload_id else str(uuid.uuid4())
@@ -661,27 +671,8 @@ async def batch_upload(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    if kb_id:
-        try:
-            kb_uuid = uuid.UUID(kb_id)
-            result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid))
-            kb = result.scalars().first()
-            if not kb:
-                raise HTTPException(status_code=400, detail="知识库不存在")
-            require_owner(kb.owner_id, current_user)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="无效的知识库ID")
-    else:
-        result = await db.execute(
-            select(KnowledgeBase).filter(
-                KnowledgeBase.is_default == True,
-                KnowledgeBase.owner_id == current_user.user_id,
-            )
-        )
-        kb = result.scalars().first()
-        if not kb:
-            raise HTTPException(status_code=400, detail="没有找到默认知识库，请先创建知识库")
-        kb_id = str(kb.id)
+    kb = await _resolve_target_kb(db, kb_id, current_user)
+    kb_id = str(kb.id)
 
     from src.services.minio_service import MinioService
 
@@ -1240,36 +1231,15 @@ async def classify_document(
         document_type, topics, domain = await asyncio.to_thread(
             DocumentAnalyzer.analyze_document_content, content
         )
-        
-        type_labels = {
-            "technical": "技术文档",
-            "business": "业务文档",
-            "report": "报告文档",
-            "manual": "操作手册",
-            "policy": "政策文件",
-            "news": "新闻资讯",
-            "other": "其他文档"
-        }
-        
-        domain_labels = {
-            "it": "信息技术",
-            "finance": "金融",
-            "healthcare": "医疗健康",
-            "education": "教育",
-            "legal": "法律",
-            "government": "政府",
-            "enterprise": "企业管理",
-            "other": "其他领域"
-        }
 
         return DocumentClassificationResponse(
             document_type=document_type,
-            document_type_label=type_labels.get(document_type, "其他文档"),
+            document_type_label=TYPE_LABELS.get(document_type, "其他文档"),
             topics=topics,
             domain=domain,
-            domain_label=domain_labels.get(domain, "其他领域"),
+            domain_label=DOMAIN_LABELS.get(domain, "其他领域"),
             confidence=0.85,
-            summary=f"该文档被分类为{type_labels.get(document_type, '其他文档')}，属于{domain_labels.get(domain, '其他领域')}领域"
+            summary=f"该文档被分类为{TYPE_LABELS.get(document_type, '其他文档')}，属于{DOMAIN_LABELS.get(domain, '其他领域')}领域"
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

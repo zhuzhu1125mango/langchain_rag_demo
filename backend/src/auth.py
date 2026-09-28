@@ -294,8 +294,9 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
     except WebSocketDisconnect:
         # 客户端在鉴权前断开，无需再发 close 帧
         raise WebSocketException(code=1008, reason="连接已断开")
-    except Exception:
-        # 非 JSON 帧 / 非 dict 帧
+    except (ValueError, RuntimeError):
+        # 非 JSON 帧（receive_json 抛 JSONDecodeError/ValueError）或二进制帧
+        # （starlette 抛 RuntimeError）；断开/超时已由上方分支单独捕获
         await websocket.close(code=1008, reason="无效的认证帧")
         raise WebSocketException(code=1008, reason="无效的认证帧")
 

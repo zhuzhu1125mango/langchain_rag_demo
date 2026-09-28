@@ -109,7 +109,8 @@ class KnowledgeGraphGenerator:
                                     "label": f"相似({similarity:.2f})",
                                     "weight": similarity
                                 })
-                        except:
+                        except Exception:
+                            # 单对相似度计算失败仅跳过该边（嵌入模型偶发异常），不中断整图构建
                             continue
 
             return {

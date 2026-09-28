@@ -209,6 +209,54 @@ async def send_message(
     }
 
 
+async def _prepare_stream_session(
+    session_id: Optional[str],
+    question: str,
+    kb_ids: Optional[list],
+    user_message_id: str,
+    current_user: CurrentUser,
+) -> Optional[tuple]:
+    """获取或创建流式会话并落库用户消息（W6 #4，独立短会话）。
+
+    Returns:
+        (current_session_id, history) 元组；session_id 指定的会话不存在时返回 None
+        （调用方负责回送 error 事件）。
+    """
+    async with async_session() as db:
+        if session_id:
+            result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(session_id)))
+            session = result.scalar_one_or_none()
+            if not session:
+                return None
+            require_owner(session.user_id, current_user)
+            current_session_id = str(session.id)
+            history = session.messages.copy()
+        else:
+            session = SessionModel(
+                user_id=current_user.user_id,
+                title=question[:50],
+                messages=[],
+                kb_ids=kb_ids or [],
+                updated_at=datetime.now()
+            )
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+            current_session_id = str(session.id)
+            history = []
+
+        # 保存用户消息（原子追加：并发写同一会话不丢消息）
+        await append_session_message(db, session.id, {
+            "id": user_message_id,
+            "role": "user",
+            "content": question,
+            "timestamp": datetime.now().isoformat()
+        })
+        await db.commit()
+        logger.info(f"用户消息保存成功(流式): session={current_session_id}, message_id={user_message_id}")
+        return current_session_id, history
+
+
 @router.post("/stream")
 async def stream_answer(
     request: Request,
@@ -255,45 +303,16 @@ async def stream_answer(
     vector_store = await VectorStoreManager.get_instance()
     rag_chain = await RAGChain.get_instance(vector_store)
 
-    # 获取或创建会话（在独立session中完成，避免StreamingResponse生命周期问题）
-    current_session_id = None
-    history = []
+    # 获取或创建会话 + 落库用户消息（独立短会话；会话不存在时回送 error 事件）
     user_message_id = str(uuid.uuid4())
     assistant_message_id = str(uuid.uuid4())
 
-    async with async_session() as db:
-        if session_id:
-            result = await db.execute(select(SessionModel).filter(SessionModel.id == _parse_session_id(session_id)))
-            session = result.scalar_one_or_none()
-            if not session:
-                async def error_generator():
-                    yield json.dumps({"type": "error", "error": "会话不存在"})
-                return StreamingResponse(error_generator(), media_type="text/event-stream")
-            require_owner(session.user_id, current_user)
-            current_session_id = str(session.id)
-            history = session.messages.copy()
-        else:
-            session = SessionModel(
-                user_id=current_user.user_id,
-                title=question[:50],
-                messages=[],
-                kb_ids=kb_ids or [],
-                updated_at=datetime.now()
-            )
-            db.add(session)
-            await db.commit()
-            await db.refresh(session)
-            current_session_id = str(session.id)
-
-        # 保存用户消息（原子追加：并发写同一会话不丢消息）
-        await append_session_message(db, session.id, {
-            "id": user_message_id,
-            "role": "user",
-            "content": question,
-            "timestamp": datetime.now().isoformat()
-        })
-        await db.commit()
-        logger.info(f"用户消息保存成功(流式): session={current_session_id}, message_id={user_message_id}")
+    prepared = await _prepare_stream_session(session_id, question, kb_ids, user_message_id, current_user)
+    if prepared is None:
+        async def error_generator():
+            yield json.dumps({"type": "error", "error": "会话不存在"})
+        return StreamingResponse(error_generator(), media_type="text/event-stream")
+    current_session_id, history = prepared
 
     # 保存助手消息（流式生成结束或异常时调用）。
     # C7：返回会话是否仍为默认标题，标题生成移到 end 事件之后的后台任务，

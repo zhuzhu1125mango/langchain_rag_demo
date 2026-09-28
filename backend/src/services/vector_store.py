@@ -4,9 +4,15 @@
 供 RAG 链统一使用。
 """
 
+import logging
+
 from langchain_core.documents import Document
+from pymilvus.exceptions import MilvusException
+
 from src.services.milvus_service import MilvusService
 from src.utils.async_singleton import AsyncSingleton
+
+logger = logging.getLogger(__name__)
 
 
 class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
@@ -47,7 +53,9 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
             results = await self.milvus_service.search_hybrid(
                 query, k=k, document_ids=document_ids, kb_ids=kb_ids
             )
-        except Exception:
+        except MilvusException as e:
+            # 仅捕获 Milvus 已知可恢复异常降级纯向量检索；其它异常（配置错误等）上抛
+            logger.warning(f"混合检索失败，降级为纯向量检索: {e}")
             results = await self.milvus_service.search(
                 query, k=k, document_ids=document_ids, kb_ids=kb_ids
             )
