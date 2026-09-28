@@ -679,11 +679,17 @@ pwsh ./scripts/gen_secrets.ps1
 
 1. `pwsh ./scripts/gen_secrets.ps1 -FromEnv .env.prod`（导出存量值）
 2. 从 `.env.prod` 删除已 secrets 化的凭据键（POSTGRES_PASSWORD /
-   MINIO_ROOT_USER / MINIO_ROOT_PASSWORD / REDIS_PASSWORD / SECRET_KEY /
+   MINIO_ROOT_USER / MINIO_ROOT_PASSWORD / MINIO_ACCESS_KEY /
+   MINIO_SECRET_KEY / REDIS_PASSWORD / SECRET_KEY /
    ADMIN_KEY / SEARCH_API_KEY / GF_SECURITY_ADMIN_PASSWORD）
-3. `./scripts/start-prod.sh`（内置预检：9 个 secrets 文件缺失或为空时拒绝启动）
+3. `./scripts/start-prod.sh`（内置预检：9 个 secrets 文件缺失或为空时拒绝启动；
+   注意 backend 镜像需 `--build` 重建才能带上 secrets_dir 逻辑）
 4. 轮换凭据 = 更新对应 secrets 文件 + 重启对应服务（Prometheus 的
    metrics_token 每次抓取重读，无需重启）
+
+> 实施注记（2026-09-27 已切换验证）：若 minio 数据卷先于凭据修复创建，root
+> 凭据轮换后 milvus/backend 以新凭据连接同一数据卷无数据影响（root 全权限）；
+> Grafana 的 `__FILE` 仅在首次初始化 admin 用户时生效，已初始化实例改密码需走 UI。
 
 **/metrics 鉴权（W2-12）**：`metrics_token` 非空时后端 `/metrics` 要求
 `Authorization: Bearer <token>`（hmac 常量时间比较），Prometheus 抓取配置
