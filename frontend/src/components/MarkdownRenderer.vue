@@ -105,9 +105,14 @@ const renderedContent = computed(() => {
       // sup：内联引用上标（cite-ref）；span：highlight.js 代码高亮节点
       'sup', 'span',
       'table', 'thead', 'tbody', 'tr', 'th', 'td'
+    ],
+    // W6 #37：显式属性白名单，移除默认放行的 style（内联样式注入面）；
+    // 取舍：markdown-it 表格对齐依赖 style="text-align"，移除后对齐失效但内容不受影响
+    ALLOWED_ATTR: [
+      'href', 'target', 'rel',
+      'role', 'aria-disabled', 'aria-label', 'tabindex',
+      'class', 'data-cite-index', 'align'
     ]
-    // 属性白名单走 DOMPurify 默认集（ALLOWED_ATTR 仅支持数组形式的严格白名单，
-    // 按标签配置的对象写法会被运行时静默忽略，等于默认行为，故不显式传入）
   })
 })
 

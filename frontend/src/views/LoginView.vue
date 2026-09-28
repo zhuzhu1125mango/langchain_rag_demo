@@ -148,6 +148,20 @@ const rules: FormRules = {
   ]
 }
 
+/**
+ * 认证接口错误 → 用户友好文案（W6 #43）。
+ * 不透出服务端原始 detail（可能是堆栈/内部信息），按状态码映射固定文案。
+ */
+function getAuthErrorMessage(error: unknown, fallback: string): string {
+  const status = (error as { response?: { status?: number } })?.response?.status
+  if (status === 401) return '用户名或密码错误'
+  if (status === 409) return '用户名已存在'
+  if (status === 429) return '尝试次数过多，请稍后再试'
+  if (status && status >= 500) return '服务暂时不可用，请稍后重试'
+  if (!status) return '网络连接失败，请检查网络'
+  return fallback
+}
+
 async function submitLogin() {
   const valid = await loginFormRef.value?.validate().catch(() => false)
   if (!valid) return
@@ -156,8 +170,7 @@ async function submitLogin() {
     await appStore.login(loginForm.username, loginForm.password)
     router.push('/')
   } catch (error: unknown) {
-    const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ElMessage.error(detail || '登录失败，请稍后重试')
+    ElMessage.error(getAuthErrorMessage(error, '登录失败，请稍后重试'))
   } finally {
     submitting.value = false
   }
@@ -172,8 +185,7 @@ async function submitRegister() {
     ElMessage.success('注册成功')
     router.push('/')
   } catch (error: unknown) {
-    const detail = (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-    ElMessage.error(detail || '注册失败，请稍后重试')
+    ElMessage.error(getAuthErrorMessage(error, '注册失败，请稍后重试'))
   } finally {
     submitting.value = false
   }

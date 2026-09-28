@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api } from '@/utils/axios'
 import { setToken, getToken, clearToken } from '@/utils/auth'
+import { useToast } from '@/composables/useToast'
 
 export interface User {
   /** 用户唯一 ID。 */
@@ -100,8 +101,16 @@ export const useAppStore = defineStore('app', () => {
     try {
       const data = await api.get<{ user_id: string; username: string }>('/auth/me')
       currentUser.value = { id: data.user_id, username: data.username }
-    } catch {
-      // 401 已由 axios 拦截器清理 token 并跳转，此处静默
+    } catch (error) {
+      // W6 #40：区分 401 与网络错误。401 时拦截器已清 token 并跳登录页（会 toast），
+      // 此处仅同步登出本地用户态；非 401（网络异常/服务不可用）不清登录态，只提示。
+      const status = (error as { response?: { status?: number } })?.response?.status
+      if (status === 401) {
+        currentUser.value = null
+        clearToken()
+      } else {
+        useToast().error('获取用户信息失败', '请检查网络连接后重试')
+      }
     }
   }
 

@@ -84,7 +84,8 @@ export const STAGE_LABELS: Record<string, string> = {
 /** 查询链路追踪列表（分页 + 过滤）。 */
 export function useTraces(params: MaybeRefOrGetter<TraceListParams>) {
   return useQuery({
-    queryKey: ['traces', params],
+    // W6 #33：params 可能是 getter/对象引用，用 toValue 求值后进 key，保证缓存键为纯数据
+    queryKey: computed(() => ['traces', toValue(params)]),
     queryFn: async (): Promise<TraceListResponse> => {
       const res = await api.get<TraceListResponse>('/traces', { params: toValue(params) })
       return res
@@ -97,7 +98,7 @@ export function useTraces(params: MaybeRefOrGetter<TraceListParams>) {
 export function useTraceDetail(id: MaybeRefOrGetter<string | null>) {
   const enabled = computed(() => !!toValue(id))
   return useQuery({
-    queryKey: ['trace', id],
+    queryKey: computed(() => ['trace', toValue(id)]),
     queryFn: async (): Promise<TraceDetail> => {
       const res = await api.get<TraceDetail>(`/traces/${toValue(id)}`)
       return res

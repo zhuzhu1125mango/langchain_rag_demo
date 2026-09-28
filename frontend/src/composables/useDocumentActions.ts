@@ -4,7 +4,7 @@ import { useKBStore } from '@/stores/kb'
 import { api } from '@/utils/axios'
 import { useDeleteDocument, useBatchDeleteDocuments, useUpdateDocument } from '@/queries/kb'
 import type { Document } from '@/queries/kb'
-import { useToast } from '@/composables/useToast'
+import { useToast, handleMutationError } from '@/composables/useToast'
 import type { Ref } from 'vue'
 
 /**
@@ -61,7 +61,7 @@ export function useDocumentActions(documentsData: Ref<{ items?: Document[] } | n
         },
         onError: (error) => {
           // 如果API失败，恢复文档列表
-          toast.error('删除失败', error instanceof Error ? error.message : '未知错误')
+          handleMutationError(error, '删除失败')
           queryClient.invalidateQueries({ queryKey: ['documents'] })
           queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
         }
@@ -77,7 +77,7 @@ export function useDocumentActions(documentsData: Ref<{ items?: Document[] } | n
         toast.success('重新处理任务已提交', response.message || '文档将在后台重新处理')
         queryClient.invalidateQueries({ queryKey: ['documents'] })
       } catch (error) {
-        toast.error('重新处理失败', error instanceof Error ? error.message : '未知错误')
+        handleMutationError(error, '重新处理失败')
       }
     }
   }
@@ -108,7 +108,7 @@ export function useDocumentActions(documentsData: Ref<{ items?: Document[] } | n
         },
         onError: (error) => {
           // 如果API失败，恢复文档列表
-          toast.error('批量删除失败', error instanceof Error ? error.message : '未知错误')
+          handleMutationError(error, '批量删除失败')
           queryClient.invalidateQueries({ queryKey: ['documents'] })
           queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
         }
@@ -128,7 +128,7 @@ export function useDocumentActions(documentsData: Ref<{ items?: Document[] } | n
         toast.success(`文档已成功${newStatusText}`)
       },
       onError: (error: unknown) => {
-        toast.error(`${newStatusText}失败`, error instanceof Error ? error.message : '未知错误')
+        handleMutationError(error, `${newStatusText}失败`)
       }
     })
   }

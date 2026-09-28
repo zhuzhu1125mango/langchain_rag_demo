@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { Session, Message } from '@/queries/chat'
-import { useGetQuickQuestions } from '@/queries/chat'
+import { getQuickQuestions } from '@/queries/chat'
 import { generateId } from '@/utils/id'
 
 export interface QuestionHistoryItem {
@@ -88,7 +88,6 @@ export const useChatStore = defineStore('chat', () => {
   /** 从后端加载推荐快捷问题。 */
   async function loadQuickQuestions() {
     try {
-      const getQuickQuestions = useGetQuickQuestions()
       const questions = await getQuickQuestions()
       if (questions && questions.length > 0) {
         quickQuestions.value = questions

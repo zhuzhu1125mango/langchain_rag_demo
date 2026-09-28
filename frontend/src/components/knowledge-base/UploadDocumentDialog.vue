@@ -125,6 +125,26 @@ const isUploading = ref(false)
 const currentUploadFile = ref('')
 const uploadMessage = ref('')
 const wsConnections = ref<Map<string, WebSocket>>(new Map())
+
+// W6 #44：前端上传预校验常量。大小上限与后端 config.processing.MAX_UPLOAD_SIZE_MB（默认 100）对齐
+const MAX_FILE_SIZE_MB = 100
+const MAX_FILE_SIZE = MAX_FILE_SIZE_MB * 1024 * 1024
+/** 单次上传文件数量上限，防止批量上传占满后台处理队列 */
+const MAX_FILE_COUNT = 20
+/** 与 <input accept> 一致的支持类型列表（小写扩展名） */
+const ALLOWED_EXTENSIONS = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.md', '.txt', '.csv', '.json', '.html', '.epub']
+
+/** 单文件校验：返回错误提示文案，通过则返回 null。 */
+function validateFile(file: File): string | null {
+  const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+  if (!ALLOWED_EXTENSIONS.includes(ext)) {
+    return `不支持的文件类型 ${ext || '(无扩展名)'}`
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    return `超过大小上限 ${MAX_FILE_SIZE_MB} MB`
+  }
+  return null
+}
 // D6 修复：当前上传任务的 AbortController。共享同一 controller——取消后后续文件
 // 循环通过 signal.aborted 提前跳出，不再继续上传。
 let uploadAbortController: AbortController | null = null
@@ -140,11 +160,35 @@ function onVisibleChange(val: boolean): void {
   }
 }
 
-/** 文件选择后将文件加入待上传列表。 */
+/** 文件选择后校验并将合法文件加入待上传列表（W6 #44：类型/大小/数量即时提示）。 */
 function onFileSelect(event: Event): void {
   const target = event.target as HTMLInputElement
   const files = Array.from(target.files || [])
-  selectedFiles.value = [...selectedFiles.value, ...files]
+
+  const rejected: string[] = []
+  const accepted: File[] = []
+  for (const file of files) {
+    const reason = validateFile(file)
+    if (reason) {
+      rejected.push(`${file.name}（${reason}）`)
+    } else {
+      accepted.push(file)
+    }
+  }
+  if (rejected.length > 0) {
+    toast.warning('部分文件未通过校验', rejected.join('；'))
+  }
+
+  // 数量上限：超出部分丢弃并提示
+  const remaining = MAX_FILE_COUNT - selectedFiles.value.length
+  if (accepted.length > remaining) {
+    const dropped = accepted.splice(remaining)
+    toast.warning(`最多同时上传 ${MAX_FILE_COUNT} 个文件`, `已忽略：${dropped.map(f => f.name).join('、')}`)
+  }
+
+  selectedFiles.value = [...selectedFiles.value, ...accepted]
+  // 允许重复选择同一文件：清空 input.value 使 change 事件可再次触发
+  target.value = ''
 }
 
 /** 从待上传列表中移除指定文件。 */

@@ -25,16 +25,10 @@
           {{ source.index }}
         </span>
 
-        <!-- 来源类型图标 / favicon：web 优先显示网站 favicon，加载失败回退到 Globe 图标 -->
+        <!-- 来源类型图标：web 与文档分别使用本地图标（W6 #38：移除第三方 favicon 请求，
+             避免向 google.com/s2 泄露用户浏览行为） -->
         <div class="flex-shrink-0 mt-0.5 flex items-center text-gray-500 dark:text-gray-400">
-          <img
-            v-if="source.source_type === 'web' && source.url && !failedFaviconUrls.includes(source.url)"
-            :src="getFaviconUrl(source.url)"
-            alt=""
-            class="w-4 h-4 rounded-sm"
-            @error="onFaviconError(source.url)"
-          />
-          <Globe v-else-if="source.source_type === 'web'" class="w-4 h-4" />
+          <Globe v-if="source.source_type === 'web'" class="w-4 h-4" />
           <FileText v-else class="w-4 h-4" />
         </div>
 
@@ -89,7 +83,7 @@
 /**
  * 消息来源展示组件
  * @description 参考主流模型（ChatGPT/Perplexity/Kimi）的来源展示样式，以浅色卡片形式
- * 展示在助手气泡外部。支持编号徽章、来源类型图标（web favicon / 文档图标）、
+ * 展示在助手气泡外部。支持编号徽章、来源类型图标（web/文档本地图标）、
  * 命中片段预览、相关性分数可视化、来源去重、超过阈值折叠展开、深色模式与键盘可访问。
  *
  * @props sources - 当前消息的来源列表（来自 SSE end 事件或历史会话加载）
@@ -112,16 +106,6 @@ const collapseThreshold = 3
 
 /** 是否已展开全部来源 */
 const expanded = ref(false)
-
-/** favicon 加载失败的 URL 列表，用于回退到默认 Globe 图标 */
-const failedFaviconUrls = ref<string[]>([])
-
-/** favicon 加载失败时记录 URL，触发响应式更新回退到默认图标 */
-function onFaviconError(url: string): void {
-  if (!failedFaviconUrls.value.includes(url)) {
-    failedFaviconUrls.value = [...failedFaviconUrls.value, url]
-  }
-}
 
 /** 按规则去重：web 按 url，kb 按 document_id+chunk_index，回退按 source。保持原顺序。 */
 const dedupedSources = computed<MessageSource[]>(() => {
@@ -147,16 +131,6 @@ function getSourceKey(source: MessageSource): string {
   if (source.source_type === 'web' && source.url) return `web:${source.url}`
   if (source.document_id) return `kb:${source.document_id}:${source.chunk_index ?? 0}`
   return `kb:${source.source}:${source.chunk_index ?? 0}`
-}
-
-/** 获取 favicon URL（Google S2 服务，在线环境有效，离线或加载失败时回退到默认图标） */
-function getFaviconUrl(url: string): string {
-  try {
-    const domain = new URL(url).hostname
-    return `https://www.google.com/s2/favicons?domain=${domain}&sz=32`
-  } catch {
-    return ''
-  }
 }
 
 /** 获取来源标题：web 取 title，kb 取 document_name */

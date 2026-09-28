@@ -159,18 +159,33 @@ async function renameSession(): Promise<void> {
 }
 
 /** 二次确认后删除单个会话，若删除的是当前选中项则清空选中状态。 */
-function deleteSession(session: Session): void {
-  if (confirm(`确定要删除对话 "${session.title || '未命名对话'}" 吗？`)) {
-    deleteMutation.mutate(session.id)
-    if (selectedSession.value?.id === session.id) {
-      selectedSession.value = null
-    }
+async function deleteSession(session: Session): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除对话 "${session.title || '未命名对话'}" 吗？`,
+      '删除对话',
+      { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  deleteMutation.mutate(session.id)
+  if (selectedSession.value?.id === session.id) {
+    selectedSession.value = null
   }
 }
 
 /** 二次确认后批量删除全部会话并清空选中状态，操作不可恢复。 */
-function clearAllHistory(): void {
-  if (!confirm('确定要清空所有历史对话吗？此操作不可恢复。')) return
+async function clearAllHistory(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      `确定要清空全部 ${sessionsData.value?.length ?? 0} 条历史对话吗？此操作不可恢复。`,
+      '清空历史对话',
+      { confirmButtonText: '清空', cancelButtonText: '取消', type: 'warning' }
+    )
+  } catch {
+    return
+  }
   const ids = sessionsData.value?.map(s => s.id) || []
   if (ids.length === 0) return
   batchDeleteMutation.mutate(ids)

@@ -71,3 +71,14 @@ export function useToast() {
     removeToast
   }
 }
+
+/**
+ * 统一处理 mutation/query 失败提示（W6 #35）。
+ *
+ * Error 实例（含 AxiosError）取其 message，其余值用兜底文案，
+ * 消除各处 `error instanceof Error ? error.message : '未知错误'` 重复样板。
+ */
+export function handleMutationError(error: unknown, title: string, fallback = '未知错误'): void {
+  const message = error instanceof Error ? error.message : fallback
+  addToast({ type: 'error', title, message })
+}

@@ -163,10 +163,11 @@ export function useDocuments(params: Record<string, unknown> = {}, options: Reco
   })
 
   return useQuery({
-    queryKey: ['documents', effectiveParams],
-    queryFn: async ({ queryKey }: { queryKey: unknown[] }): Promise<DocumentListResponse> => {
-      const [, queryParams] = queryKey as [string, Record<string, unknown>]
-      const data = await api.get<DocumentListResponse | Document[]>('/documents/', { params: queryParams })
+    // W6 #32：整个 key 用 computed 包裹，hash 输入始终是纯数据（数组+扁平对象），
+    // 避免 key 中直接嵌响应式对象导致缓存键稳定性差
+    queryKey: computed(() => ['documents', effectiveParams.value]),
+    queryFn: async (): Promise<DocumentListResponse> => {
+      const data = await api.get<DocumentListResponse | Document[]>('/documents/', { params: effectiveParams.value })
       if (Array.isArray(data)) {
         return { items: data, total: data.length }
       }

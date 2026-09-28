@@ -217,7 +217,7 @@
 import { ref, watch } from 'vue'
 import { Tags, Database, Award, Copy, FileText } from '@lucide/vue'
 import { api } from '@/utils/axios'
-import { useToast } from '@/composables/useToast'
+import { useToast, handleMutationError } from '@/composables/useToast'
 import { getQualityGradeClass, getQualityTextClass } from './utils'
 import type { Document } from '@/queries/kb'
 
@@ -296,7 +296,7 @@ async function classifyDocument(doc: Document): Promise<void> {
     classifyResult.value = response
     toast.success('分类完成')
   } catch (error) {
-    toast.error('分类失败', error instanceof Error ? error.message : '未知错误')
+    handleMutationError(error, '分类失败')
   } finally {
     isClassifying.value = false
   }
@@ -313,7 +313,7 @@ async function evaluateQuality(doc: Document): Promise<void> {
     qualityResult.value = response
     toast.success('质量评估完成')
   } catch (error) {
-    toast.error('质量评估失败', error instanceof Error ? error.message : '未知错误')
+    handleMutationError(error, '质量评估失败')
   } finally {
     isEvaluating.value = false
   }
@@ -338,7 +338,7 @@ async function detectDuplicates(doc: Document): Promise<void> {
       toast.success(`检测到 ${response.length} 个相似文档`)
     }
   } catch (error) {
-    toast.error('重复检测失败', error instanceof Error ? error.message : '未知错误')
+    handleMutationError(error, '重复检测失败')
   } finally {
     isDetectingDuplicates.value = false
   }

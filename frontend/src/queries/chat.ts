@@ -204,12 +204,10 @@ export interface QuickQuestionsResponse {
   quick_questions: string[]
 }
 
-/** 获取首页快捷问题列表。 */
-export function useGetQuickQuestions() {
-  return async function getQuickQuestions(): Promise<string[]> {
-    const data = await api.get<QuickQuestionsResponse>('/sessions/quick_questions')
-    return data.quick_questions
-  }
+/** 获取首页快捷问题列表（低频一次性拉取，直接函数调用不走缓存）。 */
+export async function getQuickQuestions(): Promise<string[]> {
+  const data = await api.get<QuickQuestionsResponse>('/sessions/quick_questions')
+  return data.quick_questions
 }
 
 export interface RewriteResponse {

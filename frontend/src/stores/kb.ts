@@ -111,9 +111,13 @@ export const useKBStore = defineStore('kb', () => {
     }
   }
 
-  /** 设置当前选中的知识库，传 null 表示取消选中。 */
+  /** 设置当前选中的知识库，传 null 表示取消选中；切换目标时清空文档选择（W6 #34：避免残留上个知识库的文档勾选）。 */
   function setCurrentKB(kb: KnowledgeBase | null) {
+    const changed = currentKB.value?.id !== kb?.id
     currentKB.value = kb
+    if (changed) {
+      clearSelection()
+    }
   }
 
   return {

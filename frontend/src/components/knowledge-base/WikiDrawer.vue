@@ -158,7 +158,7 @@ import { ElMessageBox } from 'element-plus'
 import { RefreshCw, Loader2, BookOpen, ChevronDown, Stethoscope, X } from '@lucide/vue'
 import { buildWsUrl } from '@/utils/ws'
 import { getToken } from '@/utils/auth'
-import { useToast } from '@/composables/useToast'
+import { useToast, handleMutationError } from '@/composables/useToast'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import {
   useWikiPages,
@@ -214,7 +214,7 @@ async function onLint(): Promise<void> {
   try {
     lintReport.value = await fetchWikiLint(props.kbId)
   } catch (error) {
-    toast.error('体检失败', error instanceof Error ? error.message : '未知错误')
+    handleMutationError(error, '体检失败')
   } finally {
     lintLoading.value = false
   }
@@ -272,7 +272,7 @@ async function togglePage(page: WikiPageSummary): Promise<void> {
       expandedContent.value = data.content
     }
   } catch (error) {
-    toast.error('正文加载失败', error instanceof Error ? error.message : '未知错误')
+    handleMutationError(error, '正文加载失败')
   } finally {
     contentLoading.value = false
   }
@@ -299,7 +299,7 @@ async function onRebuild(): Promise<void> {
     rebuildMessage.value = result.message
     trackRebuildProgress(result.upload_id)
   } catch (error) {
-    toast.error('重编译提交失败', error instanceof Error ? error.message : '未知错误')
+    handleMutationError(error, '重编译提交失败')
   }
 }
 

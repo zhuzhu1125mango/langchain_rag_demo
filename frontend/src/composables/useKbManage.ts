@@ -7,7 +7,7 @@ import {
   useDeleteKnowledgeBase,
   useBatchDeleteKnowledgeBases
 } from '@/queries/kb'
-import { useToast } from '@/composables/useToast'
+import { useToast, handleMutationError } from '@/composables/useToast'
 import { ElMessageBox } from 'element-plus'
 import type { Ref } from 'vue'
 
@@ -56,7 +56,7 @@ export function useKbManage(currentKB: Ref<{ id: string; name: string; descripti
         }
       },
       onError: (error) => {
-        toast.error('创建失败', error instanceof Error ? error.message : '未知错误')
+        handleMutationError(error, '创建失败')
       }
     })
   }
@@ -90,7 +90,7 @@ export function useKbManage(currentKB: Ref<{ id: string; name: string; descripti
         queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
       },
       onError: (error) => {
-        toast.error('更新失败', error instanceof Error ? error.message : '未知错误')
+        handleMutationError(error, '更新失败')
       }
     })
   }
@@ -108,7 +108,7 @@ export function useKbManage(currentKB: Ref<{ id: string; name: string; descripti
           queryClient.invalidateQueries({ queryKey: ['documents'] })
         },
         onError: (error) => {
-          toast.error('删除失败', error instanceof Error ? error.message : '未知错误')
+          handleMutationError(error, '删除失败')
         }
       })
     }
@@ -152,7 +152,7 @@ export function useKbManage(currentKB: Ref<{ id: string; name: string; descripti
         queryClient.invalidateQueries({ queryKey: ['documents'] })
       },
       onError: (error) => {
-        toast.error('批量删除失败', error instanceof Error ? error.message : '未知错误')
+        handleMutationError(error, '批量删除失败')
         queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
       }
     })

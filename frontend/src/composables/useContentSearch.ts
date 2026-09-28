@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { useKBStore } from '@/stores/kb'
 import { useSearchDocuments } from '@/queries/kb'
 import type { SearchResult } from '@/queries/kb'
-import { useToast } from '@/composables/useToast'
+import { useToast, handleMutationError } from '@/composables/useToast'
 import type { Ref } from 'vue'
 
 /**
@@ -35,7 +35,7 @@ export function useContentSearch(currentKBId: Ref<string | undefined>) {
         toast.info('未找到匹配的文档内容')
       }
     } catch (error) {
-      toast.error('搜索失败', error instanceof Error ? error.message : '未知错误')
+      handleMutationError(error, '搜索失败')
       searchResults.value = []
     } finally {
       isSearching.value = false

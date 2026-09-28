@@ -1,9 +1,31 @@
 import axios from 'axios'
 import type { AxiosRequestConfig, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { getToken, setToken, clearToken } from '@/utils/auth'
+import { useToast } from '@/composables/useToast'
 
 const MAX_RETRIES = 3
 const RETRY_DELAY = 2000
+
+/**
+ * 401 兜底跳转登录页（W6 #39）。
+ *
+ * 用动态 import 取 router 实例：axios 与 router 存在静态导入环
+ * （router/index.ts import tryRefreshToken from '@/utils/axios'），
+ * 动态加载打破循环且仅在 401 场景触发。整页 location.href 跳转会
+ * 丢失 SPA 状态，改用 Vue Router 导航；已在登录页则不重复导航。
+ */
+async function redirectToLogin(): Promise<void> {
+  useToast().error('登录已过期', '请重新登录')
+  try {
+    const { default: router } = await import('@/router')
+    if (router.currentRoute.value.name !== 'Login') {
+      await router.push({ name: 'Login' })
+    }
+  } catch {
+    // router 加载失败时退回整页跳转，保证最终仍在登录页
+    window.location.href = '/login'
+  }
+}
 
 /**
  * 全局 Axios 实例。
@@ -111,7 +133,7 @@ api.interceptors.response.use(
           }
         }
         clearToken()
-        window.location.href = '/login'
+        void redirectToLogin()
       }
       return Promise.reject(error)
     }
