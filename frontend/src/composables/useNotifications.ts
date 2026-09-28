@@ -78,7 +78,6 @@ export function useWebSocketNotifications() {
       ws = new WebSocket(wsUrl)
 
       ws.onopen = () => {
-        console.log('[WebSocket] Connected, sending auth frame')
         // 首帧鉴权：api_key 不再走 URL query（避免进反向代理访问日志），
         // 连接建立后立即发送 auth 帧（token 与 api_key 二选一，均空时
         // 开发模式服务端会不经校验直接回发 auth_ok）。
@@ -98,13 +97,11 @@ export function useWebSocketNotifications() {
           // 首帧鉴权结果：通过后启动心跳；未通过场景由服务端以 1008 关闭
           if (notification.type === 'auth_ok') {
             isConnected.value = true
-            console.log('[WebSocket] Authenticated')
             startHeartbeat()
             return
           }
 
           if (notification.type === 'connected') {
-            console.log('[WebSocket] Subscribed to channels:', notification.channels)
             subscribedChannels.value = notification.channels || []
           } else {
             handleNotification(notification)
@@ -116,7 +113,6 @@ export function useWebSocketNotifications() {
 
       ws.onclose = (event) => {
         isConnected.value = false
-        console.log('[WebSocket] Disconnected')
         stopHeartbeat()
 
         // 认证失败（1008 Policy Violation）时标记失败并提示，不再重连

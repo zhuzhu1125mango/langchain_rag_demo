@@ -23,9 +23,31 @@
  */
 import { computed, onMounted, ref } from 'vue'
 import MarkdownIt from 'markdown-it'
-import hljs from 'highlight.js'
+// W6 #50：highlight.js 全量打包含 190+ 语言（约 1MB+ min），改为 core + 常用语言注册，
+// highlightAuto 也只在已注册语言中检测，体积与检测耗时同步下降
+import hljs from 'highlight.js/lib/core'
+import type { LanguageFn } from 'highlight.js'
+import python from 'highlight.js/lib/languages/python'
+import javascript from 'highlight.js/lib/languages/javascript'
+import typescript from 'highlight.js/lib/languages/typescript'
+import json from 'highlight.js/lib/languages/json'
+import bash from 'highlight.js/lib/languages/bash'
+import sql from 'highlight.js/lib/languages/sql'
+import yaml from 'highlight.js/lib/languages/yaml'
+import xml from 'highlight.js/lib/languages/xml'
+import css from 'highlight.js/lib/languages/css'
+import markdown from 'highlight.js/lib/languages/markdown'
+import java from 'highlight.js/lib/languages/java'
+import go from 'highlight.js/lib/languages/go'
 import DOMPurify from 'dompurify'
 import type { MessageSource } from '@/queries/chat'
+
+const REGISTERED_LANGUAGES: Record<string, LanguageFn> = {
+  python, javascript, typescript, json, bash, sql, yaml, xml, css, markdown, java, go
+}
+for (const [name, lang] of Object.entries(REGISTERED_LANGUAGES)) {
+  hljs.registerLanguage(name, lang)
+}
 
 const props = defineProps<{
   content: string

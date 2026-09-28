@@ -350,8 +350,7 @@ onMounted(() => {
   // 监听知识库列表变更
   onNotification({
     type: ['kb_list_changed', 'kb_created', 'kb_updated', 'kb_deleted'],
-    handler: (notification) => {
-      console.log('[KB View] KB notification received:', notification)
+    handler: () => {
       queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
     }
   })
@@ -360,7 +359,6 @@ onMounted(() => {
   onNotification({
     type: ['doc_list_changed', 'doc_created', 'doc_deleted'],
     handler: (notification) => {
-      console.log('[KB View] Doc notification received:', notification)
       queryClient.invalidateQueries({ queryKey: ['documents'] })
       queryClient.invalidateQueries({ queryKey: ['knowledge_bases'] })
 

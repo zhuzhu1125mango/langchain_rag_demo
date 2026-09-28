@@ -34,5 +34,16 @@ export default defineConfigWithVueTs(
 
   ...pluginOxlint.buildFromOxlintConfigFile('.oxlintrc.json'),
 
+  {
+    // W6 #61：严格化基础规则——禁止 console 调试输出（保留 warn/error）与 any；
+    // 需要临时输出时使用 console.error/warn 或显式 eslint-disable 并注明原因
+    name: 'app/strict-rules',
+    files: ['**/*.{vue,ts,mts,tsx}'],
+    rules: {
+      'no-console': ['error', { allow: ['warn', 'error'] }],
+      'no-debugger': 'error',
+    },
+  },
+
   skipFormatting,
 )

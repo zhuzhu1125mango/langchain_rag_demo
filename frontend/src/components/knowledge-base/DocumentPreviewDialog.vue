@@ -51,6 +51,31 @@
 import { ref, watch } from 'vue'
 import { api } from '@/utils/axios'
 
+// W6 #49：预览内容 LRU 缓存（模块级，跨弹窗开关保留）。key 为 docId+page，
+// 上限 50 条超出淘汰最旧——预览是高频翻页只读操作，缓存消除翻页重复请求。
+const PREVIEW_CACHE_LIMIT = 50
+const previewCache = new Map<string, { content: string; total_pages: number; filename?: string }>()
+
+function cacheGet(key: string) {
+  const hit = previewCache.get(key)
+  if (hit) {
+    // 触碰即刷新插入顺序，实现 LRU 淘汰
+    previewCache.delete(key)
+    previewCache.set(key, hit)
+  }
+  return hit
+}
+
+function cacheSet(key: string, value: { content: string; total_pages: number; filename?: string }) {
+  previewCache.set(key, value)
+  if (previewCache.size > PREVIEW_CACHE_LIMIT) {
+    const oldest = previewCache.keys().next().value
+    if (oldest !== undefined) {
+      previewCache.delete(oldest)
+    }
+  }
+}
+
 const props = defineProps<{
   visible: boolean
   docId: string
@@ -81,16 +106,27 @@ watch([() => props.visible, () => props.docId], ([isVisible, docId]) => {
   }
 })
 
-/** 加载文档预览的指定分页内容。 */
+/** 加载文档预览的指定分页内容（命中缓存直接渲染，不发请求）。 */
 async function loadPreviewPage(targetPage: number): Promise<void> {
   if (!props.docId) return
   if (targetPage < 1 || (targetPage > totalPages.value && totalPages.value > 0) || loading.value) return
+
+  const cached = cacheGet(`${props.docId}:${targetPage}`)
+  if (cached) {
+    page.value = targetPage
+    content.value = cached.content
+    totalPages.value = cached.total_pages
+    if (cached.filename) {
+      displayFilename.value = cached.filename
+    }
+    return
+  }
 
   page.value = targetPage
   loading.value = true
 
   try {
-    // 按需分页预览，无需缓存，故直接调用 api 而未走 query hook
+    // 按需分页预览 + LRU 缓存（W6 #49），翻页回看不重复请求
     const response = await api.get<{ content: string; total_pages: number; filename?: string }>(
       `/documents/${props.docId}/preview`,
       { params: { page: targetPage, page_size: 2000 } }
@@ -100,6 +136,7 @@ async function loadPreviewPage(targetPage: number): Promise<void> {
     if (response.filename) {
       displayFilename.value = response.filename
     }
+    cacheSet(`${props.docId}:${targetPage}`, response)
   } catch (error) {
     content.value = `预览失败: ${error instanceof Error ? error.message : '未知错误'}`
     totalPages.value = 1

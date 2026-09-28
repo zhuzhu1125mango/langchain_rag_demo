@@ -55,10 +55,6 @@ export function useDocumentActions(documentsData: Ref<{ items?: Document[] } | n
 
       // 调用API删除
       deleteMutation.mutate(doc.id, {
-        onSuccess: () => {
-          // API已返回，但后端是异步删除
-          console.log('[Delete] Delete task submitted')
-        },
         onError: (error) => {
           // 如果API失败，恢复文档列表
           handleMutationError(error, '删除失败')
@@ -102,10 +98,6 @@ export function useDocumentActions(documentsData: Ref<{ items?: Document[] } | n
 
       // 调用API删除
       batchDeleteMutation.mutate(ids, {
-        onSuccess: () => {
-          // API已返回，但后端是异步删除
-          console.log('[Batch Delete] Delete tasks submitted')
-        },
         onError: (error) => {
           // 如果API失败，恢复文档列表
           handleMutationError(error, '批量删除失败')

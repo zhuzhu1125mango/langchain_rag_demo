@@ -246,10 +246,22 @@ export interface ClassifyResponse {
 
 /** 对用户问题进行类型分类。 */
 export function useClassifyQuestion() {
+  // W6 #52：后端返回宽泛 string，此处做运行时枚举校验替代直接断言，
+  // 未知类型回退 EXPLORATORY，防止脏数据流入 UI 分支
   return useMutation({
     mutationFn: async (question: string): Promise<QuestionClassification> => {
       const res = await api.post<ClassifyResponse>('/chat/classify', { question })
-      return res as QuestionClassification
+      const validTypes: QuestionClassification['type'][] = [
+        'FACTUAL', 'OPINION', 'OPERATIONAL', 'EXPLANATORY', 'COMPARATIVE', 'EXPLORATORY'
+      ]
+      return {
+        type: validTypes.includes(res.type as QuestionClassification['type'])
+          ? (res.type as QuestionClassification['type'])
+          : 'EXPLORATORY',
+        subtype: res.subtype,
+        confidence: res.confidence,
+        description: res.description
+      }
     }
   })
 }

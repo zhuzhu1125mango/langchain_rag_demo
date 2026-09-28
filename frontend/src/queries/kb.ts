@@ -189,8 +189,13 @@ export function useKnowledgeBases() {
     queryKey: ['knowledge_bases'],
     queryFn: async (): Promise<KnowledgeBase[]> => {
       // 传大 page_size 一次性获取全部，前端无翻页 UI
-      const data = await api.get<KnowledgeBaseListResponse>('/knowledge_bases/', { params: { page_size: 1000 } })
-      return data.items || data as unknown as KnowledgeBase[]
+      // W6 #53：接口可能返回包装对象或直接返回数组（旧版兼容），
+      // 用运行时 Array.isArray 守卫替代 `as unknown as` 双重断言
+      const data = await api.get<KnowledgeBaseListResponse | KnowledgeBase[]>('/knowledge_bases/', { params: { page_size: 1000 } })
+      if (Array.isArray(data)) {
+        return data
+      }
+      return data.items || []
     },
     staleTime: 0,
     refetchOnWindowFocus: true

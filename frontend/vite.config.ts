@@ -5,8 +5,11 @@
  * - 注册 @vitejs/plugin-vue 插件以支持 .vue 单文件组件；
  * - 配置路径别名 `@` 指向 src 目录，便于模块导入；
  * - 开发服务器监听 5173 端口，并将 `/api` 请求代理到后端
- *   （默认 http://localhost:8000，可通过 VITE_API_BASE_URL 覆盖），
+ *   （默认 http://localhost:8000，可通过 BACKEND_PROXY_TARGET 覆盖），
  *   同时开启 ws 代理以支持 WebSocket（如文档上传进度通道）。
+ *
+ * 注意：代理目标是 node 侧配置，不进入浏览器产物，按 W6 #58 使用
+ * 非 VITE_ 前缀命名，避免与客户端可见变量混淆。
  */
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -31,7 +34,7 @@ export default defineConfig({
     },
     proxy: {
       '/api': {
-        target: process.env.VITE_API_BASE_URL || 'http://localhost:8000',
+        target: process.env.BACKEND_PROXY_TARGET || 'http://localhost:8000',
         changeOrigin: true,
         ws: true,
         followRedirects: true

@@ -239,7 +239,7 @@ async function uploadFiles(): Promise<void> {
       formData.append('file', file as File)
 
       uploadMessage.value = '正在上传...'
-      const response = await api.post('/documents/upload', formData, {
+      await api.post('/documents/upload', formData, {
         params: { kb_id: kbId, upload_id: uploadId },
         timeout: 30000, // 减小超时时间，因为现在是异步处理
         signal: uploadAbortController.signal, // D6：取消上传时 abort 进行中的 HTTP 请求
@@ -253,7 +253,6 @@ async function uploadFiles(): Promise<void> {
 
       // API立即返回，但文档在后台处理
       successCount++
-      console.log('[Upload] File uploaded, processing in background:', response)
 
     } catch (error) {
       // D6：用户主动取消时不视为失败文件

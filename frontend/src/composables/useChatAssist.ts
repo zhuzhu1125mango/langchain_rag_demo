@@ -35,8 +35,13 @@ export function useChatAssist(options: {
   // fetchSuggestions 与 fetchKBRecommendations 各自独立防抖计时器：
   // 二者共用同一 timer 时后调用的函数会清掉前者刚注册的定时器（D1），
   // 导致 /api/chat/suggestions 永不发出。拆分为独立变量，互不干扰。
+  // W6 #48：配对请求序号——快速输入时旧请求响应晚到会覆盖新结果（stale
+  // response），序号不一致的响应直接丢弃。未用 AbortController 因
+  // mutation（mutateAsync）不支持 signal，序号守卫等效且无取消噪音。
   let suggestionDebounceTimer: ReturnType<typeof setTimeout> | null = null
   let kbRecommendDebounceTimer: ReturnType<typeof setTimeout> | null = null
+  let suggestionSeq = 0
+  let kbRecommendSeq = 0
 
   const getSuggestions = useGetSuggestions()
   const rewriteQuestionMutation = useRewriteQuestion()
@@ -122,12 +127,16 @@ export function useChatAssist(options: {
     }
 
     kbRecommendDebounceTimer = setTimeout(async () => {
+      const seq = ++kbRecommendSeq
       try {
         const result = await recommendKBsMutation.mutateAsync({ question, top_k: 3 })
+        if (seq !== kbRecommendSeq) return
         kbRecommendations.value = result
       } catch (error) {
         console.error('获取知识库推荐失败:', error)
-        kbRecommendations.value = []
+        if (seq === kbRecommendSeq) {
+          kbRecommendations.value = []
+        }
       }
     }, 800)
   }
@@ -146,15 +155,19 @@ export function useChatAssist(options: {
     }
 
     suggestionDebounceTimer = setTimeout(async () => {
+      const seq = ++suggestionSeq
       isGeneratingSuggestions.value = true
 
       try {
         const result = await getSuggestions(question, undefined, selectedKBs.value.length > 0 ? selectedKBs.value : undefined)
+        if (seq !== suggestionSeq) return
         suggestions.value = result
       } catch (error) {
         console.error('获取推荐问题失败:', error)
       } finally {
-        isGeneratingSuggestions.value = false
+        if (seq === suggestionSeq) {
+          isGeneratingSuggestions.value = false
+        }
       }
     }, 500)
   }

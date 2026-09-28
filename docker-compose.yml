@@ -165,7 +165,7 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "80:80"                                        # nginx 默认 HTTP 端口
+      - "80:8080"                                      # 容器内 nginx 非 root 监听 8080（W6 #60），宿主仍为 80
 
   # prometheus — 指标采集与存储
   prometheus:

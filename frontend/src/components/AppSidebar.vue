@@ -132,6 +132,7 @@
  * 主题切换与侧边栏收起/展开。折叠态宽度 64px，展开态宽度 256px。
  */
 import { computed } from 'vue'
+import type { Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
@@ -196,8 +197,8 @@ interface MenuItem {
   path: string
   /** 显示文本 */
   label: string
-  /** 图标组件 */
-  icon: unknown
+  /** 图标组件（W6 #55：lucide 图标均为 Vue 组件，用 Component 替代 unknown） */
+  icon: Component
 }
 
 const menuItems: MenuItem[] = [

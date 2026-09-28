@@ -34,6 +34,7 @@
  * （常规/分类/标签/学习引擎/A/B实验/反馈统计）。
  */
 import { useRoute, useRouter } from 'vue-router'
+import type { Component } from 'vue'
 import { Settings, FolderOpen, Tags, Cpu, BarChart3, FlaskConical } from '@lucide/vue'
 
 const route = useRoute()
@@ -43,7 +44,8 @@ interface MenuItem {
   name: string
   path: string
   label: string
-  icon: unknown
+  /** 图标组件（W6 #55：lucide 图标均为 Vue 组件，用 Component 替代 unknown） */
+  icon: Component
 }
 
 const menuItems: MenuItem[] = [
