@@ -1,6 +1,6 @@
 # 演进方向调研：从 RAG 问答到自进化知识运行时（2026-09-23）
 
-> 状态：草稿（待确认后按"设计先行 → 确认后实施"执行）
+> 状态：**已确认（2026-09-29 owner 拍板，四阶段路线转正）**——立项与执行顺序见 [special-projects-2026-09.md](special-projects-2026-09.md)；阶段一于覆盖率专项 D 完成后启动，L3 critic 反思独立灰度，MCP 分发边界建议本机/局域网起步（待最终采纳）
 > 背景：owner 提出——本想借鉴 Claude Code 的 Wiki 模式但不确定是否合适；希望项目不再只是 RAG，向更全面、跟随主流或有创意的方向演进。
 > 方法：Web 实际调研（Claude Code wiki 生态、DeepWiki、agentic RAG / context engineering / agent memory 2026 主流格局），结合本项目 A/B 实证与代码现状。
 
