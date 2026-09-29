@@ -12,7 +12,7 @@ import json
 import uuid
 from typing import List, Optional
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Path, Depends
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Query, Path, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.websockets import WebSocketState
