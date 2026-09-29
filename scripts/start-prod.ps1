@@ -427,7 +427,7 @@ function Print-AccessInfo {
     Write-Host "${Bold}========================================${Reset}"
     Write-Host ""
     Write-Host "  ${Cyan}前端 & API${Reset}"
-    Write-Host "    前端页面     : http://localhost:80"
+    Write-Host "    前端页面     : http://localhost:8080（宿主 80 被外部 nginx 占用）"
     Write-Host "    Backend API  : http://localhost:8001（仅回环绑定）"
     Write-Host "    API 文档     : http://localhost:8001/docs"
     Write-Host ""

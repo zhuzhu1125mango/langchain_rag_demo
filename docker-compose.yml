@@ -166,7 +166,9 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /var/cache/nginx
+      # Docker 29 起 tmpfs 挂载点不再默认 1777 放行，须显式属主给 nginx-unprivileged 的 uid 101，
+      # 否则 nginx 启动时 mkdir /var/cache/nginx/client_temp 报 Permission denied（崩溃循环）
+      - /var/cache/nginx:uid=101,gid=0,mode=755
     cap_drop:
       - ALL
     deploy:
@@ -178,7 +180,8 @@ services:
       backend:
         condition: service_healthy
     ports:
-      - "80:8080"                                      # 容器内 nginx 非 root 监听 8080（W6 #60），宿主仍为 80
+      - "8080:8080"                                    # 容器内 nginx 非 root 监听 8080（W6 #60）；宿主 80 被外部
+                                                       # Windows nginx 服务（其它项目）占用，改用 8080（2026-09-29）
 
   # prometheus — 指标采集与存储
   prometheus:

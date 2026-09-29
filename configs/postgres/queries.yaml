@@ -41,51 +41,7 @@ pg_stat_statements:
         usage: "COUNTER"
         description: "Number of shared blocks written"
 
-pg_stat_database:
-  query: "SELECT datname, numbackends, xact_commit, xact_rollback, blks_read, blks_hit, tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted, conflicts, temp_files, temp_bytes, deadlocks FROM pg_stat_database WHERE datname = current_database()"
-  metrics:
-    - datname:
-        usage: "LABEL"
-        description: "Database name"
-    - numbackends:
-        usage: "GAUGE"
-        description: "Number of backends connected to this database"
-    - xact_commit:
-        usage: "COUNTER"
-        description: "Number of transactions committed"
-    - xact_rollback:
-        usage: "COUNTER"
-        description: "Number of transactions rolled back"
-    - blks_read:
-        usage: "COUNTER"
-        description: "Number of disk blocks read"
-    - blks_hit:
-        usage: "COUNTER"
-        description: "Number of buffer hits"
-    - tup_returned:
-        usage: "COUNTER"
-        description: "Number of tuples returned"
-    - tup_fetched:
-        usage: "COUNTER"
-        description: "Number of tuples fetched"
-    - tup_inserted:
-        usage: "COUNTER"
-        description: "Number of tuples inserted"
-    - tup_updated:
-        usage: "COUNTER"
-        description: "Number of tuples updated"
-    - tup_deleted:
-        usage: "COUNTER"
-        description: "Number of tuples deleted"
-    - conflicts:
-        usage: "COUNTER"
-        description: "Number of conflicts"
-    - temp_files:
-        usage: "COUNTER"
-        description: "Number of temporary files created"
-    - temp_bytes:
-        usage: "COUNTER"
-        description: "Total bytes written to temporary files"
-    - deadlocks:
-        usage: "COUNTER"
-        description: "Number of deadlocks detected"
+# pg_stat_database 段已删除（2026-09-29）：postgres_exporter 0.16+ 内置 pg_stat_database
+# 收集器（含 help 语义更准确的 pg_stat_database_* 指标），自定义同名指标 help 不一致会导致
+# Prometheus client 冲突 → /metrics 每次抓取 500（56 errors = 14 指标 × 4 库）→ 容器 unhealthy。
+# pg_stat_statements 自定义段保留：内置 stat_statements 收集器需显式开启，此段为兼容现状。

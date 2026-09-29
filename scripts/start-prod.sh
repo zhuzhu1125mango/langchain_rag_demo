@@ -416,7 +416,7 @@ print_access_info() {
     echo -e "${BOLD}========================================${NC}"
     echo ""
     echo -e "  ${CYAN}前端 & API${NC}"
-    echo "    前端页面     : http://localhost:80"
+    echo "    前端页面     : http://localhost:8080（宿主 80 被外部 nginx 占用）"
     echo "    Backend API  : http://localhost:8001（仅回环绑定）"
     echo "    API 文档     : http://localhost:8001/docs"
     echo ""

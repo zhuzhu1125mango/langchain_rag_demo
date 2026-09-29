@@ -641,10 +641,11 @@ TITLE_GENERATION_MODEL=
 
 #### 6.8.1 TLS 终结建议（W6 #72）
 
-生产前端 nginx 监听 80（容器内 8080）为纯 HTTP，且未启用 HTTP/2 与证书管理。
+生产前端 nginx（容器内监听 8080，非 root；宿主映射见 compose）为纯 HTTP，且未启用 HTTP/2 与证书管理。
 推荐不在应用容器内配置 TLS，而是由**前置反向代理或 CDN 承担 TLS 终结**：
 前置层（Nginx/Caddy/Traefik/云 LB）负责 443 证书与 HTTP→HTTPS 跳转，
-经内网 HTTP 转发到 frontend 容器的 8080 端口（宿主 80，见 compose 映射）。应用侧安全头
+经内网 HTTP 转发到 frontend 容器的 8080 端口（宿主映射见 compose，本机因宿主
+80 被外部 nginx 服务占用改绑 8080）。应用侧安全头
 （X-Frame-Options/X-Content-Type-Options/Referrer-Policy/CSP，W6 #59）
 已由 nginx.conf 下发，前置层无需重复添加；若前置层也注入 HSTS 需确认
 与内网明文跳转策略一致。
