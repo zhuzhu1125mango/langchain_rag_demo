@@ -141,15 +141,22 @@ run_preflight_checks() {
 # Load Environment Variables
 # ==============================================================================
 
+# 展示用非敏感键（W6 #76：不再 source 整个 env 文件——凭据不进脚本环境/不导出
+# 给子进程；compose 经 --env-file 自行读取同一文件，无需 shell 导出）
+DEV_DISPLAY_KEYS=(POSTGRES_DB POSTGRES_USER MINIO_ROOT_USER)
+
 load_env_vars() {
     log_step "2/5" "加载环境变量..."
 
-    # Source the .env.dev file（用于脚本内展示；compose 经 --env-file 自行读取同一文件）
-    set -a
-    source "$ENV_FILE"
-    set +a
+    for key in "${DEV_DISPLAY_KEYS[@]}"; do
+        local value
+        value=$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- | tr -d '"')
+        if [[ -n "$value" ]]; then
+            declare -g "$key=$value"
+        fi
+    done
 
-    log_ok "环境变量已加载"
+    log_ok "环境变量已加载（仅非敏感展示键）"
     echo ""
 }
 

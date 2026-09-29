@@ -99,6 +99,8 @@ export interface Message {
   role: 'user' | 'assistant'
   /** 消息文本内容。 */
   content: string
+  /** 消息级错误（W6 #41：SSE/请求失败写入此字段渲染专用错误卡片，不污染正文）。 */
+  error?: string
   /** 检索来源列表。 */
   sources?: MessageSource[]
   /** 用户反馈，rating 为评分，reason 为可选理由。 */

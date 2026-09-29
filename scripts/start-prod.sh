@@ -53,15 +53,15 @@ ENV_NAME="PRODUCTION"
 MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-180}
 WAIT_INTERVAL=${WAIT_INTERVAL:-5}
 
-# Required variables for production
+# Required variables for production（W6 #76：仅非敏感必需键——凭据已迁
+# Docker Secrets（W2-11），由 check_secrets 校验 secrets 文件，不再出现在
+# .env.prod；APP_ENV/OLLAMA_HOST 由 compose environment 段显式注入，不在此列。
+# 此处校验 env 键缺失/弱值，防止漏配导致容器异常）
 REQUIRED_VARS=(
-    "POSTGRES_PASSWORD"
-    "MINIO_ROOT_PASSWORD"
-    "MINIO_SECRET_KEY"
-    "GF_SECURITY_ADMIN_PASSWORD"
-    "SECRET_KEY"
-    # SearXNG 已弃用（Tavily 替代），SEARCH_API_KEY 由搜索模块运行时读取
-    "REDIS_PASSWORD"
+    "POSTGRES_USER"
+    "POSTGRES_DB"
+    "MINIO_ENDPOINT"
+    "MINIO_SECURE"
 )
 
 # ==============================================================================
@@ -183,16 +183,15 @@ run_preflight_checks() {
 
 run_security_checks() {
     log_step "2/7" "执行安全检查..."
-    
-    # Temporarily load env file to check variables
-    set -a
-    source "$ENV_FILE"
-    set +a
-    
+
     local has_issues=false
-    
+
+    # W6 #76：逐键解析 REQUIRED_VARS（不 source 整个 env 文件——避免把全部
+    # 变量（含潜在敏感值）导入 shell 环境并导出给子进程；compose 经
+    # --env-file 自行读取同一文件，无需 shell 导出）
     for var in "${REQUIRED_VARS[@]}"; do
-        local value="${!var:-}"
+        local value
+        value=$(grep -E "^${var}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- | tr -d '"')
         if [[ -z "$value" ]]; then
             log_error "变量 $var 未设置或为空"
             has_issues=true
@@ -220,12 +219,17 @@ run_security_checks() {
 load_env_vars() {
     log_step "3/7" "加载环境变量..."
 
-    # Source the .env.prod file（用于脚本内展示；compose 经 --env-file 自行读取同一文件）
-    set -a
-    source "$ENV_FILE"
-    set +a
+    # W6 #76：仅解析访问信息展示需要的非敏感键（不 source 整个 env 文件，
+    # 凭据不进脚本环境；compose 经 --env-file 自行读取同一文件）
+    for key in POSTGRES_DB POSTGRES_USER; do
+        local value
+        value=$(grep -E "^${key}=" "$ENV_FILE" | tail -n 1 | cut -d= -f2- | tr -d '"')
+        if [[ -n "$value" ]]; then
+            declare -g "$key=$value"
+        fi
+    done
 
-    log_ok "环境变量已加载"
+    log_ok "环境变量已加载（仅非敏感展示键）"
     echo ""
 }
 

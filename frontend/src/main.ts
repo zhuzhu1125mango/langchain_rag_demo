@@ -15,6 +15,12 @@ import './style.css'
 const app = createApp(App)
 const pinia = createPinia()
 
+// W6 #42：全局错误兜底——事件处理器内未捕获的异步错误不走 ErrorBoundary
+//（onErrorCaptured 只捕获渲染/生命周期），此处统一记录，不让错误静默丢失
+app.config.errorHandler = (err, _instance, info) => {
+  console.error(`[GlobalErrorHandler] ${info}:`, err)
+}
+
 app.use(pinia)
 app.use(router)
 app.use(ElementPlus)

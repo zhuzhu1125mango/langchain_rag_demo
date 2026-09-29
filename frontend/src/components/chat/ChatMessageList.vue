@@ -60,6 +60,16 @@
               <span class="w-2 h-2 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 300ms"></span>
             </div>
           </template>
+          <!-- W6 #41：消息级错误专用卡片（不再把错误文案写进 Markdown 正文） -->
+          <template v-else-if="message.error">
+            <div class="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+              <AlertTriangle class="w-4 h-4 flex-shrink-0 text-red-500 dark:text-red-400 mt-0.5" />
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-red-700 dark:text-red-300">回答生成失败</p>
+                <p class="text-xs text-red-600/80 dark:text-red-400/80 mt-0.5 break-words">{{ message.error }}</p>
+              </div>
+            </div>
+          </template>
           <template v-else>
             <MarkdownRenderer :content="message.content" :sources="message.sources" @cite-click="onCiteClick(message, $event)" />
           </template>
@@ -141,7 +151,7 @@
  * @expose scrollToBottom - 仅在接近底部时自动滚动到最新消息，避免打断用户回看历史
  */
 import { ref, computed, nextTick } from 'vue'
-import { Bot, Star, Copy, Check, RefreshCw } from '@lucide/vue'
+import { Bot, Star, Copy, Check, RefreshCw, AlertTriangle } from '@lucide/vue'
 import type { Message, MessageSource } from '@/queries/chat'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import MessageSources from '@/components/chat/MessageSources.vue'

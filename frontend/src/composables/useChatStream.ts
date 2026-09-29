@@ -263,7 +263,7 @@ export function useChatStream(options: UseChatStreamOptions) {
             cancelReasoningRaf()
             searchStatus.value = 'idle'
             closeStream()
-            chatStore.updateMessage(lastMsg.id, { content: `⚠ 错误: ${data.error}`, isLoading: false })
+            chatStore.updateMessage(lastMsg.id, { error: `服务端错误: ${data.error}`, isLoading: false })
           }
         } catch {
           cancelReasoningRaf()
@@ -272,7 +272,7 @@ export function useChatStream(options: UseChatStreamOptions) {
           if (!receivedContent) {
             const lastMsg = chatStore.messages[chatStore.messages.length - 1]
             if (lastMsg) {
-              chatStore.updateMessage(lastMsg.id, { content: '⚠ 服务端响应解析失败', isLoading: false })
+              chatStore.updateMessage(lastMsg.id, { error: '服务端响应解析失败', isLoading: false })
             }
           }
         }
@@ -296,7 +296,7 @@ export function useChatStream(options: UseChatStreamOptions) {
           // 非 JSON 错误体，忽略
         }
         chatStore.updateMessage(assistantMsgId, {
-          content: `⚠ 请求失败 (${response.status})${detail}`,
+          error: `请求失败 (${response.status})${detail}`,
           isLoading: false
         })
         return
@@ -305,7 +305,7 @@ export function useChatStream(options: UseChatStreamOptions) {
       if (!response.body) {
         closeStream()
         searchStatus.value = 'idle'
-        chatStore.updateMessage(assistantMsgId, { content: '⚠ 服务端不支持流式响应', isLoading: false })
+        chatStore.updateMessage(assistantMsgId, { error: '服务端不支持流式响应', isLoading: false })
         return
       }
 
@@ -343,7 +343,7 @@ export function useChatStream(options: UseChatStreamOptions) {
         searchStatus.value = 'idle'
         const lastMsg = chatStore.messages[chatStore.messages.length - 1]
         if (lastMsg) {
-          chatStore.updateMessage(lastMsg.id, { content: '⚠ 连接断开，无法获取响应', isLoading: false })
+          chatStore.updateMessage(lastMsg.id, { error: '连接断开，无法获取响应', isLoading: false })
         }
       }
     } catch (error) {
@@ -351,7 +351,8 @@ export function useChatStream(options: UseChatStreamOptions) {
       chatStore.addMessage({
         id: generateId(),
         role: 'assistant',
-        content: `⚠ 发送失败: ${error instanceof Error ? error.message : '未知错误'}`
+        content: '',
+        error: `发送失败: ${error instanceof Error ? error.message : '未知错误'}`
       })
     }
   }
