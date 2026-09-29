@@ -93,10 +93,14 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 | Job | 内容 | 关键点 |
 |---|---|---|
 | env-consistency | 用 `.env.example` 生成占位 env 校验键集合一致 | `.env.dev/.env.prod` 被 gitignore 不入库；脚本对缺失文件容错跳过 |
-| backend-unit | `uv sync --frozen` + pytest 单测 | 干净安装，暴露隐性依赖缺失 |
-| backend-integration | docker run 启动 MinIO(pgsty fork)/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码 |
+| lint | backend ruff（`uvx ruff --select E9,F63,F7,F82`）+ 前端 eslint / typecheck | 真错误级规则集，零风格噪音；runner 无预装 uvx，须先 setup-uv |
+| secrets-scan | gitleaks `detect --no-git --redact` | 只扫工作树不扫历史；误报按 fingerprint 登记到 `.gitleaksignore` 并注明原因 |
+| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | `--cov-fail-under=58`（基线 61%，随覆盖提升收紧）；干净安装暴露隐性依赖缺失 |
+| backend-integration | docker run 启动 MinIO(pgsty fork)/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码；pytest-timeout 120s 防挂死 + step timeout-minutes 40 |
 | rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json；另有信息性多查询 A/B 步骤（continue-on-error，非卡点） |
-| frontend | pnpm build | 依赖变更时需 `--build` 重建镜像 |
+| frontend | pnpm 单测（覆盖率阈值）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
+
+全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限。
 
 ## 4. 已知踩坑记录（改代码前先看）
 
@@ -109,6 +113,11 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 7. **沙箱删除限制**：PowerShell `Remove-Item` 对部分 site-packages 文件可能 Access denied，改用 .NET API `[System.IO.File]::Delete` / `[System.IO.Directory]::Delete`
 8. **scripts 目录脚本运行方式**：`scripts/` 下脚本（如 `run_agent_ab.py`）需用 `python -m scripts.run_agent_ab`（把 backend 加入 sys.path）运行；直接 `python scripts/xxx.py` 会 `ModuleNotFoundError: src`
 9. **pydantic-settings List[str] 解析**：.env 中 List 类型按 JSON 解析；对 CORS 等列表配置已加 `field_validator(mode="before")` 支持逗号分隔，新增 List 配置键时注意同样处理
+10. **vue-tsc --noEmit 是空检查假绿**：根 tsconfig（references + 空 files）上跑 `--noEmit` 不检查任何文件；类型检查必须用 `pnpm typecheck`（`vue-tsc -b`）——曾因假绿漏过模板解构缺失导致 CI Frontend Build 失败
+11. **vitest coverage 版本耦合**：`@vitest/coverage-v8` 大版本必须与 vitest 一致（5.x 配 vitest 4 启动即报 `coverageFilesDirectory is required`）；v8 provider 对 .vue SFC sourcemap 映射失真会稀释覆盖率，配置 include 收窄到逻辑层目录
+12. **本机代理 Fake-IP 陷阱**：Clash 类代理的 Fake-IP 模式把外网域名解析到 198.18.0.0/15（is_private=True）→ `validate_url_safe` 判受限，联网搜索在本机开代理时不可用（环境限制非缺陷）；URL 安全测试需 mock `getaddrinfo` 消除对真实 DNS 的依赖
+13. **宿主端口占用静默失效**：本地已有 redis（如 WSL 内实例）占 6379 时，docker compose 的端口发布可能静默不生效（容器正常跑但 `docker port` 为空、宿主连到的是另一个无密码实例）；排查用 `docker port <容器>` 与 `netstat` 对照，勿假设 compose ports 必然生效
+14. **GHA runner 无预装 uv/uvx**：CI 里用 `uvx ruff` 等必须先 `astral-sh/setup-uv`；PowerShell 不支持 bash heredoc，Windows 本地写多行 commit message 用 `git commit -F <文件>`
 
 ## 5. 代码约定
 

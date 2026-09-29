@@ -49,13 +49,13 @@ docs/
 │   ├── agent-evolution.md
 │   ├── agent-ab-evaluation.md
 │   ├── evolution-research-2026-09.md
-│   ├── wiki-navigable-workspace.md
-│   └── fix-plan-2026-09-24.md
-└── archive/             # 归档（一次性报告）
+│   └── wiki-navigable-workspace.md
+└── archive/             # 归档（一次性报告、已收官计划）
     ├── code-review-2026-08.md      # 代码审查报告（已全部修复）
     ├── code-review-2026-09.md      # 代码审查报告（4 项阻断问题已修复；文档漂移已全量回写）
     ├── code-review-2026-09-23.md   # 代码审查报告（P0×1 + P1×5 + P2×17；P1 已修复入库）
-    └── code-review-2026-09-24.md   # 代码审查报告（处理中）
+    ├── code-review-2026-09-24.md   # 代码审查报告（已全部修复：W1~W6 全部落地）
+    └── fix-plan-2026-09-24.md      # 四份评审综合修复计划（2026-09-29 收官，78 项 P2 全部落账）
 ```
 
 ## design/ 文档状态表
@@ -77,7 +77,7 @@ docs/
 | [agent-ab-evaluation.md](design/agent-ab-evaluation.md) | 已执行验收 | A/B 两臂 live 对比完成（2026-09-14），结果与未达标项见 §7.1 |
 | [evolution-research-2026-09.md](design/evolution-research-2026-09.md) | 草稿 | 演进方向调研（2026-09-23）：从 RAG 问答到自进化知识运行时，含四阶段路线；待确认后实施 |
 | [wiki-navigable-workspace.md](design/wiki-navigable-workspace.md) | 已实施 | 阶段一：Wiki 升级为 Agent 可导航工作空间（D1/D3/D4 落地；D2/D5 经 A/B 证伪后回退默认值，见 §10） |
-| [fix-plan-2026-09-24.md](design/fix-plan-2026-09-24.md) | 执行中 | 四份评审综合修复计划（W0 用户操作 / W1 P0 / W2 安全 / W3 部署 / W4-W5 债务），进度以条目 ✅ 为准 |
+| [fix-plan-2026-09-24.md](archive/fix-plan-2026-09-24.md) | 已归档 | 四份评审综合修复计划（2026-09-29 收官：W0-2 完成、W1~W5 全部完成、W6 八个批次完成，78 项 P2 全部落账）；剩余仅用户侧操作 W0-1/W0-3，见文档头部状态 |
 
 ## 按场景查找
 
