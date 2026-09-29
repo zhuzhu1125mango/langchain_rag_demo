@@ -39,14 +39,14 @@ $script:EnvName = "PRODUCTION"
 $script:MaxWaitSeconds = $env:MAX_WAIT_SECONDS ? [int]$env:MAX_WAIT_SECONDS : 180
 $script:WaitInterval = $env:WAIT_INTERVAL ? [int]$env:WAIT_INTERVAL : 5
 
-# Required variables for production
+# Required variables for production（W6 #76 同步 bash 版：仅非敏感必需键——
+# 凭据已迁 Docker Secrets（W2-11）由 secrets 文件承载，不再出现在 .env.prod；
+# APP_ENV/OLLAMA_HOST 由 compose environment 段显式注入，不在此列）
 $script:RequiredVars = @(
-    "POSTGRES_PASSWORD"
-    "MINIO_ROOT_PASSWORD"
-    "MINIO_SECRET_KEY"
-    "REDIS_PASSWORD"
-    "GF_SECURITY_ADMIN_PASSWORD"
-    "SECRET_KEY"
+    "POSTGRES_USER"
+    "POSTGRES_DB"
+    "MINIO_ENDPOINT"
+    "MINIO_SECURE"
 )
 
 # ==============================================================================
@@ -246,6 +246,40 @@ function Load-EnvVars {
 # Start Docker Compose Services
 # ==============================================================================
 
+function Check-Secrets {
+    # Docker Secrets 预检（W2-11/W6 #76，与 start-prod.sh 的 check_secrets 对齐）：
+    # 生产凭据经 ./secrets/ 挂载 /run/secrets/<名称>，缺失/为空时 compose up 必失败，
+    # 此处提前拦截并给出生成命令
+    Write-Step "3.5/7" "检查 Docker Secrets 文件..."
+
+    $secretsDir = Join-Path $script:ScriptDir "../secrets"
+    $required = @(
+        "postgres_password", "minio_root_user", "minio_root_password", "redis_password",
+        "secret_key", "admin_key", "search_api_key", "metrics_token", "grafana_admin_password"
+    )
+    $missing = @()
+
+    foreach ($name in $required) {
+        $path = Join-Path $secretsDir $name
+        if (-not (Test-Path $path) -or (Get-Item $path).Length -eq 0) {
+            $missing += $name
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        Write-Err "以下 secrets 文件缺失或为空（./secrets/ 目录）:"
+        foreach ($name in $missing) {
+            Write-Host "    - $name"
+        }
+        Write-Info "生成命令: pwsh ./scripts/gen_secrets.ps1 -FromEnv .env.prod"
+        Write-Info "（随机生成则省略参数，同时完成凭据轮换）"
+        exit 1
+    }
+
+    Write-OK "全部 $($required.Count) 个 secrets 文件就绪"
+    Write-Host ""
+}
+
 function Start-Services {
     Write-Step "4/7" "启动 Docker Compose 服务..."
     Write-Info "拉取/构建镜像中，请耐心等待..."
@@ -436,6 +470,7 @@ function Main {
     Invoke-PreflightChecks
     Invoke-SecurityChecks
     Load-EnvVars
+    Check-Secrets
     Start-Services
     $healthResult = Wait-ForHealth
     Invoke-DatabaseMigration

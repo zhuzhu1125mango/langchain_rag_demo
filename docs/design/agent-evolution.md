@@ -253,6 +253,13 @@ AGENT_TOOLS_ENABLED=web_search,fetch_webpage,kb_search,wiki_lookup,calculator
 
 ### 9.4 运行时联调（灰度开启后，2026-09-11）
 
+> **灰度转正（2026-09-29，W6 收官评估）**：`AGENT_ORCHESTRATOR_ENABLED` config 默认值
+> False → True。依据：A/B live 验收 PASS（§9.7/§9.9，hit/mrr/recall=1.0，2 项 semantic
+> 未达标已用宽松口径解决、1 项为 4GB VRAM 硬件约束非代码问题）+ 生产实跑（.env.prod
+> 显式 true）无回归；有界循环自带降级链（空输出/污染 → Phase 2 → LLM 直答）。
+> `AGENT_PLAN_ENABLED` 维持默认关（无独立 live 灰度数据，仅 AGENT_RESEARCH/复杂 web
+> 触发，建议生产手动开启观察后再定）。
+
 **环境**：dev 栈（backend-dev 容器 + 宿主机 Ollama，qwen3:4b 4GB VRAM），新建测试知识库并上传员工手册类文档（4 chunks），以 `search_mode=function_calling` + `kb_ids` 触发 Agent 混合模式。
 
 **验证通过的链路**：

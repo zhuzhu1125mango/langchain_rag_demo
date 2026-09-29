@@ -357,7 +357,10 @@ class SearchSettings(BaseSettings):
     SEARCH_AGENT_NATIVE_FC: bool = True
 
     # Agent 演进（P2 有界循环，默认关闭灰度开启）
-    AGENT_ORCHESTRATOR_ENABLED: bool = False
+    # W6 灰度转正（2026-09-29）：A/B live 验收 PASS（agent-ab-evaluation §7.1，
+    # hit/mrr/recall=1.0）+ 生产实跑无回归，默认改开（有界循环自带降级链：
+    # 空输出/污染 → Phase 2 搜索 → LLM 直答）
+    AGENT_ORCHESTRATOR_ENABLED: bool = True
     AGENT_TIME_BUDGET_MS: int = 30000          # 循环时间预算（毫秒）
     AGENT_OBS_MAX_CHARS: int = 2000            # 单工具观察截断字符数
     AGENT_TOOLS_ENABLED: str = "web_search,fetch_webpage,kb_search,wiki_lookup,calculator"

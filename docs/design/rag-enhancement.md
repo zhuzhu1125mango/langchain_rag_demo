@@ -615,7 +615,7 @@ TITLE_GENERATION_MODEL=
 > **14 项已落地**，仅剩 2 项未做：前端上传界面的分块策略选择、Grafana 监控面板
 > （详见上方各阶段的勾选状态）。
 
-剩余可推进项：
+剩余可推进项（2026-09-29 复核更新）：
 
-1. 前端上传界面暴露分块策略选择（当前由 `document_processor.py` 按扩展名自动推断，用户无法干预）。
-2. 补齐 Grafana 面板（当前仅有 datasource provisioning，无任何 dashboard），与 `docs/guide/monitoring.md` 描述对齐。
+1. 前端上传界面暴露分块策略选择（当前由 `document_processor.py` 按扩展名自动推断，用户无法干预）。**仍待做**。
+2. ~~补齐 Grafana 面板~~——**已完成，本节结论过期**（2026-09-29 核实）：`configs/grafana/dashboards/rag_overview.json` 已有 7 个实质面板（QPS/错误率/P95 延迟/LLM 延迟/LLM 错误率/Milvus 查询延迟/服务存活），datasources + dashboards provider + 面板目录三处 provisioning 挂载齐全（W1-E 修复），生产 compose 已挂载生效。

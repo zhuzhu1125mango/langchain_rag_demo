@@ -136,9 +136,10 @@ docker-compose.override.yml
 # as it contains project's test suite
 
 # =============== Sensitive Files ===============
+# minio.license（MinIO 许可凭证，含账号/容量字段）：2026-09-29 决策移出 Git
+# 跟踪、本地保留（运行时无引用；新环境部署需从安全渠道分发此文件）
 minio.license
 *.license
-!configs/license/*.license
 *.key
 *.pem
 credentials.json

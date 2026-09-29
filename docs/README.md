@@ -63,7 +63,7 @@ docs/
 | 文档 | 状态 | 说明 |
 |---|---|---|
 | [improvement-roadmap.md](design/improvement-roadmap.md) | 部分实施 | 执行计划；P0-1/P1-1/P1-2/P1-3 及 P2-3~P2-6 已完成（多查询检索经 A/B 评估保持默认关闭），进度以各条目 ✅ 标记为准 |
-| [rag-enhancement.md](design/rag-enhancement.md) | 部分实施 | 混合检索/重排序/评估闭环/意图路由已落地；分阶段进度并入 roadmap 推进 |
+| [rag-enhancement.md](design/rag-enhancement.md) | 部分实施 | 混合检索/重排序/评估闭环/意图路由已落地（16 项中 15 项完成，剩前端分块策略选择）；分阶段进度并入 roadmap 推进 |
 | [intent-router-upgrade.md](design/intent-router-upgrade.md) | 已实施 | `backend/src/services/intent_router/`（LLMRouter / ConfidenceGate / 历史上下文增强） |
 | [search-optimization.md](design/search-optimization.md) | 已实施 | 通用联网搜索链路优化（Query 改写 / 引用补全 / AnswerVerifier）；逐项核对见 §5.1 |
 | [price-trustworthiness.md](design/price-trustworthiness.md) | 已实施 | 垂类结构化工具（金价/汇率/天气/时间）已落地于 `backend/src/services/tools/plugins/` |
