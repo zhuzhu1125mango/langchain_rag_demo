@@ -19,11 +19,13 @@ export default mergeConfig(
         include: ['src/utils/**/*.ts', 'src/stores/**/*.ts', 'src/composables/**/*.ts', 'src/queries/**/*.ts'],
         exclude: ['src/**/__tests__/**'],
         thresholds: {
-          // 实测基线 6.94/5.39/7.47/6.46，取略低于基线值防抖动；随覆盖提升收紧
-          statements: 6,
-          branches: 5,
-          functions: 7,
-          lines: 6,
+          // 专项 D3（2026-09-30）：6/5/7/6 → 10/8/12/10。CI 实测基线
+          // 11.33/9.07/14.01/10.83（54 tests，HEAD 态），各留约 1~2 点缓冲防抖动；
+          // 上调必须单向、禁止回退；每次补测批次后上调 3~5 点（special-projects-2026-09.md §D3）
+          statements: 10,
+          branches: 8,
+          functions: 12,
+          lines: 10,
         },
       },
     },

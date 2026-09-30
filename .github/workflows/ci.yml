@@ -137,9 +137,10 @@ jobs:
         run: uv sync --frozen
 
       # 默认即跳过 integration / e2e 标记（conftest.py 控制），CI 无需外部服务。
-      # W6 #65：覆盖率卡点——实测基线 61%，fail-under 留缓冲 58%，随覆盖提升收紧
+      # W6 #65：覆盖率卡点。专项 D2（2026-09-30）：fail_under 收敛至 backend/pyproject.toml
+      # [tool.coverage.report]（单一事实来源，当前 60，实测基线 60.95%），此处只保留 --cov
       - name: Run unit tests
-        run: uv run pytest -q --cov=src --cov-report=term --cov-fail-under=58
+        run: uv run pytest -q --cov=src --cov-report=term
 
   backend-integration:
     name: Backend Integration Tests
@@ -344,9 +345,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 单元测试：utils / store / 组件冒烟（vitest + jsdom）
+      # 单元测试：utils / store / 组件冒烟（vitest + jsdom）。
+      # 专项 D1（2026-09-30）：补齐覆盖率卡点缺口——阈值在 vitest.config.ts 一直存在
+      # 但 CI 从未带 --coverage，从未生效过；现显式启用，低于阈值非零退出卡点
       - name: Run unit tests
-        run: pnpm run test:unit
+        run: pnpm exec vitest run --coverage
 
       # build 脚本本身包含 vue-tsc -b 类型检查
       - name: Build
