@@ -19,13 +19,15 @@ export default mergeConfig(
         include: ['src/utils/**/*.ts', 'src/stores/**/*.ts', 'src/composables/**/*.ts', 'src/queries/**/*.ts'],
         exclude: ['src/**/__tests__/**'],
         thresholds: {
-          // 专项 D3（2026-09-30）：6/5/7/6 → 10/8/12/10。CI 实测基线
-          // 11.33/9.07/14.01/10.83（54 tests，HEAD 态），各留约 1~2 点缓冲防抖动；
-          // 上调必须单向、禁止回退；每次补测批次后上调 3~5 点（special-projects-2026-09.md §D3）
-          statements: 10,
-          branches: 8,
-          functions: 12,
-          lines: 10,
+          // 专项 D3/D4（2026-09-30）：6/5/7/6 → 10/8/12/10 → 32/35/24/31。
+          // D4 补测（useChatStream/useNotifications/trace +34 用例）后 CI 态实测
+          // 基线 35/38.01/27.1/34.31——本批为基线跃升（+23 点），按「新基线-3 点
+          // 缓冲」设定而非 3~5 点步进（步进会使阈值长期脱离实际）；后续批次恢复
+          // 步进上调。上调必须单向、禁止回退（special-projects-2026-09.md §D3）
+          statements: 32,
+          branches: 35,
+          functions: 24,
+          lines: 31,
         },
       },
     },
