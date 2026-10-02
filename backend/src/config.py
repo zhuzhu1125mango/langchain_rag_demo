@@ -140,6 +140,14 @@ class SecuritySettings(SecretsFirstMixin, BaseSettings):
     METRICS_TOKEN: str = ""
     # 是否开放 /api/auth/register 注册接口（关闭后仅能由已有账号或直接写库建号）
     AUTH_ALLOW_REGISTRATION: bool = True
+    # 用户级 API Key（E.6，阶段二 MCP 前置）：每用户可发放/吊销自己的 Key，
+    # 认证链在全局 API_KEY 未命中时解析出真实 user_id（owner 隔离与 JWT 一致）。
+    # 关闭时认证链跳过该分支（零开销）、/auth/api-keys 端点 404。
+    USER_API_KEYS_ENABLED: bool = False
+    # 每用户有效（未吊销）Key 数量上限
+    USER_API_KEYS_MAX_PER_USER: int = 5
+    # /auth/api-keys 发放端点限流（次/分/IP），沿用自研滑动窗口；0 = 不限流
+    AUTH_RATE_LIMIT_API_KEY_CREATE: int = 5
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 

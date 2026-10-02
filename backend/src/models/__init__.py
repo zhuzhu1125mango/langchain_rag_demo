@@ -15,6 +15,7 @@ from .experiment import (
 )
 from .badcase import Badcase
 from .user import User
+from .user_api_key import UserApiKey
 from .request_trace import RequestTrace
 from .wiki_page import WikiPage
 from .audit_log import AuditLog
@@ -37,5 +38,6 @@ __all__ = [
     "ExperimentResult",
     "Badcase",
     "User",
+    "UserApiKey",
     "WikiPage",
 ]

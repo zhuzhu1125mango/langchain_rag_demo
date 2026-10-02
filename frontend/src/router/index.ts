@@ -82,6 +82,12 @@ const routes: RouteRecordRaw[] = [
         name: 'SettingsFeedback',
         component: () => import('@/views/Settings/FeedbackView.vue'),
         meta: { title: '反馈统计' }
+      },
+      {
+        path: 'api-keys',
+        name: 'SettingsApiKeys',
+        component: () => import('@/views/Settings/ApiKeysView.vue'),
+        meta: { title: 'API 密钥' }
       }
     ]
   }

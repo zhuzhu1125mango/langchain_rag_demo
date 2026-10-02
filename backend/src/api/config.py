@@ -215,5 +215,14 @@ async def get_system_info():
             "chunk_size": 512,
             "chunk_overlap": 64,
             "top_k": 3
-        }
+        },
+        # E.6：前端设置页据此渲染「API 密钥」功能未启用空态与达上限禁用
+        "user_api_keys_enabled": bool(
+            getattr(settings, "USER_API_KEYS_ENABLED", None)
+            or getattr(settings.security, "USER_API_KEYS_ENABLED", False)
+        ),
+        "user_api_keys_max_per_user": int(
+            getattr(settings, "USER_API_KEYS_MAX_PER_USER", None)
+            or getattr(settings.security, "USER_API_KEYS_MAX_PER_USER", 5)
+        )
     }

@@ -208,7 +208,7 @@
 4. **MCP 分发边界 📋 建议按 owner 反馈修正（2026-09-29，多用户形态，待最终确认）**：初版"本机/局域网个人使用"建议被 owner 否决（项目是多人使用，且 stdio + 共享机器凭据与"多用户数据隔离"理念冲突）。修正为——传输 **HTTP/SSE（局域网服务端）**而非 stdio；认证按**每用户各自凭据**（前置：用户级 API Key 发放/吊销，MCP 客户端填各自 Key → 服务端解析 user_id → owner 隔离与 Web 端一致，禁止共享机器凭据导致隔离退化）；工具面只读白名单（kb_search/wiki_lookup/web_search），会话记忆不进第一版；端点仅局域网可达，部署必须 `APP_ENV=prod` 关匿名放行。待 owner 确认后作为阶段二设计前提。**用户级 API Key 的完整机制设计（数据模型/认证链插入/发放吊销 API/验收）见 §E.6。**
 5. **收编确认 ✅**：P2-1 GraphRAG 正式关闭（roadmap 已回写）；P3 学习引擎闭环并入阶段一 E-2、chunk 级权限归阶段三。
 
-### E.6 用户级 API Key：发放与吊销机制设计（阶段二前置，独立小专项）
+### E.6 用户级 API Key：发放与吊销机制设计（✅ 已实施 2026-09-30）
 
 > 设计先行，待确认后实施。独立于 MCP 的价值：脚本/CI 等机器集成也需要"以某个用户身份"调 API，且当前全局 `API_KEY` 命中后固定返回 `user_id="api_key_user"`（auth.py L233-234），多用户共存时资源归属会串到同一伪用户——本机制同时修复该隐患。
 
@@ -325,6 +325,13 @@ get_current_user 校验顺序调整为：
 #### E.6.9 实施规模与排期
 
 后端 1 表（create_all 自动建表，同 audit_log 先例）+ auth 链插入 + 3 端点 + 配置 3 键；前端 1 卡片；测试约 8-10 用例。单批可完成。**排期：不占用 D/C 时段，作为阶段一之后、阶段二之前的独立小批**；因修复 `api_key_user` 归属串号隐患，也可按需提前。
+
+**实施记录（2026-09-30，owner 确认后单批落地）**：
+
+- 后端：`models/user_api_key.py`（新表，含 `is_valid`）；`auth.py` 新增 `_user_api_keys_enabled` / `_resolve_api_key`（短会话 + DB 故障按未命中 + last_used_at 60s 节流，HTTP 与 WS 首帧共用），认证链顺序 = 全局 API_KEY → 用户级 Key → JWT → 开发匿名；`api/auth.py` 三端点（发放 201 一次性明文 / 列表无明文 / 吊销 204，超上限 422、越权 403、重复吊销 409，`default`/`api_key_user` 身份拒绝发放 400）；`/config/info` 增 `user_api_keys_enabled` + `user_api_keys_max_per_user`；config 三键 + `.env.example` 同步。
+- 前端：`queries/apiKeys.ts`（精确 interface + useQuery/useMutation + `deriveKeyStatus`/`formatRelativeTime`）；`views/Settings/ApiKeysView.vue`（el-table 三态 badge / 最近使用相对时间 / 未启用与空列表空态 / 达上限禁用新建）；`components/settings/CreateApiKeyDialog.vue`（两步对话框，Step2 明文深色代码块 + useClipboard 复制 + before-close 二次确认防丢）；路由 `/settings/api-keys` + 菜单项 KeyRound。
+- 测试：后端 `tests/test_user_api_keys.py` 19 用例（端点守卫/发放哈希/上限/限流/越权/WS 首帧/HTTP 真实认证链/config 字段）；前端 `queries/__tests__/apiKeys.spec.ts` 10 用例。回归：后端 **994 passed / 103 skipped**，前端 vue-tsc 零错误、eslint 0 error、vitest **64 passed**（54→64）。
+- 待用户操作：本地/部署环境 `.env` 加 `USER_API_KEYS_ENABLED=true` 重启生效（默认关闭灰度）。
 
 ---
 

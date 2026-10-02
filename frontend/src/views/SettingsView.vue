@@ -31,11 +31,11 @@
  * 设置页面容器，含侧边导航。
  *
  * 左侧渲染设置菜单，右侧通过 router-view 展示当前子页面
- * （常规/分类/标签/学习引擎/A/B实验/反馈统计）。
+ * （常规/分类/标签/API密钥/学习引擎/A/B实验/反馈统计）。
  */
 import { useRoute, useRouter } from 'vue-router'
 import type { Component } from 'vue'
-import { Settings, FolderOpen, Tags, Cpu, BarChart3, FlaskConical } from '@lucide/vue'
+import { Settings, FolderOpen, Tags, Cpu, BarChart3, FlaskConical, KeyRound } from '@lucide/vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -52,6 +52,7 @@ const menuItems: MenuItem[] = [
   { name: 'general', path: '/settings', label: '常规设置', icon: Settings },
   { name: 'categories', path: '/settings/categories', label: '分类管理', icon: FolderOpen },
   { name: 'tags', path: '/settings/tags', label: '标签管理', icon: Tags },
+  { name: 'api-keys', path: '/settings/api-keys', label: 'API 密钥', icon: KeyRound },
   { name: 'learning', path: '/settings/learning', label: '学习引擎', icon: Cpu },
   { name: 'experiments', path: '/settings/experiments', label: 'A/B实验', icon: FlaskConical },
   { name: 'feedback', path: '/settings/feedback', label: '反馈统计', icon: BarChart3 }

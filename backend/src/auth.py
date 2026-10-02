@@ -6,6 +6,7 @@ API Key 适合自托管单实例；JWT（P1-1）支持多用户注册/登录与 
 
 import asyncio
 import datetime
+import hashlib
 import hmac
 import logging
 from typing import Optional
@@ -15,6 +16,7 @@ import bcrypt
 import jwt as pyjwt
 from fastapi import Depends, HTTPException, Security, status, WebSocket, WebSocketDisconnect
 from fastapi.security import APIKeyHeader, HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy import select
 from starlette.exceptions import WebSocketException
 from pydantic import BaseModel
 
@@ -27,6 +29,10 @@ WS_AUTH_TIMEOUT_SECONDS = 10.0
 
 # JWT 算法（HS256 对称签名，SECRET_KEY 即密钥）
 JWT_ALGORITHM = "HS256"
+
+# 用户级 API Key last_used_at 写库节流：距上次记录超过该秒数才 UPDATE，
+# 防止每个认证请求都写库（泄露感知线索只需分钟级精度）
+API_KEY_LAST_USED_THROTTLE_SECONDS = 60.0
 
 # 认证方式声明
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -51,6 +57,61 @@ def _verify_api_key(api_key: Optional[str]) -> bool:
     if not configured_key:
         return False
     return hmac.compare_digest((api_key or "").encode(), configured_key.encode())
+
+
+def _user_api_keys_enabled() -> bool:
+    """读取用户级 API Key 开关（E.6；请求时求值，便于测试覆盖）。"""
+    return bool(
+        getattr(settings, "USER_API_KEYS_ENABLED", None)
+        or getattr(settings.security, "USER_API_KEYS_ENABLED", False)
+    )
+
+
+async def _resolve_api_key(api_key: str) -> Optional[CurrentUser]:
+    """解析用户级 API Key（E.6）。
+
+    在全局 API_KEY 未命中后调用：按 SHA-256 哈希查 user_api_keys，
+    命中有效（未吊销/未过期）Key 则返回绑定用户——user_id 即资源
+    owner_id，require_owner / KB 归属校验等隔离链路与 JWT 完全一致。
+
+    - 开关关闭时直接返回 None（零查询开销）；
+    - 使用一次性短会话，不占用请求级 DB 会话（P1-9/P1-10 教训）；
+    - last_used_at 按 API_KEY_LAST_USED_THROTTLE_SECONDS 节流更新，
+      写库失败 best-effort 不影响认证结果。
+
+    Args:
+        api_key: X-API-Key 头的明文内容。
+
+    Returns:
+        CurrentUser: 命中有效 Key 时返回绑定用户；否则 None。
+    """
+    if not _user_api_keys_enabled():
+        return None
+    from src.database import async_session_maker
+    from src.models import UserApiKey
+
+    key_hash = hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+    now = datetime.datetime.now(datetime.timezone.utc)
+    async with async_session_maker() as db:
+        try:
+            key_row = await db.scalar(select(UserApiKey).where(UserApiKey.key_hash == key_hash))
+        except Exception as e:  # noqa: BLE001 —— 认证链 DB 故障按未命中处理，不向调用方扩散
+            logger.warning(f"用户级 API Key 查询失败（按未命中处理）: {e}")
+            return None
+        if key_row is None or not key_row.is_valid(now):
+            return None
+        # last_used_at 节流更新；SQLite 测试库读回 naive datetime，统一按 UTC 补时区再相减
+        last_used = key_row.last_used_at
+        if last_used is not None and last_used.tzinfo is None:
+            last_used = last_used.replace(tzinfo=datetime.timezone.utc)
+        if last_used is None or (now - last_used).total_seconds() > API_KEY_LAST_USED_THROTTLE_SECONDS:
+            key_row.last_used_at = now
+            try:
+                await db.commit()
+            except Exception as e:  # noqa: BLE001
+                await db.rollback()
+                logger.warning(f"API Key last_used_at 更新失败（已忽略）: {e}")
+        return CurrentUser(user_id=str(key_row.user_id), is_authenticated=True)
 
 
 def _get_secret_key() -> str:
@@ -233,6 +294,13 @@ async def get_current_user(
     if api_key and _verify_api_key(api_key):
         return CurrentUser(user_id="api_key_user", is_authenticated=True)
 
+    # 用户级 API Key（E.6）：全局 Key 未命中时按哈希解析绑定用户。
+    # 仅在携带 X-API-Key 头且开关开启时才产生一次 DB 查询，JWT 主路径零开销。
+    if api_key:
+        user = await _resolve_api_key(api_key)
+        if user:
+            return user
+
     if jwt_credentials:
         user = _extract_user_from_jwt(jwt_credentials)
         if user:
@@ -304,6 +372,13 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
     if api_key and _verify_api_key(api_key):
         await websocket.send_json({"type": "auth_ok"})
         return CurrentUser(user_id="api_key_user", is_authenticated=True)
+
+    # 用户级 API Key（E.6）：全局 Key 未命中时按哈希解析绑定用户
+    if api_key:
+        user = await _resolve_api_key(api_key)
+        if user:
+            await websocket.send_json({"type": "auth_ok"})
+            return user
 
     # JWT 用户：首帧 {"type": "auth", "token": "<access_token>"}
     token = first_frame.get("token") if isinstance(first_frame, dict) else None
