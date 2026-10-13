@@ -306,14 +306,56 @@ async def lifespan(app: FastAPI):
         rag_chain = await RAGChain.get_instance(vector_store)
         logger.info("核心异步服务预热完成")
 
-        # 预热 LLM，触发 Ollama 将模型加载到内存，避免首个用户请求阻塞 20~40 秒。
-        # 该步骤为最佳努力（best-effort），失败仅记录警告，不中断启动。
-        try:
-            if rag_chain.llm is not None:
-                await asyncio.wait_for(rag_chain.llm.ainvoke("hello"), timeout=60.0)
-                logger.info("LLM 预热完成")
-        except Exception as e:
-            logger.warning(f"LLM 预热失败，首次调用可能较慢: {e}")
+        # A 冷启动预热：并发加载默认主力模型与检索侧模型，消除首问 20~40s 长尾。
+        # 此前只预热 rag_chain.llm（qwen3:4b 思考模型），而默认 deep_thinking=off
+        # 实际走 llm_direct（qwen3:4b-instruct-2507）——默认主力模型从未预热；
+        # bge-m3 embedding（语义缓存+检索）与 CrossEncoder reranker 也首问才懒加载。
+        # 分组：GPU 组串行，CPU 组（embedding num_gpu=0 + reranker device=cpu）与之
+        # 并发，互不争抢显存。全部为最佳努力（best-effort），失败仅记录警告，不中断启动。
+        #
+        # 4B 主模型（deep_thinking=on 专用）不预热：4GB 显存下 4B 工作集 ≈3.9GB 会
+        # 驻留并驱逐 3B 直答模型（实测 ollama ps 仅剩 4B，默认路径被迫每次换载，
+        # generate 恶化到 60s+）。深度思考首问改为按需加载 4B（10~30s，用户主动
+        # 开启时可接受）；换用 ≥8GB 显存机器后可恢复预热 4B。
+        async def _warm(factory, label):
+            try:
+                await asyncio.wait_for(factory(), timeout=60.0)
+                logger.info(f"{label} 预热完成")
+            except Exception as e:
+                logger.warning(f"{label} 预热失败，首次调用可能较慢: {e}")
+
+        async def _preheat_llm_models():
+            # 仅预热默认主力（deep_thinking=off 直答 + 辅助任务共用），使其独占常驻显存
+            if rag_chain.llm_direct is not None:
+                await _warm(lambda: rag_chain.llm_direct.ainvoke("hello"), "LLM(direct)")
+
+        async def _preheat_retrieval_models():
+            from src.services.model_manager import model_manager
+            from src.services.hybrid_search import KBReranker
+
+            async def _embed():
+                await model_manager.get_embeddings().aembed_query("预热")
+
+            async def _rerank():
+                reranker = await KBReranker.get_instance()
+                await reranker.rerank("预热", [{"content": "预热", "rrf_score": 1.0}], top_k=1)
+
+            async def _intent_examples():
+                # 意图路由 embedding 分类器的示例向量首问才批量计算（CPU 上约数秒），
+                # 预热一次使其进入进程内缓存，避免首问承担该一次性成本
+                await rag_chain.intent_router._embedding_classifier.classify("预热")
+
+            await asyncio.gather(
+                _warm(_embed, "bge-m3 embedding"),
+                _warm(_rerank, "KB reranker(CrossEncoder)"),
+                _warm(_intent_examples, "意图路由示例向量"),
+            )
+
+        await asyncio.gather(
+            _preheat_llm_models(),
+            _preheat_retrieval_models(),
+            return_exceptions=True,
+        )
     except Exception as e:
         logger.error(f"核心异步服务预热失败: {e}", exc_info=True)
         raise RuntimeError(f"核心异步服务预热失败: {e}")

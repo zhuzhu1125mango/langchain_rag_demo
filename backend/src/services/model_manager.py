@@ -264,7 +264,11 @@ class ModelManager:
         model_ref = self.task_roles.get("embedding", "EMBEDDING_MODEL_NAME")
         model_name = self._resolve_model_name(model_ref)
         if model_name not in self._embeddings_cache:
-            self._embeddings_cache[model_name] = OllamaEmbeddings(model=model_name)
+            # D 显存防抖：bge-m3 强制常驻 CPU（num_gpu=0）。4GB 显存下 embedding
+            # 与 qwen3:4b 互挤，每次 embed↔LLM 切换都要换入换出（间歇 2~10s 卡顿）。
+            # num_gpu=0 让 embedding 不再占用显存；同一模型同一权重，向量口径不变，
+            # Milvus 索引无需重建。
+            self._embeddings_cache[model_name] = OllamaEmbeddings(model=model_name, num_gpu=0)
         return self._embeddings_cache[model_name]
 
 

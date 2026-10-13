@@ -200,12 +200,19 @@ class RAGChain(
             from .citation_backfiller import CitationBackfiller
             from .output_sanitizer import AnswerVerifier
             self.citation_backfiller = CitationBackfiller(embeddings=embeddings)
-            self.answer_verifier = AnswerVerifier(embeddings=embeddings, llm=self.llm)
+            # fast llm（think=False）：web 答案校验是结构化小任务，且在 API 层后台执行——
+            # 若注入 4B 主模型，每次校验都会拉起 4B 驱逐 3B 直答模型（同 ContextEnhancer 换载拉锯根因）
+            self.answer_verifier = AnswerVerifier(embeddings=embeddings, llm=fast_llm)
         except Exception as e:
             logger.warning(f"引用补全器/答案校验器初始化失败，将跳过后处理: {e}")
 
         # 初始化各独立服务（按职责拆分）
-        self.context_enhancer = ContextEnhancer(self.llm)
+        # debug-multiround-generate-slow 最小修复：ContextEnhancer 改用 fast llm。
+        # 原注入 self.llm（4B 思考主模型）——多轮会话每轮后台摘要/指代消解都调用 4B，
+        # 触发 Ollama 驱逐 3B 直答模型并加载 4B（3.9GiB 挤爆 4GB 显存），下一问再换回，
+        # 4B⇄3B 拉锯导致 generate 41~75s（server.log evicting + qwen3:4b 加载时序实证）。
+        # fast_llm 已绑定 think=False，摘要/指代消解等结构化小任务无需思考模型。
+        self.context_enhancer = ContextEnhancer(fast_llm)
         self.question_processor = QuestionProcessor(self.llm)
         # P2-2：KB 多查询改写器（LLM 懒加载，规则路径零模型成本）
         self.query_rewriter = QueryRewriter()
@@ -222,7 +229,7 @@ class RAGChain(
         """
         return await super().get_instance(vector_store, strategy_manager)
 
-    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off"):
+    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None):
         """
         流式运行RAG问答。
 
@@ -230,6 +237,10 @@ class RAGChain(
         - ("reasoning", payload) → (payload, [], [], "reasoning")
         - ("chunk", text, sources, meta, type) → 原样转发
         - ("final", state) → 仅供 run() 消费，不对外产出
+
+        verify_holder: B2-3 事实校验输入容器（可选）。传入非 None dict 时，管线
+        不再内联执行校验，而是把校验输入写入该 dict，由调用方（API 层）在 end
+        事件后后台校验，避免阻塞流完成信号。
 
         Yields:
             tuple: (chunk_content, source_texts, source_metadata, answer_type)
@@ -243,7 +254,7 @@ class RAGChain(
                 question, kb_ids=kb_ids, history=history,
                 use_web_search=use_web_search, search_mode=search_mode,
                 user_id=user_id, session_id=session_id,
-                deep_thinking=deep_thinking,
+                deep_thinking=deep_thinking, verify_holder=verify_holder,
             ):
                 kind = ev[0]
                 if kind == "chunk":
