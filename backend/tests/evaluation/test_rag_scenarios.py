@@ -307,6 +307,16 @@ class TestToolPlugins:
         assert _extract_city_name("今天怎么样") is None
 
     @pytest.mark.asyncio
+    async def test_weather_tool_city_extraction_rejects_non_place(self):
+        """技术语境温度问法不应提取出城市（真实误路由案例：智星 X1 工作温度被当天气）。"""
+        assert _extract_city_name("智星 X1 的工作温度范围是多少？") is None
+        assert _extract_city_name("服务器 CPU 温度过高怎么办") is None
+        assert _extract_city_name("电池存储温度要求是什么") is None
+        # 真实天气问法不受影响（吕梁曾被 jieba 错标为人名，靠白名单放行）
+        assert _extract_city_name("吕梁今天天气") == "吕梁"
+        assert _extract_city_name("上海温度范围") == "上海"
+
+    @pytest.mark.asyncio
     async def test_calculator_tool(self):
         """计算器工具应正确计算表达式。"""
         tool = CalculatorTool()
@@ -320,6 +330,31 @@ class TestToolPlugins:
         tool = CalculatorTool()
         result = await tool.execute(expression="__import__('os')")
         assert result.success is False
+
+    @pytest.mark.asyncio
+    async def test_calculator_tool_natural_language_question(self):
+        """自然语言包裹的算式（如 "1+1等于几？"）应能抽取子串并计算。
+
+        回归：tool_executor 会把整句问题作为 expression 传入，此前含中文被
+        _safe_eval 直接拒绝导致工具调用失败。
+        """
+        tool = CalculatorTool()
+        result = await tool.execute(expression="1+1等于几？")
+        assert result.success is True
+        assert "2" in result.output
+
+    @pytest.mark.asyncio
+    async def test_calculator_tool_currency_still_works(self):
+        """单位换算路径不受自然语言抽取改动影响。"""
+        tool = CalculatorTool()
+        result = await tool.execute(expression="100 USD to CNY")
+        assert result.success is True
+        assert "725" in result.output
+
+    def test_safe_eval_no_truncation_without_operator(self):
+        """无运算符的自然语言不应被截断求值（防静默给出错误结果）。"""
+        tool = CalculatorTool()
+        assert tool._safe_eval("机票100元") is None
 
 
 # =============================================================================

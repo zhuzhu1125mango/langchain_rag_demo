@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 
 import httpx
+import jieba.posseg as pseg
 import logging
 
 logger = logging.getLogger("rag_system")
@@ -40,6 +41,45 @@ _DIAGNOSTIC_RE = re.compile(
     r"(过高|过低|偏高|偏低|怎么办|怎么处理|如何处理|如何解决|报警|告警|故障|异常|超标|太高|太低)"
 )
 
+# 技术语境温度：复合名词（工作温度/CPU 温度/机身温度等）永远不是天气问法，
+# 直接排除（裸"温度/气温"不加守卫，避免误伤"上海温度范围"等真实问法，
+# 由 _is_place_name 地名校验兜底拦截垃圾提取）
+_TECH_TEMPERATURE_RE = re.compile(
+    r"(?:工作|存储|运行|CPU|GPU|芯片|机身|核心|探头|传感器|设备|服务器|电脑|手机|电池|进水|回水|排风)温度"
+)
+
+# 常见中国城市白名单：兜住 jieba 词性错标的地名（如"吕梁"被标 nr 人名）。
+# 覆盖直辖市/省会/计划单列市/热门城市；未收录的小城市仍可靠词性校验放行。
+_KNOWN_CITIES = frozenset({
+    "北京", "上海", "天津", "重庆",
+    "石家庄", "太原", "呼和浩特", "沈阳", "长春", "哈尔滨", "南京", "杭州", "合肥",
+    "福州", "南昌", "济南", "郑州", "武汉", "长沙", "广州", "南宁", "海口",
+    "成都", "贵阳", "昆明", "拉萨", "西安", "兰州", "西宁", "银川", "乌鲁木齐",
+    "台北", "高雄", "香港", "澳门",
+    "深圳", "大连", "青岛", "宁波", "厦门", "苏州", "无锡", "常州", "佛山",
+    "东莞", "珠海", "中山", "惠州", "湛江", "三亚", "桂林", "柳州", "丽江",
+    "大理", "温州", "泉州", "烟台", "潍坊", "淄博", "济南", "洛阳", "南通",
+    "徐州", "扬州", "泰州", "嘉兴", "绍兴", "金华", "台州", "保定", "唐山",
+    "包头", "鄂尔多斯", "大同", "延吉", "秦皇岛", "承德", "张家界", "黄山",
+    "九江", "赣州", "绵阳", "遵义",
+    # 山西省地级市（吕梁曾被 jieba 错标为人名）
+    "吕梁", "太原", "大同", "阳泉", "长治", "晋城", "朔州", "晋中", "运城",
+    "忻州", "临汾",
+})
+
+
+def _is_place_name(text: str) -> bool:
+    """判断提取结果是否为地名：白名单命中，或分词含地名词性（ns）。
+
+    排除把任意名词短语当城市名（如"智星 X1 的工作"被惰性匹配提取出来，
+    导致技术问法误路由到天气工具）。
+    """
+    if not text:
+        return False
+    if text in _KNOWN_CITIES:
+        return True
+    return any(flag.startswith("ns") for _, flag in pseg.lcut(text))
+
 
 def _extract_city_name(question: str) -> Optional[str]:
     """从用户问题中提取中国城市名。
@@ -62,7 +102,8 @@ def _extract_city_name(question: str) -> Optional[str]:
 
     # 排除诊断/故障类问题（"服务器温度过高怎么办"、"温度偏低"）：
     # 这类含"温度/气温"但非真实天气问法，不应路由到天气工具。
-    if _DIAGNOSTIC_RE.search(q):
+    # 同时排除技术语境复合温度词（"工作温度范围"、"CPU 温度"等设备问法）。
+    if _DIAGNOSTIC_RE.search(q) or _TECH_TEMPERATURE_RE.search(q):
         return None
 
     # 先剥离句首时间前缀（今天上海天气 -> 上海天气），
@@ -84,7 +125,9 @@ def _extract_city_name(question: str) -> Optional[str]:
             if city and city not in ("今天", "明天", "后天", "现在", "当前", "未来"):
                 city = re.sub(r"^(的|是|在|有|为)", "", city).strip()
                 city = re.sub(r"(的|是|在|有|为)$", "", city).strip()
-                if city:
+                # 地名校验：非地名短语（"智星 X1 的工作"等技术问法残片）
+                # 不作为城市，继续尝试后续模式
+                if city and _is_place_name(city):
                     return city
 
     return None

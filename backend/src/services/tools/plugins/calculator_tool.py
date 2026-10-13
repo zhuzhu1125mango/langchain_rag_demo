@@ -87,13 +87,21 @@ class CalculatorTool(BaseTool):
 
     def _safe_eval(self, expression: str) -> Optional[str]:
         """安全求值数学表达式，仅支持基本四则运算和幂运算。"""
-        # 原串含中文或字母（如 "100美元是多少人民币"）直接拒绝，避免静默清洗后求值得出截断数值
-        if re.search(r"[\u4e00-\u9fff]|[a-zA-Z]", expression or ""):
+        # 先归一化符号，便于后续判断文本是否含运算符
+        normalized = (
+            (expression or "")
+            .replace("×", "*")
+            .replace("÷", "/")
+            .replace("（", "(")
+            .replace("）", ")")
+        )
+        # 含中文或字母时（如 "1+1等于几？"、"100美元是多少人民币"），仅当文本存在
+        # 显式运算符才继续抽取其中的算术子串；否则维持拒绝——避免把无运算符的
+        # 自然语言清洗成截断数字（"100美元..." -> 100）而静默给出错误结果
+        if re.search(r"[\u4e00-\u9fff]|[a-zA-Z]", normalized) and not re.search(r"[+\-*/%^]", normalized):
             return None
-        # 清理表达式：替换中文符号、删除空格
-        cleaned = expression.replace(" ", "").replace("×", "*").replace("÷", "/")
-        cleaned = cleaned.replace("（", "(").replace("）", ")")
-        cleaned = re.sub(r"[^\d+\-*/().%\s]", "", cleaned)
+        # 清理表达式：删除空格与非数学字符
+        cleaned = re.sub(r"[^\d+\-*/().%\s]", "", normalized).replace(" ", "")
         if not cleaned:
             return None
 

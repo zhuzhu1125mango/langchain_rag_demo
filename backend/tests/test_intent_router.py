@@ -287,11 +287,32 @@ class TestIntentRouterIntegration:
         assert decision.llm_routed is False
 
     @pytest.mark.asyncio
-    async def test_rule_conflict_llm_adjudication_still_used_in_simple_mode(self, monkeypatch):
-        """simple 模式下规则冲突仍走 LLM 裁决（保持原有行为）。"""
+    async def test_rule_conflict_skips_llm_when_kb_selected(self, monkeypatch):
+        """B2-2：勾选知识库时规则冲突跳过 LLM 裁决，直接按规则优先级走。"""
         router = IntentRouter()
 
+        async def fail_llm_route(question, history=None):
+            raise AssertionError("已选知识库时不应调用 LLM 冲突裁决")
+
+        monkeypatch.setattr(router._llm_router, "route", fail_llm_route)
+
+        question = "对比分析员工年假制度和病假制度的规定"
+        assert IntentRouter.is_kb_preferred_question(question)
+        assert IntentRouter.is_research_question(question)
+
+        decision = await router.route(question, kb_ids=["kb-1"], search_mode="simple")
+        # 跳过裁决后走规则优先级：命中"知识库优先"规则
+        assert decision.primary_mode == PrimaryMode.KB_ONLY
+        assert decision.llm_routed is False
+
+    @pytest.mark.asyncio
+    async def test_rule_conflict_llm_adjudication_without_kb(self, monkeypatch):
+        """未选知识库时，simple 模式下规则冲突仍走 LLM 裁决（原有行为保持）。"""
+        router = IntentRouter()
+        called = {"n": 0}
+
         async def mock_llm_route(question, history=None):
+            called["n"] += 1
             return IntentDecision(
                 confidence_scores={"needs_kb": 0.9},
                 primary_mode=PrimaryMode.KB_ONLY,
@@ -301,11 +322,10 @@ class TestIntentRouterIntegration:
 
         monkeypatch.setattr(router._llm_router, "route", mock_llm_route)
 
-        decision = await router.route(
-            "对比分析员工年假制度和病假制度的规定", kb_ids=["kb-1"], search_mode="simple"
+        await router.route(
+            "对比分析员工年假制度和病假制度的规定", kb_ids=[], search_mode="simple"
         )
-        assert decision.primary_mode == PrimaryMode.KB_ONLY
-        assert decision.llm_routed is True
+        assert called["n"] == 1
 
 
 class TestConversationContext:
