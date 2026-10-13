@@ -144,6 +144,14 @@
 - `vue-tsc -b` 零错误保持；eslint 新规则 0 error；`Record<string, unknown>` 在 queries 层清零（`env.d.ts` 的 2 处属类型声明层，保留豁免）。
 - 54 单测 + 5 E2E 全过；无新增运行时依赖（C2 不引 Zod 为验收硬条件）。
 
+### C.4 实施记录（2026-10-13，已完成）
+
+- **C1 接口化**：trace.ts 新增 `TraceStageDetail` / `TraceIntentDecision` / `TraceToolCall` / `TraceRetrievedChunk`（已知键精确 + 索引签名透传），响应字段 `Record<string, unknown>` 清零；kb.ts 参数袋接口化（`SearchDocumentsParams` / `FeedbackListParams` / `UseDocumentsOptions`，顺带消灭 `options as {autoKB}` 强转）；TraceView 模板删除 3 处 `as Record` 强转。**豁免**：`useDocuments` 的开放透传参数袋收敛为语义别名 `DocumentListQuery`（调用方键集开放，强类型化反而引入断言，与 env.d.ts 同级豁免）；spec 测试文件 2 处为 mock 数据豁免。
+- **C2**：GeneralView 的 localStorage 解析**现状已是等价实现**（逐字段 typeof 守卫 + 已知键白名单 + try/catch 兜底），未改动——避免为改而改。
+- **C3**：`no-explicit-any: error`（0 处直接开）+ `no-non-null-assertion: warn` 落地；`no-unnecessary-type-assertion` 需 type-aware linting，成本不成比例暂不启用（记录于 eslint.config.ts 注释）。
+- **C4 基线**：非空断言 44 处（spec ~10 + 生产 ~34，生产集中 ExperimentView/ChatView 等视图层）。本轮不逐处清理（重构级工作超出类型专项边界），warn 观察基线，后续以小批次逐文件清理后升 error。
+- **验收**：vue-tsc -b 零错误 ✓、eslint 0 error（44 warn 全为 non-null 断言观察项）✓、vitest 106 passed ✓、E2E 5 passed ✓、无新增运行时依赖 ✓。
+
 ---
 
 ## 专项 D：覆盖率阈值收紧（立即启动）

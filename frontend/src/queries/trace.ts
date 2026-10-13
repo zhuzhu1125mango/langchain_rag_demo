@@ -9,6 +9,18 @@ import { api } from '@/utils/axios'
  * 支持按会话/时间范围过滤与分页，详情含分阶段耗时与 token 用量。
  */
 
+/** kb_retrieval 等阶段的细分耗时明细（已知键来自 search_hybrid 五步计时）。 */
+export interface TraceStageDetail {
+  embed_ms?: number
+  dense_ms?: number
+  sparse_ms?: number
+  rrf_ms?: number
+  rerank_ms?: number
+  rerank_pairs?: number
+  rerank_skipped?: boolean
+  [key: string]: number | string | boolean | undefined
+}
+
 /** 分阶段耗时明细条目。 */
 export interface TraceStage {
   /** 阶段标识，如 intent_route / kb_retrieval / generate。 */
@@ -18,7 +30,45 @@ export interface TraceStage {
   /** 耗时（毫秒）。 */
   latency_ms: number
   /** 阶段附加信息（可选）。 */
-  detail?: Record<string, unknown>
+  detail?: TraceStageDetail
+}
+
+/** 意图决策摘要（后端 DecisionResult 序列化，未知键经索引签名透传）。 */
+export interface TraceIntentDecision {
+  primary_mode?: string
+  should_use_kb?: boolean
+  rule_hit?: boolean
+  reasoning?: string
+  suggested_tools?: string[]
+  [key: string]: unknown
+}
+
+/** 工具调用记录（tool_name / name 两种历史形态并存）。 */
+export interface TraceToolCall {
+  tool_name?: string
+  name?: string
+  output?: string
+  success?: boolean
+  duration_ms?: number
+  error?: string
+  [key: string]: unknown
+}
+
+/** 检索召回片段（dense/sparse/RRF/rerank 多通道分数并存）。 */
+export interface TraceRetrievedChunk {
+  content?: string
+  page_content?: string
+  document_id?: string
+  kb_id?: string
+  source?: string
+  chunk_index?: number
+  heading_path?: string
+  score?: number
+  dense_score?: number
+  sparse_score?: number
+  rrf_score?: number
+  rerank_score?: number
+  [key: string]: unknown
 }
 
 /** token 用量（estimated=true 时为字符估算值）。 */
@@ -45,10 +95,10 @@ export interface TraceSummary {
 export interface TraceDetail extends TraceSummary {
   user_id?: string | null
   resolved_question?: string | null
-  intent_decision?: Record<string, unknown> | null
-  tool_calls?: Array<Record<string, unknown>> | null
-  search_results?: Array<Record<string, unknown>> | null
-  kb_results?: Array<Record<string, unknown>> | null
+  intent_decision?: TraceIntentDecision | null
+  tool_calls?: TraceToolCall[] | null
+  search_results?: TraceRetrievedChunk[] | null
+  kb_results?: TraceRetrievedChunk[] | null
   stages?: TraceStage[] | null
   fallback_reason?: string | null
   output_pollution_detected?: boolean

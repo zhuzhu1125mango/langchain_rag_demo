@@ -142,7 +142,7 @@
                 :key="idx"
                 class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-700 rounded-lg p-2 line-clamp-2"
               >
-                {{ (r as Record<string, unknown>).page_content || JSON.stringify(r) }}
+                {{ r.page_content || r.content || JSON.stringify(r) }}
               </div>
             </div>
           </div>
@@ -154,7 +154,7 @@
                 :key="idx"
                 class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-700 rounded-lg p-2"
               >
-                {{ (t as Record<string, unknown>).tool_name || (t as Record<string, unknown>).name || JSON.stringify(t).slice(0, 200) }}
+                {{ t.tool_name || t.name || JSON.stringify(t).slice(0, 200) }}
               </div>
             </div>
           </div>

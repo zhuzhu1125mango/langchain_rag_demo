@@ -132,14 +132,23 @@ export interface TagCreateRequest {
   color?: string
 }
 
+/** 文档列表查询参数开放袋（调用方键集开放，值经 unref 后作为 axios params）。 */
+export type DocumentListQuery = Record<string, unknown>
+
+/** useDocuments 附加选项。 */
+export interface UseDocumentsOptions {
+  /** 未手动传 kb_id 时自动关联当前选中知识库。 */
+  autoKB?: boolean
+}
+
 /** 获取文档列表，默认自动关联当前选中的知识库。 */
-export function useDocuments(params: Record<string, unknown> = {}, options: Record<string, unknown> = {}) {
+export function useDocuments(params: DocumentListQuery = {}, options: UseDocumentsOptions & Record<string, unknown> = {}) {
   const kbStore = useKBStore()
 
-  const { autoKB = true, ...queryOptions } = options as { autoKB?: boolean }
+  const { autoKB = true, ...queryOptions } = options
 
   const effectiveParams = computed(() => {
-    const result: Record<string, unknown> = {}
+    const result: DocumentListQuery = {}
     for (const key of Object.keys(params)) {
       result[key] = unref(params[key])
     }
@@ -422,10 +431,17 @@ export interface SearchResult {
   highlight?: string
 }
 
+/** 全文搜索参数。 */
+export interface SearchDocumentsParams {
+  query: string
+  limit: number
+  kb_id?: string
+}
+
 /** 全文搜索文档内容。 */
 export function useSearchDocuments() {
   return async function searchDocuments(query: string, kbId?: string, limit: number = 10): Promise<SearchResult[]> {
-    const params: Record<string, unknown> = { query, limit }
+    const params: SearchDocumentsParams = { query, limit }
     if (kbId) {
       params.kb_id = kbId
     }
@@ -475,7 +491,7 @@ export function useGetDocumentSource() {
     chunkIndex: number,
     contextChunks: number = 1
   ): Promise<DocumentSourceResponse> {
-    const params: Record<string, unknown> = { context_chunks: contextChunks }
+    const params: { context_chunks: number } = { context_chunks: contextChunks }
     const data = await api.get<DocumentSourceResponse>(`/documents/${docId}/source/${chunkIndex}`, { params })
     return data
   }
@@ -596,6 +612,14 @@ export function useFeedbackStats(sessionId?: string) {
   })
 }
 
+/** 反馈列表查询参数。 */
+export interface FeedbackListParams {
+  session_id?: string
+  message_id?: string
+  skip: number
+  limit: number
+}
+
 /** 获取反馈列表。 */
 export function useFeedbackList(
   sessionId?: string,
@@ -606,7 +630,7 @@ export function useFeedbackList(
   return useQuery({
     queryKey: ['feedback_list', sessionId, messageId, skip, limit],
     queryFn: async (): Promise<FeedbackItem[]> => {
-      const params: Record<string, unknown> = { skip, limit }
+      const params: FeedbackListParams = { skip, limit }
       if (sessionId) params.session_id = sessionId
       if (messageId) params.message_id = messageId
       const data = await api.get<FeedbackItem[]>('/feedback/', { params })
