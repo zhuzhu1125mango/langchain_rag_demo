@@ -1,6 +1,6 @@
 # 问答链路首字延迟治理与模型配置去硬编码方案
 
-> 状态：已实施（2026-09-07），实施记录见文末 §10
+> 状态：已实施（2026-09-07），实施记录见文末 §10；2026-10-03 二次优化与瓶颈诊断见 §11，直答模型 A/B 实测与定稿见 §12
 > 范围：后端问答管线（backend/src）、前端 ChatView 事件处理（frontend/src）
 > 约束：离线开源模型（Ollama）；模型名不得硬编码，一律走配置；深度思考仅保留 开/关 两态；回答须结合知识库检索与模型自身智能
 
@@ -330,3 +330,125 @@ KB_RELEVANCE_SCORE_THRESHOLD=0.3     #  rerank 分数相关性阈值
 | C8 语义策略 | `strategies/semantic.py` embedding 后端从 sentence-transformers MiniLM 换为 `model_manager.get_embeddings()` 共享单例（bge-m3），阈值沿用 0.75/0.65；默认关闭 |
 | 未动项 | `sentence_transformer` 属性与 `_init_similarity_model()` 保留：kb_comparator / document_analyzer / knowledge_graph_generator 等低频功能仍按方案"本次不改"沿用 MiniLM 惰性加载；主问答链路不再触发加载。C9（同请求 embedding 复用）未实施，视实测收益决定 |
 | 测试 | 后端全量 pytest 通过（test_semantic_cache_service TTL 用例存在与本改动无关的既有 flaky）；前端 vitest 40/40、vue-tsc 通过；test_strategy 断言更新为语义策略默认关闭（3 策略）并新增开关用例 |
+
+---
+
+## 11. 二次优化与 generate 瓶颈诊断（2026-10-03）
+
+§10 落地后首字延迟仍偏高的反馈下，本轮先做"零功能损失提速"，随后用真实 trace 校正方向。
+
+### 11.1 本轮已实施（第一批）
+
+| 项 | 内容 | 位置 |
+|---|---|---|
+| A 冷启动预热 | lifespan 并发预热 `llm`、`llm_direct`（默认主力，此前从未预热）、bge-m3 embedding、CrossEncoder reranker、意图路由示例向量；GPU 组串行 / CPU 组并发 | [main.py](../../backend/src/main.py#L309-L350) |
+| B 摘要后台化 | `_update_conversation_summary`（一次完整 LLM 调用）由 `await` 改 `create_task`，不再阻塞 `final` 事件 | [stages.py](../../backend/src/services/pipeline/stages.py#L679-L686) |
+| C 相关性门控 | 优先复用已算好的 `rerank_score`（接上原死配置 `KB_RELEVANCE_SCORE_THRESHOLD`），reranker 未加载时才回退 MiniLM，且批量 encode 一次（原为 N+1 次串行） | [pipeline/retrieval.py](../../backend/src/services/pipeline/retrieval.py#L31-L106) |
+| D 显存防抖 | embedding `num_gpu=0` 常驻 CPU；两处 CrossEncoder 与 MiniLM 显式 `device="cpu"`，不再与 LLM 抢 4GB 显存 | [model_manager.py](../../backend/src/services/model_manager.py#L266-L272) 等 |
+
+### 11.2 本轮已实施（第二批）
+
+| 项 | 内容 | 语义边界 |
+|---|---|---|
+| 精确匹配缓存前置 | 条目字段名改为规范化问题的 md5，命中退化为单次 Redis HGET；管线新增阶段 1.5，命中即回放短路 | 命中场景答案完全一致，零差异 |
+| has_kb 跳过 LLM 冲突裁决 | 勾选知识库时规则冲突按规则优先级直接裁决，不再白付 5s 级 LLM 调用 | 极端冲突问题的路由结果会变 |
+| 尾部校验后置 | 事实校验（完整 LLM 调用）从管线内联搬到 API 层：`end` 先发，后台校验 → 补发警告 → 落库（含警告） | 流式路径不再写 trace 的 `verification`；助手消息落库时点移到 `end` 之后（`shield`+任务集保证断连仍落库） |
+
+验证：后端全量 pytest 916 passed / 83 skipped；前端 useChatStream 16 passed；镜像重建部署后启动日志 5 项预热全部完成，`ollama ps` 确认 bge-m3 100% CPU；意图路由 embedding 分类首问 6281ms → 61ms。
+
+### 11.3 trace 实测：原第三批计划方向有误
+
+拉取改动后 4 条真实 trace（`request_traces.stages`），结论与"第三批调上下文预算/多查询"的假设相反：
+
+| primary_mode | total_ms | 耗时>100ms 的阶段 | completion tokens |
+|---|---|---|---|
+| agent_research | 8907 | generate=8845 | 207 |
+| direct_llm | 13464 | intent_route=7421、generate=6042 | 148 |
+| agent_research | 5885 | generate=5826 | 140 |
+| agent_research | 9386 | intent_route=6281、generate=3102 | 68 |
+
+两点关键事实：
+
+1. **`generate` 占 60%~99%**（3.1~8.8s），而它的 `prompt_tokens` 仅约 180 —— prefill 极小。**`CONTEXT_TOKEN_BUDGET` / `max_history_turns` 与当前瓶颈无关**，第三批中的该项不应作为提速手段。慢在 **decode**（约 25~30 tok/s）。
+2. **`intent_route`** 在 embedding 分类命中时仅 59~61ms（A 预热生效）；一旦未命中落到 LLM 路由，则耗时 6.3~7.4s 并仍降级 `direct_llm`（白付）。这与 §10 C6 把 `INTENT_ROUTER_LLM_TIMEOUT` 放宽到 5.0 有关：冷/慢模型下超时被吃满。
+
+另注：默认知识库 `document_count=0`，**KB 侧优化（C 的 rerank 门控、精确缓存、语义缓存阈值）当前无法端到端验证**，需先导入文档。
+
+### 11.4 generate 瓶颈根因（硬件实测）
+
+环境：**NVIDIA GeForce RTX 3050 Laptop GPU，显存仅 4096 MiB**；宿主 Ollama 环境 `OLLAMA_FLASH_ATTENTION=1`、`OLLAMA_KV_CACHE_TYPE=q8_0`、`OLLAMA_KEEP_ALIVE=30m`、**`OLLAMA_NUM_PARALLEL=2`**。
+
+直答模型 `qwen3:4b-instruct-2507-q4_K_M`（权重约 2.5GB）在工作集 3.9GB 时只能 **60% 上 GPU（40% CPU）**，权重部分卸载即为 decode 慢的根因。`num_ctx` 对照实测（同一 prompt）：
+
+| num_ctx | CPU/GPU | 工作集 | decode |
+|---|---|---|---|
+| **6144（现网）** | 40%/60% | 3.9 GB | **27.6 tok/s** |
+| 4096 | 33%/67% | 3.6 GB | 31.5 tok/s |
+| 3072 | 31%/69% | 3.4 GB | 33.0 tok/s |
+| 2048 | 27%/73% | 3.2 GB | 35.0 tok/s |
+| 1024 | 23%/77% | 3.1 GB | 39.9 tok/s |
+
+即：KV cache 越大 → 留给权重的显存越少 → 卸载到 CPU 的层越多 → decode 越慢。KV 占用同时受 `OLLAMA_NUM_PARALLEL=2`（双 slot，KV 近似翻倍）影响，该值无法在应用侧覆盖，需改宿主 Ollama 环境后重启。
+
+### 11.5 推荐模型（待定，需自行选型）
+
+**架构约束**：`FAST_LLM_MODEL_NAME` 在 `think=False` 时会被重定向到 `OLLAMA_DIRECT_MODEL_NAME`（[model_manager.py](../../backend/src/services/model_manager.py#L229-L234)），因此**直答与全部辅助任务（意图路由/标题生成/Query 改写）当前共用同一个 4B 模型**。若只把辅助任务换小模型、直答仍留 4B，同一请求内会 1.7B↔4B 反复换入换出——正是 D 要消除的显存抖动。**结论：小模型应接管默认路径（deep_thinking=off）的直答 + 辅助，4B 仅保留给显式 deep_thinking=on。**
+
+候选（本地当前均未安装，需 `ollama pull`；磁盘余量 154 GB 充足）：
+
+| 候选 | 体积 | 预期 | 取舍 |
+|---|---|---|---|
+| `qwen2.5:3b-instruct` | ~1.9 GB | 预计可基本全量上 GPU，decode 明显提升 | **推荐**：中文与指令遵循（引用标注/禁前缀等）较可靠，质量损失最小 |
+| `qwen2.5:1.5b-instruct` | ~1 GB | 全量上 GPU，预计 60+ tok/s | 速度提升最大，但中文指令遵循明显变弱，可能破坏引用标注等规则 |
+| `qwen3:1.7b` | ~1.4 GB | 全量上 GPU | qwen3 默认输出思考链，而 `llm_direct` 定位是"从不生成思考块"的非思考模型，需额外适配，架构上不干净 |
+
+落地方式（选定后）：`.env.prod` 设 `FAST_LLM_MODEL_NAME` 与 `OLLAMA_DIRECT_MODEL_NAME` 为该模型；`OLLAMA_MODEL_NAME`（deep_thinking=on）保持 4B；`OLLAMA_SUPPORTS_THINKING` 需按所选模型区分能力（qwen2.5 无思考，若主模型仍为 qwen3 则保持 `true`，此时 1.7B 类思考小模型不适配）。更换 embedding 会改变向量口径、须重建 Milvus 索引，**本次不涉及 embedding**。
+
+### 11.6 未采纳/待定的其他杠杆
+
+| 杠杆 | 预期 | 未采纳原因 |
+|---|---|---|
+| `OLLAMA_NUM_PARALLEL` 2→1 | 释放 KV 显存、在**不压缩上下文窗口**前提下提高 GPU 卸载 | 需重启宿主 Ollama；并发 LLM 调用串行化（与 B 的后台摘要可能让下一问等待） |
+| `OLLAMA_NUM_CTX` 6144→4096 | 配合上项释放更多显存 | 会压缩 KB 上下文裕度（`CONTEXT_TOKEN_BUDGET=4000` 接近上限），需与 budget 联动并 A/B |
+| 降低 `INTENT_ROUTER_LLM_TIMEOUT` | 消除 5~7.4s 白等 | 会改变部分问题的路由结果，需单独决策 |
+
+### 11.7 结论
+
+- 本轮"零功能损失"批次已全部落地并验证，A（意图示例预热）与 D 已产生可测收益。
+- **当前剩余延迟的主要来源是 generate 段的权重部分卸载**，受限于 4GB 显存；上下文预算类旋钮对该瓶颈无效。
+- 下一步待用户选定 §11.5 的小模型，再做 A/B 与配置切换；选定前不再改动模型配置。
+
+---
+
+## 12. 直答模型 A/B 实测结果（2026-10-03）
+
+按 [direct-model-switch-plan.md](direct-model-switch-plan.md) 执行 A/B；完整执行记录（含偏差、方法学、遗留）见该文档 §6，此处只记结论。
+
+候选：A=`qwen3:1.7b`、B=`qwen2.5:3b-instruct`（均 100% GPU）。基线 `qwen3:4b-instruct-2507-q4_K_M` 在执行前已被删除，基线列采用 §11.4 同机同 ctx 实测数据。
+
+| 维度 | 基线 4B-instruct | 候选 A 1.7b | 候选 B 3b-instruct |
+|---|---|---|---|
+| GPU 分层 | 40%/60% | **100% GPU** | **100% GPU** |
+| decode（trace 换算） | 27.6 tok/s | 90~107 tok/s（含隐藏思考） | 55~71 tok/s（无思考） |
+| 短答 generate（墙钟） | 3.1~8.8 s | 2.0~5.0 s | **0.9~1.6 s** |
+| KB 引用标注 | — | Q4/Q6/Q9 均 `[1]` ✓ | Q4 ✓，Q6 稳定漏 `[1]` |
+| 思考链泄漏 | 无 | 无（但每次多生成隐藏思考） | 无 |
+
+要点：
+- **两个候选均消除权重 CPU 卸载**（`ollama ps` 100% GPU），decode 均远超 45 tok/s 目标。
+- **候选 A 的 tok/s 数字被隐藏思考 token 抬高**：同一 KB 短答 A 记 179 tokens、B 仅 26，故 A 墙钟反而更慢；A 是思考模型却位于"非思考直答"槽位，架构不契合。
+- **候选 B 是原生非思考模型**（契合 `llm_direct` 定义），墙钟最快；代价是 Q6 稳定漏 `[1]`（达门槛上限）。
+- **已定稿候选 B（2026-10-03）**：按"均合格取速度更快者"规则取墙钟最快者；A 的 tok/s 优势为隐藏思考 token 假象（同题 179 vs 26 token），且思考模型占用非思考槽位架构不契合。`README.md` / `docs/architecture.md` 模型表已同步。Q6 漏 `[1]` 已通过 KB 回答模板强化引用要求修复（实测 B 的 Q6 3/3 带引用），落选候选 A 已按指示删除。
+- 期间发现两个**与模型无关**的既有问题：①天气城市提取器对含"温度"的问题误判（`_extract_city_name`）；②KB `kb_retrieval` 阶段耗时偏高，瓶颈为 CPU 上的 CrossEncoder 重排（bge-m3 embedding 仅 ~45 ms）。经 2026-10-08 `KB_HYBRID_RERANK_TOP_K` 5→3 后，稳态由 2.8~3.1 s 降至 **1.3~1.8 s**（重启后首查另含 Milvus 首次加载约 4~5 s 的一次性成本，与该参数无关）；实测拆解与冷启动口径详见 [direct-model-switch-plan.md §6.4](direct-model-switch-plan.md)。
+
+---
+
+## 13. 后续优化实测（2026-10-12）
+
+§11/§12 遗留项先后落地，结论备查：
+
+1. **多轮会话第 3+ 问 generate 41~75 s 慢例**：根因＝`ContextEnhancer(self.llm)` 注入 4B 主模型（§4-B3 要求 fast llm，漏改），每轮后台摘要/指代消解调用 4B → Ollama 驱逐 3B 直答模型并加载 4B（3.9 GiB 挤爆 4 GB 显存）形成换载拉锯（宿主 `server.log` evicting + qwen3:4b 加载时序实证）。修复为 `ContextEnhancer(fast_llm)`，post-fix Q3 generate **41068 ms → 2490 ms**。同批修复：lifespan 去掉 4B 预热（4B 驻留会驱逐 3B；4 GB 显存机器 deep_thinking=on 首问改为按需加载 10~30 s，≥8 GB 机器可恢复预热）。
+2. **reranker 换型**：`KB_RERANK_MODEL` / `SEARCH_RERANK_MODEL` → `bge-reranker-base`（离线 A/B 10 题 × 3 配置质量零差异、推理快 3.3 倍；base 权重已入容器 HF 卷，v2-m3 保留可回滚）。实测 kb_retrieval 热身 1.3~1.8 s → **441~560 ms**，KB 问答整链 wall 0.9~1.5 s，引用质量验证通过（USB×2 / CCC+CE 排序引用正确）。语料显著增长后需复评。
+3. **既有问题实锤收口（2026-10-13）**：①~~精确缓存 TTL 过长~~——**伪问题**：Redis 实测全库仅 1 key / 17 条目、age 19~21h（<24h TTL）、key 层 redis_ttl 5.7h，此前"5 天仍命中"系时间线归因错误（第三轮 bench 命中的是数小时前同日写入的条目，非 10-08）；TTL 机制健康，未改动。②~~`AnswerVerifier(self.llm)` 4B 注入~~——**已修复**：web 答案后台校验改注入 `fast_llm`（与 ContextEnhancer 同机制，避免校验拉起 4B 驱逐 3B），容器内实测 verifier/enhancer 均为 `qwen2.5:3b-instruct`。至此应用侧全部 LLM 消费点归位：4B 仅剩 `deep_thinking=on` 主回答链。
+4. **天气城市提取器误判已修复（2026-10-12）**：§12 ① 的"工作温度范围"误路由。三层防线：`_TECH_TEMPERATURE_RE` 排除技术复合温度词（工作/CPU/存储温度等，裸"温度"不加守卫避免误伤真实问法）+ `_is_place_name` 地名校验（jieba.posseg ns 词性 + 内置常见城市白名单，兜住"吕梁"被错标 nr 的场景）+ 非地名残片继续尝试后续模式。端到端验证：技术温度问走 KB 返回 `-20℃至60℃ [1]` ✓，北京/吕梁真实天气正常触发工具 ✓。注意：裸"温度/气温"不加入技术排除表（"上海温度范围"是真问法），由地名校验兜底。
+

@@ -88,10 +88,10 @@
 | 任务 | 配置项 | 开发栈取值 | 说明 |
 |------|--------|-----------|------|
 | 主生成模型 | `OLLAMA_MODEL_NAME` | `qwen3:4b` | 复杂推理、RAG 最终答案生成、Agent / Function Calling |
-| 非思考模型 | `OLLAMA_DIRECT_MODEL_NAME` | `qwen3:4b-instruct-2507-q4_K_M` | 关闭深度思考时使用；留空则回退主模型并绑定 `reasoning=false` |
-| 轻量任务模型 | `FAST_LLM_MODEL_NAME` | `qwen3:4b` | 意图路由、会话标题生成、Query 改写等结构化/低延迟任务 |
+| 非思考模型 | `OLLAMA_DIRECT_MODEL_NAME` | `qwen2.5:3b-instruct` | 关闭深度思考时使用（直答）；留空则回退主模型并绑定 `reasoning=false` |
+| 轻量任务模型 | `FAST_LLM_MODEL_NAME` | `qwen2.5:3b-instruct` | 意图路由、会话标题生成、Query 改写等结构化/低延迟任务；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致以避免同请求内多模型换载 |
 | Embedding 模型 | `EMBEDDING_MODEL_NAME` | `bge-m3:latest` | 多语言文档向量化，输出 1024 维稠密向量（维度须与 `EMBEDDING_DIMENSION` 一致） |
-| 重排序模型 | `KB_RERANK_MODEL` / `SEARCH_RERANK_MODEL` | `BAAI/bge-reranker-v2-m3` | 知识库检索与网页搜索结果精排；`KB_RERANK_PROVIDER` 可选 `sentence_transformers` 或 `ollama` |
+| 重排序模型 | `KB_RERANK_MODEL` / `SEARCH_RERANK_MODEL` | `BAAI/bge-reranker-base` | 知识库检索与网页搜索结果精排；`KB_RERANK_PROVIDER` 可选 `sentence_transformers` 或 `ollama` |
 
 > 混合思考模型（如 `qwen3:4b`）无法通过提示词真正跳过思考，故「深度思考关闭」路径
 > 依赖 `OLLAMA_DIRECT_MODEL_NAME` 指向一个非思考模型。若主模型本身不支持思考
@@ -100,8 +100,9 @@
 通过环境变量可灵活调整：
 
 ```env
-OLLAMA_MODEL_NAME=deepseek-r1:7b-qwen-distill-q4_K_M
-FAST_LLM_MODEL_NAME=qwen2.5:7b
+OLLAMA_MODEL_NAME=qwen3:4b
+OLLAMA_DIRECT_MODEL_NAME=qwen2.5:3b-instruct
+FAST_LLM_MODEL_NAME=qwen2.5:3b-instruct
 EMBEDDING_MODEL_NAME=bge-m3:latest
 EMBEDDING_DIMENSION=1024
 KB_RERANK_MODEL=BAAI/bge-reranker-v2-m3
@@ -690,7 +691,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `SEARCH_NUM_QUERIES` | Query 改写生成的查询数 | 3 | - |
 | `SEARCH_ENABLE_RERANK` | 是否启用 Cross-Encoder 语义重排 | `true` | true/false |
 | `EMBEDDING_DIMENSION` | Embedding 向量维度 | `1024` | 需与 `EMBEDDING_MODEL_NAME` 对应 |
-| `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:7b` | 意图路由/标题/Query 改写 |
+| `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:3b-instruct` | 意图路由/标题/Query 改写；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致 |
 | `KB_RERANK_MODEL` | 知识库重排模型 | `BAAI/bge-reranker-v2-m3` | sentence_transformers 从 HF_HOME 离线缓存加载 |
 | `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
 | `SEARCH_RERANK_MODEL` | 搜索重排模型 | `BAAI/bge-reranker-v2-m3` | 同上 |
@@ -909,7 +910,7 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 3. **SECRET_KEY**: 生产环境必须在 `.env.prod` 中设置强密钥，否则后端容器启动失败
 4. **数据卷管理**: 使用 `docker-compose down -v` 会删除数据卷，**谨慎操作**
 5. **模型下载**: 首次运行需要下载 Ollama 模型，可能需要较长时间
-6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qwen2.5:7b` 与 `ollama pull deepseek-r1:7b-qwen-distill-q4_K_M`，耗时较长；重排序模型 `BAAI/bge-reranker-v2-m3` 不走 Ollama——由 sentence_transformers 从 `HF_HOME`（容器内挂载卷）的离线缓存加载，离线部署请先用支持网络的环境预热该缓存
+6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qwen3:4b` 与 `ollama pull qwen2.5:3b-instruct`，耗时较长；重排序模型 `BAAI/bge-reranker-v2-m3` 不走 Ollama——由 sentence_transformers 从 `HF_HOME`（容器内挂载卷）的离线缓存加载，离线部署请先用支持网络的环境预热该缓存
 7. **内存要求**: 建议至少 8GB 内存，模型越大需要内存越多
 8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 8080, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8081, 9002, 9003, 19531, 9092, 3001, 9094, 9095, 80，均仅绑定回环地址）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
