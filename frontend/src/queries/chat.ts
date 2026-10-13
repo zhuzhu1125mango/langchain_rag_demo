@@ -1,5 +1,7 @@
+import { computed } from 'vue'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { api } from '@/utils/axios'
+import { useAppStore } from '@/stores/app'
 
 /**
  * 聊天相关 API Query/Mutation 封装。
@@ -116,15 +118,17 @@ export interface Message {
   thinking?: string
 }
 
-/** 获取会话列表。 */
+/** 获取会话列表（仅在已登录时启用，避免未登录路由跳转期的 401 噪音）。 */
 export function useSessions() {
+  const appStore = useAppStore()
   return useQuery({
     queryKey: ['sessions'],
     queryFn: async (): Promise<Session[]> => {
       const res = await api.get<Session[]>('/sessions/')
       return res
     },
-    staleTime: 5 * 60 * 1000
+    staleTime: 5 * 60 * 1000,
+    enabled: computed(() => !!appStore.currentUser)
   })
 }
 
@@ -197,6 +201,10 @@ export function useGetSuggestions() {
       question,
       session_id: sessionId,
       kb_ids: kbIds
+    }, {
+      // 推荐问题是辅助功能且与主回答共用本地 LLM 串行推理：主回答进行中
+      // 该请求会排队，60s 默认超时只会白等刷屏，10s 快速失败静默降级
+      timeout: 10000
     })
     return data.suggestions
   }

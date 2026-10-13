@@ -147,6 +147,13 @@ export function useChatAssist(options: {
       clearTimeout(suggestionDebounceTimer)
     }
 
+    // 流式回答进行中跳过：推荐与主回答共用本地 LLM 串行推理，
+    // 此时发起只会排队超时并挤占正在生成的回答
+    const chatStore = useChatStore()
+    if (chatStore.isTyping) {
+      return
+    }
+
     const question = questionInput.value.trim()
 
     if (question.length < 3) {
@@ -162,8 +169,11 @@ export function useChatAssist(options: {
         const result = await getSuggestions(question, undefined, selectedKBs.value.length > 0 ? selectedKBs.value : undefined)
         if (seq !== suggestionSeq) return
         suggestions.value = result
-      } catch (error) {
-        console.error('获取推荐问题失败:', error)
+      } catch {
+        // 静默降级：推荐失败不影响主流程，超时/服务繁忙时清空即可
+        if (seq === suggestionSeq) {
+          suggestions.value = []
+        }
       } finally {
         if (seq === suggestionSeq) {
           isGeneratingSuggestions.value = false

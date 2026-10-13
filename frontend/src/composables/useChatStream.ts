@@ -91,7 +91,7 @@ export function useChatStream(options: UseChatStreamOptions) {
     messageListRef.value?.scrollToBottom()
 
     try {
-      const assistantMsgId = generateId()
+      let assistantMsgId = generateId()
       chatStore.addMessage({
         id: assistantMsgId,
         role: 'assistant',
@@ -148,6 +148,7 @@ export function useChatStream(options: UseChatStreamOptions) {
 
       // SSE 事件协议：
       //   - content：data.content 为增量文本片段，累加到助手消息内容上
+      //              （B2-3：事实校验警告也可能在 end 之后补发，仍按增量追加）
       //   - thinking：模型原始思考增量（深度思考开启时），累加到助手消息 thinking 上
       //   - reasoning：搜索/思考过程结构化数据，供前端折叠面板展示
       //   - search_status：向后兼容，映射为 reasoning 步骤并更新搜索按钮状态
@@ -240,6 +241,9 @@ export function useChatStream(options: UseChatStreamOptions) {
               if (index !== -1 && chatStore.messages[index]) {
                 chatStore.messages[index].id = data.message_id
               }
+              // B2-3：同步更新定位用 id，否则 end 之后补发的 content（事实校验警告）
+              // 事件会因 assistantMsgId 指向已替换的临时 id 而找不到消息被丢弃。
+              assistantMsgId = data.message_id
             }
             // 新会话创建：首条消息触发后端创建新会话，写入当前会话并 replace 路由 query。
             // 直接赋值，避免 setCurrentSession 清空已渲染的流式消息；

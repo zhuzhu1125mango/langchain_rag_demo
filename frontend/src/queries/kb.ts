@@ -794,6 +794,8 @@ export interface ProcessingConfig {
 export interface ModelConfig {
   embedding_model_name: string
   ollama_model_name: string
+  /** 深度思考关闭时使用的非思考直答模型；未配置时为空串 */
+  ollama_direct_model_name?: string
 }
 
 /** 获取处理相关配置。 */

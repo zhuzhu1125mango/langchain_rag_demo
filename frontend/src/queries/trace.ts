@@ -87,7 +87,7 @@ export function useTraces(params: MaybeRefOrGetter<TraceListParams>) {
     // W6 #33：params 可能是 getter/对象引用，用 toValue 求值后进 key，保证缓存键为纯数据
     queryKey: computed(() => ['traces', toValue(params)]),
     queryFn: async (): Promise<TraceListResponse> => {
-      const res = await api.get<TraceListResponse>('/traces', { params: toValue(params) })
+      const res = await api.get<TraceListResponse>('/traces/', { params: toValue(params) })
       return res
     },
     placeholderData: (prev) => prev

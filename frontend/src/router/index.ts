@@ -127,4 +127,34 @@ router.beforeEach(async (to) => {
   return true
 })
 
+/**
+ * 陈旧分片自愈（部署后旧入口引用已删除的 hash 分片）。
+ *
+ * 现象：重新部署前端后，浏览器若仍持有旧入口（旧标签页常驻或 index.html
+ * 走缓存），登录成功 router.push('/') 懒加载 ChatView 时会请求旧 hash 分片，
+ * 该文件已被新构建删除 → nginx 兜底返回 text/html → 报
+ * "Failed to fetch dynamically imported module"，需手动刷新才能进入首页。
+ *
+ * 处理：捕获分片加载失败后整页 reload 一次（sessionStorage 守卫防死循环），
+ * 刷新即拿到新入口从而自愈（token 在 sessionStorage，登录态不丢）；导航成功
+ * 后清除守卫，保证下次部署仍可自愈。
+ */
+const CHUNK_RELOAD_GUARD = 'chunk-reload-guard'
+const CHUNK_LOAD_ERROR_RE =
+  /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Failed to load module script/i
+
+router.onError((error) => {
+  const message = error instanceof Error ? error.message : String(error)
+  if (!CHUNK_LOAD_ERROR_RE.test(message)) return
+  // 已尝试过整页刷新仍失败：交给错误边界/控制台，不再循环刷新
+  if (sessionStorage.getItem(CHUNK_RELOAD_GUARD)) return
+  sessionStorage.setItem(CHUNK_RELOAD_GUARD, '1')
+  window.location.reload()
+})
+
+router.afterEach(() => {
+  // 导航成功说明当前入口可用，解除守卫，允许下次部署再次自愈
+  sessionStorage.removeItem(CHUNK_RELOAD_GUARD)
+})
+
 export default router

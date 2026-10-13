@@ -76,7 +76,7 @@ describe('useTraces', () => {
     const { result } = mountWithQuery(() => useTraces(() => ({ session_id: 's1', limit: 10 })))
     await flushPromises()
 
-    expect(mockedGet).toHaveBeenCalledWith('/traces', { params: { session_id: 's1', limit: 10 } })
+    expect(mockedGet).toHaveBeenCalledWith('/traces/', { params: { session_id: 's1', limit: 10 } })
     expect(unwrap(result!.data)).toEqual(listFixture)
   })
 
@@ -92,7 +92,7 @@ describe('useTraces', () => {
     await flushPromises()
 
     expect(mockedGet).toHaveBeenCalledTimes(2)
-    expect(mockedGet).toHaveBeenLastCalledWith('/traces', { params: { session_id: 's2' } })
+    expect(mockedGet).toHaveBeenLastCalledWith('/traces/', { params: { session_id: 's2' } })
     // 请求期间保留上一份数据（placeholderData）
     expect(unwrap(result!.data)).toEqual(listFixture)
   })

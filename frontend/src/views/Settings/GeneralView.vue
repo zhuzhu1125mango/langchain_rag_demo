@@ -160,8 +160,12 @@
             <span class="font-medium text-gray-800 dark:text-white">{{ modelConfig?.embedding_model_name }}</span>
           </div>
           <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <span class="text-gray-600 dark:text-gray-300">LLM 模型</span>
+            <span class="text-gray-600 dark:text-gray-300">对话模型（深度思考·开）</span>
             <span class="font-medium text-gray-800 dark:text-white">{{ modelConfig?.ollama_model_name }}</span>
+          </div>
+          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
+            <span class="text-gray-600 dark:text-gray-300">对话模型（深度思考·关）</span>
+            <span class="font-medium text-gray-800 dark:text-white">{{ modelConfig?.ollama_direct_model_name || modelConfig?.ollama_model_name }}</span>
           </div>
         </div>
       </div>
