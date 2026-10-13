@@ -595,31 +595,67 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         """
         from src.services.hybrid_search import reciprocal_rank_fusion, rerank_results
 
+        # kb_retrieval 细分计时：写入请求级 ContextVar，由管线 kb_retrieval 阶段消费
+        # 写入 trace stage detail（函数内 import 防循环依赖，同 hybrid_search 惯例）
+        from src.services.pipeline.state import _request_retrieval_timings
+
         top_k = max(k, settings.processing.KB_HYBRID_SEARCH_TOP_K)
+        timings: Dict[str, Any] = {}
 
-        # B2：dense/sparse 检索彼此独立，并行执行减少 IO 串行等待
-        dense_results, sparse_results = await asyncio.gather(
-            self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds),
-            self.search_sparse(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds),
-        )
+        async def _timed(coro, key: str):
+            t0 = time.perf_counter()
+            try:
+                return await coro
+            finally:
+                timings[key] = int((time.perf_counter() - t0) * 1000)
 
-        fused = reciprocal_rank_fusion(
-            {"dense": dense_results, "sparse": sparse_results},
-            k=settings.processing.KB_RRF_K,
-        )
+        try:
+            # embed 单独计时：未预计算时在此先算再传给 search_dense（语义等价），
+            # 已预计算（语义缓存复用）时 embed_ms=0
+            if query_embedding is None:
+                t0 = time.perf_counter()
+                query_embedding = await self.embeddings.aembed_query(query)
+                timings["embed_ms"] = int((time.perf_counter() - t0) * 1000)
+            else:
+                timings["embed_ms"] = 0
 
-        # C1：rerank 关闭或未配置模型时，直接按 RRF 分数截断，不加载/调用 reranker
-        if (
-            not settings.processing.KB_RERANK_ENABLED
-            or not settings.processing.KB_RERANK_MODEL
-        ):
-            ranked = sorted(fused, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
-            return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in ranked[:k]]
+            # B2：dense/sparse 检索彼此独立，并行执行减少 IO 串行等待
+            dense_results, sparse_results = await asyncio.gather(
+                _timed(
+                    self.search_dense(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds),
+                    "dense_ms",
+                ),
+                _timed(
+                    self.search_sparse(query, k=top_k, document_ids=document_ids, kb_ids=kb_ids, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds),
+                    "sparse_ms",
+                ),
+            )
 
-        # C1：RRF 融合后先截断到 rerank 候选数再送打分，避免对全部融合候选逐条调用重排序
-        rerank_n = max(k, settings.processing.KB_HYBRID_RERANK_TOP_K)
-        reranked = await rerank_results(query, fused[:rerank_n], top_k=k)
-        return reranked
+            t0 = time.perf_counter()
+            fused = reciprocal_rank_fusion(
+                {"dense": dense_results, "sparse": sparse_results},
+                k=settings.processing.KB_RRF_K,
+            )
+            timings["rrf_ms"] = int((time.perf_counter() - t0) * 1000)
+
+            # C1：rerank 关闭或未配置模型时，直接按 RRF 分数截断，不加载/调用 reranker
+            if (
+                not settings.processing.KB_RERANK_ENABLED
+                or not settings.processing.KB_RERANK_MODEL
+            ):
+                timings["rerank_skipped"] = True
+                ranked = sorted(fused, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
+                return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in ranked[:k]]
+
+            # C1：RRF 融合后先截断到 rerank 候选数再送打分，避免对全部融合候选逐条调用重排序
+            rerank_n = max(k, settings.processing.KB_HYBRID_RERANK_TOP_K)
+            candidates = fused[:rerank_n]
+            timings["rerank_pairs"] = len(candidates)
+            reranked = await _timed(rerank_results(query, candidates, top_k=k), "rerank_ms")
+            return reranked
+        finally:
+            # 异常路径也落已累计部分，便于归因检索慢在哪一步
+            _request_retrieval_timings.set(timings)
 
     async def search_hybrid_multi(self, queries, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
         """多查询并行混合检索（P2-2）：N query × (dense+sparse) → 跨查询 RRF → 单次 rerank。

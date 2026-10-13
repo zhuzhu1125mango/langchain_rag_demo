@@ -22,6 +22,7 @@ from src.services.pipeline.state import (
     _StageTimer,
     _background_store_tasks,
     _request_retrieval_score,
+    _request_retrieval_timings,
     should_think,
 )
 from src.services.reasoning import (
@@ -54,11 +55,12 @@ class PipelineStagesMixin:
     # 统一问答管线：流式/非流式共用的单一实现。
     # arun_stream() 转发事件给 SSE 消费方；run() 累积 chunk 返回完整结果。
     # ------------------------------------------------------------------
-    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off"):
+    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None):
         """执行完整问答流程，按事件协议产出 reasoning/chunk/final 事件。
 
         user_id / session_id 用于 Trace 归属（request_traces 表按用户隔离查询）。
         deep_thinking: 深度思考开关（on/off）。
+        verify_holder: B2-3 事实校验输入容器（流式路径由 API 层传入，见 _stage_generate）。
         """
         state = _PipelineState(
             question=question,
@@ -69,6 +71,7 @@ class PipelineStagesMixin:
             deep_thinking=deep_thinking,
             user_id=user_id,
             session_id=session_id,
+            verify_holder=verify_holder,
         )
         state.think = should_think(deep_thinking)
         state.trace = TraceCollector()
@@ -93,6 +96,21 @@ class PipelineStagesMixin:
         # 阶段 1：上下文增强（指代消解）
         async with _StageTimer(state.trace, "context_enhance"):
             await self._stage_enhance_context(state)
+
+        # 阶段 1.5：精确匹配缓存前置（B2-1）。仅需 normalized question + Redis 单次
+        # HGET；命中即回放答案并短路，跳过意图路由/决策/检索/生成全链路。
+        # 门控与写入侧一致：需选库、未联网、非深度思考（缓存仅由这类请求写入）。
+        if state.kb_ids and not state.use_web_search and state.deep_thinking != "on":
+            async with _StageTimer(state.trace, "exact_cache"):
+                exact_hit = await SemanticCacheService().lookup_exact(
+                    state.user_id or "anonymous", state.kb_ids, state.resolved_question
+                )
+            if exact_hit is not None:
+                async for ev in self._replay_cache_hit(state, exact_hit):
+                    yield ev
+                async for ev in self._finalize(state):
+                    yield ev
+                return
 
         # 阶段 2：时间/日期类问题快捷返回
         datetime_start = time.time()
@@ -151,9 +169,13 @@ class PipelineStagesMixin:
                 yield ev
 
         # 阶段 8：知识库检索
-        async with _StageTimer(state.trace, "kb_retrieval"):
+        async with _StageTimer(state.trace, "kb_retrieval") as _kb_timer:
             async for ev in self._stage_kb_retrieval(state):
                 yield ev
+            # kb_retrieval 细分耗时（search_hybrid 五步计时）写入 stage detail
+            _kb_timings = _request_retrieval_timings.get()
+            if _kb_timings:
+                _kb_timer.set_detail(_kb_timings)
 
         # 阶段 9：构建最终上下文并生成回答
         async with _StageTimer(state.trace, "generate"):
@@ -335,17 +357,29 @@ class PipelineStagesMixin:
         if hit is None:
             return
 
+        async for ev in self._replay_cache_hit(state, hit):
+            yield ev
+
+    async def _replay_cache_hit(self, state: _PipelineState, hit):
+        """回放缓存命中：发出 reasoning + 分片答案事件并置 finished（前端零改动）。
+
+        供精确匹配（阶段 1.5 前置）与语义匹配（阶段 5.5）两处共用。
+        """
         state.semantic_cache_hit = True
         state.trace.data["semantic_cache_hit"] = {
             "score": round(hit.score, 4),
             "match_type": hit.match_type,
             "cached_question": hit.question,
         }
+        if hit.match_type == "exact":
+            content = "命中相同问题缓存（完全匹配），直接返回缓存答案"
+        else:
+            content = f"命中相似问题缓存（相似度 {hit.score:.2f}），直接返回缓存答案"
         yield ("reasoning", self._reasoning_payload(
             REASONING_STEP_CACHE_HIT,
             "done",
             "缓存命中",
-            content=f"命中相似问题缓存（相似度 {hit.score:.2f}），直接返回缓存答案",
+            content=content,
             metadata={"score": round(hit.score, 4), "match_type": hit.match_type},
         ))
 
@@ -555,22 +589,36 @@ class PipelineStagesMixin:
             ))
             # 含 web 来源时做事实校验：追加警告后缀（引用补全仅非流式在生成前做）
             if state.web_sources_for_citation and self.answer_verifier is not None:
-                try:
-                    citation_sources = self._build_citation_sources(state.web_sources_for_citation)
-                    suffix, verification_result = await self._verify_answer_suffix(
-                        state.final_answer, citation_sources, state.cross_source_data
-                    )
-                    if suffix:
-                        state.final_answer += suffix
-                        yield ("chunk", suffix, state.source_texts, state.source_metadata, answer_type)
-                    if verification_result is not None:
-                        state.trace.data["verification"] = {
-                            "confidence": verification_result.confidence,
-                            "is_consistent": verification_result.is_consistent,
-                            "warnings": verification_result.warnings,
-                        }
-                except Exception as e:
-                    logger.warning(f"流式答案校验失败，跳过警告追加: {e}")
+                if state.verify_holder is not None:
+                    # B2-3 流式路径：校验是一次完整 LLM 调用，内联 await 会阻塞
+                    # ("final", ...) 事件。此处仅收集输入交给 API 层，在 end 事件后
+                    # 后台校验并补发警告 + 落库（见 api/chat.py）。
+                    try:
+                        state.verify_holder["answer"] = state.final_answer
+                        state.verify_holder["citation_sources"] = self._build_citation_sources(
+                            state.web_sources_for_citation
+                        )
+                        state.verify_holder["cross_source_data"] = state.cross_source_data
+                    except Exception as e:
+                        logger.warning(f"构建答案校验输入失败，跳过校验: {e}")
+                else:
+                    # 非流式路径：无流式 spinner 阻塞问题，仍内联校验并写 trace
+                    try:
+                        citation_sources = self._build_citation_sources(state.web_sources_for_citation)
+                        suffix, verification_result = await self._verify_answer_suffix(
+                            state.final_answer, citation_sources, state.cross_source_data
+                        )
+                        if suffix:
+                            state.final_answer += suffix
+                            yield ("chunk", suffix, state.source_texts, state.source_metadata, answer_type)
+                        if verification_result is not None:
+                            state.trace.data["verification"] = {
+                                "confidence": verification_result.confidence,
+                                "is_consistent": verification_result.is_consistent,
+                                "warnings": verification_result.warnings,
+                            }
+                    except Exception as e:
+                        logger.warning(f"流式答案校验失败，跳过警告追加: {e}")
         else:
             if PROMETHEUS_AVAILABLE:
                 record_kb_query("llm_direct")
@@ -633,7 +681,14 @@ class PipelineStagesMixin:
             state.trace.set_final_answer(state.final_answer)
             state.trace.finish()
             state.trace.save_background()
-            await self._update_conversation_summary(state.history or [], state.session_id)
+            # B 尾部阻塞消除：对话摘要更新是一次完整 LLM 调用，此前直接 await
+            # 会阻塞 ("final", ...) 事件（答案早已流完，用户还在转圈）。改为
+            # fire-and-forget 后台任务（同 _maybe_store_semantic_cache 范式）。
+            summary_task = asyncio.create_task(
+                self._update_conversation_summary(state.history or [], state.session_id)
+            )
+            _background_store_tasks.add(summary_task)
+            summary_task.add_done_callback(_background_store_tasks.discard)
         except asyncio.CancelledError:
             raise
         except Exception as e:

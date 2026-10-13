@@ -318,9 +318,13 @@ class IntentRouter:
         # 用户显式指定 search_mode（function_calling/agent）时模式已确定，
         # 跳过 LLM 裁决直接走后续规则（research 规则对显式模式同样生效），
         # 避免 4GB VRAM 下模型切换导致 60s 级路由超时空等。
+        # 已勾选知识库（has_kb）时同样跳过：与 DECISION_VOTE_WHEN_KB_SELECTED=False
+        # 同哲学——用户显式选库即视为强先验，冲突按后续规则优先级直接裁决，
+        # 不再白付 5s 级 LLM 调用（代价：极端冲突问题的路由结果会变）。
         if (
             self._detect_rule_conflict(question)
             and search_mode not in ("function_calling", "agent")
+            and not has_kb
         ):
             if settings.intent_router.INTENT_ROUTER_USE_LLM:
                 try:

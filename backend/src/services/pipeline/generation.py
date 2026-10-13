@@ -60,6 +60,20 @@ class GenerationMixin:
             logger.warning(f"答案校验失败，跳过警告追加: {e}")
             return None, None
 
+    async def verify_web_answer(
+        self,
+        answer: str,
+        citation_sources: List[Dict],
+        cross_source_data: Optional[Dict] = None,
+    ) -> Optional[str]:
+        """公开入口：对含联网来源的答案做事实校验，仅返回警告后缀（B2-3）。
+
+        供 API 层在 end 事件后后台调用（校验为一次完整 LLM 调用，内联会阻塞
+        流完成信号）。校验不可用时返回 None。
+        """
+        suffix, _ = await self._verify_answer_suffix(answer, citation_sources, cross_source_data)
+        return suffix
+
     @staticmethod
     def _reasoning_payload(step: str, status: str, title: str, content: str = "", duration_ms: Optional[int] = None, metadata: Optional[Dict] = None) -> str:
         """构造 reasoning 事件负载（供 SSE 前端展示搜索/思考过程）。"""

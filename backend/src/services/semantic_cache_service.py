@@ -4,7 +4,7 @@
 仅纯知识库问答参与读写（调用方负责条件判断），Redis 不可用时 fail-open。
 
 存储结构：Redis HASH，每 scope（user + kb 范围）一个 key，
-field 为条目 uuid，value 为条目 JSON（含 1024 维问题 embedding）。
+field 为规范化问题的确定性 md5（B2-1，精确命中单次 HGET），value 为条目 JSON（含 1024 维问题 embedding）。
 
 安全（W6 #17）：value 含用户问题与答案全文，Redis 落盘前以 Fernet 对称
 加密（密钥由 SECRET_KEY 经 SHA-256 派生）；读取时优先解密，解密失败回退
@@ -18,7 +18,6 @@ import json
 import logging
 import math
 import time
-import uuid
 from dataclasses import dataclass, field as dataclass_field
 from typing import Any, Dict, List, Optional
 
@@ -169,6 +168,17 @@ class SemanticCacheService:
         return (question or "").strip().lower()
 
     @staticmethod
+    def exact_field_id(question: str) -> str:
+        """精确匹配条目字段名：规范化问题的 md5。
+
+        B2-1：把条目固定存放在该确定性字段名下，使"同一问题"的精确命中退化为
+        单次 Redis HGET（而非遍历整个 HASH）。存储时同样使用该字段名，重复问题
+        自然覆盖去重。
+        """
+        q_norm = SemanticCacheService.normalize_question(question)
+        return "exact:" + hashlib.md5(q_norm.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def cosine_similarity(vec_a: List[float], vec_b: List[float]) -> float:
         if not vec_a or not vec_b or len(vec_a) != len(vec_b):
             return 0.0
@@ -262,6 +272,44 @@ class SemanticCacheService:
             logger.warning(f"语义缓存查找失败（fail-open）: {exc}")
             return None, None
 
+    async def lookup_exact(
+        self,
+        user_id: str,
+        kb_ids: Optional[List[str]],
+        question: str,
+    ) -> Optional[SemanticCacheHit]:
+        """精确匹配快路径（B2-1）：单次 Redis HGET，无需计算 embedding。
+
+        仅命中 normalized question 完全一致的条目；未命中/异常返回 None（fail-open）。
+        供管线在最前置阶段调用——重复问题从"全链路"降为"一次 Redis GET"。
+        """
+        if not settings.semantic_cache.SEMANTIC_CACHE_ENABLED:
+            return None
+        start = time.time()
+        try:
+            cache = await self._get_cache()
+            if not cache.available:
+                return None
+
+            key = self.scope_key(user_id, kb_ids)
+            field_id = self.exact_field_id(question)
+            raw = await self._execute(cache, cache.client.hget(key, field_id))
+            if not raw:
+                return None
+
+            entry = _decode_entry(raw)
+            if entry is None:
+                return None
+            ttl_seconds = settings.semantic_cache.SEMANTIC_CACHE_TTL_HOURS * 3600
+            if time.time() - entry.get("created_at", 0) > ttl_seconds:
+                return None  # 惰性过期
+
+            self._record_hit(start, "exact")
+            return self._to_hit(entry, 1.0, "exact")
+        except Exception as exc:
+            logger.warning(f"语义缓存精确查找失败（fail-open）: {exc}")
+            return None
+
     def _to_hit(self, entry: Dict[str, Any], score: float, match_type: str) -> SemanticCacheHit:
         return SemanticCacheHit(
             question=entry.get("question", ""),
@@ -323,7 +371,9 @@ class SemanticCacheService:
                 "answer_type": "knowledge_base",
                 "created_at": time.time(),
             }
-            field_id = uuid.uuid4().hex
+            # B2-1：字段名改为规范化问题的确定性 md5（同一问题覆盖去重），
+            # 使精确命中退化为单次 HGET；语义匹配仍遍历全部字段。
+            field_id = self.exact_field_id(question)
             await self._execute(cache, cache.client.hset(key, field_id, _encode_entry(entry)))
             await self._execute(cache, cache.client.expire(key, settings.semantic_cache.SEMANTIC_CACHE_TTL_HOURS * 3600 + 3600))
             await self._trim(cache, key)

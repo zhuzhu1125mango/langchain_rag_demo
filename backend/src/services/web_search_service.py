@@ -306,7 +306,8 @@ class WebReranker:
                 from sentence_transformers import CrossEncoder
 
                 logger.info(f"正在加载重排模型: {self.model_name}")
-                self._model = CrossEncoder(self.model_name)
+                # D 显存防抖：显式绑定 CPU，避免 CrossEncoder 抢占 qwen3:4b 显存
+                self._model = CrossEncoder(self.model_name, device="cpu")
                 logger.info("重排模型加载完成")
             except ImportError:
                 logger.warning("sentence-transformers 未安装，重排将使用嵌入兜底")

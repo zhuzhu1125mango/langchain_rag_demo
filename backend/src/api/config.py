@@ -30,6 +30,8 @@ class ModelConfig(BaseModel):
     embedding_model_name: str = ""
     embedding_dimension: int = 0
     ollama_model_name: str = ""
+    # 深度思考关闭时使用的非思考直答模型；未配置时为空串（回退主模型 + reasoning=False）
+    ollama_direct_model_name: str = ""
     fast_llm_model_name: str = ""
 
 
@@ -164,6 +166,7 @@ async def get_model_config():
         embedding_model_name=settings.model.EMBEDDING_MODEL_NAME,
         embedding_dimension=settings.model.EMBEDDING_DIMENSION,
         ollama_model_name=settings.model.OLLAMA_MODEL_NAME,
+        ollama_direct_model_name=settings.model.OLLAMA_DIRECT_MODEL_NAME or "",
         fast_llm_model_name=settings.model.FAST_LLM_MODEL_NAME,
     )
 

@@ -126,7 +126,14 @@ class KBReranker:
                 from sentence_transformers import CrossEncoder
 
                 logger.info(f"正在加载知识库重排序模型: {self.model_name}")
-                KBReranker._model = await asyncio.to_thread(CrossEncoder, self.model_name)
+                # D 显存防抖：显式绑定 CPU，避免 CrossEncoder 抢占 qwen3:4b 的
+                # 有限显存（与 embedding num_gpu=0 共同消除模型换入换出）
+                # kb_retrieval 优化：KB_RERANK_MAX_LENGTH 配置化打分输入截断，
+                # 未配置时保持模型默认（512）行为不变
+                ce_kwargs: Dict = {"device": "cpu"}
+                if settings.processing.KB_RERANK_MAX_LENGTH:
+                    ce_kwargs["max_length"] = settings.processing.KB_RERANK_MAX_LENGTH
+                KBReranker._model = await asyncio.to_thread(CrossEncoder, self.model_name, **ce_kwargs)
                 KBReranker._model_loaded = True
                 logger.info("知识库重排序模型加载完成")
             except Exception as e:

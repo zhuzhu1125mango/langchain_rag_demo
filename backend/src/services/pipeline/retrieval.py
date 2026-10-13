@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import Any, Dict, List
 
+from src.config import settings
 from src.services.kb_retrieval_service import KBRetrievalService
 from src.services.pipeline.state import _request_decision, _request_retrieval_score
 
@@ -22,7 +23,8 @@ class RetrievalMixin:
         if self.sentence_transformer is None:
             try:
                 from sentence_transformers import SentenceTransformer, util
-                self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2')
+                # D 显存防抖：显式绑定 CPU，避免与 qwen3:4b 争抢有限显存
+                self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2', device="cpu")
                 self.similarity_util = util
             except ImportError:
                 self.sentence_transformer = None
@@ -30,6 +32,11 @@ class RetrievalMixin:
     async def _calculate_relevance(self, question, docs):
         """
         计算检索文档与问题的相关性
+
+        C 优化：检索阶段已用 CrossEncoder 打好 rerank_score（本身就是相关性分数），
+        优先复用，避免重复加载 all-MiniLM-L6-v2 并对 N 个文档逐条串行 encode
+        （每次检索省 0.3~0.8s + 一个模型）。reranker 未加载时 rerank_score 退化为
+        RRF 排序分、不可作相关性依据，此时才回退到语义相似度兜底。
 
         Args:
             question: 用户问题
@@ -43,18 +50,38 @@ class RetrievalMixin:
         if not docs or len(docs) == 0:
             return 0.0, False
 
+        # 优先复用 reranker 真实相关性分数（接上 KB_RELEVANCE_SCORE_THRESHOLD）
+        if self._rerank_score_available():
+            threshold = settings.processing.KB_RELEVANCE_SCORE_THRESHOLD
+            scores = [
+                float(getattr(doc, "metadata", {}).get("rerank_score", 0.0) or 0.0)
+                for doc in docs
+            ]
+            if scores:
+                avg_score = sum(scores) / len(scores)
+                has_relevant = any(s >= threshold for s in scores) or avg_score >= threshold
+                return avg_score, has_relevant
+
+        # 兜底：reranker 不可用时用轻量语义相似度模型批量 encode（一次调用替代 N+1 次串行）
         self._init_similarity_model()
 
         if self.sentence_transformer is None:
             return 0.6, True
 
-        question_embedding = await asyncio.to_thread(self.sentence_transformer.encode, question)
+        texts = [
+            question,
+            *[
+                doc.page_content if hasattr(doc, "page_content") else str(doc)
+                for doc in docs
+            ],
+        ]
+        embeddings = await asyncio.to_thread(self.sentence_transformer.encode, texts)
+        question_embedding = embeddings[0]
+        doc_embeddings = embeddings[1:]
         total_score = 0.0
         relevant_count = 0
 
-        for doc in docs:
-            doc_content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
-            doc_embedding = await asyncio.to_thread(self.sentence_transformer.encode, doc_content)
+        for doc_embedding in doc_embeddings:
             score = float(self.similarity_util.cos_sim(question_embedding, doc_embedding))
             total_score += score
             if score >= self.similarity_threshold:
@@ -64,6 +91,20 @@ class RetrievalMixin:
         has_relevant = relevant_count > 0 or avg_score >= self.similarity_threshold
 
         return avg_score, has_relevant
+
+    @staticmethod
+    def _rerank_score_available() -> bool:
+        """KB reranker 是否已加载（此时 rerank_score 才是真实相关性分数）。
+
+        未加载时 hybrid_search 会令 rerank_score=rrf_score（数量级 ~1/61），
+        不可作相关性依据，须走语义相似度兜底。
+        """
+        try:
+            from src.services.hybrid_search import KBReranker
+
+            return KBReranker.model_loaded()
+        except Exception:
+            return False
 
     def get_last_retrieval_score(self):
         """

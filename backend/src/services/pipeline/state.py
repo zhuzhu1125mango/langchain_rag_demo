@@ -26,8 +26,14 @@ _request_decision: ContextVar[Optional[DecisionResult]] = ContextVar(
 _request_retrieval_score: ContextVar[float] = ContextVar(
     "rag_request_retrieval_score", default=0.0
 )
+# kb_retrieval 细分耗时（milvus_service.search_hybrid 五步计时写入，stage 消费）。
+# 经 ContextVar 跨层传递而非改 search_hybrid 返回值签名，避免 vector_store 中间层透传遗漏
+_request_retrieval_timings: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "rag_request_retrieval_timings", default=None
+)
 
-# P1-3 语义缓存：后台写入任务引用集，防止 fire-and-forget 任务被垃圾回收
+# P1-3 后台持久化任务引用集，防止 fire-and-forget 任务被垃圾回收
+# （语义缓存写入、对话摘要更新等终态副作用）
 _background_store_tasks: set = set()
 
 
@@ -40,7 +46,8 @@ KB_ANSWER_TEMPLATE = """
 回答要求：
 1. 优先使用参考信息中的内容，禁止编造参考信息里不存在的信息。
 2. 如果参考信息中没有答案，直接说明"无法找到相关信息"。
-3. 关键事实必须标注来源编号，如[1]、[2]，对应参考信息中的来源编号。
+3. **关键事实必须标注来源编号**，如[1]、[2]，对应参考信息中的来源编号；
+   **分点、分步骤或并列多条事实时，每一条都要各自标注**，不得整篇无编号、或只在末尾统一标注一次。
 4. 如果同时包含知识库和联网搜索结果，优先以知识库内容为准，联网搜索作为补充。
 5. 对于价格、日期、数据等时效性信息，优先提取具体数值并突出展示，
    标注数据来源；若多个来源数据不一致，给出范围而非随机选取。
@@ -57,7 +64,7 @@ KB_ANSWER_TEMPLATE = """
 当前问题:
 {question}
 
-请结合参考信息给出准确、连贯的回答：
+请结合参考信息给出准确、连贯的回答（每个事实性陈述均须标注来源编号）：
 """
 
 LLM_DIRECT_TEMPLATE = """
@@ -124,6 +131,10 @@ class _PipelineState:
     semantic_cache_embedding: Optional[Any] = None
     # 终态清理是否已执行（SSE 断连/finally 兜底与正常路径共用，幂等防重）
     finalized: bool = False
+    # B2-3：流式路径下 API 层传入的校验输入容器。非 None 时，事实校验不再由
+    # 管线内联阻塞执行，而是把 {answer, citation_sources, cross_source_data}
+    # 写入此容器，交由 API 层在 end 事件后台校验并补发/落库。
+    verify_holder: Optional[dict] = None
 
     trace: Any = None
     resolved_question: str = ""
@@ -154,12 +165,21 @@ class _PipelineState:
 
 
 class _StageTimer:
-    """阶段计时上下文管理器：退出时把阶段名/状态/耗时写入 Trace（P1-2）。"""
+    """阶段计时上下文管理器：退出时把阶段名/状态/耗时写入 Trace（P1-2）。
+
+    阶段执行中可通过 set_detail() 补充明细（如 kb_retrieval 的细分耗时），
+    退出时随 add_stage 一并写入。
+    """
 
     def __init__(self, trace, name: str):
         self._trace = trace
         self._name = name
         self._t0 = 0.0
+        self._detail: Optional[Dict[str, Any]] = None
+
+    def set_detail(self, detail: Dict[str, Any]) -> None:
+        """阶段执行中记录 detail 明细，退出时写入 trace。"""
+        self._detail = detail
 
     async def __aenter__(self):
         self._t0 = time.time()
@@ -167,7 +187,9 @@ class _StageTimer:
 
     async def __aexit__(self, exc_type, exc, tb):
         status = "error" if exc_type else "done"
-        self._trace.add_stage(self._name, status, int((time.time() - self._t0) * 1000))
+        self._trace.add_stage(
+            self._name, status, int((time.time() - self._t0) * 1000), detail=self._detail
+        )
         return False
 
 

@@ -2,7 +2,7 @@
 P1-2 回归测试：SSE 错误脱敏（审查项 #15 残留）。
 
 验证：
-1. chat.py 流式路径两处 SSE error payload（生成失败/保存失败）
+1. chat.py 流式路径 SSE error payload（生成失败）
    不再拼接 str(e)，改为通用文案 + request_id（详细错误仅进日志）；
 2. api 层无异常信息进入客户端响应路径
    （HTTPException detail / SSE error 字段中的 str(e) 插值）。
@@ -25,10 +25,13 @@ class TestChatSSEErrorSanitization:
     """chat.py SSE 错误事件脱敏。"""
 
     def test_sse_error_payloads_use_generic_message_and_request_id(self):
-        """生成失败与保存失败的 error payload 均为通用文案并携带 request_id。"""
+        """生成失败的 error payload 为通用文案并携带 request_id。
+
+        B2-3：保存助手消息已移至 end 事件后的后台任务，保存失败仅记日志、
+        不再回传 SSE error 事件（流已完成），故此处只断言生成失败路径。
+        """
         source = _read_api_source("chat.py")
         assert "'error': '生成回答失败，请稍后重试', 'request_id': request_id" in source
-        assert "'error': '回答已生成但保存失败，请稍后重试', 'request_id': request_id" in source
 
     def test_sse_error_payload_does_not_interpolate_exception(self):
         """SSE error 字段不允许 f-string 插值（防止异常细节回流）。"""

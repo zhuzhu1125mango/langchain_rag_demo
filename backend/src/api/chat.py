@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
+# B2-3：流式收尾（后台答案校验 + 落库）任务引用集，防止 fire-and-forget 任务被 GC。
+# 客户端在 end 后断连时该任务仍会完成，保证助手消息（含校验警告）落库。
+_stream_finalize_tasks: set = set()
+
 
 class MessageRequest(BaseModel):
     """消息请求数据模型"""
@@ -399,6 +403,8 @@ async def stream_answer(
         answer_type = "llm_direct"
         reasoning_steps = []
         thinking_text = ""
+        # B2-3：管线把事实校验输入写入此容器（仅含 web 来源时），由本层在 end 后后台校验
+        verify_holder: dict = {}
 
         try:
             async for result in rag_chain.arun_stream(
@@ -408,6 +414,7 @@ async def stream_answer(
                 user_id=current_user.user_id,
                 session_id=current_session_id,
                 deep_thinking=deep_thinking,
+                verify_holder=verify_holder,
             ):
                 chunk, source_texts, source_meta, at = result
 
@@ -501,22 +508,39 @@ async def stream_answer(
                 info["source_type"] = "kb"
             source_info.append(info)
 
-        # 在发送 end 事件前先保存助手消息，确保客户端断开前消息已持久化
         # reasoning 按 step 去重：逐事件累积的列表含同一阶段的 running/done 重复条目，
         # 去重后再持久化与下发，避免前端历史渲染出现残留 running 状态（spinner 不消失）
         final_reasoning = dedupe_steps(reasoning_steps)
-        needs_title = False
-        try:
-            save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, final_reasoning, thinking_text))
-            needs_title = await asyncio.shield(save_task)
-        except Exception as e:
-            logger.error(f"保存助手消息失败: {str(e)}", exc_info=True)
-            error_payload = {'type': 'error', 'error': '回答已生成但保存失败，请稍后重试', 'request_id': request_id}
-            logger.debug(f"SSE error payload: {error_payload}")
-            yield f"data: {json.dumps(error_payload)}\n\n"
-            return
 
-        # C7：end 事件先发——标题生成改为后台任务，不再推迟流完成信号
+        # B2-3：事实校验是一次完整 LLM 调用，此前内联在管线里阻塞 ("final", ...)
+        # ——答案早已流完，用户还在转圈。现将其连同落库一起交给后台任务：校验 →
+        # 补发警告 → 落库（含警告），实时视图与历史回看一致。任务放入集合防 GC，
+        # 客户端在 end 后断连时仍会跑完并落库（仅补发的 content 事件丢失）。
+        async def verify_and_save() -> tuple:
+            suffix = ""
+            if verify_holder and rag_chain.answer_verifier is not None:
+                try:
+                    suffix = await rag_chain.verify_web_answer(
+                        verify_holder.get("answer", ""),
+                        verify_holder.get("citation_sources") or [],
+                        verify_holder.get("cross_source_data"),
+                    ) or ""
+                except Exception as e:
+                    logger.warning(f"答案校验失败，跳过警告追加: {e}")
+            try:
+                needs = await save_assistant_message(
+                    full_answer + suffix, sources, source_metadata, final_reasoning, thinking_text
+                )
+            except Exception as e:
+                logger.error(f"保存助手消息失败: {str(e)}", exc_info=True)
+                needs = False
+            return suffix, needs
+
+        finalize_task = asyncio.create_task(verify_and_save())
+        _stream_finalize_tasks.add(finalize_task)
+        finalize_task.add_done_callback(_stream_finalize_tasks.discard)
+
+        # C7：end 事件先发——校验与标题生成均在其后，不再推迟流完成信号
         end_payload = {
             'type': 'end',
             'message_id': assistant_message_id,
@@ -527,6 +551,15 @@ async def stream_answer(
         }
         logger.info(f"SSE end payload: {end_payload}")
         yield f"data: {json.dumps(end_payload)}\n\n"
+
+        # 校验完成：补发警告 content 事件（前端 end 后仍会追加显示）
+        try:
+            suffix, needs_title = await asyncio.shield(finalize_task)
+        except Exception:
+            suffix, needs_title = "", False
+        if suffix:
+            logger.debug(f"SSE late verification suffix: {suffix!r}")
+            yield f"data: {json.dumps({'type': 'content', 'content': suffix})}\n\n"
 
         # C7：标题后台生成，完成后补发 title 事件（客户端断开时任务仍落库，
         # 仅 title 事件丢失，侧栏刷新可见新标题）

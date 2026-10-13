@@ -232,6 +232,18 @@ class ProcessingSettings(BaseSettings):
     # 留空/None 时自动关闭 rerank（按 RRF 截断），不隐式拉取用户未声明的模型
     KB_RERANK_MODEL: Optional[str] = None
     KB_RERANK_PROVIDER: str = "ollama"
+    # CrossEncoder 打分输入的最大 token 数（kb_retrieval 优化）：未设时用模型默认
+    # 512 满前向；设小（如 256）可近似减半 CPU 前向耗时，长块尾部不参与相关性打分
+    KB_RERANK_MAX_LENGTH: Optional[int] = None
+
+    @field_validator("KB_RERANK_MAX_LENGTH", mode="before")
+    @classmethod
+    def _empty_rerank_max_length_to_none(cls, v):
+        # .env 中该键留空（空串）时按未配置处理：Optional[int] 不接受空串，
+        # 不容错会导致按 .env.example 空值模板配置后启动即校验失败
+        if v is None or (isinstance(v, str) and not v.strip()):
+            return None
+        return v
     # rerank 分数相关性阈值（C8）：所有检索结果分数均低于此值时判定"无高度相关内容"
     KB_RELEVANCE_SCORE_THRESHOLD: float = 0.3
 
