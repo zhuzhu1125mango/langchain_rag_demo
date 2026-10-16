@@ -86,3 +86,38 @@ class TestTraceStagesAndTokens:
         trace = TraceCollector()
         trace.set_token_usage(30, 12, estimated=True)
         assert trace.data["token_usage"]["estimated"] is True
+
+
+class TestTraceUnknownColumnFilter:
+    """未知列键过滤：防止 RequestTrace(**data) 抛 TypeError 致整条 trace 落库失败。"""
+
+    def test_to_record_payload_drops_unknown_keys(self):
+        from src.models.request_trace import RequestTrace
+
+        trace = TraceCollector()
+        trace.set_basic(question="q", session_id="s", user_id="u")
+        # 这两个键无对应列（此前会使整条 trace 落库抛 TypeError 并被 best-effort 吞掉）
+        trace.data["semantic_cache_hit"] = {"score": 0.9}
+        trace.data["verification"] = {"confidence": 0.5}
+
+        payload = trace._to_record_payload()
+
+        assert "semantic_cache_hit" not in payload
+        assert "verification" not in payload
+        assert payload["question"] == "q"
+        # 过滤后可安全构造（修复前此处会抛 TypeError）
+        RequestTrace(**payload)
+
+    def test_to_record_payload_keeps_only_known_keys(self):
+        from src.models.request_trace import RequestTrace
+
+        known = {c.key for c in RequestTrace.__table__.columns}
+        trace = TraceCollector()
+        trace.set_basic(question="q", resolved_question="r")
+        trace.add_stage("x", "done", 1)
+
+        payload = trace._to_record_payload()
+
+        assert set(payload) <= known
+        assert payload["resolved_question"] == "r"
+        assert "stages" in payload

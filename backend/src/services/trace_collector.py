@@ -4,11 +4,14 @@
 """
 
 import asyncio
+import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional
 
 from src.services.tools.tool_manager import ToolResult
+
+logger = logging.getLogger("rag_system")
 
 # P1-B7：持有后台保存任务的引用，避免任务被 GC（fire-and-forget 正确写法，
 # 与 rag_chain 的 _background_store_tasks 一致）；任务完成时回调自动清理。
@@ -126,6 +129,25 @@ class TraceCollector:
         """返回当前采集数据。"""
         return self.data.copy()
 
+    def _to_record_payload(self) -> Dict[str, Any]:
+        """仅保留 RequestTrace 模型列对应的键。
+
+        `RequestTrace` 为固定列模型——data 若含无对应列的键（如
+        `semantic_cache_hit` / `verification`），`RequestTrace(**data)` 会抛
+        TypeError，使整条 trace 落库被 best-effort 静默吞掉。此处按模型列过滤，
+        保证落库稳健（未知键丢弃并告警，不再波及整条记录）。
+        """
+        from src.models.request_trace import RequestTrace
+
+        known = {c.key for c in RequestTrace.__table__.columns}
+        payload = {k: v for k, v in self.data.items() if k in known}
+        dropped = set(self.data) - known
+        if dropped:
+            logger.warning(
+                f"Trace 含无对应列的键，落库前已丢弃 [{self.trace_id}]: {sorted(dropped)}"
+            )
+        return payload
+
     async def save_async(self) -> None:
         """异步保存到数据库。"""
         if not self._finished:
@@ -136,14 +158,11 @@ class TraceCollector:
             from src.models.request_trace import RequestTrace
 
             async with AsyncSessionLocal() as session:
-                record = RequestTrace(**self.data)
+                record = RequestTrace(**self._to_record_payload())
                 session.add(record)
                 await session.commit()
         except Exception as e:
             # 保存失败不应影响主流程
-            import logging
-
-            logger = logging.getLogger("rag_system")
             logger.warning(f"Trace 持久化失败 [{self.trace_id}]: {e}")
 
     def save_background(self) -> None:
