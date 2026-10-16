@@ -1,7 +1,8 @@
 # E-1 导航式 wiki_lookup：能力差距盘点
 
 > 关联：[special-projects-2026-09.md §E.2](special-projects-2026-09.md)（阶段一）、[wiki-navigable-workspace.md](wiki-navigable-workspace.md)（D1-D5 已实施与证伪记录）、[evolution-research-2026-09.md](evolution-research-2026-09.md)
-> 日期：2026-10-13 · 状态：盘点完成，实施方案待确认
+> 状态：**部分实施**（W1 索引页优先入口 / W2 entity-topic 退主池 / W3 导航埋点均已实施 2026-10-15，见 §6；仅多跳端到端验收 E1V 待办；遵循「设计先行 → 确认后实施」）
+> 日期：2026-10-13
 
 ## 1. 关键前提修正
 
@@ -33,11 +34,56 @@
 
 | # | 工作项 | 内容 | 规模 |
 |---|---|---|---|
-| W1 | 索引页优先入口 | navigator 新增从 PG 直读 `page_type=index` 目录页作第一跳（索引页不进向量库，须 PG/MinIO 直读而非语义检索），Agent 按目录选页；`[[Title]]` 跳转已支持 | 小（1 天） |
-| W2 | entity/topic 退主池 A/B | exclude 集合扩展 `("wiki", "wiki_syn")` 的对照实验：wiki_multihop 数据集 + 主检索 hit/recall/mrr 三臂（现状/退池/仅 raw），**证据驱动决定**；退池后 wiki 页仅经 navigator 触达 | 中（A/B 为主） |
-| W3 | 导航埋点 + Agent 导航策略 | wiki_lookup 调用埋点进 trace（轮数/取页序列/入口类型）；Agent 工具描述明确"索引页→Related 逐页"使用策略 | 小（1 天） |
+| W1 ✅ | 索引页优先入口 | navigator 新增从 PG 直读 `page_type=index` 目录页作第一跳（索引页不进向量库，须 PG/MinIO 直读而非语义检索），Agent 按目录选页；`[[Title]]` 跳转已支持 | 小（1 天） |
+| W2 ✅ | entity/topic 退主池 A/B | exclude 集合扩展 `("wiki", "wiki_syn")` 的对照实验：wiki_multihop 数据集 + 主检索 hit/recall/mrr 三臂（现状/退池/仅 raw），**证据驱动决定**；退池后 wiki 页仅经 navigator 触达 | 中（A/B 为主） |
+| W3 ✅ | 导航埋点 + Agent 导航策略 | wiki_lookup 调用埋点进 trace（轮数/取页序列/入口类型）；Agent 工具描述明确"索引页→Related 逐页"使用策略 | 小（1 天） |
 | 验收 | 多跳 A/B | wiki_multihop_eval_dataset（recall -0.062 缺口）：E-1 臂（W1-W3 全开）vs 基线臂，Agent 端到端跑；`test_wiki_ab.py` 非退化底线 | — |
 
 ## 5. 建议实施顺序
 
 W1（索引页入口，独立价值可先行）→ W3（埋点，为 W2/E-2 提供测量）→ W2（退池 A/B，证据决策）→ 多跳验收。E-2（Query 回流）在 W3 埋点就绪后并行设计回流阈值。
+
+---
+
+## 6. 实施记录
+
+### W1 索引页优先入口（2026-10-15 已实施）
+
+**开关**：新增 `WIKI_NAV_INDEX_FIRST_ENABLED`（`WikiCompileSettings`，灰度默认 **false**；`.env.example` 同步）。属工具内部导航、不混入主检索，故不触发「混入主检索必先 A/B」红线；开关供 E1V 多跳 A/B 切换对照臂。
+
+**改动**：
+- `wiki_navigator.py`：新增 `get_index_page(kb_ids)`——PG 直读 `page_type=index` 目录页（`status=active`），正文经 **MinIO 直读**（`_read_minio_content`，索引页不进向量库）；`_read_page_content` 由「按 id 走向量库」重构为「按页型分流」（index → MinIO；其余 → 向量库分块拼接，无分块时回退 MinIO），`get_page_by_title` 同步支持按标题取读索引页。
+- `wiki_lookup_tool.py`：`_entry_search` 在开关开启时先返回索引页目录作**第一跳**（`[索引页] 标题` 块 + source），再附语义命中切片；无语义命中但有索引页时返回目录（不再回退「暂无相关」）。
+
+**验证**：`test_wiki_navigator.py` 新增 4 用例（索引页 MinIO 直读 / 无索引返回 None / 按标题取读索引页 / 工具入口索引优先 + 无命中回退 + 开关关闭保持旧行为）；后端全量 **1024 passed / 103 skipped**。
+
+**遗留**：开关默认关，需在 `.env.dev` 设 `WIKI_NAV_INDEX_FIRST_ENABLED=true` 方可在 dev 观察到「索引页先行」；W3 埋点（入口类型统计）落地后可对 E1V 多跳 A/B 做证据评估。
+
+### W3 导航埋点 + Agent 导航策略（2026-10-15 已实施）
+
+**埋点**：新增请求级缓冲 `_request_wiki_nav`（[state.py](../../backend/src/services/pipeline/state.py)；ContextVar 承载**可变列表**——`asyncio.gather` 子任务共享同一引用，工具侧 append 对父任务可见）+ `record_wiki_nav`（工具侧写入）与 `summarize_wiki_nav`（汇总：轮数 / 入口类型序列 / 取页序列 / 索引入口轮数）。管线 `_pipeline` 起始建缓冲，`_finalize_side_effects` 把汇总写入 trace 的 `stages` 明细（`name=wiki_nav`）——**刻意不新增 trace.data 键**：`RequestTrace` 是固定列模型，未知键会使 `RequestTrace(**data)` 抛 TypeError 致落库失败。
+- `wiki_lookup_tool.py`：入口检索记 `{mode:"entry", index_used}`、按页取读记 `{mode:"page", target}`。
+
+**Agent 策略**：工具 `description` 明确「先读【索引页】目录 → 沿目录/Related 逐页取读；跨文档问题多走几步」。
+
+**验证**：`test_wiki_navigator.py` 新增 3 用例（汇总 / 工具写入缓冲 / 无缓冲 no-op）；后端全量 **1027 passed / 103 skipped**。
+
+**顺带发现（已修复，见文末「TRACE 修复」）**：`RequestTrace` 固定列不含 `context_rewrite` / `semantic_cache_hit` / `verification` 三键，而 `pipeline/stages.py` 会写入 → 这三类路径（问题改写 / 语义缓存命中 / 非流式 web 校验）的 trace 落库静默失败。
+
+### W2 entity/topic 退主池 A/B（2026-10-15 已实施）
+
+**机制**：主检索默认排除集合由 `KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS` 驱动（[config.py](../../backend/src/config.py) `ProcessingSettings`，逗号分隔；[kb_retrieval_service.py](../../backend/src/services/kb_retrieval_service.py) 的 `_configured_exclude_kinds` 解析，显式传参可覆盖）。现状 `"wiki_syn"`（entity/topic 与 raw 同池）vs 退池 `"wiki,wiki_syn"`（编译页全退主池，仅经 wiki_lookup 导航触达）。
+
+**三臂口径**：现状 = 池内 raw+wiki；退池 = 仅 raw；「仅 raw」与退池在主检索口径下**等价**，故退化为两臂比较（判定函数 `run_wiki_multihop_ab.py::w2_recommend`，报告新增 `w2_arms` 段）。
+
+**证据（wiki_multihop 数据集 8 题 × 12 篇语料，BM25 离线代理）**：仅 raw recall@5=**0.938** vs raw+wiki **0.812**（hit/mrr 均 1.0 持平）→ 编译页混入主池稀释跨文档召回 **−0.125** → **采纳退池**（默认 `wiki,wiki_syn`）。
+
+**验证**：`test_multi_query_retrieval.py` 新增 3 用例（配置解析 / 缺省透传 / 显式覆盖）；后端全量 **1032 passed / 103 skipped**。
+
+**回退**：设 `KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS=wiki_syn` 即回退现状（一行配置）。
+
+**复跑说明**：2026-10-15 曾发起一次复跑以复核（harness 默认以 `OLLAMA_MODEL_NAME=qwen3:4b` 思考版逐页重编译全量语料），运行 ~79 分钟仍未产出、遂**中止**。**W2 证据基线仍为 2026-09-23 报告（0.938 vs 0.812）**，结论不变。E1V 复跑前应给 harness 加「编译页缓存」并以 `python -u` 运行，避免每次 1~2 小时盲等。
+
+### TRACE 修复（2026-10-15，随 W2/W3 顺带）
+
+`RequestTrace` 为固定列模型，而 `save_async` 直接 `RequestTrace(**self.data)`——data 含无对应列的键（`semantic_cache_hit` / `verification` / 冗余 `context_rewrite`）时抛 TypeError，被 best-effort 吞掉致**整条 trace 落库失败**（问题改写 / 语义缓存命中 / 非流式 web 校验三类路径）。修复：`TraceCollector._to_record_payload` 按模型列过滤（未知键丢弃并告警，不再波及整条记录）+ 移除 `context_rewrite` 冗余顶层写（该值已随 `intent_decision.to_dict()` 持久化）。验证：`test_trace_ownership.py` 新增 2 用例。

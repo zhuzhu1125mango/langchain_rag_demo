@@ -1,6 +1,6 @@
 # 问答链路首字延迟治理与模型配置去硬编码方案
 
-> 状态：已实施（2026-09-07），实施记录见文末 §10；2026-10-03 二次优化与瓶颈诊断见 §11，直答模型 A/B 实测与定稿见 §12
+> 状态：已实施（2026-09-07），实施记录见文末 §10；2026-10-03 二次优化与瓶颈诊断见 §11，直答模型 A/B 实测与定稿见 §12，2026-10-12 后续优化实测（多轮慢例修复 / reranker 换型 / 天气提取器修复）见 §13
 > 范围：后端问答管线（backend/src）、前端 ChatView 事件处理（frontend/src）
 > 约束：离线开源模型（Ollama）；模型名不得硬编码，一律走配置；深度思考仅保留 开/关 两态；回答须结合知识库检索与模型自身智能
 
@@ -38,13 +38,14 @@
 
 | 配置项 | 当前值 | 说明 |
 |---|---|---|
-| `OLLAMA_MODEL_NAME` | `qwen3:4b` | 主回答模型（思考模型） |
-| `FAST_LLM_MODEL_NAME` | `qwen3:4b` | 辅助任务模型，与主模型同名 |
+| `OLLAMA_MODEL_NAME` | `qwen3:4b` | 主回答模型（思考模型，`deep_thinking=on` 专属） |
+| `OLLAMA_DIRECT_MODEL_NAME` | `qwen2.5:3b-instruct` | 关闭深度思考时的直答专用模型（2026-10-03 切换） |
+| `FAST_LLM_MODEL_NAME` | `qwen2.5:3b-instruct` | 辅助任务模型；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致，避免同请求内多模型换载 |
 | `EMBEDDING_MODEL_NAME` | `bge-m3:latest` | 嵌入模型（1024 维） |
-| `KB_RERANK_MODEL` / `KB_RERANK_PROVIDER` | `qllama/bge-reranker-v2-m3` / `ollama` | 知识库重排序 |
+| `KB_RERANK_MODEL` / `KB_RERANK_PROVIDER` | `BAAI/bge-reranker-base` / `sentence_transformers` | 知识库重排序（2026-10-03 由 v2-m3 换型） |
 | `OLLAMA_SUPPORTS_THINKING` | `true` | qwen3 支持思考 |
 
-主辅模型同为 qwen3:4b，**不存在多模型切换重载问题**；但 qwen3 是思考模型，而所有辅助任务的 `ChatOllama` 实例均未绑定 `reasoning=False`（见 2.4），结构化小任务也会先生成思考链。
+**2026-10-03 更新**：直答与辅助任务已切换为 `qwen2.5:3b-instruct`（原生非思考），与主模型 `qwen3:4b` 分属不同常驻角色——下文 §2.2 原「主辅同名、无换载」的结论已不再适用；显存约束改由「4B 仅 `deep_thinking=on` 主回答链，其余全部走 3B」保证（详见 [project-status.md §四](../project-status.md) 与 [direct-model-switch-plan-2026-10-03.md](../archive/direct-model-switch-plan-2026-10-03.md)）。
 
 ### 2.3 模型名硬编码点清单
 
@@ -52,7 +53,7 @@
 |---|---|---|
 | [config.py L103-136](../../backend/src/config.py#L103-L136) | 默认值 `bge-m3:latest`、`deepseek-r1:7b-qwen-distill-q4_K_M`、`qwen2.5:7b`、`qllama/bge-reranker-v2-m3:latest` | .env 缺项时静默使用过时模型 |
 | [api/config.py L30-33](../../backend/src/api/config.py#L30-L33) | `ModelConfig` 响应字段默认 deepseek/qwen2.5 | 配置接口可能泄露硬编码名（实际被 settings 覆盖，属脏默认） |
-| `.env.example`、`.env.prod` | 示例值仍为 deepseek-r1:7b / qwen2.5:7b | 误导新部署 |
+| `.env.example`、`.env.prod` | 原为 deepseek-r1:7b / qwen2.5:7b，**已于 2026-10-15 修正**为 qwen3:4b / qwen2.5:3b-instruct | 已解决（原影响：误导新部署） |
 | 过时注释 | [rag_chain.py L119](../../backend/src/services/rag_chain.py#L119)、search_agent.py、citation_backfiller.py 中 "deepseek-r1" 字样 | 文档性误导 |
 
 ### 2.4 模型实例化点清单（11 处构造点）
@@ -422,7 +423,7 @@ KB_RELEVANCE_SCORE_THRESHOLD=0.3     #  rerank 分数相关性阈值
 
 ## 12. 直答模型 A/B 实测结果（2026-10-03）
 
-按 [direct-model-switch-plan.md](direct-model-switch-plan.md) 执行 A/B；完整执行记录（含偏差、方法学、遗留）见该文档 §6，此处只记结论。
+按 [direct-model-switch-plan-2026-10-03.md](../archive/direct-model-switch-plan-2026-10-03.md) 执行 A/B；完整执行记录（含偏差、方法学、遗留）见该文档 §6，此处只记结论。
 
 候选：A=`qwen3:1.7b`、B=`qwen2.5:3b-instruct`（均 100% GPU）。基线 `qwen3:4b-instruct-2507-q4_K_M` 在执行前已被删除，基线列采用 §11.4 同机同 ctx 实测数据。
 
@@ -439,7 +440,7 @@ KB_RELEVANCE_SCORE_THRESHOLD=0.3     #  rerank 分数相关性阈值
 - **候选 A 的 tok/s 数字被隐藏思考 token 抬高**：同一 KB 短答 A 记 179 tokens、B 仅 26，故 A 墙钟反而更慢；A 是思考模型却位于"非思考直答"槽位，架构不契合。
 - **候选 B 是原生非思考模型**（契合 `llm_direct` 定义），墙钟最快；代价是 Q6 稳定漏 `[1]`（达门槛上限）。
 - **已定稿候选 B（2026-10-03）**：按"均合格取速度更快者"规则取墙钟最快者；A 的 tok/s 优势为隐藏思考 token 假象（同题 179 vs 26 token），且思考模型占用非思考槽位架构不契合。`README.md` / `docs/architecture.md` 模型表已同步。Q6 漏 `[1]` 已通过 KB 回答模板强化引用要求修复（实测 B 的 Q6 3/3 带引用），落选候选 A 已按指示删除。
-- 期间发现两个**与模型无关**的既有问题：①天气城市提取器对含"温度"的问题误判（`_extract_city_name`）；②KB `kb_retrieval` 阶段耗时偏高，瓶颈为 CPU 上的 CrossEncoder 重排（bge-m3 embedding 仅 ~45 ms）。经 2026-10-08 `KB_HYBRID_RERANK_TOP_K` 5→3 后，稳态由 2.8~3.1 s 降至 **1.3~1.8 s**（重启后首查另含 Milvus 首次加载约 4~5 s 的一次性成本，与该参数无关）；实测拆解与冷启动口径详见 [direct-model-switch-plan.md §6.4](direct-model-switch-plan.md)。
+- 期间发现两个**与模型无关**的既有问题：①天气城市提取器对含"温度"的问题误判（`_extract_city_name`）；②KB `kb_retrieval` 阶段耗时偏高，瓶颈为 CPU 上的 CrossEncoder 重排（bge-m3 embedding 仅 ~45 ms）。经 2026-10-08 `KB_HYBRID_RERANK_TOP_K` 5→3 后，稳态由 2.8~3.1 s 降至 **1.3~1.8 s**（重启后首查另含 Milvus 首次加载约 4~5 s 的一次性成本，与该参数无关）；实测拆解与冷启动口径详见 [direct-model-switch-plan-2026-10-03.md §6.4](../archive/direct-model-switch-plan-2026-10-03.md)；该指标后由 §13 的 reranker 换型进一步降至 **441~560 ms**。
 
 ---
 

@@ -8,7 +8,7 @@
 
 | 功能模块 | 特性描述 | 状态 |
 |---------|---------|------|
-| 🔐 **多用户认证** | API Key（单实例）+ JWT（注册/登录）双模式；资源按 `owner_id` 隔离，越权返回 403 | ✅ |
+| 🔐 **多用户认证** | API Key（单实例）+ JWT（注册/登录，滑动窗口续期）双模式；用户级 API Key 自助签发/吊销（E.6，MCP/脚本/CI 集成前置）；资源按 `owner_id` 隔离，越权返回 403 | ✅ |
 | 📁 **多格式文档支持** | TXT, PDF, DOCX, XLSX, PPTX, MD, CSV, JSON, HTML, EPUB | ✅ |
 | 🖼️ **扫描版 PDF OCR** | 扫描版检测 + 双后端（MinerU / PaddleOCR）可选依赖分流，失败回退内置解析 | ✅ |
 | 🔍 **智能检索** | 混合检索（BM25 稀疏 + 向量稠密 + RRF 融合）+ Cross-Encoder 重排 | ✅ |
@@ -16,15 +16,15 @@
 | ⚡ **语义缓存** | 高相似度问题直接回放答案，Redis 不可用时 fail-open | ✅ |
 | 📖 **LLM-Wiki 编译层** | 将文档预编译为结构化页面（增量编译 / 交叉链接 / 一致性检查） | ✅ |
 | 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
-| 🤖 **搜索 Agent** | Function Calling / ReAct Agent，支持多步推理与网页抓取 | ✅ |
+| 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启，多工具/多步推理）＋原生 Function Calling / ReAct 作为回退路径 | ✅ |
 | 💬 **流式输出** | 实时打字效果，提升用户体验 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
 | 🧹 **问候过滤** | 你好 / hi / 在吗 等日常对话直接走 LLM，跳过知识库检索 | ✅ |
 | 🔗 **来源展示** | 前端同时展示知识库片段与网页搜索来源（标题/URL） | ✅ |
-| 🔒 **完全离线** | 使用本地 Ollama 模型，无需付费 API | ✅ |
+| 🔒 **完全离线（模型侧）** | 使用本地 Ollama 模型，无需付费 API；联网搜索默认走 Tavily 在线 API（可选，`SEARCH_PROVIDER` 可切换） | ✅ |
 | 🖥️ **界面支持** | Vue3 生产级界面 | ✅ |
-| 📊 **实验框架** | 支持 A/B 测试和策略权重调整 | ✅ |
-| 🧠 **动态学习** | 基于用户反馈的规则学习引擎 | ✅ |
+| 📊 **实验框架** | A/B 实验管理 API（创建/分流/度量）已完备；**未接入问答链路**（不影响真实回答） | ✅ |
+| 🧠 **动态学习** | 基于用户反馈的规则学习引擎（接口完备）；**写回闭环待打通**（策略权重未回载） | ✅ |
 | 🔎 **答案可信度** | 引用补全（embedding 匹配补 `[n]`）+ 数值幻觉校验 + 分档置信度提示 | ✅ |
 | 🧭 **意图路由** | 规则 + Embedding 分类 + LLM 路由三层，置信度门控与歧义澄清 | ✅ |
 | 📈 **监控告警** | 集成 Prometheus + Alertmanager + Grafana（rag_overview 仪表盘已 provision） | ✅ |
@@ -105,8 +105,8 @@ OLLAMA_DIRECT_MODEL_NAME=qwen2.5:3b-instruct
 FAST_LLM_MODEL_NAME=qwen2.5:3b-instruct
 EMBEDDING_MODEL_NAME=bge-m3:latest
 EMBEDDING_DIMENSION=1024
-KB_RERANK_MODEL=BAAI/bge-reranker-v2-m3
-SEARCH_RERANK_MODEL=BAAI/bge-reranker-v2-m3
+KB_RERANK_MODEL=BAAI/bge-reranker-base
+SEARCH_RERANK_MODEL=BAAI/bge-reranker-base
 ```
 
 > ⚠️ **Embedding 维度变更注意**：默认 Embedding 从 `nomic-embed-text`（768 维）切换为 `bge-m3`（1024 维）。现有 Milvus 集合会在服务启动时自动检测维度不一致并重建，旧知识库数据将丢失。请在启动前运行 `cd backend && uv run python scripts/migrate_embedding_model.py --backup` 备份并重新上传文档。
@@ -472,14 +472,15 @@ langchain_rag_demo/
 │       ├── auth.py           # 认证与授权（API Key / JWT / owner 归属校验）
 │       ├── exceptions.py     # 异常定义
 │       ├── main.py           # FastAPI 入口
-│       ├── api/              # REST API 路由（16 个模块）
-│       │   ├── auth.py                 # 注册/登录/当前用户
+│       ├── api/              # REST API 路由（17 个模块）
+│       │   ├── auth.py                 # 注册/登录/当前用户/用户级 API Key
 │       │   ├── chat.py                 # 聊天问答接口（含 SSE 流式）
 │       │   ├── document.py             # 文档管理接口
 │       │   ├── knowledge_base.py       # 知识库管理接口
 │       │   ├── wiki.py                 # Wiki 编译层接口
 │       │   ├── session.py              # 会话管理接口
 │       │   ├── trace.py                # 请求链路追踪
+│       │   ├── audit.py                # 审计日志查询接口
 │       │   ├── experiment.py           # A/B 测试实验接口
 │       │   ├── category.py             # 分类管理接口
 │       │   ├── tag.py                  # 标签管理接口
@@ -490,17 +491,40 @@ langchain_rag_demo/
 │       │   ├── config.py               # 系统配置接口
 │       │   └── notification.py         # WebSocket 实时通知接口
 │       ├── services/         # 业务逻辑层
-│       │   ├── rag_chain.py              # RAG 问答链（核心编排）
+│       │   ├── pipeline/                 # RAG 管线拆分（stages/retrieval/agent/generation/state/insights）
+│       │   ├── rag_chain.py              # RAG 问答链（编排门面：依赖装配 + run/arun_stream）
 │       │   ├── decision_pipeline.py      # 决策管道（是否检索 KB / 联网 / Agent）
-│       │   ├── strategy_manager.py       # 策略管理器
+│       │   ├── strategy_manager.py       # 策略管理器（strategies/ 子包：semantic/keyword/llm_inference）
+│       │   ├── kb_retrieval_service.py   # 统一知识库检索服务（管线与 Agent 共用口径）
+│       │   ├── hybrid_search.py          # 混合检索（BM25 + 向量 + RRF）与 KBReranker
+│       │   ├── agent_orchestrator.py     # 有界 Agent 编排（DECIDE-ACT-OBSERVE）
+│       │   ├── intent_router/            # 意图路由（embedding 分类 + LLM 路由 + 置信度门控）
+│       │   ├── tools/                    # 工具平台（tool_manager + plugins/ 9 个工具）
+│       │   ├── wiki_*.py                 # LLM-Wiki 编译层（compiler/navigator/lint/synthesis/cascade 等）
+│       │   ├── evaluation/               # 检索评估器 + 生成评估器（faithfulness/relevance）
+│       │   ├── learning_engine.py        # 学习引擎（用户反馈驱动的策略权重）
 │       │   ├── web_search_service.py     # 联网搜索服务
-│       │   ├── search_agent.py           # Function Calling / ReAct Agent
+│       │   ├── search_agent.py           # 原生 Function Calling / ReAct（AgentOrchestrator 回退路径）
+│       │   ├── semantic_cache_service.py # 语义缓存（命中直接回放）
 │       │   ├── context_enhancer.py       # 上下文增强（指代消解、压缩、摘要）
+│       │   ├── context_builder.py        # 上下文预算与 Lost-in-the-Middle 重排
+│       │   ├── answer_generator.py       # 答案生成（流式）
+│       │   ├── citation_backfiller.py    # 引用补全（[n] 回填）
+│       │   ├── output_sanitizer.py       # 输出清洗（推理前缀/复述过滤、答案校验）
+│       │   ├── numerical_validator.py    # 数字幻觉校验
+│       │   ├── query_rewriter.py         # 多查询改写
 │       │   ├── question_processor.py     # 问题处理（改写、分类、建议）
-│       │   ├── kb_comparator.py          # 知识库对比
+│       │   ├── document_loaders.py       # 本地直读加载器（txt/md/csv/json/pdf）
+│       │   ├── ocr_parser.py             # 扫描版 PDF 双后端 OCR
 │       │   ├── document_analyzer.py      # 文档分析（去重、质量、分类）
+│       │   ├── kb_comparator.py          # 知识库对比
 │       │   ├── kb_recommender.py         # 知识库推荐
 │       │   ├── knowledge_graph_generator.py # 知识图谱生成
+│       │   ├── trace_collector.py        # 请求链路追踪采集
+│       │   ├── audit_service.py          # 审计日志记录与查询
+│       │   ├── session_service.py        # 会话消息原子追加
+│       │   ├── title_generator.py        # 会话标题生成
+│       │   ├── runtime_config_service.py # 运行时配置落盘/加载
 │       │   ├── cache_service.py          # Redis 缓存服务
 │       │   ├── vector_store.py           # 向量存储管理
 │       │   ├── minio_service.py          # MinIO 对象存储服务
@@ -517,6 +541,8 @@ langchain_rag_demo/
 │   │   │   ├── ChatView.vue           # 对话页面（支持网页来源展示）
 │   │   │   ├── KnowledgeBaseView.vue  # 知识库管理
 │   │   │   ├── HistoryView.vue        # 历史记录
+│   │   │   ├── TraceView.vue          # 请求链路追踪
+│   │   │   ├── LoginView.vue          # 登录
 │   │   │   ├── SettingsView.vue       # 设置中心
 │   │   │   └── Settings/              # 设置子页面
 │   │   │       ├── GeneralView.vue    # 通用设置
@@ -524,10 +550,13 @@ langchain_rag_demo/
 │   │   │       ├── CategoryView.vue   # 分类管理
 │   │   │       ├── LearningView.vue   # 学习引擎设置
 │   │   │       ├── FeedbackView.vue   # 反馈统计
-│   │   │       └── ExperimentView.vue # A/B 实验管理
-│   │   ├── components/       # 公共组件
+│   │   │       ├── ExperimentView.vue # A/B 实验管理
+│   │   │       └── ApiKeysView.vue    # 用户级 API 密钥管理
+│   │   ├── components/       # 公共组件（含 chat/ 与 knowledge-base/ 子目录）
+│   │   ├── composables/      # 组合式函数（useChatStream / useNotifications 等）
 │   │   ├── stores/           # Pinia 状态管理
 │   │   ├── queries/          # Vue Query 数据获取
+│   │   ├── router/           # 路由配置（含陈旧分片自愈）
 │   │   └── utils/            # 工具函数
 │   └── nginx.conf            # Nginx 配置
 ├── configs/                  # 配置目录
@@ -675,6 +704,9 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `MINIO_BUCKET_NAME` | MinIO 存储桶名称 | `documents` | - |
 | `MINIO_SECURE` | 是否启用 HTTPS | `false` | true/false |
 | `SECRET_KEY` | JWT/安全签名密钥 | 无（开发缺失时启动自动生成临时密钥） | 生产环境必须设置为强密钥，否则启动失败 |
+| `USER_API_KEYS_ENABLED` | 用户级 API Key 开关（设置页自助签发/吊销） | `false` | true/false；开启后用户可签发 `rag_` 前缀 Key，以其本人 `user_id` 调 API（owner 隔离同 JWT），MCP/脚本/CI 集成用 |
+| `USER_API_KEYS_MAX_PER_USER` | 每用户 Key 数量上限 | `5` | - |
+| `AUTH_RATE_LIMIT_API_KEY_CREATE` | 签发端点限流（次/分/IP） | `5` | 0 = 不限流 |
 | `APP_ENV` | 显式环境标记 | 空（按 `IN_DOCKER` 推断） | `dev` / `prod`（兼容旧值 `production`）。非 Docker 的生产部署**必须显式设为 `prod`**，否则不执行启动强校验 |
 | `MILVUS_REBUILD_ON_MISMATCH` | 集合 schema/维度不匹配时是否删除重建 | `false` | 破坏性操作，开启前必须完成数据迁移/备份 |
 | `REDIS_HOST` | Redis 主机 | `localhost` | 容器内自动覆盖为 `redis` |
@@ -692,9 +724,9 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `SEARCH_ENABLE_RERANK` | 是否启用 Cross-Encoder 语义重排 | `true` | true/false |
 | `EMBEDDING_DIMENSION` | Embedding 向量维度 | `1024` | 需与 `EMBEDDING_MODEL_NAME` 对应 |
 | `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:3b-instruct` | 意图路由/标题/Query 改写；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致 |
-| `KB_RERANK_MODEL` | 知识库重排模型 | `BAAI/bge-reranker-v2-m3` | sentence_transformers 从 HF_HOME 离线缓存加载 |
+| `KB_RERANK_MODEL` | 知识库重排模型 | `BAAI/bge-reranker-base` | sentence_transformers 从 HF_HOME 离线缓存加载 |
 | `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
-| `SEARCH_RERANK_MODEL` | 搜索重排模型 | `BAAI/bge-reranker-v2-m3` | 同上 |
+| `SEARCH_RERANK_MODEL` | 搜索重排模型 | `BAAI/bge-reranker-base` | 同上 |
 | `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
 | `SEARCH_RERANK_TOP_K` | 重排后返回 Top-K | 5 | - |
 | `SEARCH_CACHE_TTL` | 搜索结果缓存时间（秒） | 3600 | - |
@@ -781,7 +813,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 
 **注意事项**：
 
-- Function Calling / ReAct 默认关闭，避免对现有流程产生影响；开启前请确保模型能遵循工具调用格式
+- Function Calling（`SEARCH_ENABLE_FUNCTION_CALLING`）默认**已开启**；ReAct（`SEARCH_ENABLE_REACT`）默认**关闭**——开启 ReAct 前请确保模型能遵循工具调用格式
 - 代码类查询（如 `langchain_ollama.ChatOllama`）会保留 `_`、`.`、`#` 等关键符号，避免搜索精度下降
 - 搜索失败时会抛出带搜索引擎名称的 `WebSearchError`，不再静默返回空结果
 
@@ -831,7 +863,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 
 ```bash
 cd backend
-python -m pytest tests/ -v
+uv run pytest -q
 ```
 
 ### 前端测试
@@ -870,6 +902,7 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 | 部署指南 | 开发/生产环境部署说明 | [docs/guide/deployment.md](docs/guide/deployment.md) |
 | 开发与测试指南 | 本地开发、测试执行、CI 说明、踩坑记录 | [docs/guide/development.md](docs/guide/development.md) |
 | 监控运维指南 | 监控栈使用、指标说明、告警规则与处置 | [docs/guide/monitoring.md](docs/guide/monitoring.md) |
+| 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](docs/project-status.md) |
 | 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
 | 专项设计文档 | 检索增强/意图路由/搜索优化等设计 | `docs/design/` |
 | 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](docs/archive/code-review-2026-08.md) |
@@ -893,8 +926,8 @@ MIT License
 feature/* → Pull Request → CI 全绿 → squash merge 到 main
 ```
 
-- CI 必检项：`env-consistency`（环境变量一致性）/ `backend-unit` / `backend-integration` / `rag-eval` / `frontend`
-- 建议为 main 分支开启保护（Settings → Branches → Add rule）：勾选 *Require a pull request before merging* 与 *Require status checks to pass*，选中上述 5 个 check
+- CI 必检项（7 个 job）：`env-consistency`（环境变量一致性）/ `lint`（ruff）/ `secrets-scan`（gitleaks）/ `backend-unit` / `backend-integration` / `rag-eval` / `frontend`
+- 建议为 main 分支开启保护（Settings → Branches → Add rule）：勾选 *Require a pull request before merging* 与 *Require status checks to pass*，选中上述 7 个 check
 - 提交信息使用中文或英文均可，一次 PR 聚焦一个主题
 
 ### 开发规范
@@ -910,9 +943,9 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 3. **SECRET_KEY**: 生产环境必须在 `.env.prod` 中设置强密钥，否则后端容器启动失败
 4. **数据卷管理**: 使用 `docker-compose down -v` 会删除数据卷，**谨慎操作**
 5. **模型下载**: 首次运行需要下载 Ollama 模型，可能需要较长时间
-6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qwen3:4b` 与 `ollama pull qwen2.5:3b-instruct`，耗时较长；重排序模型 `BAAI/bge-reranker-v2-m3` 不走 Ollama——由 sentence_transformers 从 `HF_HOME`（容器内挂载卷）的离线缓存加载，离线部署请先用支持网络的环境预热该缓存
+6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qwen3:4b` 与 `ollama pull qwen2.5:3b-instruct`，耗时较长；重排序模型 `BAAI/bge-reranker-base` 不走 Ollama——由 sentence_transformers 从 `HF_HOME`（容器内挂载卷）的离线缓存加载，离线部署请先用支持网络的环境预热该缓存
 7. **内存要求**: 建议至少 8GB 内存，模型越大需要内存越多
-8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 8080, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8081, 9002, 9003, 19531, 9092, 3001, 9094, 9095, 80，均仅绑定回环地址）
+8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8080, 9002, 9003, 19531, 9092, 3001, 9094, 9095；前端 8080 绑定 0.0.0.0，其余均仅绑定回环地址。前端容器内监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
 10. **联网搜索稳定性**: 联网搜索默认走 Tavily 在线 API，需在 `SEARCH_API_KEY` 配置有效的 Key；如遇网络或配额限制可切换其它 provider
 

@@ -1,8 +1,9 @@
 # 直答模型切换与 A/B 验证执行方案
 
-> 关联文档：[chat-latency-and-model-config.md](chat-latency-and-model-config.md) §11.5（背景分析）
-> 状态：**已完成（2026-10-03）** —— A/B 已执行并定稿候选 B（`qwen2.5:3b-instruct`），实测结果见 §6
+> 关联文档：[chat-latency-and-model-config.md](../design/chat-latency-and-model-config.md) §11.5（背景分析）
+> 状态：**已归档**（原状态：已完成 2026-10-03；2026-10-15 移入 archive/ 封存）—— A/B 已执行并定稿候选 B（`qwen2.5:3b-instruct`），实测结果见 §6
 > 日期：2026-10-03
+> 注：§1~§5 为**执行前计划快照**（当时现任直答模型为 `qwen3:4b-instruct-2507-q4_K_M`、候选 A 为 `qwen3:1.7b`）；实际执行结果与当前状态见 §6。
 
 ## 0. 目标
 
@@ -189,7 +190,7 @@ Copy-Item .env.prod.bak-20261003 .env.prod -Force  # 回滚配置
 1. **天气城市提取器误判**：`_extract_city_name`（[_weather_impl.py](../../backend/src/services/tools/plugins/_weather_impl.py#L44-L90)）在问题含"温度/气温/…天气"时会把前置短语当作城市名，导致 Q5（"最大吞吐量和工作温度范围"）被路由到 `weather_query` 并返回"无法找到相关信息"。**与模型无关**，基线同样受影响；建议单独修（`_DIAGNOSTIC_RE` 已排除诊断类，但"温度"仍误命中）。
 2. **KB 检索耗时以 CrossEncoder 重排为主**（2026-10-03 实测，KB 8 块）：`kb_retrieval` 稳态 **2.8~3.1 s**，重启后首查 **8.8 s**（Milvus 首次加载）。拆解：bge-m3 query embedding（CPU，`num_gpu=0`）仅 **~45 ms**；瓶颈是 CPU 上的 `bge-reranker-v2-m3` CrossEncoder 打分——实测**按 token 线性增长**（≈10 ms/token：20 token≈1.0 s、37 token≈0.7 s、616 token≈6.9 s），5 个候选合计 **~3.5 s**，且**与语料规模无关**（固定送重排候选数）。
    **已实施优化（2026-10-08）**：`KB_HYBRID_RERANK_TOP_K` 5→3（`.env.prod` / `.env.dev`）。复测同题 10 条独立样本：稳态 `kb_retrieval` **1.3~1.8 s**（中位 ≈1.6 s），**较 5 对基线省 ≈1.4 s（≈47%）**，与预测一致；KB 查询端到端总耗时从 4.3~4.5 s 降至 **2.0~2.7 s**。质量核对：10/10 均带 `[1]` 引用、答案正确。注意该参数的实际语义：`rerank_n = max(TOP_K, KB_HYBRID_RERANK_TOP_K)`，两值同为 3 时重排只对 RRF 前 3 名打分——质量代价是"RRF 排 4~5 名但语义更相关的候选"不再有机会进前 3（此前重排可提拔）；`KB_RERANK_MIN_SCORE=0` 下不做过滤。若后续发现检索质量退化，回退只需改回 5。
-   **冷启动数据口径**：重启后首查（5 对时 8.8 s / 3 对时 6.3 s）含一次性成本——Milvus 集合首次加载与 BM25 词表载入（约 4~5 s，与 `KB_HYBRID_RERANK_TOP_K` **无关**）+ 重排首推理预热，因此**首查耗时不可用于评估该参数收益**，对比一律以稳态为准（-1.4 s）。另 2026-10-08 复测时宿主机为刚冷启动，前 3 个样本（6.3→4.6→3.8 s）呈 CPU 频率/页缓存爬坡的递减趋势，约第 4 个样本起进入稳态——单机评估此类延迟应跳过重启后前 3~4 次查询再采样。
+   **冷启动数据口径**：重启后首查（5 对时 8.8 s / 3 对时 6.3 s）含一次性成本——Milvus 集合首次加载与 BM25 词表载入（约 4~5 s，与 `KB_HYBRID_RERANK_TOP_K` **无关**）+ 重排首推理预热，因此**首查耗时不可用于评估该参数收益**，对比一律以稳态为准（-1.4 s）。另 2026-10-08 复测时宿主机为刚冷启动，前 3 个样本（6.3→4.6→3.8 s）呈 CPU 频率/页缓存爬坡的递减趋势，约第 4 个样本起进入稳态——单机评估此类延迟应跳过重启后前 3~4 次查询再采样。另：该瓶颈后经 reranker 换型（`v2-m3` → `bge-reranker-base`）进一步降至 **441~560 ms**，见 [chat-latency-and-model-config.md](../design/chat-latency-and-model-config.md) §13。
 3. **测量方法学**：用 httpx 测 SSE 延迟会因 gzip/读取缓冲虚高约 21 s（curl 实测首字节仅 0.23 s）；应以 `request_traces.stages` 或 curl（不带 gzip）为准。
 
 ### 6.5 遗留与后续

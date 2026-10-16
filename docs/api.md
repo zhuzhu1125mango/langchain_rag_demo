@@ -10,12 +10,12 @@
 
 ### 鉴权
 
-除 `/api/auth/register`、`/api/auth/login`、`/health`、`/health/detail`、`/metrics`、`/` 外，
+除 `/api/auth/register`、`/api/auth/login`、`/api/auth/refresh`、`/health`、`/health/detail`、`/metrics`、`/` 外，
 全部接口都需要认证。支持两种凭据，按以下顺序判定：
 
 | 方式 | 携带位置 | 说明 |
 |------|----------|------|
-| API Key | `X-API-Key: <API_KEY>` | 自托管单实例模式；身份记为 `api_key_user` |
+| API Key | `X-API-Key: <API_KEY>` | 全局单租户 Key（身份记为 `api_key_user`）或用户级 Key（身份为其归属用户，见「用户级 API Key（E.6）」） |
 | JWT | `Authorization: Bearer <access_token>` | 多用户模式；身份为 `users` 表主键。经 `POST /api/auth/login` 获取 |
 
 ```bash
@@ -37,9 +37,29 @@ curl -X POST http://localhost:8000/api/chat/messages \
   生产模式未配置 `ADMIN_KEY` 时这些接口一律 403
 - **对象级隔离**：资源（知识库/文档/会话/反馈）按 `owner_id` 隔离，非所有者访问返回 **403**；
   `owner_id` 为空的遗留数据对任意登录用户放行
-- **JWT 有效期为 `ACCESS_TOKEN_EXPIRE_MINUTES`（默认 1440 分钟）**，无 refresh token 机制，
-  且服务端不查库校验，因此删号/改密后 token 在过期前仍然有效
+- **JWT 有效期为 `ACCESS_TOKEN_EXPIRE_MINUTES`（默认 60 分钟）**；token 未过期且签发时间未超过
+  `ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS`（默认 7 天）时，可经 `POST /api/auth/refresh` 换发新 token
+  （滑动窗口续期；超过硬上限需重新登录，设为 0 可关闭）。服务端不查库校验，因此删号/改密后 token
+  在过期前仍然有效
 - WebSocket 走首帧鉴权，见 §11
+
+### 用户级 API Key（E.6）
+
+自托管单实例的全局 `API_KEY` 在多用户场景下会把所有调用归到同一伪用户 `api_key_user`，造成资源归属串号。启用 `USER_API_KEYS_ENABLED=true`（默认 **false**，灰度开关）后，用户可用 JWT 为自己签发独立 API Key（`rag_` 前缀），并以该用户身份调用**全部接口**（HTTP 与 WebSocket 走同一套解析逻辑）——`owner_id` 隔离与 Web 端完全一致，适合 MCP 客户端 / 脚本 / CI 等机器集成。
+
+| 端点 | 方法 | 说明 |
+|---|---|---|
+| `/api/auth/api-keys` | POST | 签发新 Key（**JWT 必须**）；body `{name, expires_in_days?}`；响应 **一次性返回明文** `{id, name, key_prefix, key, created_at, expires_at}`，此后任何接口不再返回 |
+| `/api/auth/api-keys` | GET | 列出当前用户全部 Key 的元数据（`key_prefix` / 状态 / 最近使用等，**永不返回明文**） |
+| `/api/auth/api-keys/{key_id}` | DELETE | 软吊销（`revoked_at=now`，**下一请求即失效**，无缓存窗口）；仅 Key 归属人可操作 |
+
+约束与错误码：
+
+- 每用户上限 `USER_API_KEYS_MAX_PER_USER`（默认 5），超出返回 **422**；签发端点限流 `AUTH_RATE_LIMIT_API_KEY_CREATE`（默认 5 次/分/IP）
+- 匿名（`default`）与全局 Key 身份（`api_key_user`）无真实归属，签发返回 **400**（防止造出越权"万能 Key"）
+- 吊销他人 Key 返回 **403**；重复吊销返回 **409**；Key 不存在/格式非法返回 **404**
+- `api_key.create` / `api_key.revoke` 记入审计日志（`GET /api/audit`，`require_admin`）
+- 开关关闭时三端点一律返回 **404**，认证链跳过用户级 Key 分支（零开销）
 
 ### API 使用示例
 
@@ -916,8 +936,9 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
   "model": {
     "embedding_model_name": "bge-m3:latest",
     "embedding_dimension": 1024,
-    "ollama_model_name": "deepseek-r1:7b-qwen-distill-q4_K_M",
-    "fast_llm_model_name": "qwen2.5:7b"
+    "ollama_model_name": "qwen3:4b",
+    "ollama_direct_model_name": "qwen2.5:3b-instruct",
+    "fast_llm_model_name": "qwen2.5:3b-instruct"
   },
   "supported_extensions": [".txt", ".pdf", ".docx", ...]
 }
@@ -1273,7 +1294,7 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ## 附录：API 端点汇总
 
-> 与代码核对至 2026-09-24（`backend/src/api/` 共 17 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 111 条路由）。
+> 与代码核对至 2026-10-15（`backend/src/api/` 共 17 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 115 条路由）。
 
 | 模块 | 方法 | 端点 | 说明 |
 |------|------|------|------|
@@ -1281,6 +1302,9 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 认证 | POST | `/api/auth/login` | 登录换取 JWT（限流 5 次/分/IP） |
 | 认证 | POST | `/api/auth/refresh` | 滑动窗口续期：凭签名有效 token 换发（orig_iat+7d 硬上限） |
 | 认证 | GET | `/api/auth/me` | 获取当前用户信息 |
+| 认证 | POST | `/api/auth/api-keys` | 签发用户级 API Key（JWT 必须；201 一次性返回明文；限流 5 次/分/IP；`USER_API_KEYS_ENABLED=false` 时 404） |
+| 认证 | GET | `/api/auth/api-keys` | 列出当前用户 Key 元数据（永不返回明文） |
+| 认证 | DELETE | `/api/auth/api-keys/{key_id}` | 软吊销用户级 Key（204；下一请求即失效） |
 | 聊天 | POST | `/api/chat/messages` | 发送消息（非流式） |
 | 聊天 | POST | `/api/chat/stream` | 流式回答（SSE） |
 | 聊天 | POST | `/api/chat/suggestions` | 获取推荐问题 |

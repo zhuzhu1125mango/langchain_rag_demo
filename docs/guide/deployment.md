@@ -71,13 +71,13 @@
 - ✅ **安全可控**: 生产环境必须手动配置强密码
 - ✅ **灵活切换**: 一键启动脚本自动切换环境
 - ✅ **端口全错开**: 生产栈所有宿主机端口与开发栈逐一错开（详见 §2.2.1），**两个环境可同时运行**
-- ✅ **生产仅回环暴露**: 生产栈除前端 `80` 外全部绑定 `127.0.0.1`，基础设施端口不对外网开放
+- ✅ **生产仅回环暴露**: 生产栈除前端 `8080`（容器内非 root 监听 8080；因宿主 80 被外部服务占用而改绑）外全部绑定 `127.0.0.1`，基础设施端口不对外网开放
 
 #### 2.2.1 端口对照
 
 | 服务 | 开发栈（`docker-compose.dev.yml`） | 生产栈（`docker-compose.yml`） |
 |---|---|---|
-| 前端 | 5173（Vite dev server） | **80**（nginx，唯一对外端口） |
+| 前端 | 5173（Vite dev server） | **8080**（nginx，容器内监听 8080；因宿主 80 被外部服务占用而改绑） |
 | 后端 API | 8000 | 127.0.0.1:8001 |
 | PostgreSQL | 5433 | 127.0.0.1:5434 |
 | Redis | 6379 | 127.0.0.1:6380 |
@@ -163,10 +163,11 @@ uv sync --frozen
 # 下载地址: https://ollama.com/download
 
 # 拉取模型（首次运行需要下载，耗时较长）
-ollama pull deepseek-r1:7b-qwen-distill-q4_K_M
-ollama pull qwen2.5:7b
+ollama pull qwen3:4b
+ollama pull qwen2.5:3b-instruct
 ollama pull bge-m3:latest
-ollama pull qllama/bge-reranker-v2-m3:latest
+# 注：重排序模型 BAAI/bge-reranker-base 不走 Ollama——由 sentence_transformers
+# 从 HF_HOME 指向的离线缓存加载（离线部署请先用可联网环境预热该缓存）
 
 # 启动服务（推荐方式）
 uv run python start.py
@@ -276,7 +277,7 @@ docker-compose logs -f
 
 | 服务 | 宿主机地址 | 用户名/密码 |
 |------|------|-------------|
-| 前端界面 | http://localhost（**80**，唯一对外端口） | - |
+| 前端界面 | http://localhost:**8080**（容器内 8080；宿主 80 被外部服务占用而改绑） | - |
 | 后端 API | http://localhost:**8001** | - |
 | API 文档 | http://localhost:**8001**/docs | - |
 | PostgreSQL | localhost:**5434** | 见 .env.prod |
@@ -335,7 +336,7 @@ docker-compose down -v
 | 服务（Compose 服务名） | 容器名 | 镜像 | 宿主机端口 | 数据卷 | 说明 |
 |------|------|------|--------|--------|------|
 | backend | backend-prod | - | 127.0.0.1:8001:8000 | - | 后端 API 服务 |
-| frontend | frontend-prod | - | **80:80**（唯一对外端口） | - | 前端界面（nginx） |
+| frontend | frontend-prod | - | **8080:8080** | - | 前端界面（nginx 非 root，容器内监听 8080） |
 | postgres | postgres-prod | postgres:16.14 | 127.0.0.1:5434:5432 | postgres_data_prod | 生产数据库 |
 | minio | minio-prod | pgsty/minio:RELEASE.2026-06-18T00-00-00Z | 127.0.0.1:9002:9000 / 9003:9001 | minio_data_prod | 生产对象存储 |
 | milvus-standalone | milvus-standalone-prod | milvusdb/milvus:v2.6.17 | 127.0.0.1:19531:19530 / 9092:9091 | milvus_data_prod | 生产向量数据库 |
@@ -478,6 +479,9 @@ services:
 | `APP_ENV` | 不设置（默认 `dev`） | Docker 部署由 compose 注入 `prod`；非 Docker 生产部署必设 `prod`（兼容旧值 `production`） | 否 |
 | `MILVUS_REBUILD_ON_MISMATCH` | `false` | `false`（除非已确认可丢弃向量数据） | 否 |
 | `ADMIN_KEY` | 不设置（管理接口仅限开发模式） | 建议设置；未设置时管理接口一律 403 | ✅ |
+| `USER_API_KEYS_ENABLED` | `false` | `false`（灰度开关；启用后用户可在设置页自助签发用户级 API Key，供 MCP 客户端/脚本/CI 以其本人身份调用） | 否 |
+| `USER_API_KEYS_MAX_PER_USER` | `5` | `5` | 否 |
+| `AUTH_RATE_LIMIT_API_KEY_CREATE` | `5` | `5` | 否 |
 | `SEARCH_PROVIDER` | `tavily` | `tavily` | 否 |
 | `GF_SECURITY_ADMIN_PASSWORD` | `admin` | **必须手动设置** | ✅ |
 | `TITLE_GENERATION_ENABLED` | `true` | `true` | 否 |
@@ -488,6 +492,9 @@ services:
 > **说明**：
 > - `SEARCH_PROVIDER` 默认 `tavily`，需在 `.env` 中配置有效的 `SEARCH_API_KEY`；若切换为 `searxng` / `duckduckgo` 则无需 Key。
 > - `SEARCH_API_KEY`：Tavily 在线 API Key（`SEARCH_PROVIDER=tavily` 时必填），请通过 `tavily.com` 获取。
+> - 用户级 API Key（E.6，`USER_API_KEYS_ENABLED`）：开启后用户在「设置 → API 密钥」页自助签发/吊销
+>   （明文仅签发响应返回一次），以其本人 `user_id` 调用全部接口（HTTP/WS 同一套解析，owner 隔离与
+>   JWT 一致），适合 MCP 客户端 / 脚本 / CI。关闭时三端点返回 404。端点契约见 [api.md](../api.md) §用户级 API Key（E.6）。
 
 ### 6.4.1 存量库升级：sessions.messages 列迁移 JSONB
 
@@ -586,7 +593,7 @@ SEARCH_MIN_CONTENT_LENGTH=100
 SEARCH_ENABLE_MULTI_QUERY=true
 SEARCH_NUM_QUERIES=3
 SEARCH_ENABLE_RERANK=true
-SEARCH_RERANK_MODEL=BAAI/bge-reranker-v2-m3
+SEARCH_RERANK_MODEL=BAAI/bge-reranker-base
 SEARCH_RERANK_PROVIDER=sentence_transformers
 SEARCH_RERANK_TOP_K=5
 
@@ -603,9 +610,9 @@ SEARCH_AGENT_FALLBACK_TO_PHASE2=true
 
 **说明**：
 - 启用 `SEARCH_ENABLE_RERANK=true` 后，默认经 `sentence_transformers` 加载本地
-  HuggingFace 缓存中的 `BAAI/bge-reranker-v2-m3`（需已在 `HF_HOME` 指向的离线缓存中，
-  离线环境勿换未缓存模型）；如改用 `SEARCH_RERANK_PROVIDER=ollama`，模型名需为
-  Ollama 已拉取的 tag（如 `qllama/bge-reranker-v2-m3:latest`）
+  HuggingFace 缓存中的 `BAAI/bge-reranker-base`（需已在 `HF_HOME` 指向的离线缓存中，
+  离线环境勿换未缓存模型）；如改用 `SEARCH_RERANK_PROVIDER=ollama`，模型名需改为
+  Ollama 已拉取的对应 tag
 - 联网搜索默认走 Tavily 在线 API，需确保 `SEARCH_API_KEY` 有效；如网络或配额受限可切换其它 provider
 - Function Calling / ReAct 对本地模型的指令遵循能力要求较高，建议充分测试后再开启
 
@@ -625,7 +632,7 @@ TITLE_GENERATION_MODEL=
 **说明**：
 - 启用后，新建会话发送第一条消息时，后端会自动调用本地 LLM 生成会话标题
 - 生成失败时会降级为截取用户问题前 `TITLE_FALLBACK_LENGTH` 个字作为标题
-- 如需使用更轻量的模型专门生成标题，可设置 `TITLE_GENERATION_MODEL`（如 `qwen2.5:7b`）
+- 如需使用更轻量的模型专门生成标题，可设置 `TITLE_GENERATION_MODEL`（如 `qwen2.5:3b-instruct`）
 
 ### 6.8 安全配置建议
 
@@ -934,10 +941,9 @@ cat frontend/vite.config.js
 
 ```bash
 # 手动拉取模型
-ollama pull deepseek-r1:7b-qwen-distill-q4_K_M
-ollama pull qwen2.5:7b
+ollama pull qwen3:4b
+ollama pull qwen2.5:3b-instruct
 ollama pull bge-m3:latest
-ollama pull qllama/bge-reranker-v2-m3:latest
 
 # 查看已安装模型
 ollama list
@@ -1203,7 +1209,7 @@ curl -I http://localhost:9094
 
 | 服务 | 开发栈端口 | 生产栈端口 | 说明 |
 |------|------|------|------|
-| 前端 | 5173 | **80** | Vue3 开发服务器 / nginx（生产唯一对外端口） |
+| 前端 | 5173 | **8080** | Vue3 开发服务器 / nginx（容器内 8080；宿主 80 被外部服务占用而改绑） |
 | 后端 API | 8000 | **8001** | FastAPI 服务（生产绑 `127.0.0.1`） |
 | PostgreSQL | 5433 | **5434** | 业务数据库（生产绑 `127.0.0.1`） |
 | MinIO | 9000 | **9002** | 对象存储 S3 API |

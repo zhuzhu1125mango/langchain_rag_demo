@@ -1,6 +1,7 @@
 # 后续完善与优化执行计划
 
 > 状态：部分实施（执行中；P0-1 / P1-1 / P1-2 / P1-3 / P2-3~P2-6 已完成，各条目以 ✅ 标记进度；遵循「设计先行 → 确认后实施」流程）
+> 2026-10 进展：模型选型与链路延迟治理已落地（见 [chat-latency-and-model-config.md](chat-latency-and-model-config.md) §11~§13）；P2-1 GraphRAG 已正式关闭、P2-2 多查询保持关闭（依据见 [special-projects-2026-09.md](special-projects-2026-09.md) §E）
 > 日期：2026-09-01
 > 依据：对标企业级 RAG 项目（RAGFlow / Dify / FastGPT / MaxKB）与 2026 年生产级 RAG 架构共识，结合本项目现状盘点
 

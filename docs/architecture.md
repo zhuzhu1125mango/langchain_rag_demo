@@ -35,7 +35,7 @@
 - 开发环境：`docker-compose.dev.yml`（前端走 Vite dev server）
 - 生产环境：`docker-compose.yml`（前端 nginx，后端 FastAPI）
 - 两栈端口全域错开（dev backend 8000 / prod 8001 等），`name: rag-dev` / `rag-prod` 隔离容器与卷
-- 两栈基础设施端口均仅绑定 `127.0.0.1`（对外只暴露 dev frontend 5173 / prod frontend 80）；MinIO 镜像使用社区 fork `pgsty/minio`（官方 `minio/minio` 镜像已下架）
+- 两栈基础设施端口均仅绑定 `127.0.0.1`（对外只暴露 dev frontend 5173 / prod frontend 8080——容器内非 root 监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）；MinIO 镜像使用社区 fork `pgsty/minio`（官方 `minio/minio` 镜像已下架）
 - 后端启动约束（`src/main.py` 的 lifespan，按顺序）：
   1. 生产模式强制校验 `SECRET_KEY` 强度与关键凭据非空，缺失即拒绝启动
   2. 校验三个模型名非空且存在于本地 Ollama（`/api/tags`），缺失即拒绝启动
@@ -47,11 +47,11 @@
 ```
 用户提问
   │
-  ├─ 敏感词校验 / 权限校验（auth.py：API Key 与 JWT 双模式 + owner 归属校验）
+  ├─ 敏感词校验 / 权限校验（auth.py：API Key（全局单租户 / 用户级）与 JWT 双模式 + owner 归属校验）
   ├─ 意图路由（intent_router/：embedding 分类器 + LLM 路由 + 置信度门控）
   │    ├─ 知识库问答 ──► 策略管理（strategies/：semantic / keyword / llm_inference）
   │    ├─ 时效性问题 ──► 联网搜索（web_search_service）
-  │    ├─ Agent 类问题 ──► 有界 Agent 循环（agent_orchestrator.py，AGENT_ORCHESTRATOR_ENABLED 灰度；
+  │    ├─ Agent 类问题 ──► 有界 Agent 循环（agent_orchestrator.py，AGENT_ORCHESTRATOR_ENABLED 默认开启；
   │    │    search_agent.py 的原生 FC 为回退路径）——DECIDE-ACT-OBSERVE，max_steps/时间预算熔断，
   │    │    工具经统一 ToolManager 暴露（web_search/kb_search/wiki_lookup 等），可与知识库检索混合
   │    ├─ 工具类问题 ──► 工具执行（tools/plugins：天气/时间/金价/汇率/计算器/网页抓取）
@@ -88,8 +88,9 @@
 |---|---|
 | `api/` | 路由层（17 个模块，不写业务逻辑）：auth、chat、knowledge_base、wiki、document、session、trace、audit、category、tag、feedback、badcase、learning、experiment、config、evaluation、notification |
 | `services/` | 业务核心：决策管线、检索、生成、搜索、工具、评估、学习引擎 |
-| `services/rag_chain.py` | RAG 决策管线编排（`_stage_*` 分阶段 + `_PipelineState`），约 2000 行，已偏大 |
-| `services/agent_orchestrator.py` | 有界 Agent 编排：plan-execute 循环（max_steps=3 + 时间预算熔断），KB/Wiki/搜索工具统一接入，`AGENT_ORCHESTRATOR_ENABLED` 默认灰度关闭 |
+| `services/rag_chain.py` | RAG 问答链编排门面：依赖装配（`__init__`/`_async_init`）+ 公开 API（`run`/`arun_stream`）+ 生命周期；管线各阶段已拆入 `services/pipeline/`（文件已从约 2000 行瘦身为门面） |
+| `services/pipeline/` | 管线拆分（自 `rag_chain.py` 抽出）：`state.py`（共享状态 / ContextVar / 提示词模板）、`stages.py`（阶段 1-9 编排 + 终态清理）、`retrieval.py`、`agent.py`、`generation.py`、`insights.py` |
+| `services/agent_orchestrator.py` | 有界 Agent 编排：plan-execute 循环（max_steps=3 + 时间预算熔断），KB/Wiki/搜索工具统一接入，`AGENT_ORCHESTRATOR_ENABLED` 默认开启（W6 灰度转正 2026-09-29；有界循环自带降级链） |
 | `services/context_enhancer.py` / `context_builder.py` | 历史摘要增强 / 上下文预算与 Lost-in-the-Middle 重排 |
 | `services/semantic_cache_service.py` | 语义缓存（P1-3）：命中直接回放，Redis 不可用时 fail-open |
 | `services/wiki_*.py` | LLM-Wiki 编译层：编译器、去抖调度、级联重写、交叉链接扩展、一致性 lint、分布式锁 |
@@ -103,7 +104,7 @@
 | `services/audit_service.py` | 审计日志记录与查询（P2-4，best-effort 写入不阻断主流程，对应 `/api/audit`） |
 | `middleware/` | Prometheus 指标、自定义 Metrics 中间件 |
 | `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验） |
-| `auth.py` | 认证：`X-API-Key`（单实例）+ JWT 多用户（注册/登录/`/me`）+ `require_owner` 对象级授权 + WS 首帧鉴权 |
+| `auth.py` | 认证：`X-API-Key`（全局单租户 / 用户级 API Key，后者解析为真实 `user_id`）+ JWT 多用户（注册/登录/`/me`/`/refresh`）+ `require_owner` 对象级授权 + WS 首帧鉴权 |
 | `prompts/` | 提示词模板（aiofiles 异步加载） |
 
 ## 6. 关键设计约定

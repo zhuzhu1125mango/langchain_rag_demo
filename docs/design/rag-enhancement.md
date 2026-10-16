@@ -148,7 +148,7 @@ score = Σ 1 / (k + rank_i)
 
 **C. Cross-Encoder 重排序**
 
-- 复用 `qllama/bge-reranker-v2-m3:latest`（通过 `OllamaReranker` 本地调用，同时支持 `sentence_transformers` 加载方式切换）。
+- 复用 `BAAI/bge-reranker-base`（经 `sentence_transformers` 从 HF_HOME 离线缓存加载；亦可切换 `OllamaReranker` 本地调用）。2026-10-03 由 `v2-m3` 换型：离线 A/B 质量零差异、推理快约 3.3 倍（见 [direct-model-switch-plan-2026-10-03.md](../archive/direct-model-switch-plan-2026-10-03.md)）。
 - 对 Fusion 后的 Top-K（如 20/50）做精排，最终取 Top-N 给 LLM。
 - 增加重排序置信度阈值，低于阈值的结果标记为“可能不相关”，供后续上下文构建过滤或提示模型谨慎使用。
 
@@ -322,11 +322,11 @@ async def search_hybrid(query, kb_ids=None, document_ids=None):
 
 | 任务 | 默认模型 | 说明 |
 |------|---------|------|
-| 主生成模型 | `deepseek-r1:7b-qwen-distill-q4_K_M` | 复杂推理与最终回答 |
-| 轻量任务模型 | `qwen2.5:7b` | 意图路由 LLM 层、Query 改写、会话标题生成 |
+| 主生成模型 | `qwen3:4b` | 复杂推理与最终回答（`deep_thinking=on` 专属） |
+| 直答/轻量任务模型 | `qwen2.5:3b-instruct` | 关闭深度思考时的直答 + 意图路由 LLM 层、Query 改写、会话标题生成 |
 | Embedding | `bge-m3:latest` | 多语言稠密向量，1024 维 |
-| 重排序 | `qllama/bge-reranker-v2-m3:latest` | KB/Web 检索结果精排，Ollama 本地调用 |
-| 事实校验/判断 | 复用 `qwen2.5:7b` | 二分类/抽取任务 |
+| 重排序 | `BAAI/bge-reranker-base` | KB/Web 检索结果精排，sentence_transformers 离线加载 |
+| 事实校验/判断 | 复用 `qwen2.5:3b-instruct` | 二分类/抽取任务 |
 
 **实现要点**：
 
@@ -557,9 +557,9 @@ CHUNK_STRATEGY=auto
 CONTEXT_TOKEN_BUDGET=4000
 CONTEXT_COMPRESSION_ENABLED=false
 
-# 模型配置
-OLLAMA_MODEL_NAME=deepseek-r1:7b-qwen-distill-q4_K_M
-FAST_LLM_MODEL_NAME=qwen2.5:7b
+# 模型配置（2026-10 现状；原设计为 deepseek-r1:7b-qwen-distill-q4_K_M / qwen2.5:7b）
+OLLAMA_MODEL_NAME=qwen3:4b
+FAST_LLM_MODEL_NAME=qwen2.5:3b-instruct
 EMBEDDING_MODEL_NAME=bge-m3:latest
 EMBEDDING_DIMENSION=1024
 

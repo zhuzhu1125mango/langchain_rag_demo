@@ -498,3 +498,5 @@ Phase 2 交付的有界 Agent（AgentOrchestrator，§4）核心能力已具备�
 ### 11.6 L3/L4（方向保留）
 
 L3 的 critic 反思复用 L1-a 记忆写入通道 + `_get_aux_llm`；L4 checkpoint 用「简单状态序列化」优先，LangGraph 仅在需要完整编排拓扑时引入。
+
+> **状态（2026-10-15）**：L3 critic 反思**尚未实施**（独立灰度，时点待排；建议与 evolution 阶段一并列）；L4 维持「设计预留、运行受限」，4GB VRAM 约束解除前不开启（见 [special-projects-2026-09.md](special-projects-2026-09.md) §E.4）。

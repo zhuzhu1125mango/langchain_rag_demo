@@ -59,8 +59,8 @@
 
 ### 2.2 关键约束
 
-- 本地主模型：`deepseek-r1:7b-qwen-distill-q4_K_M`，单次推理 2~5 秒，指令遵循能力有限。
-- 轻量任务模型：`qwen2.5:7b`，用于 Query 改写、意图路由 LLM 层等结构化任务。
+- 本地主模型：`qwen3:4b`（原设计为 `deepseek-r1:7b-qwen-distill-q4_K_M`），复杂推理与 RAG 主回答。
+- 轻量任务模型：`qwen2.5:3b-instruct`（原设计为 `qwen2.5:7b`），用于 Query 改写、意图路由 LLM 层等结构化任务。
 - Embedding 模型：`bge-m3:latest`（已通过 OllamaEmbeddings 使用），1024 维稠密向量。
 - 搜索引擎：SearXNG（私有化聚合搜索）。
 - 延迟容忍：快速路径 ~6 秒，完整路径 ~12 秒（用户已确认可接受）。

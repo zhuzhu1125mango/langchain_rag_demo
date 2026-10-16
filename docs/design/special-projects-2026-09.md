@@ -1,8 +1,8 @@
 # 技术债与演进专项立项（2026-09）
 
-> 状态：立项草案（待 owner 逐项确认后启动；遵循「设计先行 → 确认后实施」）
-> 日期：2026-09-29
-> 来源：[code-review-2026-09-24.md](../archive/code-review-2026-09-24.md) §4 P2 表（#5/#46/#47/#51/#54）+ [fix-plan-2026-09-24.md](../archive/fix-plan-2026-09-24.md) W6 收官遗留决策（#5 决策渐进式、#46/#47 留规模触发）+ [evolution-research-2026-09.md](evolution-research-2026-09.md)（草稿待评审）+ [agent-evolution.md](agent-evolution.md) §10.6/§10.7/§11.6（L3/L4 方向保留）
+> 状态：部分实施（2026-09-29 owner 拍板转正；专项 C / D / E.6 已完成，E-1 差距盘点完成待实施；逐项进展见文末「实施进展回写」）
+> 日期：2026-09-29（实施进展回写于 2026-10-15）
+> 来源：[code-review-2026-09-24.md](../archive/code-review-2026-09-24.md) §4 P2 表（#5/#46/#47/#51/#54）+ [fix-plan-2026-09-24.md](../archive/fix-plan-2026-09-24.md) W6 收官遗留决策（#5 决策渐进式、#46/#47 留规模触发）+ [evolution-research-2026-09.md](evolution-research-2026-09.md)（已确认）+ [agent-evolution.md](agent-evolution.md) §10.6/§10.7/§11.6（L3/L4 方向保留）
 > 现状核实：2026-09-29 以代码实测为准。与评审报告数字有出入处，已在各专项「现状核实」标注修正。
 
 ---
@@ -18,6 +18,8 @@
 | E | 自进化知识运行时（四阶段）+ Agent L3/L4 | evolution 草稿 / agent-evolution §10 | 战略路线（✅ 已拍板转正，见 §E.5） | 高 | 阶段一于专项 D 完成后启动 | 阶段一复用既有 wiki 管线与 A/B 框架 |
 
 **确认后的执行顺序（2026-09-29 owner 拍板）**：D（立即）→ C（与 D 交错）→ **E 阶段一（D 完成后启动）**；L3 critic 反思独立灰度（建议 D 后与阶段一并行排期，时点实施时定）；A/B 按触发器挂起。
+
+**执行进展（2026-10-15）**：专项 **D ✅ 完成**（D1-D4）、**C ✅ 完成**、**E.6 ✅ 完成**、**E-1 差距盘点 ✅**（实施待启动）；A / B 仍按触发器挂起。逐项证据见文末「实施进展回写」。
 
 ---
 
@@ -158,6 +160,8 @@
 
 ### D.1 现状核实（含两个关键事实）
 
+> 注：本节为 **2026-09-29 实施前**的实测快照（保留作为决策依据）；D1-D4 已于 2026-10-15 完成，**当前值以 §D.4 为准**。
+
 - **backend**：CI 卡点存在——`ci.yml` L142 `pytest --cov=src --cov-fail-under=58`；`pyproject.toml` 无 `[tool.coverage]` 配置（阈值散落 CI 脚本，非单一事实来源）。**当前实测 60.95%，已低于 CI 注释所称「基线 61%」**。
 - **frontend（关键缺口）**：`vitest.config.ts` L16-28 已配置 v8 coverage + thresholds（statements 6 / branches 5 / functions 7 / lines 6，仅全局、无 per-file，include 仅 `src/{utils,stores,composables,queries}/**/*.ts` 逻辑层）；**但 CI L349 只跑 `pnpm run test:unit`（无 `--coverage`）→ 前端覆盖率阈值在 CI 中从未生效过**。本地 W6 记录逻辑层覆盖率 11.3%。
 
@@ -174,9 +178,17 @@
 - backend fail_under=60 生效且全绿；阈值历史调整有据可查（CI 注释记录实测值）。
 - 不为凑数写断言测试：新增测试必须断言真实行为（沿用 W6 #63 useToast/kb spec 的质量标准）。
 
+### D.4 实施记录（2026-10-15 回写）
+
+- **D1 ✅**：CI 前端 job 改为 `pnpm exec vitest run --coverage`——此前阈值虽已在 `vitest.config.ts` 配置，但 CI 从未带 `--coverage`，属「配置存在但从未生效」；已补双向验证（人为调高必红 / 正常值全绿）。
+- **D2 ✅**：`fail_under` 自 `ci.yml` 收敛至 `backend/pyproject.toml` `[tool.coverage.report]`（单一事实来源，CI 只写 `--cov`）；58 → **60**（实测 60.95%；D4 补测后 61.11%，距 62 尚差 0.89 点 → 维持 60，待补测回到 61+ 再评估）。
+- **D3 ✅（超额）**：前端 thresholds 6/5/7/6 → 10/8/12/10 → **32/35/24/31**（D4 补测后实测 35/38.01/27.1/34.31，按「新基线-3 点」设定）；**per-module thresholds 仍未设置**，留后续补测批次。
+- **D4 ✅**：后端 +19 用例（`api/chat.py` / `api/document.py` 行为守卫，为专项 A 拆分提供行为等价守卫）；前端 +32 用例（`useChatStream` / `useNotifications` / `queries/trace.ts`，与 C1 重叠、一次投入双收益）。
+- 提交：`59140bc`（D1/D2/D3）、`287fea2`（D4）。
+
 ---
 
-## 专项 E：自进化知识运行时（evolution 四阶段）+ Agent L3/L4（战略路线，待拍板）
+## 专项 E：自进化知识运行时（evolution 四阶段）+ Agent L3/L4（战略路线，已拍板转正）
 
 ### E.1 定位与收编关系
 
@@ -343,9 +355,25 @@ get_current_user 校验顺序调整为：
 
 ---
 
+## 实施进展回写（2026-10-15）
+
+| 专项 | 状态 | 证据 / 去向 |
+|---|---|---|
+| A 巨型文件拆分 | 挂起（触发器） | `rag_chain.py` 已达标移出；`document.py`（1439 行）、`web_search_service.py`（893 行）待拆；`12a5f79` 已触碰 `web_search_service.py` 3 行 → 按 A.4「触碰即先拆」待 owner 决策是否补拆（见 [project-status.md §二 SA](../project-status.md)） |
+| B 前端性能 | 挂起（触发器） | 消息 >200 或图谱节点 >300 时启动 |
+| C 类型严格化 | ✅ 完成 | `c1a4b9e`：trace.ts 四接口精确化 + kb.ts 参数袋接口化 + eslint `no-explicit-any: error`；验收 vue-tsc 0 错误 / eslint 0 error（44 处 non-null 断言为 warn 观察项）/ vitest 全绿 |
+| D 覆盖率收紧 | ✅ 完成 | `59140bc` + `287fea2`；见 §D.4；后端 `fail_under=60`、前端 thresholds `32/35/24/31` |
+| E 阶段一（E-1 ~ E-3） | E-1 盘点完成待实施；E-3 实质完成；E-2 未启动 | [e1-navigable-lookup-gap.md](e1-navigable-lookup-gap.md)：差距①索引页优先入口 / ②entity-topic 退主池 / ③导航埋点，建议序 W1 → W3 → W2 → 多跳验收；E-3 `wiki_lint_scheduler` 已完整（lifespan 挂载 + 可配间隔 + 失败续跑） |
+| E.6 用户级 API Key | ✅ 完成 | `cdd2ed3`；实施记录见 §E.6.9 |
+| L3 critic 反思 | 待启动 | 独立灰度，时点待排（建议与阶段一并列） |
+| 阶段二 MCP 前置 | 待 owner 最终确认 | 分发边界已修正为 HTTP/SSE + 每用户凭据（§E.5 第 4 条）；E.6 已提供前置能力 |
+
+---
+
 ## 执行约定
 
 - 全部专项遵循「设计先行 → 确认后实施」；每个专项启动时输出独立实施记录（沿用 fix-plan 的 ✅ 惯例回写本文件）。
-- 回归基线：后端 976 passed / 102 skipped；前端 vue-tsc 零错误、eslint 0 error、54 单测 + 5 E2E；CI 五 job 全绿。
+- 回归基线（2026-10-15 实测）：后端 994 passed / 103 skipped；前端 vue-tsc 零错误、eslint 0 error（44 处 non-null 断言为 warn 观察项）、vitest 86 passed + E2E 5 passed；CI 覆盖率卡点：后端 `fail_under=60`、前端 thresholds `32/35/24/31`。
+- **说明**：各专项「验收标准」中的历史数字（如 `976 passed` / `54 单测`）为编写时快照，执行对应专项时以本基线为准。
 - A/B 两个渐进式专项以触发器挂起状态跟踪，每季度例行复核一次触发条件是否达成（或随评审一并复核）。
 - 新增依赖硬约束：开源可离线、禁止付费 API（Zod 决策、虚拟滚动库选型均已按此约束裁剪）。

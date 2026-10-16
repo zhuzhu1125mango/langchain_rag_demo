@@ -28,7 +28,7 @@ uv run pytest -q            # 全量
 uv run pytest tests/test_rag_chain.py -q   # 单文件
 ```
 
-基线：929 passed / 103 skipped（2026-09-24）。
+基线：1019 passed / 102 skipped（2026-10-15 实测）。
 
 ### 2.2 集成测试（需容器）
 
@@ -95,10 +95,10 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 | env-consistency | 用 `.env.example` 生成占位 env 校验键集合一致 | `.env.dev/.env.prod` 被 gitignore 不入库；脚本对缺失文件容错跳过 |
 | lint | backend ruff（`uvx ruff --select E9,F63,F7,F82`）+ 前端 eslint / typecheck | 真错误级规则集，零风格噪音；runner 无预装 uvx，须先 setup-uv |
 | secrets-scan | gitleaks `detect --no-git --redact` | 只扫工作树不扫历史；误报按 fingerprint 登记到 `.gitleaksignore` 并注明原因 |
-| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | `--cov-fail-under=58`（基线 61%，随覆盖提升收紧）；干净安装暴露隐性依赖缺失 |
+| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | 阈值已收敛至 `backend/pyproject.toml` `[tool.coverage.report]` `fail_under=60`（实测 61.11%），CI 命令仅 `--cov=src`；干净安装暴露隐性依赖缺失 |
 | backend-integration | docker run 启动 MinIO(pgsty fork)/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码；pytest-timeout 120s 防挂死 + step timeout-minutes 40 |
 | rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json；另有信息性多查询 A/B 步骤（continue-on-error，非卡点） |
-| frontend | pnpm 单测（覆盖率阈值）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
+| frontend | `vitest run --coverage`（阈值 32/35/24/31 卡点）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
 
 全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限。
 

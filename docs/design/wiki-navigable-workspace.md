@@ -2,6 +2,7 @@
 
 > 状态：已实施（D1/D3/D4 代码与单测落地；D2/D5 经 A/B 证伪后回退默认值，见 §10）
 > 上游文档：[evolution-research-2026-09.md](evolution-research-2026-09.md)（调研与四阶段路线）
+> 后续：[e1-navigable-lookup-gap.md](e1-navigable-lookup-gap.md)（E-1 能力差距盘点：索引页入口 / entity·topic 退池 / 导航埋点）
 > 实证依据：`scripts/run_wiki_multihop_ab.py` A/B（混入式 recall -0.062，缺口在"导航"而非"压缩"）
 
 ## 0. 目标与不做什么
