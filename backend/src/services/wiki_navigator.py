@@ -119,6 +119,52 @@ class WikiNavigator:
     # ------------------------------------------------------------------
     # 按页取读
     # ------------------------------------------------------------------
+    async def get_index_page(self, kb_ids: List[str]) -> Optional[Dict]:
+        """从 PG 直读 page_type=index 目录页（索引页不进向量库，须 PG/MinIO 直读）。
+
+        E-1 W1：作为导航「第一跳」——返回索引页目录（列出全部 active 编译页标题），
+        供 Agent 按目录选页导航。无索引页时返回 None（fail-soft）。
+
+        Returns:
+            与 get_page_by_title 同构的 dict（page_type="index"）或 None。
+        """
+        if not kb_ids:
+            return None
+        try:
+            from sqlalchemy import select
+
+            from src.database import async_session_maker
+            from src.models.wiki_page import WikiPage
+
+            async with async_session_maker() as db:
+                row = (
+                    await db.execute(
+                        select(WikiPage).filter(
+                            WikiPage.kb_id.in_([str(k) for k in kb_ids]),
+                            WikiPage.status == "active",
+                            WikiPage.page_type == "index",
+                        )
+                    )
+                ).scalars().first()
+            if row is None:
+                return None
+
+            content = await self._read_minio_content(getattr(row, "content_path", ""))
+            max_chars = settings.wiki_compile.WIKI_NAV_PAGE_MAX_CHARS
+            if len(content) > max_chars:
+                content = content[:max_chars] + "\n\n（内容过长，已截断）"
+            return {
+                "page_id": str(row.id),
+                "kb_id": str(row.kb_id),
+                "title": row.title,
+                "page_type": row.page_type,
+                "content": content,
+                "links": list(row.links or []),
+            }
+        except Exception as e:
+            logger.warning(f"Wiki 索引页直读失败: {e}")
+            return None
+
     async def get_page_by_title(self, kb_ids: List[str], title: str) -> Optional[Dict]:
         """按 (kb_ids, 归一化标题) 精确取页：元数据 + 全文（截断）+ Related。
 
@@ -150,7 +196,7 @@ class WikiNavigator:
             if row is None:
                 return None
 
-            content = await self._read_page_content(str(row.id))
+            content = await self._read_page_content(row)
             max_chars = settings.wiki_compile.WIKI_NAV_PAGE_MAX_CHARS
             if len(content) > max_chars:
                 content = content[:max_chars] + "\n\n（内容过长，已截断；可用更具体的 Related 页面继续导航）"
@@ -166,16 +212,34 @@ class WikiNavigator:
             logger.warning(f"Wiki 按页取读失败（title={title}）: {e}")
             return None
 
-    async def _read_page_content(self, page_id: str) -> str:
-        """从向量库按 document_id 取回整页分块，按 chunk_index 拼接。"""
+    async def _read_page_content(self, row) -> str:
+        """取页正文：索引页走 MinIO 直读（不进向量库），其余走向量库分块拼接。
+
+        向量库无分块（编译中断/未索引）时回退 MinIO 直读，保证页面仍可导航。
+        """
+        if getattr(row, "page_type", "") == "index":
+            return await self._read_minio_content(getattr(row, "content_path", ""))
         vector_store = await self._ensure_vector_store()
-        chunks = await vector_store.get_chunks_by_document_id(page_id)
+        chunks = await vector_store.get_chunks_by_document_id(str(row.id))
         if not chunks:
-            return ""
+            return await self._read_minio_content(getattr(row, "content_path", ""))
         chunks = sorted(chunks, key=lambda d: d.metadata.get("chunk_index", 0))
         return "\n".join(
             d.page_content for d in chunks if getattr(d, "page_content", "")
         )
+
+    async def _read_minio_content(self, content_path: str) -> str:
+        """从 MinIO 直读页面正文（wiki/{kb_id}/{page_id}.md）。失败 fail-soft 返回空串。"""
+        if not content_path:
+            return ""
+        try:
+            from src.services.minio_service import MinioService
+
+            minio = await MinioService.get_instance()
+            return await minio.download_text_async(content_path) or ""
+        except Exception as e:
+            logger.warning(f"Wiki 页 MinIO 直读失败（path={content_path}）: {e}")
+            return ""
 
 
 def format_related(links: List[str], exclude_titles: Optional[List[str]] = None) -> str:

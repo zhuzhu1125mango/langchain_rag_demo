@@ -32,6 +32,14 @@ _request_retrieval_timings: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     "rag_request_retrieval_timings", default=None
 )
 
+# E-1 W3 导航埋点：wiki_lookup 多轮调用的请求级事件缓冲。
+# 以「可变列表」承载、由管线在请求开始时创建——asyncio.gather 派生的子任务共享同一
+# 列表对象（contextvar 只复制映射、值是同一引用），故工具侧 append 对父任务可见；
+# 仅追加、不重绑 ContextVar，规避「子任务内 set 不回传父任务」的经典陷阱。
+_request_wiki_nav: ContextVar[Optional[List[Dict[str, Any]]]] = ContextVar(
+    "rag_request_wiki_nav", default=None
+)
+
 # P1-3 后台持久化任务引用集，防止 fire-and-forget 任务被垃圾回收
 # （语义缓存写入、对话摘要更新等终态副作用）
 _background_store_tasks: set = set()
@@ -201,3 +209,38 @@ def _memory_doc_id(session_id: str) -> str:
     拒绝 `memory:{session_id}` 这类带冒号的字符串（防注入白名单）。
     """
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"agent-memory:{session_id}"))
+
+
+def record_wiki_nav(event: Dict[str, Any]) -> None:
+    """记录一次 wiki_lookup 导航事件到请求级缓冲（工具侧调用，fail-soft）。
+
+    无缓冲（单测直调工具 / 非管线上下文）时静默忽略
+    - event: {"mode": "entry"|"page", "target": 查询词或页标题, "index_used": bool}
+    """
+    buf = _request_wiki_nav.get()
+    if buf is not None:
+        try:
+            buf.append(event)
+        except Exception:
+            pass
+
+
+def summarize_wiki_nav(
+    events: Optional[List[Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """把导航事件汇总为埋点指标：轮数 / 入口类型序列 / 取页序列（E-1 W3）。
+
+    Returns None 表示本轮无 wiki_lookup 调用（不写 trace）。
+    """
+    if not events:
+        return None
+    return {
+        "rounds": len(events),
+        "entry_modes": [e.get("mode", "") for e in events],
+        "page_sequence": [
+            str(e.get("target", ""))
+            for e in events
+            if e.get("mode") == "page" and e.get("target")
+        ],
+        "index_rounds": sum(1 for e in events if e.get("index_used")),
+    }

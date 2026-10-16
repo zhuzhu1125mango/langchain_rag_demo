@@ -189,6 +189,32 @@ def recommend(a: Dict, b: Dict, wiki_only: Dict) -> str:
     )
 
 
+def w2_recommend(a: Dict, b: Dict) -> str:
+    """E-1 W2 退主池判定：现状 B（raw+wiki）vs 退池 A（仅 raw）。
+
+    退池 == 仅 raw：两臂在主检索口径下等价（编译页全退主池后池中只剩原始 chunk），
+    故"三臂（现状/退池/仅 raw）"实质为两臂比较；落地开关为
+    KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS（"wiki_syn"=现状 / "wiki,wiki_syn"=退池）。
+    """
+    d_recall = a["recall"] - b["recall"]
+    d_hit = a["hit_rate"] - b["hit_rate"]
+    if d_recall >= GAIN_THRESHOLD:
+        return (
+            f"退池（仅 raw，recall@5={a['recall']:.3f}）优于现状（raw+wiki，{b['recall']:.3f}）"
+            f"recall {d_recall:+.3f}（hit {d_hit:+.3f}）：编译页混入主池稀释跨文档召回 → "
+            "采纳退池（KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS=wiki,wiki_syn）。"
+        )
+    if d_recall <= -GAIN_THRESHOLD:
+        return (
+            f"现状（raw+wiki，recall@5={b['recall']:.3f}）优于退池（仅 raw，{a['recall']:.3f}）"
+            f"recall {d_recall:+.3f}：编译页对主检索有净增益 → 维持现状（exclude 仅 wiki_syn）。"
+        )
+    return (
+        f"退池与现状近持平（Δrecall={d_recall:+.3f} / Δhit={d_hit:+.3f}）：无明确增益，"
+        "维持现状（保守）；开关可随时切换。"
+    )
+
+
 def main() -> int:
     for p in (str(BASE_DIR / "scripts"), str(BASE_DIR)):
         if p not in sys.path:
@@ -252,6 +278,7 @@ def main() -> int:
     print(f"  D(导航式,阶段一)    hit@{args.top_k}={d_metrics['hit_rate']:.3f}  mrr@{args.top_k}={d_metrics['mrr']:.3f}  recall@{args.top_k}={d_metrics['recall']:.3f}")
     print(f"  结论：{recommend(a_metrics, b_metrics, c_metrics)}")
     print(f"  D 臂判定：{d_recommend(a_metrics, b_metrics, d_metrics)}")
+    print(f"  W2 退主池判定：{w2_recommend(a_metrics, b_metrics)}")
 
     if args.report:
         payload = {
@@ -262,8 +289,14 @@ def main() -> int:
             "arm_B_mixed": b_metrics,
             "arm_C_wiki_only": c_metrics,
             "arm_D_navigated": d_metrics,
+            "w2_arms": {
+                "现状_raw_plus_wiki": b_metrics,
+                "退池_raw_only": a_metrics,
+                "仅raw_等价退池": a_metrics,
+            },
             "recommendation": recommend(a_metrics, b_metrics, c_metrics),
             "d_recommendation": d_recommend(a_metrics, b_metrics, d_metrics),
+            "w2_recommendation": w2_recommend(a_metrics, b_metrics),
         }
         args.report.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"[wiki-mh-ab] 报告已写入: {args.report}")

@@ -27,9 +27,10 @@ class WikiLookupTool(BaseTool):
     description = (
         "查询并导航知识库的 Wiki 编译页（由 LLM 将多篇文档编译成的结构化主题页，"
         "含跨文档综合与矛盾标注）。当问题涉及概念解释、多篇文档的综合对比、"
-        "主题梳理时优先使用。入口检索结果末尾的 Related: [[页面标题]] 是相关"
-        "页面链接——需要展开某篇时，把其标题作为 page_title 再次调用本工具即可"
-        "逐页导航，跨文档问题应沿 Related 多走几步。"
+        "主题梳理时优先使用。导航策略：入口检索可能先给出【索引页】目录（列出全部"
+        "页面），结果末尾的 Related: [[页面标题]] 是相关页面链接——需要展开某一页时，"
+        "把其标题作为 page_title 再次调用本工具，沿【索引页】目录或 Related 逐页取读；"
+        "跨文档问题应多走几步，而非一次性检索。"
     )
     parameters = {
         "type": "object",
@@ -76,6 +77,19 @@ class WikiLookupTool(BaseTool):
             input_arguments=kwargs,
             output="当前未选择知识库，无法查询 Wiki 编译页。请先选择知识库后再提问。",
         )
+
+    @staticmethod
+    def _record_nav(mode: str, target: str, index_used: bool = False) -> None:
+        """E-1 W3 导航埋点：记录一次 wiki_lookup 调用事件（fail-soft）。
+
+        mode: "entry"（入口检索）| "page"（按页取读）；index_used 表示入口经索引页目录。
+        """
+        try:
+            from src.services.pipeline.state import record_wiki_nav
+
+            record_wiki_nav({"mode": mode, "target": target, "index_used": index_used})
+        except Exception:
+            pass
 
     async def execute(self, **kwargs) -> ToolResult:
         # _owner_id 由编排层服务端注入（非模型参数），用于工具侧归属校验
@@ -124,6 +138,7 @@ class WikiLookupTool(BaseTool):
 
     async def _fetch_page(self, navigator, kb_ids: list, page_title: str, kwargs: dict) -> ToolResult:
         """按页取读：全文（截断）+ Related 链接。"""
+        self._record_nav("page", page_title)
         page = await navigator.get_page_by_title(kb_ids, page_title)
         if page is None:
             return ToolResult(
@@ -162,9 +177,26 @@ class WikiLookupTool(BaseTool):
         )
 
     async def _entry_search(self, navigator, kb_ids: list, query: str, kwargs: dict) -> ToolResult:
-        """入口检索：命中切片 + 各命中页的 Related 链接。"""
+        """入口检索：索引页目录（E-1 W1，开关控制）→ 语义命中切片 + Related。"""
+        from src.config import settings
+
         docs = await navigator.search_entries(query, kb_ids)
-        if not docs:
+
+        # E-1 W1 第一跳：索引页目录（PG/MinIO 直读，不进向量库）——供 Agent 按目录选页。
+        # 属工具内部导航，不混入主检索，灰度开关控制（默认关）。
+        index_page = None
+        if settings.wiki_compile.WIKI_NAV_INDEX_FIRST_ENABLED:
+            try:
+                index_page = await navigator.get_index_page(kb_ids)
+            except Exception as e:
+                logger.warning(f"wiki_lookup 索引页读取失败（忽略）: {e}")
+
+        # E-1 W3 导航埋点：入口类型（经索引页目录 / 语义检索）
+        self._record_nav(
+            "entry", query, index_used=bool(index_page and index_page.get("content"))
+        )
+
+        if not docs and index_page is None:
             return ToolResult(
                 tool_name=self.name,
                 input_arguments=kwargs,
@@ -177,6 +209,24 @@ class WikiLookupTool(BaseTool):
         sources = []
         hit_titles = []
         links_acc: list = []
+
+        # 索引页作为第一跳先行透出（目录内容含 [[标题]]，Agent 可据此取读）
+        if index_page and index_page.get("content"):
+            hit_titles.append(index_page["title"])
+            lines.append(f"[索引页] {index_page['title']}\n\n{index_page['content']}")
+            sources.append({
+                "url": "",
+                "source": f"wiki://{index_page['title']}",
+                "title": index_page["title"],
+                "page_content": index_page["content"][:800],
+                "document_id": index_page["page_id"],
+                "filename": f"wiki://{index_page['title']}",
+                "chunk_index": 0,
+                "total_chunks": 1,
+                "source_kind": "wiki",
+                "score": 0.0,
+            })
+
         for i, doc in enumerate(docs, 1):
             meta = doc.metadata or {}
             title = meta.get("heading_path") or meta.get("source", "未知")
@@ -209,6 +259,8 @@ class WikiLookupTool(BaseTool):
         output = "\n\n".join(lines)
         if related:
             output = f"{output}\n\n{related}\n（需要展开某篇时，将其标题作为 page_title 再次调用本工具）"
+        elif index_page and index_page.get("content"):
+            output = f"{output}\n（可按索引页目录，把任一 [[标题]] 作为 page_title 取读）"
 
         return ToolResult(
             tool_name=self.name,

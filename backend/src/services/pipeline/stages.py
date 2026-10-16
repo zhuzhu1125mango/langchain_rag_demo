@@ -23,7 +23,9 @@ from src.services.pipeline.state import (
     _background_store_tasks,
     _request_retrieval_score,
     _request_retrieval_timings,
+    _request_wiki_nav,
     should_think,
+    summarize_wiki_nav,
 )
 from src.services.reasoning import (
     REASONING_STEP_ANSWER_GENERATE,
@@ -76,6 +78,8 @@ class PipelineStagesMixin:
         state.think = should_think(deep_thinking)
         state.trace = TraceCollector()
         state.trace.set_basic(question=question, session_id=session_id, user_id=user_id)
+        # E-1 W3：初始化导航事件缓冲（本任务持有，工具体经共享引用 append；终态汇总写入 trace）
+        _request_wiki_nav.set([])
 
         try:
             # 各阶段执行内部生成器
@@ -227,8 +231,8 @@ class PipelineStagesMixin:
         ))
 
         # 优先使用意图路由层产生的 context_rewrite 作为实际执行问题
+        # （context_rewrite 已随 intent_decision.to_dict() 落入 trace，无需另存顶层键）
         if intent_decision.context_rewrite:
-            state.trace.data["context_rewrite"] = intent_decision.context_rewrite
             if intent_decision.context_rewrite != state.resolved_question:
                 state.resolved_question = intent_decision.context_rewrite
                 logger.info(f"使用意图路由改写后的问题: {state.resolved_question}")
@@ -678,6 +682,10 @@ class PipelineStagesMixin:
                 await maybe_schedule_synthesis(state)
             except Exception as e:
                 logger.warning(f"synthesis 回流调度失败（忽略）: {e}")
+            # E-1 W3：wiki_lookup 导航埋点汇总写入 trace（存 stages 明细，规避 trace 表未知列报错）
+            _wiki_nav = summarize_wiki_nav(_request_wiki_nav.get())
+            if _wiki_nav:
+                state.trace.add_stage("wiki_nav", "done", latency_ms=0, detail=_wiki_nav)
             state.trace.set_final_answer(state.final_answer)
             state.trace.finish()
             state.trace.save_background()

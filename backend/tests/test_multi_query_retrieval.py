@@ -251,3 +251,59 @@ class TestRetrieveDocumentsRouting:
 
         await rag_chain._retrieve_documents("q", queries=["q", "q改写"])
         assert routed == [("dense", "q")]
+
+
+class TestRetrievalExcludeKindsConfig:
+    """E-1 W2：主检索默认排除集合由 KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS 驱动（退池开关）。"""
+
+    def _make_rag_chain(self):
+        vector_store = VectorStoreManager()
+        vector_store.milvus_service = object()
+        return RAGChain(vector_store), vector_store
+
+    def test_configured_exclude_kinds_parses_csv(self, monkeypatch):
+        from src.services.kb_retrieval_service import _configured_exclude_kinds
+
+        monkeypatch.setattr(settings.processing, "KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS", "wiki,wiki_syn")
+        assert _configured_exclude_kinds() == ("wiki", "wiki_syn")
+
+        monkeypatch.setattr(settings.processing, "KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS", " wiki_syn , ")
+        assert _configured_exclude_kinds() == ("wiki_syn",)
+
+        monkeypatch.setattr(settings.processing, "KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS", "")
+        assert _configured_exclude_kinds() == ()
+
+    async def test_retrieve_passes_configured_exclude(self, monkeypatch):
+        """缺省 exclude 时按配置透传（退池默认 = wiki,wiki_syn）。"""
+        rag_chain, vector_store = self._make_rag_chain()
+        captured = {}
+
+        async def fake_hybrid(query, **kwargs):
+            captured.update(kwargs)
+            return []
+
+        monkeypatch.setattr(vector_store, "search_hybrid", fake_hybrid)
+        monkeypatch.setattr(
+            settings.processing, "KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS", "wiki,wiki_syn"
+        )
+
+        await rag_chain._retrieve_documents("q")
+        assert captured.get("exclude_source_kinds") == ("wiki", "wiki_syn")
+
+    async def test_explicit_exclude_overrides_config(self, monkeypatch):
+        """显式传入 exclude_source_kinds 时覆盖配置默认。"""
+        from src.services.kb_retrieval_service import KBRetrievalService
+
+        captured = {}
+
+        class _FakeVS:
+            async def search_hybrid(self, query, **kwargs):
+                captured.update(kwargs)
+                return []
+
+        monkeypatch.setattr(settings.processing, "KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS", "wiki,wiki_syn")
+        monkeypatch.setattr(settings.processing, "KB_ENABLE_HYBRID_SEARCH", True)
+
+        svc = KBRetrievalService(vector_store=_FakeVS())
+        await svc.retrieve("q", kb_ids=["kb1"], exclude_source_kinds=("wiki_syn",))
+        assert captured.get("exclude_source_kinds") == ("wiki_syn",)

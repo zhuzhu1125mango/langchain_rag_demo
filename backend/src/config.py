@@ -255,6 +255,13 @@ class ProcessingSettings(BaseSettings):
     # 多查询时每个 query 每路（dense/sparse）的召回数；单查询路径仍用 KB_HYBRID_SEARCH_TOP_K
     KB_MULTI_QUERY_CHANNEL_TOP_K: int = 10
 
+    # E-1 W2 entity/topic 退主池：主检索默认排除的 source_kind 集合（逗号分隔）。
+    # 现状 "wiki_syn"（仅排除综合页，entity/topic 编译页仍与 raw 同池竞争）；
+    # 退池 "wiki,wiki_syn"（编译页全退主池，仅经 wiki_lookup 导航触达）。
+    # 依据 wiki_multihop 离线 A/B：raw-only recall@5=0.938 ＞ raw+wiki 0.812（hit/mrr 持平）
+    # ——编译页混入主池稀释跨文档召回，故取退池为默认（见 docs/design/e1-navigable-lookup-gap.md §6）。
+    KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS: str = "wiki,wiki_syn"
+
     # 上下文构建相关配置
     CONTEXT_TOKEN_BUDGET: int = 4000
     CONTEXT_COMPRESSION_ENABLED: bool = False
@@ -478,6 +485,10 @@ class WikiCompileSettings(BaseSettings):
     WIKI_REWRITE_MATERIAL_CHARS: int = 16000
     # 阶段一 D1 导航式 wiki_lookup：按页取读时的正文截断上限（字符）
     WIKI_NAV_PAGE_MAX_CHARS: int = 4000
+    # E-1 W1 索引页优先入口（灰度默认关）：wiki_lookup 入口检索先返回索引页（目录，
+    # 经 PG/MinIO 直读——索引页不进向量库），供 Agent 按目录选页导航；属工具内部
+    # 导航，不混入主检索，无需 A/B 即可灰度开启（A/B 用于 E1V 多跳验收）。
+    WIKI_NAV_INDEX_FIRST_ENABLED: bool = False
     # 阶段一 D3 答案回流（synthesis 页）：灰度开关，默认关
     WIKI_SYNTHESIS_ENABLED: bool = False
     # 回流最短答案长度（字符）：过短答案不值得合成

@@ -25,6 +25,16 @@ except ImportError:
     PROMETHEUS_AVAILABLE = False
 
 
+def _configured_exclude_kinds() -> tuple:
+    """解析配置的主检索排除 source_kind 集合（逗号分隔；空配置 → 不排除）。
+
+    E-1 W2：默认由 KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS 驱动——
+    现状 "wiki_syn"（entity/topic 编译页仍在主池）vs 退池 "wiki,wiki_syn"。
+    """
+    raw = settings.processing.KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS or ""
+    return tuple(k.strip() for k in raw.split(",") if k.strip())
+
+
 class KBRetrievalService:
     """统一知识库检索入口（管线与 Agent 工具共用）。"""
 
@@ -65,9 +75,10 @@ class KBRetrievalService:
             query_embedding: 预计算的 query 向量（语义缓存场景），传入时跳过重复计算
             queries: 改写后的多查询列表（可选，首元素必须为 question）
             source_kind: 可选，限定切片来源类型（如 "wiki" 只检索编译页）
-            exclude_source_kinds: 可选，排除的切片来源类型集合。默认排除
-                synthesis 页（"wiki_syn"）——综合页仅经 wiki_lookup 导航入口
-                触达，不与原始 chunk 同池竞争（阶段一 D3）。
+            exclude_source_kinds: 可选，排除的切片来源类型集合。缺省（None）时取配置
+                `KB_RETRIEVAL_EXCLUDE_SOURCE_KINDS`——默认 "wiki,wiki_syn"（退池）：
+                编译页（entity/topic + synthesis）不与原始 chunk 同池竞争，仅经
+                wiki_lookup 导航入口触达（E-1 W2；现状口径为仅排 "wiki_syn"）。
 
         Returns:
             list: 检索到的 Document 对象列表（截断到 TOP_K）
@@ -87,10 +98,11 @@ class KBRetrievalService:
                 search_kwargs["query_embedding"] = query_embedding
             if source_kind:
                 search_kwargs["source_kind"] = source_kind
+            elif exclude_source_kinds is not None:
+                search_kwargs["exclude_source_kinds"] = tuple(exclude_source_kinds)
             else:
-                search_kwargs["exclude_source_kinds"] = tuple(
-                    exclude_source_kinds or ("wiki_syn",)
-                )
+                # 默认排除集合由配置驱动（E-1 W2：现状仅排 wiki_syn；退池再加 wiki）
+                search_kwargs["exclude_source_kinds"] = _configured_exclude_kinds()
 
             if settings.processing.KB_ENABLE_HYBRID_SEARCH:
                 try:
