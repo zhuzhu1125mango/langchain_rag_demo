@@ -23,8 +23,8 @@
 | 🔗 **来源展示** | 前端同时展示知识库片段与网页搜索来源（标题/URL） | ✅ |
 | 🔒 **完全离线（模型侧）** | 使用本地 Ollama 模型，无需付费 API；联网搜索默认走 Tavily 在线 API（可选，`SEARCH_PROVIDER` 可切换） | ✅ |
 | 🖥️ **界面支持** | Vue3 生产级界面 | ✅ |
-| 📊 **实验框架** | A/B 实验管理 API（创建/分流/度量）已完备；**未接入问答链路**（不影响真实回答） | ✅ |
-| 🧠 **动态学习** | 基于用户反馈的规则学习引擎（接口完备）；**写回闭环待打通**（策略权重未回载） | ✅ |
+| 📊 **实验框架** | A/B 实验管理 API（创建/分流/度量）；**已接入 chat 链路**（变体白名单覆盖 decision/检索参数 + response_time 指标回收），灰度开关 `AB_EXPERIMENT_CHAT_ENABLED` 默认关 | ✅ |
+| 🧠 **动态学习** | 基于用户反馈的规则学习引擎；**写回闭环已接入**（单例权重回载 + KB 短路路径样本补采），灰度开关 `LEARNING_WEIGHT_RELOAD_ENABLED` / `LEARNING_SAMPLE_COLLECT_BG_ENABLED` 默认关 | ✅ |
 | 🔎 **答案可信度** | 引用补全（embedding 匹配补 `[n]`）+ 数值幻觉校验 + 分档置信度提示 | ✅ |
 | 🧭 **意图路由** | 规则 + Embedding 分类 + LLM 路由三层，置信度门控与歧义澄清 | ✅ |
 | 📈 **监控告警** | 集成 Prometheus + Alertmanager + Grafana（rag_overview 仪表盘已 provision） | ✅ |

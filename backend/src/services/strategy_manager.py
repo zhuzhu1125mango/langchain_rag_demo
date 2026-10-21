@@ -1,3 +1,4 @@
+import logging
 from typing import List, Dict, Optional, Tuple
 
 from src.config import settings
@@ -7,6 +8,8 @@ from .strategies.keyword import KeywordStrategy
 from .strategies.semantic import SemanticStrategy
 from .strategies.llm_inference import LLMInferenceStrategy
 from .strategies.context import ContextStrategy
+
+logger = logging.getLogger("rag_system")
 
 
 class StrategyManager:
@@ -138,18 +141,22 @@ class StrategyManager:
         """
         self.abstention_threshold = max(0.0, min(1.0, threshold))
     
-    def fuse_results(self, results: List[Tuple[str, bool, float]]) -> Tuple[bool, float, Dict[str, float]]:
+    def fuse_results(self, results: List[Tuple[str, bool, float]],
+                     weights: Optional[Dict[str, float]] = None) -> Tuple[bool, float, Dict[str, float]]:
         """
         融合多个策略的结果
-        
+
         支持弃权机制：当策略置信度低于弃权阈值时，该策略不参与投票
-        
+
         Args:
             results: 策略执行结果列表，每个元素为 (策略名, 结果, 置信度)
-        
+            weights: 可选的请求级权重覆盖（LEARN W-C A/B），与 self.weights 合并；
+                     缺省（None）时用 self.weights，保证默认行为不变
+
         Returns:
             Tuple[bool, float, Dict[str, float]]: (最终决策, 综合置信度, 各策略置信度)
         """
+        effective_weights = {**self.weights, **(weights or {})}
         total_weight = 0.0
         weighted_score = 0.0
         strategy_confidences: Dict[str, float] = {}
@@ -166,7 +173,7 @@ class StrategyManager:
                 abstained_strategies.append(name)
                 continue
 
-            weight = self.weights.get(name, 0.0)
+            weight = effective_weights.get(name, 0.0)
             total_weight += weight
 
             # 投"是"按置信度计入正分，投"否"按 (1-置信度) 计入
@@ -187,13 +194,15 @@ class StrategyManager:
         return final_decision, min(final_confidence, 0.99), strategy_confidences
     
     async def should_use_knowledge_base(self, question: str, 
-                                  history: Optional[List[Dict[str, str]]] = None) -> Tuple[bool, float, Dict[str, float]]:
+                                  history: Optional[List[Dict[str, str]]] = None,
+                                  weights_override: Optional[Dict[str, float]] = None) -> Tuple[bool, float, Dict[str, float]]:
         """
         判断是否需要使用知识库（融合所有策略）
         
         Args:
             question: 用户问题
             history: 历史对话
+            weights_override: 可选的请求级权重覆盖（LEARN W-C A/B）
         
         Returns:
             Tuple[bool, float, Dict[str, float]]: (是否使用知识库, 综合置信度, 各策略置信度)
@@ -205,7 +214,7 @@ class StrategyManager:
                 result, confidence = await self.execute_strategy(name, question, history)
                 results.append((name, result, confidence))
         
-        return self.fuse_results(results)
+        return self.fuse_results(results, weights=weights_override)
     
     def get_strategy_status(self) -> Dict[str, Dict[str, float]]:
         """
@@ -244,6 +253,43 @@ class StrategyManager:
             for name in self.weights:
                 self.weights[name] /= total
 
+    async def load_from_store(self) -> None:
+        """从 strategy_configs 回载持久化的权重/启用状态与决策阈值（LEARN W-A）。
+
+        此前 `sample_store.get_strategy_config` 无任何调用方，学到的权重永不被回载
+        （三重断链②）。逐策略读取：单条失败仅告警跳过，不影响其余项。阈值单独存放于
+        `__decision__` 行的 config.threshold。
+        """
+        from .sample_store import sample_store
+
+        for name in list(self.strategies.keys()):
+            try:
+                cfg = await sample_store.get_strategy_config(name)
+            except Exception as e:
+                logger.warning(f"回载策略配置失败[{name}]: {e}")
+                continue
+            if not cfg:
+                continue
+            weight = cfg.get("weight")
+            if weight is not None:
+                self.weights[name] = max(0.0, min(1.0, float(weight)))
+            enabled = cfg.get("enabled")
+            if enabled is not None:
+                if enabled:
+                    self.enable_strategy(name)
+                else:
+                    self.disable_strategy(name)
+
+        try:
+            decision_cfg = await sample_store.get_strategy_config("__decision__")
+        except Exception as e:
+            logger.warning(f"回载决策阈值失败: {e}")
+            decision_cfg = None
+        if decision_cfg:
+            threshold = (decision_cfg.get("config") or {}).get("threshold")
+            if threshold is not None:
+                self.set_threshold(float(threshold))
+
 
 async def create_default_strategy_manager() -> StrategyManager:
     """
@@ -265,3 +311,25 @@ async def create_default_strategy_manager() -> StrategyManager:
     await manager.initialize_all()
     
     return manager
+
+
+# LEARN W-A：进程内唯一策略管理器实例。
+# 此前 rag_chain._async_init / api.learning / 定时学习任务各自
+# create_default_strategy_manager() 新建实例，学习权重调整落在临时对象上、
+# 且线上实例从不回载持久化权重（三重断链②）。统一经 get_strategy_manager()
+# 获取同一实例，保证学习调整与回载作用于在线决策。
+_default_strategy_manager: Optional[StrategyManager] = None
+
+
+async def get_strategy_manager() -> StrategyManager:
+    """返回进程内唯一的策略管理器实例（LEARN W-A）。"""
+    global _default_strategy_manager
+    if _default_strategy_manager is None:
+        _default_strategy_manager = await create_default_strategy_manager()
+    return _default_strategy_manager
+
+
+def reset_strategy_manager() -> None:
+    """重置单例（测试用）。"""
+    global _default_strategy_manager
+    _default_strategy_manager = None

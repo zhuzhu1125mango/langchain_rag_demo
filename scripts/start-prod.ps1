@@ -385,21 +385,16 @@ function Invoke-DatabaseMigration {
     Write-Step "6/7" "执行数据库迁移（alembic upgrade head）..."
 
     # 容器内 POSTGRES_HOST=postgres 直连数据库（alembic 为主依赖，prod 镜像可用）
+    # W-漂移修复（2026-10-19）：删除原「upgrade 失败即 stamp head」兜底——它会掩盖未执行
+    # 的 DDL（曾致 prod 缺 audit_logs/user_api_keys/experiments.owner_id/wiki_pages.links）。
+    # 失败一律报错退出并给出排查指引；确需兼容全空库请人工判断。
     & docker @script:ComposeArgs exec -T backend alembic upgrade head
     if ($LASTEXITCODE -ne 0) {
-        # 全新数据库：backend 启动时 init_db(create_all) 已建全量表但无 alembic_version，
-        # upgrade 撞 DuplicateTableError；此时 schema 与当前镜像模型一致，stamp 对齐即可
-        Write-Warn "upgrade 未执行，尝试按全新库对齐 alembic 版本（stamp head）..."
-        & docker @script:ComposeArgs exec -T backend alembic stamp head
-        if ($LASTEXITCODE -ne 0) {
-            Write-Err "数据库迁移失败，请检查 backend 容器日志"
-            Write-Info "查看日志: docker $script:ComposeArgs logs backend"
-            exit 1
-        }
-        Write-OK "已对齐 alembic 版本（全新库由启动建表）"
-    } else {
-        Write-OK "数据库迁移完成"
+        Write-Err "数据库迁移失败（alembic upgrade head 未通过）——请检查 backend 日志与 alembic 版本/漂移，勿手工 stamp 掩盖"
+        Write-Info "查看日志: docker $script:ComposeArgs logs backend"
+        exit 1
     }
+    Write-OK "数据库迁移完成"
     Write-Host ""
 }
 

@@ -725,6 +725,37 @@ def test_build_decide_prompt_no_reflect_without_failures():
     assert "已连续" not in prompt
 
 
+def test_build_decide_prompt_hybrid_injects_dual_source():
+    """needs_web=True 且绑定 KB（混合问题）→ 注入 kb+web 双源引导，取消『不要依赖 web』。"""
+    orch = AgentOrchestrator(llm=_ScriptedLLM([]), tool_manager=_FakeToolManager([_EchoTool()]))
+    loop = AgentLoopState(deadline=1.0, needs_web=True)
+    prompt = orch._build_decide_prompt("问题", "", loop, kb_ids=["kb-1"], memory_context="")
+    assert "知识库+联网混合问题" in prompt
+    assert "web_search" in prompt and "kb_search" in prompt
+    assert "不要依赖 web_search" not in prompt
+
+
+def test_build_decide_prompt_kb_only_keeps_kb_first():
+    """needs_web=False 且绑定 KB（纯 KB 问题）→ 保持 kb 优先、web 可选原引导。"""
+    orch = AgentOrchestrator(llm=_ScriptedLLM([]), tool_manager=_FakeToolManager([_EchoTool()]))
+    loop = AgentLoopState(deadline=1.0)
+    prompt = orch._build_decide_prompt("问题", "", loop, kb_ids=["kb-1"], memory_context="")
+    assert "不要依赖 web_search" in prompt
+    assert "知识库+联网混合问题" not in prompt
+
+
+def test_force_first_suffix_hybrid_variant():
+    """首步强制工具后缀：混合问题用双源版本，其余用 kb 优先版本。"""
+    orch = AgentOrchestrator(llm=_ScriptedLLM([]), tool_manager=_FakeToolManager([_EchoTool()]))
+    assert (
+        orch._force_first_suffix(AgentLoopState(deadline=1.0))
+        == AgentOrchestrator.FORCE_FIRST_TOOL_SUFFIX
+    )
+    hybrid = orch._force_first_suffix(AgentLoopState(deadline=1.0, needs_web=True))
+    assert hybrid == AgentOrchestrator.FORCE_FIRST_TOOL_SUFFIX_HYBRID
+    assert "kb_search" in hybrid and "web_search" in hybrid
+
+
 # ---------------------------------------------------------------------------
 # L2 分层规划
 # ---------------------------------------------------------------------------

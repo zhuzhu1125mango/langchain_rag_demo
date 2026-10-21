@@ -79,6 +79,38 @@ class TestOutputSanitizer:
         assert was_polluted is True
         assert "name" not in cleaned
 
+    def test_detect_tool_narration(self):
+        """应识别「工具调用叙述」污染（非 JSON 的过程文本）。"""
+        assert OutputSanitizer.looks_like_tool_narration(
+            "第 2 步调用 wiki_lookup({...}) 结果为空。"
+        ) is True
+        assert OutputSanitizer.looks_like_tool_narration("观察结果：[1] 标题: xxx") is True
+        assert OutputSanitizer.looks_like_tool_narration(
+            '下一步操作：调用 wiki_lookup({"query": "q"})'
+        ) is True
+        assert OutputSanitizer.looks_like_tool_narration("公司办公时间为9:00至18:00。") is False
+
+    def test_sanitize_narration_fully_polluted_returns_empty(self):
+        """整段为过程叙述时应清洗为空（触发上游降级）。"""
+        text = (
+            '第 2 步调用 wiki_lookup({"page_title": "x"}) 结果为空，请先选择知识库。\n\n'
+            '调用 web_search({"query": "q"}) 继续查找。\n\n'
+            "观察结果：[1] 标题: xxx"
+        )
+        cleaned, was_polluted = OutputSanitizer.sanitize(text)
+        assert cleaned == ""
+        assert was_polluted is True
+
+    def test_sanitize_narration_partial_keeps_answer(self):
+        """真实答案后的工具叙述行应被移除，保留正文。"""
+        text = (
+            "根据已有的搜索结果，2026年世界人工智能大会将于7月17日至20日在上海举办。\n\n"
+            '下一步操作：调用 wiki_lookup({"query": "q"})'
+        )
+        cleaned, was_polluted = OutputSanitizer.sanitize(text)
+        assert cleaned == "根据已有的搜索结果，2026年世界人工智能大会将于7月17日至20日在上海举办。"
+        assert was_polluted is True
+
 
 # =============================================================================
 # 2. 意图路由

@@ -270,6 +270,13 @@ class AgentMixin:
                 state.resolved_question, state.session_id,
                 top_k=settings.search.AGENT_MEMORY_TOP_K,
             )
+        # 混合问题（路由 needs_kb+needs_web）：注入 kb+web 双源引导，避免只走 kb_search
+        intent = state.intent_decision
+        hybrid_needs_web = bool(
+            intent
+            and getattr(intent, "needs_kb", False)
+            and getattr(intent, "needs_web", False)
+        )
         async for ev in self.agent_orchestrator.run_stream(
             question=state.resolved_question,
             history_context=state.history_context,
@@ -279,6 +286,7 @@ class AgentMixin:
             answer_type=answer_type,
             memory_context=memory_context,
             owner_id=state.user_id,
+            needs_web=hybrid_needs_web,
         ):
             kind = ev[0]
             if kind in ("reasoning", "thinking"):

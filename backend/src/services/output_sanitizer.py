@@ -27,6 +27,17 @@ _TOOL_CALL_POLLUTION_PATTERNS = [
     re.compile(r'<RichMediaReference>', re.IGNORECASE),
 ]
 
+# 工具调用「叙述」污染（非 JSON）：模型把工具调用过程/scratchpad 写进正文。
+# 3B 模型在停止调用工具后偶发把「第 N 步调用 X(...) / 观察结果：... / 下一步操作：调用 X({...})」
+# 当作最终答案输出（2026-10-20 基线实证：web_01/web_03）。
+_TOOL_NARRATION_PATTERNS = [
+    re.compile(r"^\s*第\s*\d+\s*步"),                 # 第 2 步调用 ...
+    re.compile(r"^\s*观察结果\s*[：:]"),               # 观察结果：
+    re.compile(r"^\s*下一步操作\s*[：:]"),             # 下一步操作：
+    re.compile(r"^\s*调用\s*\w+\s*\("),               # 调用 web_search(...
+    re.compile(r"调用\s*\w+\s*\(\s*\{"),              # 调用 web_search({...
+]
+
 # 需要过滤的思考/元数据标签
 _THINKING_TAG_PATTERNS = [
     re.compile(r'<think>.*?</think>', re.DOTALL | re.IGNORECASE),
@@ -146,6 +157,13 @@ class OutputSanitizer:
         return any(p.search(text) for p in _TOOL_CALL_POLLUTION_PATTERNS)
 
     @staticmethod
+    def looks_like_tool_narration(text: str) -> bool:
+        """判断文本是否含「工具调用叙述」污染（非 JSON 的过程文本）。"""
+        if not text:
+            return False
+        return any(p.search(text) for p in _TOOL_NARRATION_PATTERNS)
+
+    @staticmethod
     def extract_json_code_block(text: str) -> Optional[str]:
         """从文本中提取 ```json ... ``` 代码块内容。"""
         match = _JSON_CODE_BLOCK_PATTERN.search(text)
@@ -194,7 +212,7 @@ class OutputSanitizer:
         if not text:
             return text, False
 
-        was_polluted = cls.looks_like_tool_call(text)
+        was_polluted = cls.looks_like_tool_call(text) or cls.looks_like_tool_narration(text)
 
         # 移除思考标签
         cleaned = cls.remove_thinking_tags(text)
@@ -225,10 +243,13 @@ class OutputSanitizer:
         # 移除 <tool_call> 标签块
         cleaned = re.sub(r'<tool_call>\s*[\s\S]*?\s*</tool_call>', '', cleaned, flags=re.IGNORECASE)
 
-        # 移除独立的工具 JSON 行
+        # 移除独立的工具 JSON 行 / 工具调用叙述行
         lines = []
         for line in cleaned.splitlines():
             if cls.looks_like_tool_call(line):
+                continue
+            if cls.looks_like_tool_narration(line):
+                was_polluted = True
                 continue
             lines.append(line)
         cleaned = "\n".join(lines)

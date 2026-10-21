@@ -149,3 +149,125 @@ class TestStrategyManagerIntegration:
         
         manager.set_threshold(-0.1)
         assert manager.threshold == 0.0
+
+
+class TestShortCircuitSampleCollection:
+    """LEARN W-B：KB 短路路径的样本补采"""
+
+    async def test_collect_strategy_results_returns_confidences(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        engine = LearningEngine()
+        sm = SimpleNamespace(
+            should_use_knowledge_base=AsyncMock(return_value=(True, 0.5, {"keyword": 0.9}))
+        )
+        out = await engine.collect_strategy_results(sm, "q", [])
+        assert out == {"keyword": 0.9}
+
+    async def test_collect_strategy_results_swallows_error(self):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        engine = LearningEngine()
+        sm = SimpleNamespace(
+            should_use_knowledge_base=AsyncMock(side_effect=RuntimeError("boom"))
+        )
+        assert await engine.collect_strategy_results(sm, "q") == {}
+
+    async def test_record_chat_execution_reuses_nonempty_results(self):
+        """已有策略结果时不补采"""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from src.config import settings
+
+        engine = LearningEngine()
+        decision = SimpleNamespace(
+            should_use_kb=True, confidence=0.8, strategy_results={"keyword": 0.9}
+        )
+        sm = SimpleNamespace(
+            should_use_knowledge_base=AsyncMock(side_effect=AssertionError("不应补采"))
+        )
+
+        with patch.object(engine, "record_execution", new=AsyncMock(return_value="ex-1")) as rec:
+            with patch.object(settings.decision, "LEARNING_SAMPLE_COLLECT_BG_ENABLED", True):
+                eid = await engine.record_chat_execution(
+                    session_id="s1", question="q", decision=decision,
+                    used_knowledge_base=True, strategy_manager=sm, history=[]
+                )
+
+        assert eid == "ex-1"
+        assert rec.await_args.kwargs["strategy_results"] == {"keyword": 0.9}
+        sm.should_use_knowledge_base.assert_not_called()
+
+    async def test_record_chat_execution_collects_when_empty_and_enabled(self):
+        """结果为空且开关开启时补采"""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from src.config import settings
+
+        engine = LearningEngine()
+        decision = SimpleNamespace(should_use_kb=True, confidence=1.0, strategy_results={})
+        sm = SimpleNamespace(
+            should_use_knowledge_base=AsyncMock(
+                return_value=(True, 0.5, {"keyword": 0.9, "context": 0.8})
+            )
+        )
+
+        with patch.object(engine, "record_execution", new=AsyncMock(return_value="ex-2")) as rec:
+            with patch.object(settings.decision, "LEARNING_SAMPLE_COLLECT_BG_ENABLED", True):
+                await engine.record_chat_execution(
+                    session_id="s1", question="q", decision=decision,
+                    used_knowledge_base=True, strategy_manager=sm, history=[]
+                )
+
+        assert rec.await_args.kwargs["strategy_results"] == {"keyword": 0.9, "context": 0.8}
+
+    async def test_record_chat_execution_skips_collect_when_disabled(self):
+        """开关关闭时保持原行为（空结果直接落库，不补采）"""
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+
+        from src.config import settings
+
+        engine = LearningEngine()
+        decision = SimpleNamespace(should_use_kb=True, confidence=1.0, strategy_results={})
+        sm = SimpleNamespace(
+            should_use_knowledge_base=AsyncMock(side_effect=AssertionError("不应补采"))
+        )
+
+        with patch.object(engine, "record_execution", new=AsyncMock(return_value="ex-3")) as rec:
+            with patch.object(settings.decision, "LEARNING_SAMPLE_COLLECT_BG_ENABLED", False):
+                await engine.record_chat_execution(
+                    session_id="s1", question="q", decision=decision,
+                    used_knowledge_base=True, strategy_manager=sm, history=[]
+                )
+
+        assert rec.await_args.kwargs["strategy_results"] == {}
+
+
+class TestExperimentChatWiring:
+    """LEARN W-C：A/B 变体请求级覆盖"""
+
+    def test_ab_contextvar_and_rerank_top_k_override(self):
+        from src.services.milvus_service import _ab_rerank_top_k
+        from src.services.pipeline.state import (
+            get_ab_config,
+            reset_ab_config,
+            set_ab_config,
+        )
+
+        assert get_ab_config() is None
+        default_top_k = _ab_rerank_top_k()
+
+        token = set_ab_config({"kb_hybrid_rerank_top_k": 9})
+        try:
+            assert get_ab_config() == {"kb_hybrid_rerank_top_k": 9}
+            assert _ab_rerank_top_k() == 9
+        finally:
+            reset_ab_config(token)
+
+        assert get_ab_config() is None
+        assert _ab_rerank_top_k() == default_top_k

@@ -49,9 +49,14 @@ docs/
 │   ├── severe-fixes.md
 │   ├── agent-evolution.md
 │   ├── agent-ab-evaluation.md
+│   ├── agent-maturity-gap-analysis.md
+│   ├── agent-eval-trace.md
 │   ├── evolution-research-2026-09.md
 │   ├── wiki-navigable-workspace.md
 │   ├── e1-navigable-lookup-gap.md
+│   ├── learning-loop-wiring.md
+│   ├── prod-schema-drift-repair.md
+│   ├── wiki-link-metadata-edges.md
 │   └── special-projects-2026-09.md
 └── archive/             # 归档（一次性报告、已收官计划）
     ├── code-review-2026-08.md      # 代码审查报告（已全部修复）
@@ -80,10 +85,15 @@ docs/
 | [severe-fixes.md](design/severe-fixes.md) | 已实施 | 严重问题 1~9 修复；来源报告归档于 archive/code-review-2026-08.md |
 | [agent-evolution.md](design/agent-evolution.md) | 部分实施 | Agent 有界循环 Phase 1/2 已落地，L1-a 记忆已实施（见 archive/code-review-2026-09.md §6.5） |
 | [agent-ab-evaluation.md](design/agent-ab-evaluation.md) | 已执行验收 | A/B 两臂 live 对比完成（2026-09-14），结果与未达标项见 §7.1 |
+| [agent-maturity-gap-analysis.md](design/agent-maturity-gap-analysis.md) | 已确认 | Agent 成熟度对标与差距分析（2026-10-20）：对标业界做法与主流产品，给出能力矩阵/差距清单/优先级；落地项见 [project-status.md](project-status.md) §二「Agent 成熟度差距」 |
+| [agent-eval-trace.md](design/agent-eval-trace.md) | 部分实施 | Agent 轨迹级评测（AM-1）：①②③ 已实施（2026-10-20，单测 +16；`AGENT_TRAJ_EVAL_ENABLED` 默认关）；④ 在线抽样待办 |
 | [evolution-research-2026-09.md](design/evolution-research-2026-09.md) | 已确认 | 演进方向调研（2026-09-23）：从 RAG 问答到自进化知识运行时，四阶段路线于 2026-09-29 owner 拍板转正，立项见 special-projects-2026-09.md |
 | [wiki-navigable-workspace.md](design/wiki-navigable-workspace.md) | 已实施 | 阶段一：Wiki 升级为 Agent 可导航工作空间（D1/D3/D4 落地；D2/D5 经 A/B 证伪后回退默认值，见 §10） |
 | [special-projects-2026-09.md](design/special-projects-2026-09.md) | 部分实施 | 技术债与演进专项立项 A~E；C / D / E.6 已完成、E-1 差距盘点完成待实施（进展与证据见文末「实施进展回写」）；A/B 按触发器挂起 |
-| [e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md) | 部分实施 | E-1 导航式 wiki_lookup：W1 索引页入口 / W2 entity-topic 退主池 / W3 导航埋点已实施（2026-10-15）；仅多跳端到端验收（E1V）待办 |
+| [e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md) | 部分实施 | E-1 导航式 wiki_lookup：W1/W2/W3 已实施（2026-10-15）；E1V 离线**两轮**（10-19/10-20）——**主瓶颈为编译覆盖**（`_parse_json_dict` 已修），修后 C 臂 0.188→0.938、图边 47 含跨档 13；**仅 Agent e2e 待办** |
+| [wiki-link-metadata-edges.md](design/wiki-link-metadata-edges.md) | 部分实施 | Wiki 图边「仅元数据建边」（L1 已实施 + 编译覆盖修复 + 离线验证，2026-10-20）；L2 暂缓，导航须 Agent e2e |
+| [learning-loop-wiring.md](design/learning-loop-wiring.md) | 已实施 | 学习闭环接入（LEARN）：W-A 权重回载 / W-B 样本补采 / W-C A/B 接入 chat（2026-10-16 单测 + dev 端到端验证通过），三开关灰度默认关 |
+| [prod-schema-drift-repair.md](design/prod-schema-drift-repair.md) | 已实施 | 生产库 schema 漂移修复：代码侧（幂等对账迁移 + 去 start-prod stamp + CI `alembic check` 卡点）+ prod 窗口执行（`upgrade head` 后 `alembic check` 无漂移）全部完成（2026-10-19） |
 | [fix-plan-2026-09-24.md](archive/fix-plan-2026-09-24.md) | 已归档 | 四份评审综合修复计划（2026-09-29 收官：W0-2 完成、W1~W5 全部完成、W6 八个批次完成，78 项 P2 全部落账）；剩余仅用户侧操作 W0-1/W0-3，见文档头部状态 |
 | [project-readthrough-2026-09-30.md](archive/project-readthrough-2026-09-30.md) | 已归档 | 项目通读报告（2026-09-30 只读代码审查） |
 | [direct-model-switch-plan-2026-10-03.md](archive/direct-model-switch-plan-2026-10-03.md) | 已归档 | 直答模型切换与 A/B 验证执行方案（2026-10-03 定稿；2026-10-15 移入 archive/ 封存） |

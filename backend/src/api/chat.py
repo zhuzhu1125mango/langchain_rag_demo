@@ -18,7 +18,9 @@ import asyncio
 import uuid
 import json
 import logging
+import time
 from datetime import datetime, timezone
+from src.config import settings
 from src.database import get_db, async_session
 from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback, KnowledgeBase
@@ -27,6 +29,8 @@ from src.services.reasoning import dedupe_steps
 from src.services.vector_store import VectorStoreManager
 from src.services.session_service import append_session_message
 from src.services.learning_engine import learning_engine
+from src.services.experiment_manager import experiment_manager
+from src.services.pipeline.state import set_ab_config, reset_ab_config
 from src.services.title_generator import TitleGenerator
 from src.utils.sensitive_words import sensitive_filter
 from src.utils.validators import parse_uuid_list, validate_kb_ownership
@@ -69,6 +73,60 @@ def _parse_session_id(raw: Optional[str]) -> Optional[uuid.UUID]:
         return uuid.UUID(raw)
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=400, detail="无效的会话ID")
+
+
+# LEARN W-C：A/B 变体可实验化参数白名单（仅这些键可从 variant.config 覆盖到问答链路）
+_AB_WHITELIST = (
+    "search_mode",
+    "decision_vote_when_kb_selected",
+    "kb_hybrid_rerank_top_k",
+    "strategy_weights",
+)
+
+
+async def _resolve_ab_config(user_id: str, session_id: Optional[str]) -> Optional[dict]:
+    """LEARN W-C：按部署级配置解析本请求的 A/B 变体，返回白名单参数覆盖。
+
+    未开启开关 / 未配置实验 / 实验非 running / 分流失败 → None（不分流、行为不变）。
+    """
+    if not settings.experiment.AB_EXPERIMENT_CHAT_ENABLED:
+        return None
+    experiment_id = settings.experiment.AB_CHAT_EXPERIMENT_ID
+    if not experiment_id:
+        return None
+    try:
+        allocation = await experiment_manager.allocate_traffic_for_chat(
+            experiment_id=experiment_id, user_id=user_id, session_id=session_id
+        )
+    except Exception as e:
+        logger.warning(f"A/B 分流失败，跳过本次分流: {e}")
+        return None
+    if not allocation:
+        return None
+    raw = allocation.get("config") or {}
+    cfg = {k: raw[k] for k in _AB_WHITELIST if k in raw}
+    cfg["experiment_id"] = experiment_id
+    cfg["variant_id"] = allocation.get("variant_id")
+    return cfg
+
+
+async def _record_ab_metric(ab_config: Optional[dict], elapsed_ms: float) -> None:
+    """LEARN W-C：记录系统级实验 response_time 指标（fail-soft，不影响回答）。"""
+    if not ab_config:
+        return
+    experiment_id = ab_config.get("experiment_id")
+    variant_id = ab_config.get("variant_id")
+    if not experiment_id or not variant_id:
+        return
+    try:
+        await experiment_manager.record_metric_for_chat(
+            experiment_id=experiment_id,
+            variant_id=variant_id,
+            metric_name="response_time",
+            metric_value=elapsed_ms,
+        )
+    except Exception as e:
+        logger.warning(f"记录 A/B 指标失败: {e}")
 
 
 @router.post("/messages")
@@ -143,27 +201,37 @@ async def send_message(
         await db.commit()
     logger.info(f"用户消息保存成功: session={session_uuid}, message_id={user_message_id}, messages_count={user_msg_count}")
 
-    # 生成回答（传递历史消息和搜索参数）——此处不持有任何 DB 会话
-    answer, sources, source_metadata, answer_type = await rag_chain.run(
-        request.question, kb_ids, history,
-        use_web_search=request.use_web_search,
-        search_mode=request.search_mode or "simple",
-        user_id=current_user.user_id,
-        session_id=str(session_uuid)
-    )
+    # LEARN W-C：解析本请求 A/B 变体 → 白名单参数覆盖（含 search_mode）
+    ab_config = await _resolve_ab_config(current_user.user_id, str(session_uuid))
+    effective_search_mode = (ab_config or {}).get("search_mode") or (request.search_mode or "simple")
 
-    # 记录策略执行到学习引擎
+    # 生成回答（传递历史消息和搜索参数）——此处不持有任何 DB 会话
+    ab_token = set_ab_config(ab_config)
+    ab_t0 = time.perf_counter()
+    try:
+        answer, sources, source_metadata, answer_type = await rag_chain.run(
+            request.question, kb_ids, history,
+            use_web_search=request.use_web_search,
+            search_mode=effective_search_mode,
+            user_id=current_user.user_id,
+            session_id=str(session_uuid)
+        )
+    finally:
+        reset_ab_config(ab_token)
+    await _record_ab_metric(ab_config, (time.perf_counter() - ab_t0) * 1000)
+
+    # 记录策略执行到学习引擎（LEARN W-B：短路路径按开关补采各策略结果）
     execution_id = None
     try:
         decision = rag_chain.get_last_decision()
         if decision:
-            execution_id = await learning_engine.record_execution(
+            execution_id = await learning_engine.record_chat_execution(
                 session_id=str(session_uuid),
                 question=request.question,
-                final_decision=decision.should_use_kb,
-                final_confidence=decision.confidence,
-                strategy_results=decision.strategy_results or {},
-                used_knowledge_base=answer_type in ("knowledge_base", "hybrid_search")
+                decision=decision,
+                used_knowledge_base=answer_type in ("knowledge_base", "hybrid_search"),
+                strategy_manager=rag_chain.strategy_manager,
+                history=history,
             )
     except Exception as e:
         logger.error(f"记录策略执行失败: {e}", exc_info=True)
@@ -322,6 +390,23 @@ async def stream_answer(
     # C7：返回会话是否仍为默认标题，标题生成移到 end 事件之后的后台任务，
     # 不再阻塞流完成信号。
     async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None, thinking="") -> bool:
+        # LEARN W-B：记录策略执行样本（短路路径按开关补采各策略结果）。
+        # 置于 DB 会话之外——补采会重跑策略投票（含 fast LLM 调用），避免期间占用连接。
+        execution_id = None
+        try:
+            decision = rag_chain.get_last_decision()
+            if decision:
+                execution_id = await learning_engine.record_chat_execution(
+                    session_id=current_session_id,
+                    question=question,
+                    decision=decision,
+                    used_knowledge_base=len(source_metadata) > 0,
+                    strategy_manager=rag_chain.strategy_manager,
+                    history=history,
+                )
+        except Exception as exec_err:
+            logger.error(f"记录策略执行失败: {exec_err}", exc_info=True)
+
         async with async_session() as db:
             result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(current_session_id)))
             session = result.scalar_one_or_none()
@@ -332,22 +417,6 @@ async def stream_answer(
                 # 作用域定义，stream_answer 内并不存在 → 并发删除会话时会抛 NameError，
                 # 被外层 except Exception 吞成"回答已生成但保存失败"。
                 return False
-
-            # 记录策略执行到学习引擎（失败不影响消息保存）
-            execution_id = None
-            try:
-                decision = rag_chain.get_last_decision()
-                if decision:
-                    execution_id = await learning_engine.record_execution(
-                        session_id=current_session_id,
-                        question=question,
-                        final_decision=decision.should_use_kb,
-                        final_confidence=decision.confidence,
-                        strategy_results=decision.strategy_results or {},
-                        used_knowledge_base=len(source_metadata) > 0
-                    )
-            except Exception as exec_err:
-                logger.error(f"记录策略执行失败: {exec_err}", exc_info=True)
 
             message_payload = {
                 "id": assistant_message_id,
@@ -406,11 +475,17 @@ async def stream_answer(
         # B2-3：管线把事实校验输入写入此容器（仅含 web 来源时），由本层在 end 后后台校验
         verify_holder: dict = {}
 
+        # LEARN W-C：解析本请求 A/B 变体 → 白名单参数覆盖（含 search_mode）
+        ab_config = await _resolve_ab_config(current_user.user_id, current_session_id)
+        effective_search_mode = (ab_config or {}).get("search_mode") or (search_mode or "simple")
+        ab_token = set_ab_config(ab_config)
+        ab_t0 = time.perf_counter()
+
         try:
             async for result in rag_chain.arun_stream(
                 question, kb_ids, history,
                 use_web_search=use_web_search,
-                search_mode=search_mode or "simple",
+                search_mode=effective_search_mode,
                 user_id=current_user.user_id,
                 session_id=current_session_id,
                 deep_thinking=deep_thinking,
@@ -483,6 +558,12 @@ async def stream_answer(
             logger.debug(f"SSE error payload: {error_payload}")
             yield f"data: {json.dumps(error_payload)}\n\n"
             return
+        finally:
+            # LEARN W-C：管线消费完毕，复位请求级 A/B 覆盖
+            reset_ab_config(ab_token)
+
+        # LEARN W-C：记录系统级实验 response_time 指标（fail-soft）
+        await _record_ab_metric(ab_config, (time.perf_counter() - ab_t0) * 1000)
 
         # 构建来源信息（包含完整的元数据，支持答案溯源与网页来源展示）
         source_info = []

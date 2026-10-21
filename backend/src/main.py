@@ -144,14 +144,15 @@ class RequestTracingMiddleware:
 async def _periodic_learning_task():
     """后台定时学习任务"""
     from src.services.learning_engine import learning_engine
-    from src.services.strategy_manager import create_default_strategy_manager
+    from src.services.strategy_manager import get_strategy_manager
 
     # 等待系统启动完成
     await asyncio.sleep(30)
 
     while True:
         try:
-            strategy_manager = await create_default_strategy_manager()
+            # LEARN W-A：使用进程内唯一实例，学习调整直接落到在线决策所用 manager
+            strategy_manager = await get_strategy_manager()
             result = await learning_engine.check_and_trigger_learning(strategy_manager)
             if result.get("status") != "skipped":
                 logger.info(f"自动学习触发成功: {result}")
@@ -363,6 +364,17 @@ async def lifespan(app: FastAPI):
     # W6 #22：注册主事件循环，供 progress_manager 从工作线程投递 WS 通知与延迟清理
     from src.services.progress_manager import set_main_loop
     set_main_loop(asyncio.get_running_loop())
+
+    # LEARN W-A：启动时回载持久化的学习权重/阈值（灰度开关默认关）。
+    # rag_chain 预热已创建单例策略管理器，此处按开关把 strategy_configs 中的
+    # 权重与决策阈值回载到该实例；失败仅告警，不阻断启动。
+    if settings.decision.LEARNING_WEIGHT_RELOAD_ENABLED:
+        try:
+            from src.services.strategy_manager import get_strategy_manager
+            await (await get_strategy_manager()).load_from_store()
+            logger.info("学习权重回载完成（LEARNING_WEIGHT_RELOAD_ENABLED=true）")
+        except Exception as reload_err:
+            logger.warning(f"学习权重回载失败: {reload_err}")
 
     # 启动后台定时学习任务
     learning_task = asyncio.create_task(_periodic_learning_task())

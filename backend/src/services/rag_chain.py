@@ -52,7 +52,7 @@ from .pipeline.state import (  # 再导出：保持历史导入路径兼容
 from .question_processor import QuestionProcessor
 from .query_rewriter import QueryRewriter
 from .search_agent import SearchToolkit
-from .strategy_manager import create_default_strategy_manager
+from .strategy_manager import get_strategy_manager
 from .tool_executor import ToolExecutor
 from .vector_store import VectorStoreManager
 from .web_search_service import WebSearchService
@@ -130,7 +130,8 @@ class RAGChain(
         """
         if self.vector_store is None:
             self.vector_store = await VectorStoreManager.get_instance()
-        self.strategy_manager = self.strategy_manager or await create_default_strategy_manager()
+        # LEARN W-A：默认取进程内唯一单例，使学习侧与在线决策共用同一实例
+        self.strategy_manager = self.strategy_manager or await get_strategy_manager()
         self.decision_pipeline = DecisionPipeline(self.strategy_manager)
         # 统一检索服务（注入同一 vector_store 实例，保证口径一致）
         self.kb_retrieval_service = KBRetrievalService(self.vector_store)

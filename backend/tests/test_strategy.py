@@ -118,3 +118,75 @@ class TestStrategyManager:
         """测试决策阈值设置"""
         self.manager.set_threshold(0.6)
         assert self.manager.threshold == 0.6
+
+    async def test_load_from_store_applies_weight_and_threshold(self):
+        """LEARN W-A：从 strategy_configs 回载持久化权重与决策阈值"""
+        from unittest.mock import AsyncMock, patch
+
+        manager = StrategyManager()
+        manager.register_strategy(KeywordStrategy())
+
+        async def fake_get(name):
+            if name == "keyword":
+                return {"weight": 0.77, "enabled": True}
+            if name == "__decision__":
+                return {"config": {"threshold": 0.66}}
+            return None
+
+        with patch(
+            "src.services.sample_store.sample_store.get_strategy_config",
+            new=AsyncMock(side_effect=fake_get),
+        ):
+            await manager.load_from_store()
+
+        assert manager.weights["keyword"] == 0.77
+        assert manager.threshold == 0.66
+
+    async def test_load_from_store_missing_row_keeps_defaults(self):
+        """无持久化行时保持默认权重与阈值（回载失败不改变现状）"""
+        from unittest.mock import AsyncMock, patch
+
+        manager = StrategyManager()
+        manager.register_strategy(KeywordStrategy())
+        default_weight = manager.weights["keyword"]
+        default_threshold = manager.threshold
+
+        with patch(
+            "src.services.sample_store.sample_store.get_strategy_config",
+            new=AsyncMock(return_value=None),
+        ):
+            await manager.load_from_store()
+
+        assert manager.weights["keyword"] == default_weight
+        assert manager.threshold == default_threshold
+
+    async def test_get_strategy_manager_singleton(self):
+        """LEARN W-A：get_strategy_manager 返回同一进程内实例"""
+        from src.services.strategy_manager import (
+            get_strategy_manager,
+            reset_strategy_manager,
+        )
+
+        reset_strategy_manager()
+        try:
+            m1 = await get_strategy_manager()
+            m2 = await get_strategy_manager()
+            assert m1 is m2
+        finally:
+            reset_strategy_manager()
+
+    def test_fuse_results_weight_override(self):
+        """LEARN W-C：请求级权重覆盖生效（覆盖为 0 时该策略不参与投票）"""
+        manager = StrategyManager()
+        manager.register_strategy(KeywordStrategy())
+        results = [("keyword", True, 0.9)]
+
+        decision, _, _ = manager.fuse_results(results)
+        assert decision is True
+
+        # 覆盖后权重归零 → 总权重 0 → 默认不使用知识库
+        decision_overridden, confidence, _ = manager.fuse_results(
+            results, weights={"keyword": 0.0}
+        )
+        assert decision_overridden is False
+        assert confidence == 0.0

@@ -22,7 +22,13 @@
 - B ≈ A 或更差 → 编译页未解决跨文档问题，轻量 GraphRAG 有立项依据。
 
 运行方式（需本地 Ollama 可用，编译全量语料约 12 篇短文档）：
-    cd backend && uv run python scripts/run_wiki_multihop_ab.py [--report wiki_multihop_ab.json]
+    cd backend && uv run python -u scripts/run_wiki_multihop_ab.py [--report wiki_multihop_ab.json]
+
+说明（AB-CACHE，2026-10-18）：
+- `python -u` 保证编译进度实时输出（否则输出重定向时按块缓冲，长时间无日志易误判卡死）。
+- 编译页结果按「语料 + 编译模型 + 页数上限/精炼轮数」哈希缓存于
+  backend/data/wiki_multihop_ab_cache/（已被 gitignore）；命中即跳过 LLM 编译，
+  语料或编译参数变化自动失效。`--no-cache` 强制重编译，`--cache-dir` 改落点。
 """
 
 import argparse
@@ -36,6 +42,7 @@ from typing import Dict, List
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_DATASET = BASE_DIR / "tests" / "evaluation" / "wiki_multihop_eval_dataset.jsonl"
 DEFAULT_CORPUS = BASE_DIR / "tests" / "evaluation" / "eval_corpus.jsonl"
+DEFAULT_CACHE_DIR = BASE_DIR / "data" / "wiki_multihop_ab_cache"
 
 WIKI_ID_PREFIX = "wiki::"
 # 增益判定阈值，与 run_multiquery_ab.recommend 口径一致
@@ -51,22 +58,31 @@ def wiki_entry_id(doc_id: str, page_title: str) -> str:
 
 
 def build_link_graph(wiki_entries: List[Dict]) -> Dict[str, List[Dict]]:
-    """解析编译页正文中的 [[Title]] 链接，构建页→邻居页邻接表（离线导航模拟）。
+    """构建页→邻居页邻接表（离线导航模拟）。
 
-    与生产 wiki_pages.links 同源（编译器把 [[Title]] 写进正文，入库时校验
-    目标页存在后落 links 列）；此处直接解析正文，未解析到的链接自然跳过。
+    与生产 `wiki_pages.links` 同源：
+    - `WIKI_LINK_METADATA_ENABLED=true`：E-1 L1 元数据建边（正文零改动，
+      按「其他页标题出现在本页正文」建边，`derive_links_from_titles`）；
+    - 默认：解析正文 `[[Title]]` 语法（旧口径，当前默认编译产物通常为空）。
     """
-    from src.services.wiki_compiler import normalize_title
+    from src.config import settings
+    from src.services.wiki_compiler import derive_links_from_titles, normalize_title
     from src.services.wiki_lint import _extract_link_titles
 
     by_title: Dict[str, Dict] = {}
     for entry in wiki_entries:
         by_title.setdefault(normalize_title(entry["title"]), entry)
+    metadata_edges = settings.wiki_compile.WIKI_LINK_METADATA_ENABLED
+    title_map = {normalize_title(e["title"]): e["title"] for e in wiki_entries}
     graph: Dict[str, List[Dict]] = {}
     for entry in wiki_entries:
         neighbors: List[Dict] = []
         seen_titles = {normalize_title(entry["title"])}
-        for link_title in _extract_link_titles(entry["text"]):
+        if metadata_edges:
+            link_titles = derive_links_from_titles(entry["text"], entry["title"], title_map)
+        else:
+            link_titles = _extract_link_titles(entry["text"])
+        for link_title in link_titles:
             target = by_title.get(normalize_title(link_title))
             if target is None or target["id"] == entry["id"]:
                 continue
@@ -132,7 +148,9 @@ async def compile_wiki_pages(corpus: List[Dict]) -> tuple:
     entries: List[Dict] = []
     provenance: Dict[str, str] = {}
     existing: List[ExistingPage] = []
-    for doc in corpus:
+    total = len(corpus)
+    for i, doc in enumerate(corpus, 1):
+        print(f"[wiki-mh-ab] 编译 {i}/{total}：{doc['id']}", flush=True)
         chunks = [SimpleNamespace(page_content=f"{doc['title']}\n{doc['text']}")]
         doc_pages = await compiler.compile_pages(chunks, existing)
         existing.extend(
@@ -145,8 +163,73 @@ async def compile_wiki_pages(corpus: List[Dict]) -> tuple:
             rid = wiki_entry_id(doc["id"], page.title)
             entries.append({"id": rid, "title": page.title, "text": page.content})
             provenance[rid] = doc["id"]
-    n_links = sum(len(_extract_link_titles(e["text"])) for e in entries)
-    print(f"[wiki-mh-ab] 链接图：{n_links} 条 [[互链]]（0 条说明编译期未建桥）")
+    from src.config import settings
+    from src.services.wiki_compiler import derive_links_from_titles, normalize_title
+    from src.services.wiki_lint import _extract_link_titles
+
+    if settings.wiki_compile.WIKI_LINK_METADATA_ENABLED:
+        title_map = {normalize_title(e["title"]): e["title"] for e in entries}
+        n_links = sum(
+            len(derive_links_from_titles(e["text"], e["title"], title_map)) for e in entries
+        )
+        label = "元数据图边（L1，正文零改动）"
+    else:
+        n_links = sum(len(_extract_link_titles(e["text"])) for e in entries)
+        label = "[[互链]]"
+    print(f"[wiki-mh-ab] 链接图：{n_links} 条 {label}（0 条说明未建桥）", flush=True)
+    return entries, provenance
+
+
+def compile_cache_key(corpus: List[Dict]) -> str:
+    """编译结果缓存键：语料 + 编译模型 + 页数上限/精炼轮数（任一变则失效）。
+
+    AB-CACHE（2026-10-18）：编译是 LLM 逐篇调用（思考模型下全量语料耗时可达小时级），
+    缓存命中即跳过重编译，使 E1V 等复跑不必每次盲等。
+    """
+    import hashlib
+
+    from src.config import settings
+
+    payload = {
+        "version": 1,
+        "corpus": [
+            {"id": d["id"], "title": d["title"], "text": d["text"]} for d in corpus
+        ],
+        "compile_model": settings.wiki_compile.WIKI_COMPILE_MODEL
+        or settings.model.OLLAMA_MODEL_NAME,
+        "max_pages_per_doc": settings.wiki_compile.WIKI_COMPILE_MAX_PAGES_PER_DOC,
+        "refinement_iterations": settings.wiki_compile.WIKI_COMPILE_REFINEMENT_ITERATIONS,
+    }
+    blob = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+async def compile_wiki_pages_cached(
+    corpus: List[Dict], cache_dir: Path, use_cache: bool = True
+) -> tuple:
+    """带磁盘缓存的编译包装：命中则直读，未命中则编译并回写（AB-CACHE）。"""
+    key = compile_cache_key(corpus)
+    cache_file = cache_dir / f"wiki_pages_{key}.json"
+    if use_cache and cache_file.exists():
+        try:
+            data = json.loads(cache_file.read_text(encoding="utf-8"))
+            entries, provenance = data["entries"], data["provenance"]
+            print(f"[wiki-mh-ab] 命中编译缓存（{len(entries)} 页）：{cache_file}", flush=True)
+            return entries, provenance
+        except Exception as e:  # 缓存损坏则回退重编译，不阻断
+            print(f"[wiki-mh-ab] 缓存读取失败，回退重编译：{e}", flush=True)
+
+    entries, provenance = await compile_wiki_pages(corpus)
+    if entries:
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_file.write_text(
+                json.dumps({"entries": entries, "provenance": provenance}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            print(f"[wiki-mh-ab] 编译结果已缓存：{cache_file}", flush=True)
+        except Exception as e:  # 缓存写入失败不影响本次评估
+            print(f"[wiki-mh-ab] 缓存写入失败（忽略）：{e}", flush=True)
     return entries, provenance
 
 
@@ -225,6 +308,9 @@ def main() -> int:
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--report", type=Path, default=None)
+    parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR,
+                        help="编译页缓存目录（默认 backend/data/wiki_multihop_ab_cache）")
+    parser.add_argument("--no-cache", action="store_true", help="忽略缓存，强制重编译")
     args = parser.parse_args()
 
     from run_eval import evaluate, load_jsonl
@@ -239,8 +325,10 @@ def main() -> int:
         print(f"[wiki-mh-ab] 存在 golden_documents 少于 2 篇的样本（非跨文档）: {bad}")
         return 2
 
-    print(f"[wiki-mh-ab] 开始编译全量语料 wiki 页（{len(corpus)} 篇，需本地 Ollama）...")
-    wiki_entries, provenance = asyncio.run(compile_wiki_pages(corpus))
+    print(f"[wiki-mh-ab] 编译全量语料 wiki 页（{len(corpus)} 篇，需本地 Ollama；命中缓存则跳过）...", flush=True)
+    wiki_entries, provenance = asyncio.run(
+        compile_wiki_pages_cached(corpus, args.cache_dir, use_cache=not args.no_cache)
+    )
     if not wiki_entries:
         print("[wiki-mh-ab] 编译未产出任何页面，检查 Ollama 与编译模型可用性")
         return 2

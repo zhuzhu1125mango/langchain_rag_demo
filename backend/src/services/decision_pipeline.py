@@ -137,10 +137,22 @@ class DecisionPipeline:
                 reasoning="强制使用知识库模式"
             )
 
+        # LEARN W-C：请求级 A/B 覆盖（默认无 → 全部回落 settings，行为不变）
+        ab_cfg = {}
+        try:
+            from src.services.pipeline.state import get_ab_config
+
+            ab_cfg = get_ab_config() or {}
+        except Exception:
+            ab_cfg = {}
+        vote_when_kb_selected = ab_cfg.get(
+            "decision_vote_when_kb_selected", settings.decision.DECISION_VOTE_WHEN_KB_SELECTED
+        )
+
         # C5：用户显式勾选知识库且未强制指定模式时，跳过多策略投票直接检索。
         # 回答模板已保证"参考信息不足时结合模型自身知识回答"，跳过投票不改变回答质量约束，
         # 仅省去首字前的 LLM 投票耗时；策略投票结果与用户显式意图相悖时反而造成困惑。
-        if kb_ids and len(kb_ids) > 0 and not settings.decision.DECISION_VOTE_WHEN_KB_SELECTED:
+        if kb_ids and len(kb_ids) > 0 and not vote_when_kb_selected:
             return DecisionResult(
                 should_use_kb=True,
                 confidence=1.0,
@@ -149,8 +161,13 @@ class DecisionPipeline:
                 reasoning="用户显式选择知识库，跳过策略投票直接检索"
             )
 
-        # 兜末级：交给策略管理器多策略投票决策
-        use_kb, confidence, strategy_results = await self.strategy_manager.should_use_knowledge_base(question, history)
+        # 兜末级：交给策略管理器多策略投票决策（LEARN W-C：可选请求级权重覆盖）
+        weights_override = ab_cfg.get("strategy_weights") if isinstance(ab_cfg, dict) else None
+        if not isinstance(weights_override, dict):
+            weights_override = None
+        use_kb, confidence, strategy_results = await self.strategy_manager.should_use_knowledge_base(
+            question, history, weights_override=weights_override
+        )
         reasoning = "混合智能模式判断：" + ("需要使用知识库" if use_kb else "直接回答更合适")
 
         return DecisionResult(

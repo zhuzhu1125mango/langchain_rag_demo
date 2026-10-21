@@ -333,7 +333,74 @@ class ExperimentManager:
                 return variant_id
         
         return None
-    
+
+    async def allocate_traffic_for_chat(self, experiment_id: str, user_id: str,
+                                       session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """LEARN W-C：chat 路径按部署级配置分配变体（绕过对象级归属校验）。
+
+        实验由部署配置 `AB_CHAT_EXPERIMENT_ID` 指定，视为系统级；返回
+        `{"variant_id", "name", "config"}`；实验不存在/非 running/无变体时返回 None。
+        """
+        experiment = await self._get_experiment_any(experiment_id)
+        if not experiment or experiment.get("status") != "running":
+            return None
+        variants = experiment.get("variants") or []
+        if not variants:
+            return None
+        hash_value = self._hash_user_id(user_id, experiment_id)
+        cumulative_weight = 0.0
+        for variant in variants:
+            cumulative_weight += variant.get("weight", 0.0)
+            if hash_value <= cumulative_weight:
+                variant_id = variant.get("id")
+                async with async_session() as session:
+                    session.add(TrafficAllocation(
+                        experiment_id=experiment_id,
+                        variant_id=variant_id,
+                        user_id=user_id,
+                        session_id=session_id,
+                    ))
+                    await session.commit()
+                return {
+                    "variant_id": variant_id,
+                    "name": variant.get("name", ""),
+                    "config": variant.get("config") or {},
+                }
+        return None
+
+    async def _get_experiment_any(self, experiment_id: str) -> Optional[Dict[str, Any]]:
+        """按 ID 读取实验（不做对象级归属校验，仅供系统级 chat 分流使用）。"""
+        try:
+            uuid.UUID(str(experiment_id))
+        except (ValueError, TypeError, AttributeError):
+            return None
+        async with async_session() as session:
+            result = await session.execute(
+                select(Experiment).where(Experiment.id == experiment_id)
+            )
+            experiment = result.scalar_one_or_none()
+            if not experiment:
+                return None
+            return {
+                "id": str(experiment.id),
+                "name": experiment.name,
+                "status": experiment.status,
+                "variants": experiment.variants,
+                "metrics": experiment.metrics,
+            }
+
+    async def record_metric_for_chat(self, experiment_id: str, variant_id: str,
+                                     metric_name: str, metric_value: float) -> None:
+        """LEARN W-C：chat 路径记录系统级实验指标（不做对象级归属校验）。"""
+        async with async_session() as session:
+            session.add(ExperimentMetric(
+                experiment_id=experiment_id,
+                variant_id=variant_id,
+                metric_name=metric_name,
+                metric_value=metric_value,
+            ))
+            await session.commit()
+
     async def record_metric(self, experiment_id: str, variant_id: str,
                            metric_name: str, metric_value: float,
                            owner_id: str = ""):

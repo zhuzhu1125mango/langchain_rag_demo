@@ -31,8 +31,6 @@ FACT_RETENTION_THRESHOLD = 0.75
 FACT_RETENTION_WARN = 0.9
 # P4 迭代精炼：页面事实保留率低于该值视为弱页，触发重生成
 FACT_RETENTION_TARGET = 0.9
-# 候选抽取的 JSON 提取兜底正则（容忍模型输出包裹文字/代码围栏）
-_JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
@@ -493,10 +491,14 @@ class WikiCompiler:
         return result
 
     async def _fill_links(self, db, kb_id: str, rows: List, contents: List[str]) -> None:
-        """P3：为本次 upsert 的页面提取正文 [[Title]] 写 links 列（校验目标页存在）。
+        """为页面写 links 列（校验目标页存在），两种建边口径：
+
+        - `WIKI_LINK_METADATA_ENABLED=true`：E-1 L1 元数据建边——按「其他页标题
+          出现在本页正文」生成图边（`derive_links_from_titles`），**正文零改动**；
+        - 默认（false）：P3 正文 `[[Title]]` 语法提取（`extract_links`）。
 
         在页面 upsert 提交后执行，保证批次内互链可见；失败仅告警（links 缺失
-        只影响检索扩展，不影响编译产物）。
+        只影响导航/检索扩展，不影响编译产物）。
         """
         from sqlalchemy import select
 
@@ -512,8 +514,12 @@ class WikiCompiler:
                 )
             ).scalars().all()
             title_set = {normalize_title(t): t for t in active_titles}
+            metadata_edges = settings.wiki_compile.WIKI_LINK_METADATA_ENABLED
             for row, content in zip(rows, contents):
-                row.links = extract_links(content, row.title, title_set)
+                if metadata_edges:
+                    row.links = derive_links_from_titles(content, row.title, title_set)
+                else:
+                    row.links = extract_links(content, row.title, title_set)
             await db.commit()
         except Exception as e:
             logger.warning(f"Wiki 页链接提取失败（不影响编译产物）: {e}")
@@ -900,6 +906,45 @@ def normalize_title(title: str) -> str:
     return re.sub(r"\s+", "", (title or "")).lower()
 
 
+def derive_links_from_titles(
+    content: str, self_title: str, valid_titles, max_links: int = 8
+) -> List[str]:
+    """E-1 图边元数据化（L1）：按「其他页标题出现在本页正文」建边。
+
+    与 `extract_links` 的「正文 `[[Title]]` 语法」不同，本函数**不改正文**——
+    直接把正文里出现的既有页标题识别为图边（红线：互链严禁内联正文）。生成
+    的标题列表写入 `wiki_pages.links` JSONB，供 navigator 的 Related 导航。
+
+    Args:
+        content: 本页正文
+        self_title: 本页标题（自引用排除，归一化比较）
+        valid_titles: 有效目标标题映射（归一化 key → 原标题），或标题集合
+        max_links: 单页图边数量上限
+
+    Returns:
+        去重后的目标标题列表（按目标标题在正文中的首次出现位置排序）
+    """
+    valid = (
+        valid_titles
+        if isinstance(valid_titles, dict)
+        else {normalize_title(t): t for t in (valid_titles or [])}
+    )
+    self_norm = normalize_title(self_title)
+    haystack = normalize_title(content or "")
+    if not haystack:
+        return []
+    found = []
+    for norm, title in valid.items():
+        # 单字标题噪声大，跳过（如「会」「卡」）
+        if not norm or norm == self_norm or len(norm) < 2:
+            continue
+        pos = haystack.find(norm)
+        if pos >= 0:
+            found.append((pos, title))
+    found.sort(key=lambda item: item[0])
+    return [title for _, title in found[:max_links]]
+
+
 def _split_sentences(text: str) -> List[str]:
     """按中英文句末标点与换行切句（诊断探针用），去空句。"""
     parts = re.split(r"(?<=[。！？!?；;])|\n", text or "")
@@ -912,17 +957,22 @@ def _strip_think(text: str) -> str:
 
 
 def _parse_json_dict(text: str) -> dict:
-    """从 LLM 输出中解析 JSON 对象；容忍代码围栏与包裹文字。"""
+    """从 LLM 输出中解析 JSON 对象；容忍代码围栏、包裹文字与**尾随多余内容**。
+
+    尾随多余内容（如 JSON 之后又续了说明/第二个对象）曾使贪心 `\\{.*\\}` 匹配
+    把整段喂给 `json.loads` → `Extra data` 报错 → 该文档零页面。此处改用
+    `raw_decode` 只消费**一个** JSON 值，忽略其后内容。
+    """
     text = (text or "").strip()
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", text, flags=re.DOTALL)
     try:
         data = json.loads(text)
     except json.JSONDecodeError:
-        m = _JSON_BLOCK_RE.search(text)
-        if not m:
+        start = text.find("{")
+        if start == -1:
             raise
-        data = json.loads(m.group(0))
+        data, _ = json.JSONDecoder().raw_decode(text[start:])
     return data if isinstance(data, dict) else {}
 
 

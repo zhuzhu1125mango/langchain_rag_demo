@@ -6,11 +6,15 @@
 
 from typing import List, Dict, Optional, Any
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
+from src.config import settings
 from src.database import async_session
 from .sample_store import sample_store
 from .rule_learner import rule_learner
+
+logger = logging.getLogger("rag_system")
 
 
 class LearningEngine:
@@ -88,6 +92,44 @@ class LearningEngine:
             final_confidence=final_confidence,
             strategy_results=strategy_results,
             used_knowledge_base=used_knowledge_base
+        )
+
+    async def collect_strategy_results(self, strategy_manager, question: str,
+                                       history: Optional[List[dict]] = None) -> Dict[str, float]:
+        """LEARN W-B：补采各策略结果（仅取置信度，不影响决策）。
+
+        KB 勾选路径决策短路、`strategy_results` 恒空 → 学习无输入。此处复用同一策略
+        管理器重跑投票，仅收集各策略置信度用于样本落库；LLM 策略已是 fast 模型
+        （`think=False` + `STRATEGY_LLM_TIMEOUT` 上限）。失败返回空 dict。
+        """
+        try:
+            _, _, strategy_results = await strategy_manager.should_use_knowledge_base(question, history)
+            return strategy_results or {}
+        except Exception as e:
+            logger.warning(f"策略结果补采失败: {e}")
+            return {}
+
+    async def record_chat_execution(self, *, session_id, question, decision,
+                                    used_knowledge_base: bool, strategy_manager,
+                                    history: Optional[List[dict]] = None) -> Optional[str]:
+        """LEARN W-B：记录一次问答的策略执行样本，短路路径按开关补采。
+
+        `decision.strategy_results` 非空时直接使用；为空且开启补采开关
+        （`LEARNING_SAMPLE_COLLECT_BG_ENABLED`）时重跑策略投票补齐置信度，
+        使学习训练样本可用。
+        """
+        strategy_results = (getattr(decision, "strategy_results", None) or {})
+        if not strategy_results and settings.decision.LEARNING_SAMPLE_COLLECT_BG_ENABLED:
+            strategy_results = await self.collect_strategy_results(
+                strategy_manager, question, history
+            )
+        return await self.record_execution(
+            session_id=session_id,
+            question=question,
+            final_decision=decision.should_use_kb,
+            final_confidence=decision.confidence,
+            strategy_results=strategy_results,
+            used_knowledge_base=used_knowledge_base,
         )
     
     async def record_feedback(self, execution_id: str, feedback_score: float, 

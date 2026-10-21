@@ -167,6 +167,7 @@ def _live_inputs(sample: Dict[str, Any], kb_ids: List[str]):
 async def _run_one(
     chain, sample: Dict[str, Any], kb_ids: List[str],
     doc_id_map: Dict[str, str], judge,
+    traj_evaluator: Any = None,
 ) -> Dict[str, Any]:
     q = sample["question"]
     cat = sample["category"]
@@ -276,6 +277,42 @@ async def _run_one(
         record["faithfulness"] = None
         record["relevance"] = None
         record["judge_ok"] = False
+
+    # AM-1 轨迹级判分（受 AGENT_TRAJ_EVAL_ENABLED 控制；失败不阻断单题）
+    from src.config import settings  # noqa: E402
+
+    if getattr(settings.search, "AGENT_TRAJ_EVAL_ENABLED", False) and traj_evaluator is not None:
+        try:
+            from src.services.evaluation.trajectory_evaluator import (
+                build_trajectory_from_agent_loop,
+            )
+
+            loop_events = []
+            for payload in reasoning_payloads:
+                try:
+                    loop_events.append(json.loads(payload))
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            traj = build_trajectory_from_agent_loop(
+                question=q,
+                agent_loop=loop_events,
+                final_answer=record.get("answer", ""),
+                total_latency_ms=int(record.get("total_ms") or 0),
+            )
+            if not traj.steps and not sample.get("expected_tools"):
+                # 非 Agent 路径（KB / fast / memory）不产生工具轨迹，且无期望约束
+                # → 无轨迹可判，标记跳过（避免把「没走 Agent」误判为轨迹失败）
+                record["traj_skipped"] = True
+            else:
+                tr = await traj_evaluator.evaluate(
+                    traj,
+                    expected_tools=sample.get("expected_tools"),
+                    expected_answer_points=sample.get("expected_points"),
+                    expected_max_steps=sample.get("expected_max_steps"),
+                )
+                record.update({f"traj_{k}": v for k, v in tr.to_dict().items()})
+        except Exception as e:  # noqa: BLE001
+            record["traj_error"] = f"{type(e).__name__}: {e}"
     return record
 
 
@@ -292,9 +329,19 @@ def run_live(args: argparse.Namespace) -> int:
         chain = await RAGChain.get_instance()
         from src.services.evaluation.generation_evaluator import GenerationEvaluator
         judge = GenerationEvaluator()
+
+        # AM-1 轨迹级判分（灰度开关控制；关闭时为 None，行为与旧版一致）
+        from src.config import settings
+
+        traj_evaluator = None
+        if getattr(settings.search, "AGENT_TRAJ_EVAL_ENABLED", False):
+            from src.services.evaluation.trajectory_evaluator import TrajectoryEvaluator
+
+            traj_evaluator = TrajectoryEvaluator()
+
         results = []
         for i, sample in enumerate(dataset, 1):
-            rec = await _run_one(chain, sample, kb_ids, doc_id_map, judge)
+            rec = await _run_one(chain, sample, kb_ids, doc_id_map, judge, traj_evaluator)
             results.append(rec)
             status = rec["error"] or "ok"
             print(
@@ -418,6 +465,14 @@ def _arm_metrics(run: Dict[str, Any]) -> Dict[str, Any]:
         "agent_total_p95_ms": _p95([s.get("total_ms") for s in agent_cat]),
         "agent_first_token_p95_ms": _p95([s.get("first_token_ms") for s in agent_cat]),
         "fast_total_p95_ms": _p95([s.get("total_ms") for s in fast]),
+        # AM-1 轨迹级判分（仅开关开启时有值；traj_skipped 的样本不计入）
+        "traj_score": _mean([s.get("traj_score") for s in all_ok if not s.get("traj_skipped")]),
+        "traj_pass_rate": (
+            sum(1 for s in all_ok if s.get("traj_passed") and not s.get("traj_skipped"))
+            / len([s for s in all_ok if not s.get("traj_skipped")])
+            if [s for s in all_ok if not s.get("traj_skipped")] else 0.0
+        ),
+        "traj_judged_count": len([s for s in all_ok if not s.get("traj_skipped")]),
     }
     return metrics
 

@@ -403,6 +403,12 @@ class SearchSettings(BaseSettings):
     AGENT_MEMORY_TOP_K: int = 3            # 每次会话注入的最近记忆条数
     AGENT_MEMORY_COLLECTION: str = ""      # 预留：为空则复用主 collection（当前实现）
 
+    # AM-1 Agent 轨迹级评测（默认关闭灰度）：仅控制「轨迹判分是否参与 A/B compare 判定门」，
+    # 不影响回答链路；判分走 fast llm（守 4B 红线）。设计见 docs/design/agent-eval-trace.md
+    AGENT_TRAJ_EVAL_ENABLED: bool = False
+    # 轨迹判分通过门：四维均值 ≥ 该值记 pass
+    AGENT_TRAJ_EVAL_PASS_THRESHOLD: float = 0.7
+
     # 引用补全
     CITATION_MATCH_THRESHOLD: float = 0.65       # embedding 相似度阈值
     CITATION_ENABLE_EMBEDDING: bool = True        # 是否用 embedding 匹配（False 退化为关键词）
@@ -430,6 +436,12 @@ class DecisionSettings(BaseSettings):
     STRATEGY_SEMANTIC_ENABLED: bool = False
     # 策略投票 LLM 调用超时（秒，C4）：超时按弃权处理（低置信度），不阻塞决策
     STRATEGY_LLM_TIMEOUT: float = 5.0
+    # LEARN W-A：启动时/学习后从 strategy_configs 回载持久化权重与决策阈值
+    # （灰度默认关；开启后学到的权重才会作用于在线决策）
+    LEARNING_WEIGHT_RELOAD_ENABLED: bool = False
+    # LEARN W-B：KB 勾选短路路径后台补采各策略结果（默认关）。
+    # KB 勾选时决策短路、strategy_results 恒空 → 学习无输入；开启后补采使样本可用。
+    LEARNING_SAMPLE_COLLECT_BG_ENABLED: bool = False
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
@@ -473,6 +485,11 @@ class WikiCompileSettings(BaseSettings):
     # 且互链正文稀释 BM25 使 B/C 臂同步退化），证据见
     # docs/design/wiki-navigable-workspace.md §10；机制保留可配置启用
     WIKI_LINK_EXPANSION: bool = False
+    # E-1 图边元数据化（L1，灰度默认关）：编译期按「其他页标题出现在本页正文」
+    # 生成 links（JSONB）图边，**不改正文**（红线：互链严禁内联正文），供
+    # navigator 的 Related 逐页导航；与查询期 WIKI_LINK_EXPANSION 解耦。
+    # 设计见 docs/design/wiki-link-metadata-edges.md。
+    WIKI_LINK_METADATA_ENABLED: bool = False
     # P5 编译去抖（秒）：>0 时上传管线不再立即编译，由调度器合并窗口内文档一次编译
     WIKI_COMPILE_DEBOUNCE_SECONDS: int = 20
     # P5 Redis 分布式锁（多副本/多 worker 部署时开启；false 仅进程内锁）
@@ -498,6 +515,17 @@ class WikiCompileSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
+class ExperimentSettings(BaseSettings):
+    """A/B 实验接入问答链路配置（LEARN W-C）。默认全关，零行为变更。"""
+
+    # 总开关（false 时 chat 路径不查实验、不分流）
+    AB_EXPERIMENT_CHAT_ENABLED: bool = False
+    # 部署级指定的实验 ID（UUID）；为空则不分流。须为 running 状态。
+    AB_CHAT_EXPERIMENT_ID: str = ""
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
+
+
 class Settings(BaseSettings):
     """聚合所有子配置的根配置类。"""
 
@@ -517,6 +545,7 @@ class Settings(BaseSettings):
     decision: DecisionSettings = DecisionSettings()
     evaluation: EvaluationSettings = EvaluationSettings()
     ocr: OcrSettings = OcrSettings()
+    experiment: ExperimentSettings = ExperimentSettings()
 
     IN_DOCKER: bool = False
     # 显式环境标记：dev | prod（与上方模块级 APP_ENV 同源）。未设置时按 IN_DOCKER 推断。

@@ -269,6 +269,14 @@ jobs:
           echo "--- milvus logs ---"; docker logs milvus 2>&1 | tail -n 100
           exit 1
 
+      # 迁移链漂移卡点（2026-10-19，W-漂移修复）：在全新库上 upgrade head → check。
+      # 等价于「迁移链必须能重建出与模型一致的 schema」，从源头拦住"改了模型但没写
+      # 迁移"（曾致 prod 缺 audit_logs/user_api_keys）。须在跑测试（app create_all）之前。
+      - name: Alembic migrate & drift check
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+
       # pytest-timeout：单个用例 120s 超时（thread 方法可打断 gRPC/网络挂起），
       # 防止个别测试挂死耗尽 job 6h 上限后无任何失败明细可查
       - name: Run integration tests

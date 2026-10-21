@@ -40,6 +40,12 @@ _request_wiki_nav: ContextVar[Optional[List[Dict[str, Any]]]] = ContextVar(
     "rag_request_wiki_nav", default=None
 )
 
+# LEARN W-C：A/B 实验变体的请求级参数覆盖（chat 层在调用链路前 set，管线终止时 reset）。
+# 由决策（门控投票/策略权重）与检索（rerank 候选数）读点消费；无覆盖时读点回落 settings 默认。
+_request_ab_config: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "rag_request_ab_config", default=None
+)
+
 # P1-3 后台持久化任务引用集，防止 fire-and-forget 任务被垃圾回收
 # （语义缓存写入、对话摘要更新等终态副作用）
 _background_store_tasks: set = set()
@@ -223,6 +229,21 @@ def record_wiki_nav(event: Dict[str, Any]) -> None:
             buf.append(event)
         except Exception:
             pass
+
+
+def set_ab_config(config: Optional[Dict[str, Any]]):
+    """设置请求级 A/B 覆盖（LEARN W-C），返回 token 供 reset。"""
+    return _request_ab_config.set(config)
+
+
+def reset_ab_config(token) -> None:
+    """复位请求级 A/B 覆盖。"""
+    _request_ab_config.reset(token)
+
+
+def get_ab_config() -> Optional[Dict[str, Any]]:
+    """读取请求级 A/B 覆盖；无覆盖时为 None（读点应回落 settings 默认）。"""
+    return _request_ab_config.get()
 
 
 def summarize_wiki_nav(

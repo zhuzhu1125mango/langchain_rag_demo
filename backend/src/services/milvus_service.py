@@ -36,6 +36,19 @@ except Exception as _bm25_import_err:  # pragma: no cover - 依赖未安装时�
     logger.warning(f"pymilvus-model 未安装，知识库混合检索将降级为纯向量检索: {_bm25_import_err}")
 
 
+def _ab_rerank_top_k() -> int:
+    """LEARN W-C：请求级 A/B 覆盖的 rerank 候选数；无覆盖时回落 settings 默认。"""
+    try:
+        from src.services.pipeline.state import get_ab_config
+
+        override = (get_ab_config() or {}).get("kb_hybrid_rerank_top_k")
+        if override is not None:
+            return int(override)
+    except Exception:
+        pass
+    return settings.processing.KB_HYBRID_RERANK_TOP_K
+
+
 class MilvusService(AsyncSingleton["MilvusService"]):
     """Milvus 客户端封装，管理集合生命周期与向量操作。"""
 
@@ -648,7 +661,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                 return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in ranked[:k]]
 
             # C1：RRF 融合后先截断到 rerank 候选数再送打分，避免对全部融合候选逐条调用重排序
-            rerank_n = max(k, settings.processing.KB_HYBRID_RERANK_TOP_K)
+            rerank_n = max(k, _ab_rerank_top_k())
             candidates = fused[:rerank_n]
             timings["rerank_pairs"] = len(candidates)
             reranked = await _timed(rerank_results(query, candidates, top_k=k), "rerank_ms")
@@ -709,7 +722,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             ranked = sorted(fused, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
             return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in ranked[:k]]
 
-        rerank_n = max(k, settings.processing.KB_HYBRID_RERANK_TOP_K)
+        rerank_n = max(k, _ab_rerank_top_k())
         reranked = await rerank_results(queries[0], fused[:rerank_n], top_k=k)
         return reranked
 

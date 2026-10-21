@@ -147,6 +147,34 @@ class TestExperimentManager:
             assert "std" in vr["metrics"]["accuracy"]
             assert "count" in vr["metrics"]["accuracy"]
 
+    async def test_allocate_traffic_for_chat_returns_variant_config(self):
+        """LEARN W-C：chat 系统级分流返回变体 id/config（绕过对象级归属校验）"""
+        variants = [
+            {"id": "v1", "name": "Control", "weight": 0.0, "config": {}},
+            {"id": "v2", "name": "Variant", "weight": 1.0, "config": {"kb_hybrid_rerank_top_k": 9}},
+        ]
+        experiment_id = await self.manager.create_experiment(name="Chat AB", variants=variants)
+        await self.manager.start_experiment(experiment_id)
+
+        allocation = await self.manager.allocate_traffic_for_chat(experiment_id, "u1", "s1")
+        assert allocation is not None
+        assert allocation["variant_id"] == "v2"
+        assert allocation["config"]["kb_hybrid_rerank_top_k"] == 9
+
+        # 系统级指标记录（无归属校验）
+        await self.manager.record_metric_for_chat(experiment_id, "v2", "response_time", 123.0)
+        metrics = await self.manager.get_metrics(experiment_id)
+        assert "v2" in metrics
+        assert metrics["v2"]["response_time"] == [123.0]
+
+    async def test_allocate_traffic_for_chat_inactive_or_invalid(self):
+        """LEARN W-C：未启动实验/非法 UUID 不分流"""
+        experiment_id = await self.manager.create_experiment(
+            name="Not Started", variants=[{"id": "v1", "weight": 1.0, "config": {}}]
+        )
+        assert await self.manager.allocate_traffic_for_chat(experiment_id, "u1") is None
+        assert await self.manager.allocate_traffic_for_chat("not-a-uuid", "u1") is None
+
     async def test_batch_delete_experiments(self):
         """测试批量删除实验及其关联数据"""
         # 创建两个实验并记录指标

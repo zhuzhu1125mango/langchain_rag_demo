@@ -41,6 +41,9 @@ class TestTooling:
         assert _parse_json_dict('{"pages": []}') == {"pages": []}
         assert _parse_json_dict('```json\n{"pages": []}\n```') == {"pages": []}
         assert _parse_json_dict('好的：{"pages": [1]} 完成') == {"pages": [1]}
+        # 尾随多余内容（"Extra data" 失败源）：只取第一个完整对象
+        assert _parse_json_dict('{"pages": [1]} {"more": 2}') == {"pages": [1]}
+        assert _parse_json_dict('{"pages": [1]}\n说明 {乱}') == {"pages": [1]}
         with pytest.raises(Exception):
             _parse_json_dict("完全不是 JSON")
 
@@ -487,6 +490,41 @@ class TestExtractLinks:
         assert extract_links("[[页面A]]", "本页", {"页面A"}) == ["页面A"]
 
 
+# ----------------------------------------------------------------------
+# 图边元数据化 L1（E-1）：按「其他页标题出现在本页正文」建边
+# ----------------------------------------------------------------------
+class TestDeriveLinksFromTitles:
+    def test_title_occurrence_builds_edges_in_position_order(self):
+        from src.services.wiki_compiler import derive_links_from_titles
+
+        valid = {normalize_title(t): t for t in ["年终奖", "绩效等级", "会议室"]}
+        content = "先提绩效等级，再说年终奖。"
+        assert derive_links_from_titles(content, "本页", valid) == ["绩效等级", "年终奖"]
+
+    def test_self_and_short_titles_excluded(self):
+        from src.services.wiki_compiler import derive_links_from_titles
+
+        valid = {normalize_title(t): t for t in ["本页", "卡", "门禁卡"]}
+        assert derive_links_from_titles("本页提及卡与门禁卡", "本页", valid) == ["门禁卡"]
+
+    def test_empty_content_or_no_valid_titles(self):
+        from src.services.wiki_compiler import derive_links_from_titles
+
+        assert derive_links_from_titles("", "本页", {"a": "A"}) == []
+        assert derive_links_from_titles("含标题A的正文", "本页", {}) == []
+
+    def test_set_input_and_max_links_cap(self):
+        from src.services.wiki_compiler import derive_links_from_titles
+
+        valid = {normalize_title(f"页面{i}"): f"页面{i}" for i in range(5)}
+        content = "页面0 页面1 页面2 页面3 页面4"
+        assert derive_links_from_titles(content, "本页", valid, max_links=3) == [
+            "页面0",
+            "页面1",
+            "页面2",
+        ]
+
+
 class TestFillLinks:
     async def test_persist_writes_links_for_batch(self, patched_services):
         """persist 后 links 列写入批次内互链（批次提交后再校验存在性）。"""
@@ -526,6 +564,23 @@ class TestFillLinks:
         )
         assert result.pages_created == 1  # links 失败不影响编译产物
         assert vector.indexed  # 向量入库仍执行
+
+    async def test_metadata_mode_edges_from_plain_body(self, patched_services, monkeypatch):
+        """WIKI_LINK_METADATA_ENABLED=true：正文无 [[..]] 语法也按标题出现建边（正文零改动）。"""
+        monkeypatch.setattr(settings.wiki_compile, "WIKI_LINK_METADATA_ENABLED", True)
+        db = FakeDB(select_queue=[[], [], ["年终奖", "绩效等级", "会议室"], [], []])
+        compiler = WikiCompiler()
+        pages = [
+            CompiledPage(title="年终奖", page_type="topic", content="发放与绩效等级挂钩。"),
+            CompiledPage(title="绩效等级", page_type="entity", content="用于年终奖分配。"),
+        ]
+        await compiler.persist_pages(db, "kb-1", "doc-1", pages)
+
+        row_a, row_b = db.added[0], db.added[1]
+        assert row_a.links == ["绩效等级"]
+        assert row_b.links == ["年终奖"]
+        # 正文零改动：页面正文未注入任何 [[..]] 语法
+        assert all("[[" not in p.content for p in pages)
 
 
 # ----------------------------------------------------------------------

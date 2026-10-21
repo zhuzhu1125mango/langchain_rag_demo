@@ -26,11 +26,19 @@ def _backfill_null_owner_id(conn: Connection, table: str) -> None:
 
 
 def _constraint_exists(conn: Connection, table: str, name: str) -> bool:
-    """判断约束是否已存在（幂等保护，允许部分 DDL 生效后重跑迁移）。"""
+    """判断约束是否已存在（幂等保护，允许部分 DDL 生效后重跑迁移）。
+
+    注（2026-10-19）：原实现用 ``conrelid = :table::regclass``，在 asyncpg 下
+    SQLAlchemy 无法解析 ``:table`` 后的 ``::`` 转型 → 保留字面量致 PostgresSyntaxError
+    （该迁移此前从未在空库上真正执行过，dev/prod 均靠 create_all + stamp 绕过）。
+    改用 pg_class 联接按 (nspname, relname) 精确匹配，规避绑定参数 + 转型解析问题。
+    """
     row = conn.execute(
         sa.text(
-            "SELECT 1 FROM pg_constraint WHERE conname = :name "
-            "AND conrelid = :table::regclass"
+            "SELECT 1 FROM pg_constraint c "
+            "JOIN pg_class t ON c.conrelid = t.oid "
+            "JOIN pg_namespace n ON t.relnamespace = n.oid "
+            "WHERE c.conname = :name AND t.relname = :table AND n.nspname = 'public'"
         ),
         {"name": name, "table": table},
     ).first()

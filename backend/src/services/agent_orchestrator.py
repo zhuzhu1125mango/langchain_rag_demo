@@ -40,6 +40,7 @@ class AgentLoopState:
     plan: List[str] = field(default_factory=list)   # L2 分层规划：剩余待执行提纲（步骤描述）
     plan_done: List[str] = field(default_factory=list)  # 已完成规划步骤（推动计划修订）
     plan_dirty: bool = False                        # plan 是否已产出（首步规划后置 True）
+    needs_web: bool = False                         # 混合问题：需 kb+web 双源（由路由 hybrid 意图注入）
 
 
 class AgentOrchestrator:
@@ -126,12 +127,20 @@ class AgentOrchestrator:
                 f"观察结果：{obs}"
             )
         scratch_text = "\n\n".join(scratch_lines) if scratch_lines else "（尚未执行任何工具）"
-        kb_guidance = (
-            "5. 用户已绑定知识库，与知识库主题相关的问题请优先调用 kb_search 检索知识库，"
-            "知识库能覆盖的问题不要依赖 web_search。\n"
-            if kb_ids
-            else ""
-        )
+        if kb_ids and loop.needs_web:
+            # 混合问题（路由 needs_kb+needs_web）：KB 只覆盖公司半边，须补 web 外部信息
+            kb_guidance = (
+                "5. 本次为**知识库+联网混合问题**：请**同时**调用 kb_search 检索公司/内部"
+                "资料，并用 web_search 检索行业/法定/外部标准或时效信息；两者缺一不可，"
+                "不要只调其一就给出最终答案。\n"
+            )
+        elif kb_ids:
+            kb_guidance = (
+                "5. 用户已绑定知识库，与知识库主题相关的问题请优先调用 kb_search 检索知识库，"
+                "知识库能覆盖的问题不要依赖 web_search。\n"
+            )
+        else:
+            kb_guidance = ""
         failed_steps = self._consecutive_failed_steps(loop)
         self_reflect = (
             ""
@@ -195,6 +204,20 @@ class AgentOrchestrator:
         "本步必须调用工具（知识库优先 kb_search，否则 web_search）。"
         "禁止此刻给出最终答案。"
     )
+    FORCE_FIRST_TOOL_SUFFIX_HYBRID = (
+        "【强制要求】你当前尚未调用任何工具，而本次为**知识库+联网混合问题**。"
+        "本步必须调用工具，且最终需**同时**用到 kb_search（公司/内部资料）与 "
+        "web_search（行业/法定/外部标准）两源；可本步一并调用，也可先 kb 后 web。"
+        "禁止此刻给出最终答案。"
+    )
+
+    def _force_first_suffix(self, loop: AgentLoopState) -> str:
+        """首步强制工具后缀：混合问题用双源版本，其余用 kb 优先版本。"""
+        return (
+            self.FORCE_FIRST_TOOL_SUFFIX_HYBRID
+            if loop.needs_web
+            else self.FORCE_FIRST_TOOL_SUFFIX
+        )
 
     # ------------------------------------------------------------------
     # L2 分层规划
@@ -291,7 +314,7 @@ class AgentOrchestrator:
         # 兜底重试一次强制先调工具；仍不调工具则回退直接答案，避免死循环。
         if not loop.scratchpad:
             retry = await bound.ainvoke(
-                [HumanMessage(content=base_prompt + "\n\n" + self.FORCE_FIRST_TOOL_SUFFIX)]
+                [HumanMessage(content=base_prompt + "\n\n" + self._force_first_suffix(loop))]
             )
             tool_calls = self._extract_tool_calls(retry)
             if tool_calls:
@@ -319,7 +342,7 @@ class AgentOrchestrator:
         # 兜底重试一次强制先调工具；仍不调工具则回退直接答案，避免死循环。
         if not loop.scratchpad:
             retry = await bound.ainvoke(
-                [HumanMessage(content=base_prompt + "\n\n" + self.FORCE_FIRST_TOOL_SUFFIX)]
+                [HumanMessage(content=base_prompt + "\n\n" + self._force_first_suffix(loop))]
             )
             tool_calls = self._extract_tool_calls(retry)
             if tool_calls:
@@ -407,6 +430,7 @@ class AgentOrchestrator:
         answer_type: str = "agent_orchestrator",
         memory_context: str = "",
         owner_id: Optional[str] = None,
+        needs_web: bool = False,
     ) -> AsyncIterator[Tuple]:
         """有界循环 + 综合。
 
@@ -419,10 +443,13 @@ class AgentOrchestrator:
                           摘要注入，附加到决策 prompt，实现会话级记忆。
             owner_id: 当前用户 ID（资源 owner）。透传给 kb_search/wiki_lookup
                       做工具侧 kb 归属校验（安全 W1-4，纵深防御）。
+            needs_web: 混合问题标志（路由 `needs_kb and needs_web`）。为 True 时决策
+                      prompt 注入「kb+web 双源」引导，避免只调 kb_search 就作答。
         """
         # perf_counter：单调时钟，避免 time.time() 在 Windows 上的粗粒度/回退问题
         loop = AgentLoopState(
-            deadline=time.perf_counter() + settings.search.AGENT_TIME_BUDGET_MS / 1000.0
+            deadline=time.perf_counter() + settings.search.AGENT_TIME_BUDGET_MS / 1000.0,
+            needs_web=needs_web,
         )
         all_results = []
         direct_answer = ""
@@ -535,11 +562,16 @@ class AgentOrchestrator:
 
         # 纯 Agent 模式：模型直接给出的答案优先；否则用工具结果综合生成
         if direct_answer:
-            yield ("chunk", direct_answer, [], [], answer_type)
+            # 3B 模型偶发把 scratchpad/工具调用叙述当最终答案输出 → 先清洗再外发
+            from .output_sanitizer import OutputSanitizer
+
+            cleaned, polluted = OutputSanitizer.sanitize(direct_answer)
+            if cleaned:
+                yield ("chunk", cleaned, [], [], answer_type)
             yield (
                 "result",
-                {"answer": direct_answer, "sources": self._collect_sources(all_results),
-                 "polluted": False, "steps": loop.steps, "reason": end_reason},
+                {"answer": cleaned, "sources": self._collect_sources(all_results),
+                 "polluted": polluted, "steps": loop.steps, "reason": end_reason},
             )
             return
 

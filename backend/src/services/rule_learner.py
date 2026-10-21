@@ -332,7 +332,16 @@ class RuleLearner:
         new_threshold = min(0.9, max(0.1, avg_positive_confidence - 0.1))
         old_threshold = strategy_manager.threshold
         strategy_manager.set_threshold(new_threshold)
-        
+
+        # LEARN W-A：阈值随权重一并持久化（存于 __decision__ 行的 config.threshold），
+        # 供启动回载；此前仅改内存、重启即丢
+        try:
+            await sample_store.update_strategy_config(
+                "__decision__", {"config": {"threshold": new_threshold}}
+            )
+        except Exception:
+            pass
+
         return {
             "status": "success",
             "old_threshold": old_threshold,

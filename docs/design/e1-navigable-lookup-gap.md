@@ -87,3 +87,44 @@ W1（索引页入口，独立价值可先行）→ W3（埋点，为 W2/E-2 提�
 ### TRACE 修复（2026-10-15，随 W2/W3 顺带）
 
 `RequestTrace` 为固定列模型，而 `save_async` 直接 `RequestTrace(**self.data)`——data 含无对应列的键（`semantic_cache_hit` / `verification` / 冗余 `context_rewrite`）时抛 TypeError，被 best-effort 吞掉致**整条 trace 落库失败**（问题改写 / 语义缓存命中 / 非流式 web 校验三类路径）。修复：`TraceCollector._to_record_payload` 按模型列过滤（未知键丢弃并告警，不再波及整条记录）+ 移除 `context_rewrite` 冗余顶层写（该值已随 `intent_decision.to_dict()` 持久化）。验证：`test_trace_ownership.py` 新增 2 用例。
+
+### E1V 多跳 A/B 复跑（2026-10-19，离线 BM25 代理）
+
+AB-CACHE 落地后复跑 [run_wiki_multihop_ab.py](../../backend/scripts/run_wiki_multihop_ab.py)（语料 12 篇 / 8 问，`python -u`，qwen3:4b 编译）。本轮编译成功产出 **11 页**（上次尝试因 Ollama 连接失败仅 2 页）。
+
+| 臂 | hit@5 | mrr@5 | recall@5 |
+|---|---|---|---|
+| A 仅原始 chunk | 1.000 | 1.000 | **0.938** |
+| B 原始 chunk + wiki | 1.000 | 1.000 | 0.875 |
+| C 仅 wiki 页（诊断） | 0.375 | 0.375 | 0.188 |
+| D 导航式（入口+链接） | 0.375 | 0.375 | 0.188 |
+
+**结论**
+- **W2 退池复现**：A(0.938) > B(0.875)，Δrecall=+0.062 → 编译页混入主池仍稀释跨文档召回，**退池结论不变**（与 2026-09-23 基线方向一致：0.938 vs 0.812）。
+- **混入无增益 / 缺口未收复**：B 相对 A recall −0.062。
+- **wiki 页自身跨文档召回低**（C=0.188）：编译页未覆盖跨文档关联 → 轻量 GraphRAG 立项依据（同前）。
+- **⚠️ D 臂不可用 —— 经查属既定现状，非新缺陷**：本轮 **[[互链]] 0 条** → D≡C。根因：[wiki_compiler.py `_generate_page`](../../backend/src/services/wiki_compiler.py#L326-L363) 的页面生成 prompt 已在 **2026-09-23 D2/D5 证伪后回退**（不再要求 `[[Title]]`），`WIKI_LINK_EXPANSION` 亦默认 `false` → **当前默认编译不产图边**，navigator 读的 `links` JSONB 为空 → 「Related 逐页」无链接可循。日志的 `Wiki 候选抽取失败: Extra data` 系 `_extract_candidates()` 的 LLM JSON 解析告警，与无桥**无因果**（初判有误，已更正）。
+- 故 D 臂/导航价值在**默认编译下离线不可测**；按红线，导航价值最终以 **Agent 多轮端到端 A/B** 为准（离线 5-slot 仅非退化底线）。
+
+**破局点（建议）**：W2 退池后 wiki 页**已不在主检索池**，"链接文本内联正文→稀释主检索"的证伪前提（D2/D5 的负收益来源）**已不再适用主池**。故可重估 prompt 注记中所谓"正规建法"——**仅写 `links` JSONB 元数据、不内联正文**（页面正文不含 `[[..]]`），据此重建图边后再测 D 臂与 Agent 导航。此项属对既定证伪结论的**重新评审**，须设计先行、确认后实施。
+
+### E1V 复跑（2026-10-20，编译覆盖修复后）—— 结论修正
+
+排查中发现**真瓶颈是编译覆盖**：12 篇语料中 8 篇因 `_parse_json_dict` 兜底正则（贪婪 `\{.*\}`）解析 LLM 输出失败 → **零页面**（含 `reimbursement`/`attendance` 等多跳枢纽档）。修复（改 `raw_decode`）后冷重编译：**12/12 篇 → 34 页**。
+
+| 项 | 修复前（10-19） | 修复后（10-20） |
+|---|---|---|
+| 编译覆盖 | 4/12 篇（11 页） | **12/12 篇（34 页）** |
+| 图边（L1 元数据） | — | **47 条（跨档 13）** |
+| A 仅 raw | 0.938 | 0.938 |
+| B raw+wiki | 0.875 | 0.875 |
+| **C 仅 wiki** | **0.188** | **0.938** |
+| D 导航式 | 0.188 | 0.688 |
+
+**修正后的结论**
+- **"跨文档缺口"主要是编译覆盖问题**：修复后 **C 臂 = 0.938**，与 raw 基线**持平** → 不依赖导航即可达基线。
+- **L1 跨档建边成立**：13 条跨档边恰对齐多跳金标对（如 `remote_work↔attendance`）→ 此前"跨档 0"系覆盖混淆。
+- **退池结论不变**（A 0.938 > B 0.875）。
+- **导航（D）离线仍为负**（0.688），但 harness 的 D 排序把邻居页置于其余入口页之前（保守偏置）→ **导航价值仍须 Agent 多轮 e2e 判定**（红线）。
+
+详见 [wiki-link-metadata-edges.md §7](wiki-link-metadata-edges.md)。

@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from src.auth import get_current_user, require_admin, CurrentUser
 from src.services.learning_engine import learning_engine
-from src.services.strategy_manager import create_default_strategy_manager
+from src.services.strategy_manager import get_strategy_manager
 
 router = APIRouter(prefix="/learning", tags=["learning"])
 
@@ -83,7 +83,8 @@ async def get_misclassification_analysis(
 async def trigger_learning(current_user: CurrentUser = Depends(require_admin)):
     """手动触发学习流程（全局操作，需管理员权限）"""
     try:
-        strategy_manager = await create_default_strategy_manager()
+        # LEARN W-A：使用进程内唯一实例，学习调整直接落到在线决策所用 manager
+        strategy_manager = await get_strategy_manager()
         result = await learning_engine.trigger_learning(strategy_manager)
         return {"success": True, "data": result}
     except Exception as e:
