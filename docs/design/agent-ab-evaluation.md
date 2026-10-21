@@ -93,12 +93,14 @@ agent-evolution.md §4.4 已定义 Phase 2 的三项验收，本方案将其落�
 | `web_topic_hit` | sources 标题/内容是否覆盖标注 `web_topic`（LLM-as-judge 打分 0/1，复用 GenerationEvaluator 的 LLM 实例） | 后处理 |
 | `agent_steps` / `end_reason` 分布 | B 臂循环步数与终止原因（final_answer/max_steps/time_budget/decide_error） | B 臂 result 元数据 |
 
-### 4.3 生成质量（LLM-as-judge，复用现有 GenerationEvaluator）
+### 4.3 生成质量（确定性规则，2026-10-21 起；原为 LLM-as-judge）
+
+> 口径变更：3B judge 抽检证明 `relevance` 零区分度（完美答案与无关答案同为 0.0）、`faithfulness` 绝对分被压在 0.7，已改为确定性规则（详见 [agent-eval-trace.md](agent-eval-trace.md)「答案级判分器复核与改造」）。**旧报告中的数值不可与新值直接比较，hybrid 非退化门槛需重标定。**
 
 | 指标 | 定义 | 说明 |
 |---|---|---|
-| `faithfulness` | 答案对参考上下文的忠实度（0-1） | 上下文取该题实际检索结果（KB 片段 + web 来源），与生产 judge 口径一致（fast 模型 + think=False + temperature=0） |
-| `relevance` | 答案对问题的相关度（0-1） | 同上 |
+| `faithfulness` | 答案子句被参考上下文**语义支撑**的比例（0-1） | 子句↔上下文子句最大余弦 ≥ 0.70 计有依据，并叠加**数字一致性**闸门；embedding 失败降级为 bigram 覆盖 |
+| `relevance` | 答案中最相关句与问句的语义相似度（0-1） | bge-m3 余弦按 `[0.45, 0.92] → [0,1]` 映射；embedding 失败降级为问题 bigram 覆盖 |
 | `citation_coverage` | 答案中带 `[n]` 的句子占比 | 正则切句 + `[n]` 解析（复用 CitationBackfiller 切句规则） |
 | `invalid_citation` | `[n]` 超出有效 source_index 数量 | 后处理 |
 

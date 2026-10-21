@@ -29,6 +29,17 @@ from src.services.wiki_compiler import (
 # ----------------------------------------------------------------------
 # 工具函数
 # ----------------------------------------------------------------------
+@pytest.fixture(autouse=True)
+def _disable_distributed_lock(monkeypatch):
+    """单测不触达 Redis 分布式锁。
+
+    dev 容器默认 WIKI_DISTRIBUTED_LOCK=true，而 pytest 每个用例独立事件循环，
+    async redis 客户端跨循环释放失败会残留锁 key（TTL 360s），导致后续用例
+    在 _acquire_redis_lock 轮询到 300s 超时（表现为测试挂起）。
+    """
+    monkeypatch.setattr(settings.wiki_compile, "WIKI_DISTRIBUTED_LOCK", False)
+
+
 class TestTooling:
     def test_normalize_title(self):
         assert normalize_title("  RAG 系统  ") == "rag系统"

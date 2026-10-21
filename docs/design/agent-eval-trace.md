@@ -19,7 +19,7 @@ AM-1 的动因是**E1V 的直接教训**：离线 5-slot recall 代理**测不�
 |---|---|---|
 | A/B 跑批 | ✅ `run_agent_ab.py`：live 两臂（`AGENT_ORCHESTRATOR_ENABLED` 控制变量）+ offline KB 回归 + compare 汇总 | `scripts/run_agent_ab.py` |
 | 步数/工具统计 | ✅ 从 reasoning 的 `agent_loop` 取 `agent_steps` / `agent_tool_calls` | `run_agent_ab.py#L234-L279` |
-| 答案级打分 | ✅ `GenerationEvaluator` LLM-as-judge：`faithfulness` / `relevance`，支持 `strict`/`loose` | `services/evaluation/generation_evaluator.py#L107-L167` |
+| 答案级打分 | ✅ `GenerationEvaluator` **确定性规则**（2026-10-21 起）：`faithfulness`=子句级语义依据率+数字一致性；`relevance`=问句↔答案句语义相似度映射 | `services/evaluation/generation_evaluator.py` |
 | 轨迹落库 | ✅ `RequestTrace.tool_calls` / `stages` / `token_usage` / `final_answer` / `total_latency_ms` | `models/request_trace.py#L19-L49`、`trace_collector.py#L44-L83` |
 | 评测集 | ✅ `tests/evaluation/agent_eval_dataset*.jsonl`（**有**问题/类别等字段） | `tests/evaluation/` |
 | **轨迹级判分** | ❌ **缺**：只统计步数，不判「工具选得对不对 / 步数是否冗余 / 是否覆盖所需信息」 | — |
@@ -168,7 +168,37 @@ Step(index, tool, args_digest, ok, observation_digest, latency_ms)
 - **【残留】`hybrid_01` 仍 `ts=0.5`**：双源引导后仍只调 `kb_search`——提示引导不等于确定性保证，若需硬保证应改为「首步多工具强约束」。
 - **【已修复】`web_01`/`web_03` 输出污染**：答案泄漏工具调用叙述（见「输出污染修复」）。
 
+### 答案级判分器复核与改造（2026-10-21）
+
+触发：批次 `faithfulness` 0.34 / `relevance` 0.12 长期偏低，疑与轨迹判分器同类问题。
+
+**四轮抽检结论（3B judge，temperature=0）**
+
+| 验证项 | 输入 | 结果 | 判定 |
+|---|---|---|---|
+| relevance 区分度 | 标准正确答案 / 真实回答 / 完全无关 | 三者均 **0.0**（各重复 3 次稳定） | **零区分度**；理由与答案原文矛盾（称"未说明提前时间"，答案里明确写了） |
+| relevance 污染 | 加置信度免责声明 | 0.0 → 0.2 | 免责声明是噪声源 |
+| faithfulness 区分度 | 有依据 / 数字矛盾 / 编造 / 无关 | 0.7 / 0.0 / 0.0 / 0.0（重复 2 次稳定） | 方向正确 |
+| faithfulness 天花板 | 完全有依据 | **仅 0.7**；改为"关键事实一致即 1.0"的新锚点后仍 0.7 | 绝对分不可横向比较 |
+
+**改造（与 AM-1 同口径，全确定性、零 LLM）**
+- `relevance`：问句与答案各句的 bge-m3 余弦取最大，按 `[0.45, 0.92] → [0,1]` 线性映射。实测无关≈0.45、真实答案 0.80+；embedding 失败时降级为问题 bigram 覆盖。
+- `faithfulness`：答案子句与上下文子句的最大余弦 ≥ 0.70 计为"有依据"，**并叠加数字一致性闸门**（子句数字必须在上下文中出现，否则该子句判无依据——数值矛盾无法靠语义识别）；embedding 失败时降级为子句 bigram 覆盖。
+- 判分前统一剥离**置信度免责声明**与**引用编号 `[n]`**（展示层产物，前者系统性拉低 0.1，后者会被误当成数字）。
+- 移除 `strict`/`loose` 双模式（确定性规则下不再需要），`run_agent_ab.py` 同步去掉 `faithfulness_mode` 与 `AB_FAITHFULNESS_MODE`。
+
+**离线重打分（同一批 E1V 答案，不重跑 Agent）**
+
+| 臂 | faithfulness（旧→新） | relevance（旧→新） |
+|---|---|---|
+| 基线 W1-OFF | 0.575 → **0.727** | 0.175 → **0.759** |
+| E-1 W1-ON | 0.550 → **0.838** | 0.200 → **0.937** |
+
+拒答题（`mh05` 输出"无法找到相关信息"）两维均为 0，方向正确；此前 LLM judge 对其 faithfulness 给 0.5–0.7。
+
+> **口径变更提示**：`agent-ab-evaluation.md` 中 `AB_HYBRID_NON_DEGRADE` / `AB_HYBRID_MIN`（0.30）是按旧 LLM judge 的分数分布标定的，新尺度下需重新基线后再沿用；旧历史报告里的 faithfulness/relevance 数值不可与新值直接比较。
+
 **待办**
-- **答案级判分器复核**（`GenerationEvaluator` 亦为 3B：`faithfulness` 0.34 / `relevance` 0.12 偏低，疑同类不可靠）——待确认后再动。
 - **④ 在线抽样跑批**（以 `RequestTrace` 为源，只读旁路）。
 - **`hybrid_01` 双源硬保证**（可选：首步强制 kb+web 并发调用）。
+- **A/B 门槛重标定**：用新判分器重跑一轮基线，更新 hybrid 非退化阈值。

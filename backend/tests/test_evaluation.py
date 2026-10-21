@@ -1,7 +1,6 @@
 """检索与生成评估器单元测试。"""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
 
 from src.services.evaluation import RetrievalEvaluator, GenerationEvaluator
 
@@ -94,77 +93,145 @@ class TestRetrievalEvaluator:
         assert len(report["samples"]) == 2
 
 
+class FakeEmbeddings:
+    """按固定词表做 0/1 词袋的假 embedding（同词表命中→同向，无命中→零向量）。"""
+
+    VOCAB = ("事假", "远程办公", "直属主管", "工作日", "OA", "天气", "散步")
+
+    def __init__(self, fail: bool = False):
+        self.fail = fail
+
+    async def aembed_documents(self, texts):
+        if self.fail:
+            raise ConnectionError("ollama down")
+        return [[1.0 if w in t else 0.0 for w in self.VOCAB] for t in texts]
+
+
 class TestGenerationEvaluator:
-    """生成评估器测试。"""
+    """生成评估器测试（确定性规则，无 LLM）。"""
 
-    @pytest.fixture
-    def mock_llm(self):
-        llm = MagicMock()
-        llm.ainvoke = AsyncMock(
-            return_value=MagicMock(content='{"score": 0.85, "reason": "good"}')
-        )
-        return llm
+    CONTEXTS = [
+        "事假管理：员工请事假须提前3个工作日提交申请，经直属主管审批。",
+        "远程办公：员工须提前2个工作日在OA系统提交远程办公申请，单次不超过5个工作日。",
+    ]
 
-    @pytest.mark.asyncio
-    async def test_parse_score_from_json(self, mock_llm):
-        """应从 JSON 输出中解析分数。"""
-        evaluator = GenerationEvaluator(llm=mock_llm)
-        result = await evaluator.evaluate(
-            answer="answer",
-            question="question",
-            contexts=["context"],
-        )
-        assert result.faithfulness == 0.85
-        assert result.relevance == 0.85
-        assert "good" in result.faithfulness_reason
+    # ---------------- 忠实度 ----------------
 
     @pytest.mark.asyncio
-    async def test_parse_score_from_text(self, mock_llm):
-        """应从文本输出中解析分数。"""
-        mock_llm.ainvoke = AsyncMock(return_value=MagicMock(content="Score: 0.7"))
-        evaluator = GenerationEvaluator(llm=mock_llm)
-        result = await evaluator.evaluate(
-            answer="answer",
-            question="question",
-            contexts=["context"],
+    async def test_faithfulness_grounded_is_one(self, monkeypatch):
+        """完全有依据的答案应得 1.0。"""
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        result = await evaluator.evaluate_faithfulness(
+            "事假需提前3个工作日申请，远程办公需提前2个工作日在OA提交。", self.CONTEXTS
         )
-        assert result.faithfulness == 0.7
-        assert result.relevance == 0.7
+        assert result["score"] == 1.0
+        assert "2/2" in result["reason"]
 
     @pytest.mark.asyncio
-    async def test_empty_answer(self, mock_llm):
-        """空答案应返回零分。"""
-        evaluator = GenerationEvaluator(llm=mock_llm)
-        result = await evaluator.evaluate(
-            answer="",
-            question="question",
-            contexts=["context"],
+    async def test_faithfulness_numeric_contradiction_is_zero(self, monkeypatch):
+        """数字与上下文矛盾（3→30）即使语义高度相似也判 0。"""
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        result = await evaluator.evaluate_faithfulness(
+            "事假需提前30个工作日申请。", self.CONTEXTS
         )
+        assert result["score"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_faithfulness_fabricated_and_offtopic_are_zero(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        assert (await evaluator.evaluate_faithfulness(
+            "公司规定远程办公期间工资按80%发放。", self.CONTEXTS
+        ))["score"] == 0.0
+        assert (await evaluator.evaluate_faithfulness(
+            "今天天气不错，适合出门散步。", self.CONTEXTS
+        ))["score"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_faithfulness_empty_answer_or_context(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        assert "为空" in (await evaluator.evaluate_faithfulness("", self.CONTEXTS))["reason"]
+        assert (await evaluator.evaluate_faithfulness("事假需提前3个工作日申请。", []))["score"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_faithfulness_strips_confidence_disclaimer(self, monkeypatch):
+        """置信度声明是展示层产物，不应影响判分。"""
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        dirty = (
+            "事假需提前3个工作日申请。[1]\n\n"
+            "⚠️ 当前回答可信度较低，未在多个独立来源中得到验证，请谨慎参考。"
+        )
+        assert (await evaluator.evaluate_faithfulness(dirty, self.CONTEXTS))["score"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_faithfulness_falls_back_to_lexical_when_embedding_fails(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings(fail=True))
+        result = await evaluator.evaluate_faithfulness(
+            "事假需提前3个工作日申请，远程办公需提前2个工作日在OA提交。", self.CONTEXTS
+        )
+        assert result["score"] == 1.0
+        assert "词面兜底" in result["reason"]
+
+    # ---------------- 相关度 ----------------
+
+    @pytest.mark.asyncio
+    async def test_relevance_high_for_related_answer(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        result = await evaluator.evaluate_relevance(
+            "远程办公需提前2个工作日申请。", "远程办公需提前2个工作日申请？"
+        )
+        assert result["score"] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_relevance_zero_for_offtopic_answer(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        result = await evaluator.evaluate_relevance(
+            "今天天气不错，适合出门散步。", "远程办公要提前多久申请？"
+        )
+        assert result["score"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_relevance_falls_back_to_lexical_when_embedding_fails(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings(fail=True))
+        result = await evaluator.evaluate_relevance(
+            "远程办公需提前2个工作日申请。", "远程办公要提前多久申请？"
+        )
+        assert 0.0 < result["score"] <= 1.0
+        assert "词面覆盖" in result["reason"]
+
+    # ---------------- 聚合 ----------------
+
+    @pytest.mark.asyncio
+    async def test_evaluate_and_batch(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        result = await evaluator.evaluate(
+            answer="事假需提前3个工作日申请，远程办公需提前2个工作日在OA提交。",
+            question="远程办公需提前2个工作日申请？",
+            contexts=self.CONTEXTS,
+        )
+        assert result.faithfulness == 1.0
+        assert result.relevance > 0.0
+
+        report = await evaluator.evaluate_batch([
+            {"answer": "事假需提前3个工作日申请。", "question": "远程办公要提前多久？", "contexts": self.CONTEXTS},
+            {"answer": "", "question": "q", "contexts": self.CONTEXTS},
+        ])
+        assert report["aggregated"]["faithfulness"] == 0.5
+        assert len(report["samples"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_empty_answer_scores_zero(self, monkeypatch):
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        result = await evaluator.evaluate(answer="", question="q", contexts=self.CONTEXTS)
         assert result.faithfulness == 0.0
         assert "为空" in result.faithfulness_reason
-
-    @pytest.mark.asyncio
-    async def test_llm_unavailable(self, monkeypatch):
-        """LLM 不可用时评估应优雅降级。"""
-        evaluator = GenerationEvaluator(llm=None)
-        monkeypatch.setattr(evaluator, "_get_llm", AsyncMock(return_value=None))
-        result = await evaluator.evaluate(
-            answer="answer",
-            question="question",
-            contexts=["context"],
-        )
-        assert result.faithfulness == 0.0
-        assert result.relevance == 0.0
-
-    @pytest.mark.asyncio
-    async def test_batch_evaluation(self, mock_llm):
-        """批量生成评估应返回聚合指标。"""
-        evaluator = GenerationEvaluator(llm=mock_llm)
-        samples = [
-            {"answer": "a1", "question": "q1", "contexts": ["c1"]},
-            {"answer": "a2", "question": "q2", "contexts": ["c2"]},
-        ]
-        report = await evaluator.evaluate_batch(samples)
-        assert report["aggregated"]["faithfulness"] == 0.85
-        assert report["aggregated"]["relevance"] == 0.85
-        assert len(report["samples"]) == 2

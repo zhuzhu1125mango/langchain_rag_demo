@@ -1,7 +1,7 @@
 # E-1 导航式 wiki_lookup：能力差距盘点
 
 > 关联：[special-projects-2026-09.md §E.2](special-projects-2026-09.md)（阶段一）、[wiki-navigable-workspace.md](wiki-navigable-workspace.md)（D1-D5 已实施与证伪记录）、[evolution-research-2026-09.md](evolution-research-2026-09.md)
-> 状态：**部分实施**（W1 索引页优先入口 / W2 entity-topic 退主池 / W3 导航埋点均已实施 2026-10-15，见 §6；仅多跳端到端验收 E1V 待办；遵循「设计先行 → 确认后实施」）
+> 状态：**部分实施 + 验收完成**（W1 索引页优先入口 / W2 entity-topic 退主池 / W3 导航埋点均已实施 2026-10-15；E1V Agent 多跳 e2e 验收 2026-10-21 完成，**未证明增益，W1 保持默认关闭**，见 §6；遵循「设计先行 → 确认后实施」）
 > 日期：2026-10-13
 
 ## 1. 关键前提修正
@@ -128,3 +128,35 @@ AB-CACHE 落地后复跑 [run_wiki_multihop_ab.py](../../backend/scripts/run_wik
 - **导航（D）离线仍为负**（0.688），但 harness 的 D 排序把邻居页置于其余入口页之前（保守偏置）→ **导航价值仍须 Agent 多轮 e2e 判定**（红线）。
 
 详见 [wiki-link-metadata-edges.md §7](wiki-link-metadata-edges.md)。
+
+### E1V Agent 多跳 e2e A/B（2026-10-21，W1 索引页入口）—— 验收结论
+
+**口径**：`wiki_multihop_eval_dataset.jsonl`（8 题，12 篇语料），两臂均 `AGENT_ORCHESTRATOR_ENABLED=true`（`--arm B`）+ `AGENT_TRAJ_EVAL_ENABLED=true`，仅切换 `WIKI_NAV_INDEX_FIRST_ENABLED`（OFF/ON）；Wiki 页编译一次（12 篇 → 26 页，20 页带 links），两臂共享。
+
+| 指标 | 基线臂（W1 OFF） | E-1 臂（W1 ON） | 判定 |
+|---|---|---|---|
+| kb_hit@5 | 1.000 | 1.000 | 持平（天花板效应） |
+| kb_recall@5 | 0.875 | 0.875 | 持平（逐题互有胜负） |
+| kb_mrr@5 | 1.000 | 1.000 | 持平 |
+| traj_score | 0.875 | 0.891 | +0.016（噪声量级） |
+| traj_pass_rate | 0.875 | 1.000 | +0.125（mh04 单题） |
+| 总步数 | 9 | 11 | +2 |
+| 工具调用 | kb_search×8, web_search×1 | kb_search×5, web_search×3, wiki_lookup×3 | 选择漂移 |
+| P95 延迟 | 9.4s | 21.6s | **+130%** |
+
+**结论**
+- **无检索增益**：hit/recall/mrr 三指标完全持平。多跳金标对在 `kb_search` 混合检索下基线已 hit@5=1.0，本数据集存在**天花板效应**，对 W1 不具区分力。
+- **触发率过低**：3B 决策模型 8 题中仅 **1 题**（mh04）走 `wiki_lookup`，索引页入口实际只被激活一次 → 即使索引页有价值，也无法在样本上体现。这是「决策器不选导航工具」的问题，而非索引页内容问题。
+- **成本明显为负**：步数 9→11、P95 9.4s→21.6s；且 KB-only 多跳题出现 **3 次 web_search**（基线 1 次），属工具选择漂移。
+- **按红线判定**：导航价值以 Agent e2e 为准，本轮 e2e **未证明增益** → **`WIKI_NAV_INDEX_FIRST_ENABLED` 保持默认 false**，不进入开启序列。
+
+**后续可选路径（未实施）**
+1. 提升导航触发率：在决策 prompt 中显式提示「跨文档问题优先 `wiki_lookup`」（需单独 A/B，避免污染本轮结论）。
+2. 构造**非天花板**多跳集：金标文档在 `kb_search` 下 hit@5 有明显缺口的题，才能测出导航收益。
+3. E-2 Query 回流设计前，先确认 W3 埋点能否区分「索引页入口 / 语义入口」的实际使用率。
+
+**环境侧阻断缺陷（本轮定位并修复）**
+首跑 8/8 题 `steps=0` 超时、300s 单题探针零事件，根因**不在 Agent 代码**：一个 2 小时前启动的 wiki 编译进程 [`rebuild_wiki.py`](../../backend/scripts/rebuild_wiki.py) 未退出，`WikiCompiler._get_llm` 因 `WIKI_COMPILE_MODEL` 为空**回退到 `OLLAMA_MODEL_NAME=qwen3:4b`**，且未设输出上限，陷入**无终止生成**（3.5k+ token、9 tok/s），独占 Ollama 单槽 → 所有并发请求排队至超时。修复：
+- [`wiki_compiler.py`](../../backend/src/services/wiki_compiler.py) 回退链改为 `WIKI_COMPILE_MODEL → FAST_LLM_MODEL_NAME → OLLAMA_MODEL_NAME`（遵守辅助任务走 3B 的显存红线）；
+- `ChatOllama` 增加 `num_predict=COMPILE_MAX_OUTPUT_TOKENS(2048)` 与 `reasoning=False`，杜绝无限生成；
+- 清理残留进程后 Ollama 直连恢复（3B 6.8s / 工具调用 0.46s），双臂复跑 8/8 全部 `ok`。

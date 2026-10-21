@@ -31,6 +31,9 @@ FACT_RETENTION_THRESHOLD = 0.75
 FACT_RETENTION_WARN = 0.9
 # P4 迭代精炼：页面事实保留率低于该值视为弱页，触发重生成
 FACT_RETENTION_TARGET = 0.9
+# 编译输出 token 上限：本地小模型偶发重复生成（无上限时 Ollama 默认无限生成），
+# 单槽被占满会拖垮全链路，故强制截断。
+COMPILE_MAX_OUTPUT_TOKENS = 2048
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 
@@ -79,16 +82,22 @@ class WikiCompiler:
         if self._llm is None:
             from langchain_ollama import ChatOllama
 
+            # 辅助任务红线：编译必须走 fast llm（3B）。OLLAMA_MODEL_NAME（4B）仅供
+            # deep_thinking 主回答；4GB 显存下两者互斥，且 4B 编译偶发无终止生成会
+            # 独占 Ollama 单槽，导致所有并发请求排队超时。
             model_name = (
                 settings.wiki_compile.WIKI_COMPILE_MODEL
+                or settings.model.FAST_LLM_MODEL_NAME
                 or settings.model.OLLAMA_MODEL_NAME
             )
-            self._llm = ChatOllama(
+            llm = ChatOllama(
                 model=model_name,
                 streaming=False,
                 num_ctx=settings.model.OLLAMA_NUM_CTX,
                 temperature=0,
+                num_predict=COMPILE_MAX_OUTPUT_TOKENS,
             )
+            self._llm = llm.bind(reasoning=False)
         return self._llm
 
     def _get_embeddings(self):

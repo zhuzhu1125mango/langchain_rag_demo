@@ -49,9 +49,6 @@ AB_P95_LIMIT = float(os.environ.get("AB_P95_LIMIT", "45"))         # Agent 路�
 AB_FAST_SLACK = float(os.environ.get("AB_FAST_PATH_P95_SLACK", "5"))  # 快路径两臂 P95 差（秒）
 AB_MIN_TOOL_SUCCESS = float(os.environ.get("AB_MIN_TOOL_SUCCESS", "0.8"))
 AB_PER_QUESTION_TIMEOUT_S = float(os.environ.get("AB_PER_QUESTION_TIMEOUT_S", "90"))
-# Agent 语义复核的宽松 faithful 口径（agent-ab-evaluation.md §7.1）：默认开，
-# strict 用于受控路径对照；loose 允许结合多源自身知识但不得与参考矛盾。
-_AB_FAITHFULNESS_MODE = os.environ.get("AB_FAITHFULNESS_MODE", "loose")
 
 
 # ----------------------------------------------------------------------
@@ -154,9 +151,24 @@ def _kb_hit_metrics(
 # ----------------------------------------------------------------------
 # live 模式
 # ----------------------------------------------------------------------
+def _expected_points(sample: Dict[str, Any]) -> List[str]:
+    """参考要点：优先 expected_points；E1V 多跳集用 needed_facts[].fact 兜底。"""
+    points = sample.get("expected_points")
+    if points:
+        return list(points)
+    facts = sample.get("needed_facts") or []
+    return [f.get("fact") for f in facts if isinstance(f, dict) and f.get("fact")]
+
+
 def _live_inputs(sample: Dict[str, Any], kb_ids: List[str]):
-    """按类别决定 arun_stream 的入参（A/B 两臂一致，保证公平）。"""
-    cat = sample["category"]
+    """按类别决定 arun_stream 的入参（A/B 两臂一致，保证公平）。
+
+    multihop：E1V 多跳验收集——仅 KB 内跨文档导航（走 Agent 工具路径，不联网）。
+    无 category 时按 multi（KB+web 多步）处理。
+    """
+    cat = sample.get("category") or "multi"
+    if cat == "multihop":
+        return False, "function_calling", kb_ids
     # multi 为 KB+web 多步类：与 web/hybrid 一样开启联网与 Agent 工具路径，并传入 KB
     use_web = cat in ("web", "hybrid", "multi")
     search_mode = "function_calling" if use_web else "simple"
@@ -170,7 +182,7 @@ async def _run_one(
     traj_evaluator: Any = None,
 ) -> Dict[str, Any]:
     q = sample["question"]
-    cat = sample["category"]
+    cat = sample.get("category") or "multi"
     use_web, search_mode, q_kb_ids = _live_inputs(sample, kb_ids)
 
     record: Dict[str, Any] = {
@@ -252,21 +264,19 @@ async def _run_one(
     from src.services.search_agent import looks_like_tool_call
     record["polluted"] = bool(looks_like_tool_call(record["answer"]))
 
-    # 生成质量（LLM-as-judge，复用现有 GenerationEvaluator）
+    # 生成质量（确定性规则判分：子句依据覆盖 + 语义相关度，见 generation_evaluator）
     if record["answer"] and not record["error"]:
         contexts = [
             str(s.get("content") or "")[:1000] for s in sources if s.get("content")
         ][:6]
-        # 宽松口径：Agent 臂（B）用 loose 模式（允许多源综合），固定管线（A）用 strict
-        agent_enabled = os.environ.get("AGENT_ORCHESTRATOR_ENABLED", "false").lower() == "true"
-        faith_mode = "loose" if agent_enabled else "strict"
         try:
             result = await judge.evaluate(
                 answer=record["answer"], question=q, contexts=contexts,
-                faithfulness_mode=faith_mode,
             )
             record["faithfulness"] = result.faithfulness
             record["relevance"] = result.relevance
+            record["faithfulness_reason"] = result.faithfulness_reason
+            record["relevance_reason"] = result.relevance_reason
             record["judge_ok"] = True
         except Exception as e:  # noqa: BLE001
             record["faithfulness"] = 0.0
@@ -307,7 +317,7 @@ async def _run_one(
                 tr = await traj_evaluator.evaluate(
                     traj,
                     expected_tools=sample.get("expected_tools"),
-                    expected_answer_points=sample.get("expected_points"),
+                    expected_answer_points=_expected_points(sample),
                     expected_max_steps=sample.get("expected_max_steps"),
                 )
                 record.update({f"traj_{k}": v for k, v in tr.to_dict().items()})
