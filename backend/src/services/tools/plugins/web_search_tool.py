@@ -9,6 +9,8 @@ class WebSearchTool(BaseTool):
     """执行联网搜索，返回相关网页标题、URL 和摘要。"""
 
     name = "web_search"
+    # AM-2：访问外部网络
+    risk_level = "external"
     description = (
         "执行联网搜索，返回相关网页的标题、URL 和摘要，"
         "用于获取实时信息或外部知识。"

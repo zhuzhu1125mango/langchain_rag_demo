@@ -13,6 +13,11 @@ from typing import Optional
 from src.config import settings
 from src.services.decision_pipeline import QAMode
 from src.services.context_builder import estimate_token_count
+from src.services.guardrails import (
+    INPUT_BLOCK_MESSAGE,
+    get_input_guard,
+    get_output_guard,
+)
 from src.services.intent_router import PrimaryMode
 from src.services.output_sanitizer import OutputSanitizer
 from src.services.pipeline.state import (
@@ -104,7 +109,28 @@ class PipelineStagesMixin:
 
         try:
             # 各阶段执行内部生成器
+            output_guard = get_output_guard()
+            recorded_output_rules: set = set()
             async for ev in self._pipeline_process(state):
+                # AM-2 输出护栏：所有 chunk 的统一出口脱敏，保证 SSE/落库/trace 一致
+                if ev[0] == "chunk" and ev[1]:
+                    redacted, hits = output_guard.redact(ev[1])
+                    if hits:
+                        # 阶段在 yield 前已把原文累加进 final_answer，这里同步修正
+                        state.final_answer, full_hits = output_guard.redact(state.final_answer)
+                        new_rules = [
+                            r for r in (hits + full_hits) if r not in recorded_output_rules
+                        ]
+                        if new_rules:
+                            recorded_output_rules.update(new_rules)
+                            logger.warning(f"输出护栏脱敏: rules={new_rules}")
+                            state.trace.add_stage(
+                                "guardrail_output",
+                                "redacted",
+                                latency_ms=0,
+                                detail={"rules": new_rules},
+                            )
+                        ev = (ev[0], redacted) + tuple(ev[2:])
                 yield ev
         finally:
             # SSE 断连兜底：客户端中途断连会 aclose 当前生成器，中断于某条
@@ -118,6 +144,24 @@ class PipelineStagesMixin:
         供 _pipeline 在外层 try/finally 中迭代；自身可被 aclose 中断，
         终态清理由外层 finally 统一兜底（见 _finalize_side_effects）。
         """
+        # AM-2 输入护栏（最先执行）：命中即拒答，不进入改写/检索/生成
+        guard_hit = get_input_guard().check(state.question)
+        if guard_hit is not None:
+            logger.warning(f"输入护栏拦截: rule={guard_hit.rule}")
+            state.trace.set_fallback(True, f"guardrail_input:{guard_hit.rule}")
+            state.trace.add_stage(
+                "guardrail_input",
+                "blocked",
+                latency_ms=0,
+                detail={"kind": guard_hit.kind, "rule": guard_hit.rule},
+            )
+            state.answer_type = "guardrail_blocked"
+            state.final_answer = INPUT_BLOCK_MESSAGE
+            yield ("chunk", INPUT_BLOCK_MESSAGE, [], [], "guardrail_blocked")
+            async for ev in self._finalize(state):
+                yield ev
+            return
+
         # 阶段 1：上下文增强（指代消解）
         async with _StageTimer(state.trace, "context_enhance"):
             await self._stage_enhance_context(state)

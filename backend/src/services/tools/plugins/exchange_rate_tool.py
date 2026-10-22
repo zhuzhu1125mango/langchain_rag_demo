@@ -60,6 +60,8 @@ class ExchangeRateTool(BaseTool):
     """查询两种货币之间的最新汇率。"""
 
     name = "exchange_rate"
+    # AM-2：访问外部网络
+    risk_level = "external"
     description = (
         "查询两种货币之间的最新汇率，支持常见货币对。"
         "当用户询问汇率、兑换、换算、X 美元兑多少人民币等问题时使用此工具。"

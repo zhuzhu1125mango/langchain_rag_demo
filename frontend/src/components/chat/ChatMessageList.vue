@@ -75,6 +75,41 @@
           </template>
         </div>
 
+        <!-- AM-2 HITL：高危工具审批卡片（pending 时等待用户回执） -->
+        <div
+          v-if="message.approval?.status === 'pending'"
+          class="flex items-start gap-2 p-3 rounded-xl border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-900/20"
+        >
+          <AlertTriangle class="w-4 h-4 flex-shrink-0 text-amber-500 mt-0.5" />
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-amber-800 dark:text-amber-200">需要你确认后继续执行</p>
+            <p class="text-xs text-amber-700/80 dark:text-amber-300/80 mt-0.5 break-all">
+              工具 {{ message.approval.tool }}
+              <span v-if="approvalArgsText(message)"> · {{ approvalArgsText(message) }}</span>
+            </p>
+            <div class="flex gap-2 mt-2">
+              <button
+                @click="emit('resolve-approval', message.id, true)"
+                class="px-2.5 py-1 rounded-md text-xs bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+              >
+                批准执行
+              </button>
+              <button
+                @click="emit('resolve-approval', message.id, false)"
+                class="px-2.5 py-1 rounded-md text-xs border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+              >
+                拒绝
+              </button>
+            </div>
+          </div>
+        </div>
+        <p
+          v-else-if="message.approval"
+          class="text-xs text-gray-500 dark:text-gray-400 px-1"
+        >
+          工具 {{ message.approval.tool }}：{{ approvalStatusText(message) }}
+        </p>
+
         <!-- 来源卡片（卡片外，浅色样式，参考主流模型布局） -->
         <MessageSources
           v-if="!message.isLoading && message.sources?.length"
@@ -168,6 +203,7 @@ const emit = defineEmits<{
   (e: 'submit-feedback', payload: { messageId: string; rating: number }): void
   (e: 'send-quick-question', question: string): void
   (e: 'regenerate'): void
+  (e: 'resolve-approval', messageId: string, approved: boolean): void
 }>()
 
 const messagesContainer = ref<HTMLElement | null>(null)
@@ -245,6 +281,27 @@ function onCiteClick(message: Message, sourceIndex: number): void {
 /** 点击星星提交评分，向上冒泡 submit-feedback 事件。 */
 function onStarClick(messageId: string, rating: number): void {
   emit('submit-feedback', { messageId, rating })
+}
+
+/** AM-2：审批卡片中的参数预览（截断，避免撑破布局）。 */
+function approvalArgsText(message: Message): string {
+  const args = message.approval?.arguments
+  if (!args) return ''
+  try {
+    const text = JSON.stringify(args)
+    return text.length > 120 ? `${text.slice(0, 120)}…` : text
+  } catch {
+    return ''
+  }
+}
+
+/** AM-2：审批结果文案（pending 由卡片渲染，此处覆盖其余状态）。 */
+function approvalStatusText(message: Message): string {
+  const status = message.approval?.status
+  if (status === 'approved') return '已批准'
+  if (status === 'rejected') return '已拒绝'
+  if (status === 'expired') return '已过期'
+  return ''
 }
 
 /** 判断滚动容器是否接近底部（阈值 50px），用于决定自动滚动是否打断用户阅读。 */

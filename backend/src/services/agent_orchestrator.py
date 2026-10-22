@@ -364,16 +364,22 @@ class AgentOrchestrator:
         self, actions: List[Dict[str, Any]], loop: AgentLoopState,
         kb_ids: Optional[List[str]] = None,
         owner_id: Optional[str] = None,
+        trace: Any = None,
     ):
-        """执行本步全部工具调用（去重后并行），返回 (results, observations)。
+        """执行本步全部工具调用（去重 → 审批 → 并行执行）。
+
+        AM-2：命中审批闸门的工具在 ACT 之前 yield ("approval_required", payload)，
+        wait 模式阻塞等待人工回执；最终 yield ("action_results", results, observations)。
 
         kb_search / wiki_lookup 的 KB 范围一律以编排层注入为准：
         - 剥离模型显式传入的 kb_ids（不可信，可能指向他人知识库）；
         - 会话 kb_ids（已经 API 层 validate_kb_ownership 校验）注入为检索白名单；
         - 注入 _owner_id 供支持 supports_owner_scope 的工具做二道归属校验（纵深防御）。
         """
+        from src.services.guardrails import get_approval_gate
         from src.services.tools.tool_manager import ToolResult
 
+        gate = get_approval_gate()
         pending = []
         observations: List[Dict[str, str]] = []
         for action in actions:
@@ -396,6 +402,82 @@ class AgentOrchestrator:
                 })
                 continue
             loop.seen_calls.add(key)
+
+            # AM-2 HITL：高危工具执行前审批（模式 off / 未命中名单时直接放行）
+            tool = self.tool_manager.registry.get(name)
+            if gate.needs_approval(name, tool):
+                if gate.mode == "reject":
+                    logger.warning(f"审批拒绝（reject 模式）: tool={name}")
+                    observations.append({
+                        "tool": name,
+                        "args": args,
+                        "observation": f"执行失败: 工具 {name} 需要人工审批，当前审批模式已直接拒绝。",
+                    })
+                    if trace is not None:
+                        trace.add_stage(
+                            "approval", "rejected", latency_ms=0,
+                            detail={"tool": name, "mode": "reject"},
+                        )
+                    continue
+
+                record = await gate.request(name, args, user_id=owner_id)
+                if record is None:
+                    observations.append({
+                        "tool": name,
+                        "args": args,
+                        "observation": f"执行失败: 工具 {name} 的审批通道不可用，已拒绝执行。",
+                    })
+                    if trace is not None:
+                        trace.add_stage(
+                            "approval", "unavailable", latency_ms=0,
+                            detail={"tool": name},
+                        )
+                    continue
+
+                yield ("approval_required", json.dumps({
+                    "type": "approval_required",
+                    "approval_id": record["approval_id"],
+                    "tool": name,
+                    "arguments": record.get("arguments") or {},
+                    "timeout_s": gate.timeout_s,
+                    "expires_at": record["expires_at"],
+                }, ensure_ascii=False))
+                approval_start = time.time()
+                approved, reason = await gate.wait(record["approval_id"])
+                approval_ms = int((time.time() - approval_start) * 1000)
+                if trace is not None:
+                    trace.add_stage(
+                        "approval", "approved" if approved else "rejected",
+                        latency_ms=approval_ms,
+                        detail={"tool": name, "mode": "wait", "reason": reason[:120]},
+                    )
+                if not approved:
+                    logger.info(f"人工审批未通过: tool={name} reason={reason}")
+                    observations.append({
+                        "tool": name,
+                        "args": args,
+                        "observation": f"执行失败: 工具 {name} 未获人工批准（{reason}）。请勿重复调用，改用其他方式或直接作答。",
+                    })
+                    yield (
+                        "reasoning",
+                        self._step_payload(
+                            "done", "人工审批",
+                            f"工具 {name} 未获批准，跳过执行",
+                            duration_ms=approval_ms,
+                            metadata={"tool": name, "approved": False},
+                        ),
+                    )
+                    continue
+                yield (
+                    "reasoning",
+                    self._step_payload(
+                        "done", "人工审批",
+                        f"工具 {name} 已获批准，继续执行",
+                        duration_ms=approval_ms,
+                        metadata={"tool": name, "approved": True},
+                    ),
+                )
+
             pending.append({"tool_name": name, "arguments": args, "key": key})
 
         results: List[ToolResult] = []
@@ -415,7 +497,7 @@ class AgentOrchestrator:
             })
             # ToolResult 携带 key 便于综合阶段排除去重占位
             result.input_arguments = p["arguments"]
-        return results, observations
+        yield ("action_results", results, observations)
 
     # ------------------------------------------------------------------
     # 主循环
@@ -431,6 +513,7 @@ class AgentOrchestrator:
         memory_context: str = "",
         owner_id: Optional[str] = None,
         needs_web: bool = False,
+        trace: Any = None,
     ) -> AsyncIterator[Tuple]:
         """有界循环 + 综合。
 
@@ -445,6 +528,7 @@ class AgentOrchestrator:
                       做工具侧 kb 归属校验（安全 W1-4，纵深防御）。
             needs_web: 混合问题标志（路由 `needs_kb and needs_web`）。为 True 时决策
                       prompt 注入「kb+web 双源」引导，避免只调 kb_search 就作答。
+            trace: 可选 TraceCollector，用于记录 HITL 审批事件（AM-2）。
         """
         # perf_counter：单调时钟，避免 time.time() 在 Windows 上的粗粒度/回退问题
         loop = AgentLoopState(
@@ -525,7 +609,16 @@ class AgentOrchestrator:
 
             # ---- ACT + OBSERVE ----
             step_start = time.time()
-            results, observations = await self._execute_actions(actions, loop, kb_ids=kb_ids, owner_id=owner_id)
+            results = []
+            observations = []
+            async for ev in self._execute_actions(
+                actions, loop, kb_ids=kb_ids, owner_id=owner_id, trace=trace
+            ):
+                if ev[0] == "action_results":
+                    results, observations = ev[1], ev[2]
+                else:
+                    # 审批事件（approval_required）与审批结果 reasoning 直接透传给 SSE
+                    yield ev
             all_results.extend(results)
             for obs in observations:
                 loop.scratchpad.append({"step": step, **obs})

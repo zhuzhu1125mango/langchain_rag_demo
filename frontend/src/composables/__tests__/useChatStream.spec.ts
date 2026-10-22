@@ -12,10 +12,16 @@ import { defineComponent, h, ref, type Ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 
 // vi.mock 工厂会被提升到文件顶部，共享 spy 须经 vi.hoisted 创建
-const { routerReplace, invalidateQueries, refetchQueries } = vi.hoisted(() => ({
+const { routerReplace, invalidateQueries, refetchQueries, resolveApprovalMock } = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   invalidateQueries: vi.fn(),
-  refetchQueries: vi.fn()
+  refetchQueries: vi.fn(),
+  resolveApprovalMock: vi.fn()
+}))
+
+vi.mock('@/queries/chat', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/queries/chat')>()),
+  resolveChatApproval: resolveApprovalMock
 }))
 
 vi.mock('vue-router', () => ({
@@ -315,6 +321,23 @@ describe('SSE 事件分发', () => {
     expect(assistant.isLoading).toBe(false)
     expect(h.searchStatus.value).toBe('idle')
   })
+
+  it('approval_required 事件：写入待审批卡片', async () => {
+    stubSseFetch([
+      'data: {"type":"approval_required","approval_id":"ap-1","tool":"write_tool",' +
+      '"arguments":{"x":1},"timeout_s":60}\n\n'
+    ])
+    const h = mountStream()
+
+    await h.api.sendMessage('hi')
+
+    expect(assistantOf(h.store).approval).toEqual({
+      id: 'ap-1',
+      tool: 'write_tool',
+      arguments: { x: 1 },
+      status: 'pending'
+    })
+  })
 })
 
 describe('异常路径', () => {
@@ -375,6 +398,43 @@ describe('重新生成与快捷发送', () => {
 
     expect(lastRequestBody().question).toBe('快捷问题')
     expect(h.questionInput.value).toBe('')
+  })
+})
+
+describe('HITL 审批回执（AM-2）', () => {
+  beforeEach(() => {
+    resolveApprovalMock.mockReset()
+  })
+
+  it('批准成功：审批状态更新为 approved', async () => {
+    resolveApprovalMock.mockResolvedValue(undefined)
+    const h = mountStream()
+    h.store.addMessage({
+      id: 'a1',
+      role: 'assistant',
+      content: '',
+      approval: { id: 'ap-1', tool: 'write_tool', status: 'pending' }
+    })
+
+    await h.api.resolveApproval('a1', true)
+
+    expect(resolveApprovalMock).toHaveBeenCalledWith('ap-1', true)
+    expect(h.store.messages.find(m => m.id === 'a1')?.approval?.status).toBe('approved')
+  })
+
+  it('接口失败：审批状态标记为 expired', async () => {
+    resolveApprovalMock.mockRejectedValue(new Error('not found'))
+    const h = mountStream()
+    h.store.addMessage({
+      id: 'a2',
+      role: 'assistant',
+      content: '',
+      approval: { id: 'ap-2', tool: 'write_tool', status: 'pending' }
+    })
+
+    await h.api.resolveApproval('a2', false)
+
+    expect(h.store.messages.find(m => m.id === 'a2')?.approval?.status).toBe('expired')
   })
 })
 

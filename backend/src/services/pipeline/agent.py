@@ -291,9 +291,10 @@ class AgentMixin:
             memory_context=memory_context,
             owner_id=state.user_id,
             needs_web=hybrid_needs_web,
+            trace=state.trace,
         ):
             kind = ev[0]
-            if kind in ("reasoning", "thinking"):
+            if kind in ("reasoning", "thinking", "approval_required"):
                 yield ev
             elif kind == "chunk":
                 _, chunk, src_texts, src_meta, _atype = ev

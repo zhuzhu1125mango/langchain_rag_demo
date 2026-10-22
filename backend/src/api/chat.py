@@ -534,6 +534,20 @@ async def stream_answer(
                         yield f"data: {json.dumps(thinking_payload)}\n\n"
                     continue
 
+                # AM-2 HITL：高危工具审批请求（独立事件类型，前端弹出审批卡片）
+                if at == "approval_required":
+                    try:
+                        approval_payload = json.loads(chunk) if chunk else {}
+                    except Exception:
+                        approval_payload = {}
+                    if approval_payload:
+                        logger.info(
+                            f"SSE approval_required: tool={approval_payload.get('tool')} "
+                            f"id={approval_payload.get('approval_id')}"
+                        )
+                        yield f"data: {json.dumps(approval_payload, ensure_ascii=False)}\n\n"
+                    continue
+
                 # 过滤模型思考阶段产生的空内容，避免前端显示异常
                 if chunk:
                     full_answer += chunk
@@ -656,6 +670,41 @@ async def stream_answer(
                 logger.warning(f"流式后台标题生成失败: {title_err}")
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+class ApprovalResolveRequest(BaseModel):
+    """HITL 审批回执（AM-2）。"""
+
+    approved: bool
+    # 可选：拒绝理由（批准时可留空）
+    reason: str = ""
+
+
+@router.post("/approvals/{approval_id}")
+async def resolve_approval(
+    approval_id: str,
+    payload: ApprovalResolveRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """回执一次高危工具审批；仅发起审批的用户可操作。
+
+    返回 404（记录不存在/已过期）、403（非发起人）、409（已处理）。
+    """
+    from src.services.guardrails import get_approval_gate
+
+    ok, code = await get_approval_gate().resolve(
+        approval_id,
+        approved=payload.approved,
+        user_id=current_user.user_id,
+        reason=payload.reason,
+    )
+    if ok:
+        return {"status": "ok", "approved": payload.approved}
+    if code == "not_found":
+        raise HTTPException(status_code=404, detail="审批不存在或已过期")
+    if code == "forbidden":
+        raise HTTPException(status_code=403, detail="无权处理该审批")
+    raise HTTPException(status_code=409, detail="审批已处理")
 
 
 class SuggestionRequest(BaseModel):

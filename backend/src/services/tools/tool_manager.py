@@ -63,6 +63,10 @@ class BaseTool(ABC):
     name: str = ""
     description: str = ""
     parameters: Dict[str, Any] = {}
+    # AM-2 风险声明：read=只读内部 | external=访问外部网络 | write=有副作用（写操作）
+    risk_level: str = "read"
+    # 是否强制人工审批（write 级工具由 ApprovalGate 自动纳入，无需逐个声明）
+    requires_approval: bool = False
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolResult:
@@ -164,7 +168,7 @@ class ToolManager:
                     logger.warning(f"实例化工具 {obj.__name__} 失败: {e}")
 
     async def execute(self, tool_name: str, **kwargs) -> ToolResult:
-        """执行指定工具，带超时和异常捕获。"""
+        """执行指定工具，带护栏校验、超时和异常捕获。"""
         tool = self.registry.get(tool_name)
         if not tool:
             return ToolResult(
@@ -172,6 +176,19 @@ class ToolManager:
                 input_arguments=kwargs,
                 success=False,
                 error=f"工具 '{tool_name}' 未注册",
+            )
+
+        # AM-2 工具护栏：参数长度/URL/路径穿越统一在唯一执行入口拦截
+        from src.services.guardrails import get_tool_guard
+
+        guard_hit = get_tool_guard().check(tool, kwargs)
+        if guard_hit is not None:
+            logger.warning(f"工具护栏拦截: tool={tool_name} rule={guard_hit.rule}")
+            return ToolResult(
+                tool_name=tool_name,
+                input_arguments=kwargs,
+                success=False,
+                error=f"安全护栏拦截: {guard_hit.detail or guard_hit.rule}",
             )
 
         start = time.time()

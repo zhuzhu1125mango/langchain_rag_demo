@@ -116,6 +116,17 @@ export interface Message {
   reasoning?: ReasoningStep[]
   /** 模型原始思考内容（深度思考开启时流式接收并持久化，历史回看可展开）。 */
   thinking?: string
+  /** AM-2：待人工审批的高危工具调用（approval_required 事件）。 */
+  approval?: {
+    /** 审批 ID（回执接口使用）。 */
+    id: string
+    /** 工具名。 */
+    tool: string
+    /** 工具参数预览。 */
+    arguments?: Record<string, unknown>
+    /** 本地审批状态。 */
+    status: 'pending' | 'approved' | 'rejected' | 'expired'
+  }
 }
 
 /** 获取会话列表（仅在已登录时启用，避免未登录路由跳转期的 401 噪音）。 */
@@ -188,6 +199,15 @@ export function useSubmitFeedback() {
 
 export interface SuggestionsResponse {
   suggestions: string[]
+}
+
+/** HITL 审批回执（AM-2）：批准/拒绝一次高危工具调用。 */
+export async function resolveChatApproval(
+  approvalId: string,
+  approved: boolean,
+  reason?: string
+): Promise<void> {
+  await api.post(`/chat/approvals/${approvalId}`, { approved, reason })
 }
 
 /** 获取基于当前输入的问题推荐。 */

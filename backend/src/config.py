@@ -462,6 +462,35 @@ class SemanticCacheSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
+
+class GuardrailSettings(BaseSettings):
+    """Agent 输入/输出/工具护栏与 HITL 审批（AM-2，见 docs/design/agent-guardrails-hitl.md）。
+
+    全部判定走确定性规则（零额外 LLM 调用）；审批模式默认 off，名单为空时不触发。
+    """
+
+    # 总开关：关闭后三处护栏全部旁路（保留代码路径，便于线上快速回退）
+    GUARDRAIL_ENABLED: bool = True
+    # 输入护栏：注入/越权特征、超长、控制字符 → 拒答
+    GUARDRAIL_INPUT_ENABLED: bool = True
+    # 输出护栏：凭证/系统提示泄漏 → 脱敏
+    GUARDRAIL_OUTPUT_ENABLED: bool = True
+    # 工具护栏：参数长度/URL/路径穿越 → 拒绝执行
+    GUARDRAIL_TOOL_ENABLED: bool = True
+    # 输入长度上限（字符）
+    GUARDRAIL_INPUT_MAX_CHARS: int = 4000
+    # 工具参数 JSON 长度上限（字符）
+    GUARDRAIL_TOOL_MAX_ARG_CHARS: int = 4000
+    # HITL：off=不检查 | reject=高危工具直接拒绝 | wait=SSE 内等待人工批准
+    AGENT_APPROVAL_MODE: str = "off"
+    # 强制审批的工具名单（逗号分隔；risk_level=write 的工具自动纳入）
+    AGENT_APPROVAL_TOOLS: str = ""
+    # wait 模式等待审批的超时（秒），超时按拒绝处理
+    AGENT_APPROVAL_TIMEOUT_S: int = 60
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
+
+
 class WikiCompileSettings(BaseSettings):
     """LLM-Wiki 编译层配置（P2 前置编译增强，Phase 1）。默认全关，零风险合入。"""
 
@@ -541,6 +570,7 @@ class Settings(BaseSettings):
     intent_router: IntentRouterSettings = IntentRouterSettings()
     search: SearchSettings = SearchSettings()
     semantic_cache: SemanticCacheSettings = SemanticCacheSettings()
+    guardrail: GuardrailSettings = GuardrailSettings()
     wiki_compile: WikiCompileSettings = WikiCompileSettings()
     decision: DecisionSettings = DecisionSettings()
     evaluation: EvaluationSettings = EvaluationSettings()

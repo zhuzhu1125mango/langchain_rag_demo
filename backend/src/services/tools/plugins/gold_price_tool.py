@@ -96,6 +96,8 @@ class GoldPriceTool(BaseTool):
     """查询黄金、白银等贵金属实时价格。"""
 
     name = "gold_price"
+    # AM-2：访问外部网络
+    risk_level = "external"
     description = (
         "查询黄金、白银、铂金、钯金等贵金属的实时价格。"
         "当用户询问金价、银价、黄金价格、白银价格、贵金属价格等问题时使用此工具。"

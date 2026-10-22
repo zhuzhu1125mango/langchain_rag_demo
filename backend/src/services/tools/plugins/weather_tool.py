@@ -13,6 +13,8 @@ class WeatherTool(BaseTool):
     """查询指定城市的实时天气和短期预报。"""
 
     name = "weather_query"
+    # AM-2：访问外部网络
+    risk_level = "external"
     description = (
         "查询指定城市或地区的当前天气、气温、湿度、风速和今日预报。"
         "当用户询问某个城市天气、气温、是否下雨等问题时使用此工具。"

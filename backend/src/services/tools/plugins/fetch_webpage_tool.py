@@ -10,6 +10,8 @@ class FetchWebpageTool(BaseTool):
     """抓取指定网页的完整正文内容，用于深入查看某个搜索结果。"""
 
     name = "fetch_webpage"
+    # AM-2：访问外部网络（URL 安全另由 ToolGuard 统一校验）
+    risk_level = "external"
     description = "抓取指定网页的完整正文内容，用于深入查看某个搜索结果"
     parameters = {
         "type": "object",

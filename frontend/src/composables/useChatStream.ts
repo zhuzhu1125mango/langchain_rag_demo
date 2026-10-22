@@ -3,6 +3,7 @@ import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useChatStore } from '@/stores/chat'
 import type { MessageSource, ReasoningStep } from '@/queries/chat'
+import { resolveChatApproval } from '@/queries/chat'
 import type ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import { getToken } from '@/utils/auth'
 import { generateId } from '@/utils/id'
@@ -185,6 +186,20 @@ export function useChatStream(options: UseChatStreamOptions) {
             const current = lastMsg.reasoning || []
             const merged = mergeReasoningSteps(current, [step])
             chatStore.updateMessage(lastMsg.id, { reasoning: merged })
+            return
+          }
+
+          // AM-2 HITL：高危工具执行前审批，渲染审批卡片等待用户回执
+          if (data.type === 'approval_required') {
+            chatStore.updateMessage(lastMsg.id, {
+              approval: {
+                id: data.approval_id,
+                tool: data.tool,
+                arguments: data.arguments,
+                status: 'pending'
+              }
+            })
+            messageListRef.value?.scrollToBottom()
             return
           }
 
@@ -376,6 +391,23 @@ export function useChatStream(options: UseChatStreamOptions) {
     if (lastUser) void sendMessage(lastUser.content)
   }
 
+  /** 回执高危工具审批（AM-2）；接口失败按过期处理，避免卡片一直挂起。 */
+  async function resolveApproval(messageId: string, approved: boolean): Promise<void> {
+    const message = chatStore.messages.find(m => m.id === messageId)
+    const approval = message?.approval
+    if (!approval || approval.status !== 'pending') return
+    try {
+      await resolveChatApproval(approval.id, approved)
+      chatStore.updateMessage(messageId, {
+        approval: { ...approval, status: approved ? 'approved' : 'rejected' }
+      })
+    } catch {
+      chatStore.updateMessage(messageId, {
+        approval: { ...approval, status: 'expired' }
+      })
+    }
+  }
+
   onBeforeUnmount(() => {
     // D4：组件卸载时中止仍在进行的 SSE 流，避免后台继续写入已销毁的响应式消息
     activeStreamController?.abort()
@@ -386,6 +418,7 @@ export function useChatStream(options: UseChatStreamOptions) {
   return {
     sendMessage,
     sendQuickQuestion,
-    regenerateLast
+    regenerateLast,
+    resolveApproval
   }
 }

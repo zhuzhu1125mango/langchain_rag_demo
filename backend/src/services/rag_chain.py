@@ -264,6 +264,9 @@ class RAGChain(
                     yield ev[1], [], [], "reasoning"
                 elif kind == "thinking":
                     yield ev[1], [], [], "thinking"
+                elif kind == "approval_required":
+                    # AM-2 HITL：审批请求原样转发给 API 层（SSE approval_required 事件）
+                    yield ev[1], [], [], "approval_required"
         except GeneratorExit:
             # P2-5：客户端中途断连（异步生成器被 aclose 关闭）触发，正常完成不触发；
             # 计次供 "SSE 流式中断率" 告警，需先让管线 finally 完成 _finalize_side_effects
