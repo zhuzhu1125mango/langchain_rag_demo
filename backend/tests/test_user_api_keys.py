@@ -375,7 +375,7 @@ class TestHttpAuthChain:
         holder = FakeKeySession(FakeKeyRow(USER_ID, valid=True))
         monkeypatch.setattr("src.database.async_session_maker", lambda: holder)
 
-        ws = FakeWebSocket({"type": "auth", "api_key": "rag_ws_key_1234567890abcdef"})
+        ws = FakeWebSocket({"type": "auth", "api_key": "rag_ws_key_1234567890abcdef"})  # gitleaks:allow (测试夹具假值)
         user = asyncio.run(get_current_user_for_ws(ws))
         assert user.user_id == USER_ID
         assert ws.sent == [{"type": "auth_ok"}]

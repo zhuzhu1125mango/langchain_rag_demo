@@ -112,7 +112,7 @@ class TestProductionCredentialRules:
     def test_strong_config_passes(self):
         s = self._production_settings(
             security=SecuritySettings(SECRET_KEY=STRONG_KEY),
-            database=DatabaseSettings(POSTGRES_PASSWORD="strong-db-pass-123"),
-            minio=MinIOSettings(MINIO_ACCESS_KEY="prod-access", MINIO_SECRET_KEY="prod-secret-123456"),
+            database=DatabaseSettings(POSTGRES_PASSWORD="strong-db-pass-123"),  # gitleaks:allow (测试夹具假值)
+            minio=MinIOSettings(MINIO_ACCESS_KEY="prod-access", MINIO_SECRET_KEY="prod-secret-123456"),  # gitleaks:allow (测试夹具假值)
         )
         assert self._check_production(s) == []

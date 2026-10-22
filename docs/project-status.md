@@ -156,3 +156,17 @@
   - **③ prod schema 漂移修复**：迁移 `d4e5f6a7b8c9_reconcile_missing_schema.py`、`8cb6e5b283ec`（asyncpg 缺陷）、`scripts/start-prod.sh|.ps1`（去 stamp）、`.github/workflows/ci.yml`（加 `alembic check`）
   - **④ E-1 后续**：`wiki_compiler.py`（L1 图边 + 编译覆盖修复）、`WIKI_LINK_METADATA_ENABLED`、`run_wiki_multihop_ab.py`（图构建对齐 + 编译缓存）、`test_wiki_compiler.py`（+7）
   - **⑤ 文档**：README/docs README/project-status + 4 份新增设计文档
+
+### CI 检查本地复跑（2026-10-22）
+
+分支保护要求的 5 项 required checks 已逐项在本地按 CI 命令复跑：
+
+| Job | 结果 |
+|---|---|
+| Env Consistency | ✅ 104 键覆盖、compose 插值 / config 字段全对齐 |
+| Backend Unit Tests | ✅ **1078 passed / 105 skipped**；覆盖率 **61.72%**（门槛 60） |
+| Backend Integration Tests | ✅ 全新库 `alembic upgrade head` + `alembic check` 无漂移；**1153 passed / 24 skipped**（6 例失败均为本地环境差异，宿主机 CI 布局复跑全过：`/configs` 容器挂载路径、`APP_ENV=dev` 环境变量泄漏、`/app/data`↔`/tmp` 跨设备 rename） |
+| RAG Retrieval Eval | ✅ hit_rate/mrr/recall 均 **1.000** |
+| Frontend Build & Tests | ✅ vitest+coverage、`pnpm build`、E2E **5 passed** |
+| Lint & Typecheck（非必需） | ✅ ruff 0；eslint 0 error（44 warning）；`vue-tsc` 0 |
+| Secrets Scan（非必需） | 修复后 ✅：3 处测试夹具假值被误报 → 加 `gitleaks:allow`，按 CI 口径（`git archive` 已跟踪文件）重扫 **no leaks** |
