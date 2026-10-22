@@ -78,7 +78,7 @@
 | **P1** | AM | **Agent 成熟度差距**（2026-10-20 对标业界，新增）：AM-1 轨迹级评测 / AM-2 HITL+护栏 为 **P1**；AM-3 MCP 客户端 / AM-4 持久化 / AM-5 记忆 为 P2；AM-6 工具治理 / AM-7 同名跨档页合并 为 P3。详见下方「Agent 成熟度差距」与 [agent-maturity-gap-analysis.md](design/agent-maturity-gap-analysis.md) | 开发 |
 | P3 | D-U / DEV / W0 / HG | 覆盖率上调 / dev 栈回收 / owner 手动项 / 挂起区 | 见各条 |
 
-> **一句话执行序**（2026-10-21 刷新）：P0 已清（prod schema 漂移、AB-CACHE、ENV 虚警）→ **AM-1 轨迹级评测已落地并推送**（含 hybrid 双源、输出污染修复）→ **E1V 已收口**（Agent e2e 双臂完成：无增益，W1 保持默认关；顺带修复 wiki 编译 4B 回退导致的 Ollama 单槽无限生成阻塞）→ **答案级判分器已确定性化**（3B judge 零区分度 → 语义规则；A/B hybrid 门槛待重标定）→ AM-2 HITL+护栏 → AM-3 MCP 客户端 → E2/SA/D-U/AM-4~7 视排期。
+> **一句话执行序**（2026-10-21 刷新）：P0 已清（prod schema 漂移、AB-CACHE、ENV 虚警）→ **AM-1 轨迹级评测已落地并推送**（含 hybrid 双源、输出污染修复）→ **E1V 已收口**（Agent e2e 双臂完成：无增益，W1 保持默认关；顺带修复 wiki 编译 4B 回退导致的 Ollama 单槽无限生成阻塞）→ **答案级判分器已确定性化 + A/B 门槛已重标定**（0.45/0.30，compare 全 PASS；顺带修复 KB 来源被标成 web 的指标失真）→ AM-2 HITL+护栏 → AM-3 MCP 客户端 → E2/SA/D-U/AM-4~7 视排期。
 
 ### E-1 导航式 wiki_lookup（阶段一，已收口）
 
@@ -100,7 +100,7 @@
 
 | # | 差距 | 优先级 | 说明 / 触发 |
 |---|---|---|---|
-| AM-1 | **Agent 轨迹级评测** | **P1** | **已实施 + 真机基线（2026-10-20/21）**：`TrajectoryEvaluator`（**四维全确定性规则**，去 LLM；受 4GB 显存红線约束、3B judge 不可靠）+ 轨迹双入口 + 数据集 29 例标注 + `run_agent_ab` 接入（开关默认关）。**另修两处产品缺陷**：① hybrid/multi「未走 web」（编排器未透传路由 `needs_web` → kb+web 双源引导，工具选择 0.5→1.0）② Agent 答案输出污染（直答分支未清洗 + 只认 JSON 型污染 → 新增叙述型检测，污染 2/29→0/29）。**dev 基线（live B 臂 29 题，0 错误）**：已判分 15 / 跳过 14；**`traj_score` 0.981 / `traj_pass_rate` 1.000**（15/15，末轮答案质量偏好，非稳定水位）。**答案级判分已同步确定性化（2026-10-21）**：`GenerationEvaluator` 由 3B judge 改为「语义依据率 + 数字一致性」/「问句↔答案句语义相似度」规则（抽检证明 3B relevance 零区分度、faithfulness 天花板 0.7）；离线重打分 faithfulness 0.575→0.727、relevance 0.175→0.759。**残留**：①非 Agent 路径需跳过判分 ②`hybrid_01` 双源引导后仍只走 kb（引导非硬保证）③A/B hybrid 门槛需按新判分尺度重标定。待办：④ 在线抽样。见 [agent-eval-trace.md](design/agent-eval-trace.md) |
+| AM-1 | **Agent 轨迹级评测** | **P1** | **已实施 + 真机基线（2026-10-20/21）**：`TrajectoryEvaluator`（**四维全确定性规则**，去 LLM；受 4GB 显存红線约束、3B judge 不可靠）+ 轨迹双入口 + 数据集 29 例标注 + `run_agent_ab` 接入（开关默认关）。**另修两处产品缺陷**：① hybrid/multi「未走 web」（编排器未透传路由 `needs_web` → kb+web 双源引导，工具选择 0.5→1.0）② Agent 答案输出污染（直答分支未清洗 + 只认 JSON 型污染 → 新增叙述型检测，污染 2/29→0/29）。**dev 基线（live B 臂 29 题，0 错误）**：已判分 15 / 跳过 14；**`traj_score` 0.981 / `traj_pass_rate` 1.000**（15/15，末轮答案质量偏好，非稳定水位）。**答案级判分已同步确定性化（2026-10-21）**：`GenerationEvaluator` 由 3B judge 改为「语义依据率 + 数字一致性」/「问句↔答案句语义相似度」规则（抽检证明 3B relevance 零区分度、faithfulness 天花板 0.7）；离线重打分 faithfulness 0.575→0.727、relevance 0.175→0.759。**残留**：①非 Agent 路径需跳过判分 ②`hybrid_01` 双源引导后仍只走 kb（引导非硬保证）③**A/B hybrid 门槛已按新判分尺度重标定（2026-10-21，0.45/0.30，compare 全 PASS）**；顺带修复 Agent 工具来源 `source_type` 丢失导致 KB 命中被误判为 0 的问题。待办：④ 在线抽样、`hybrid_04` 拒答复核。见 [agent-eval-trace.md](design/agent-eval-trace.md) |
 | AM-2 | **HITL 审批点 + 护栏** | **P1** | 无 `interrupt`/审批；无输入/输出 tripwire 与提示注入防护。**触发**：工具一旦具备写操作（改数据/外部副作用）必须先补 |
 | AM-3 | MCP 客户端接入 | P2 | 工具层缺互操作协议（业界已收敛 MCP）；先做**客户端**消费外部工具（用户级 API Key 前置已就绪，见 E.6） |
 | AM-4 | 持久化 / 可恢复执行 | P2 | Agent 循环为内存态，长任务中断即丢；**触发**：多步/跨会话任务成为刚需 |

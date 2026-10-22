@@ -42,6 +42,27 @@ from src.services.tools.plugins._datetime_impl import build_datetime_answer
 
 logger = logging.getLogger("rag_system")
 
+
+def _kb_source_to_doc(src: dict):
+    """把 Agent 工具返回的 KB 来源还原为 Document，供 ContextBuilder 按 kb 类型编号。"""
+    from langchain_core.documents import Document as LcDoc
+
+    content = src.get("page_content") or src.get("content") or ""
+    return LcDoc(
+        page_content=content,
+        metadata={
+            "document_id": src.get("document_id", ""),
+            "filename": src.get("filename") or src.get("source", "unknown"),
+            "source": src.get("source", ""),
+            "chunk_index": src.get("chunk_index", 0),
+            "total_chunks": src.get("total_chunks", 1),
+            "kb_id": src.get("kb_id", ""),
+            "source_kind": src.get("source_kind") or "raw",
+            "score": src.get("score", 0.0),
+        },
+    )
+
+
 # 导入 Prometheus 指标模块
 try:
     from src.middleware.prometheus import record_kb_query
@@ -522,7 +543,16 @@ class PipelineStagesMixin:
 
     async def _stage_generate(self, state: _PipelineState):
         """阶段 9：构建最终上下文（ContextBuilder）并流式生成回答。"""
-        web_sources_for_context = list(state.web_sources_for_citation) if state.web_sources_for_citation else []
+        # Agent 来源是 kb_search + web_search 的混合体，需按 source_type 分流：
+        # 统一塞进 web_sources 会把 KB 片段标成 web（context 编号、引用元数据、
+        # A/B 的 kb_hit/mrr/recall 全部随之失真）。
+        kb_docs_for_context = list(state.docs)
+        web_sources_for_context = []
+        for src in state.web_sources_for_citation or []:
+            if src.get("source_type") == "kb":
+                kb_docs_for_context.append(_kb_source_to_doc(src))
+            else:
+                web_sources_for_context.append(src)
         if state.search_context and not web_sources_for_context:
             # Agent 等场景可能只返回格式化上下文字符串，构造一条合成来源
             web_sources_for_context.append({
@@ -534,7 +564,7 @@ class PipelineStagesMixin:
 
         final_context, numbered_sources = self.context_builder.build_context(
             question=state.resolved_question,
-            kb_docs=state.docs,
+            kb_docs=kb_docs_for_context,
             web_sources=web_sources_for_context,
         )
         # 用 ContextBuilder 返回的统一编号来源替换旧的 source_texts/source_metadata

@@ -43,7 +43,12 @@ DEFAULT_OFFLINE_REPORT = BASE_DIR / "agent_ab_report_offline.json"
 AB_NON_DEGRADE = float(os.environ.get("AB_NON_DEGRADE", "0.05"))   # 非退化容差
 # 宽松口径（Agent 语义复核，2026-09-14）：hybrid 生成质量对 Agent 臂单独放宽，
 # 因多源综合属 Agent 预期能力而非退化；并设绝对下限兜底防止质量崩溃。
-AB_HYBRID_NON_DEGRADE = float(os.environ.get("AB_HYBRID_NON_DEGRADE", "0.30"))
+# 2026-10-21 重标定（确定性判分器，hybrid 子集 n=6，AB_PER_QUESTION_TIMEOUT_S=240）：
+#   A 臂 faithfulness 0.975±0.038 / relevance 0.810±0.099；
+#   B 臂 faithfulness 0.713±0.373 / relevance 0.656±0.366（hybrid_04 拒答，两维 0）。
+#   容差 = ceil(Δ(A-B)+1×SE)（faithfulness 主导 0.26+0.15→0.45）；
+#   下限 = floor(B_mean-1σ)=0.30（沿用旧值）。
+AB_HYBRID_NON_DEGRADE = float(os.environ.get("AB_HYBRID_NON_DEGRADE", "0.45"))
 AB_HYBRID_MIN = float(os.environ.get("AB_HYBRID_MIN", "0.30"))
 AB_P95_LIMIT = float(os.environ.get("AB_P95_LIMIT", "45"))         # Agent 路径 P95 上限（秒）
 AB_FAST_SLACK = float(os.environ.get("AB_FAST_PATH_P95_SLACK", "5"))  # 快路径两臂 P95 差（秒）

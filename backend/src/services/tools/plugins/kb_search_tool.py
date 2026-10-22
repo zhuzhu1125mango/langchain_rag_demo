@@ -117,6 +117,7 @@ class KBSearchTool(BaseTool):
                     "filename": meta.get("source", ""),
                     "chunk_index": meta.get("chunk_index", 0),
                     "total_chunks": 1,
+                    "source_type": "kb",
                     "source_kind": meta.get("source_kind", "raw"),
                     "score": meta.get("score", 0.0),
                 })

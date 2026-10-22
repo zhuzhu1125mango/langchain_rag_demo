@@ -37,6 +37,12 @@ _DISCLAIMER_RE = re.compile(r"⚠️ 当前回答可信度较低[^\n]*")
 # 引用编号（[1]/[2]）是展示标记，不属答案内容；不清除会被当成"数字"触发数字一致性误判
 _CITATION_RE = re.compile(r"\[\s*\d+\s*\]")
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+# 拒答/未作答模式：这类句子与上下文语义上常相近（"无法找到相关信息"），
+# 若按语义依据判定会被误计为「有依据」，需单独短路为 0（与 AM-1 compliance 同口径）。
+_NON_ANSWER_RE = re.compile(
+    r"(无法找到|找不到|未找到|没有找到|无法回答|无法提供|无法确定|暂无相关|暂无法|无法直接)"
+)
+_NON_ANSWER_MAX_CHARS = 40
 _SENT_SPLIT_RE = re.compile(r"[。！？!?；;\n]+")
 _CLAUSE_SPLIT_RE = re.compile(r"[，,；;。！？!?、\n]+")
 
@@ -116,6 +122,8 @@ class GenerationEvaluator:
         clean = _clean_answer(answer)
         if not clean:
             return {"score": 0.0, "reason": "答案为空"}
+        if len(clean) <= _NON_ANSWER_MAX_CHARS and _NON_ANSWER_RE.search(clean):
+            return {"score": 0.0, "reason": "拒答/未作答，不计依据覆盖"}
         if not contexts or not any(c.strip() for c in contexts):
             return {"score": 0.0, "reason": "参考上下文为空"}
 

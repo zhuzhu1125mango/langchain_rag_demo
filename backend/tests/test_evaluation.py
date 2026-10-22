@@ -157,6 +157,18 @@ class TestGenerationEvaluator:
         assert (await evaluator.evaluate_faithfulness("事假需提前3个工作日申请。", []))["score"] == 0.0
 
     @pytest.mark.asyncio
+    async def test_faithfulness_refusal_is_zero(self, monkeypatch):
+        """拒答句与上下文语义贴近（如"无法找到相关信息"），不能算作有依据。"""
+        evaluator = GenerationEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: FakeEmbeddings())
+        result = await evaluator.evaluate_faithfulness(
+            "无法找到相关信息。\n\n⚠️ 当前回答可信度较低，未在多个独立来源中得到验证，请谨慎参考。",
+            self.CONTEXTS,
+        )
+        assert result["score"] == 0.0
+        assert "拒答" in result["reason"]
+
+    @pytest.mark.asyncio
     async def test_faithfulness_strips_confidence_disclaimer(self, monkeypatch):
         """置信度声明是展示层产物，不应影响判分。"""
         evaluator = GenerationEvaluator()

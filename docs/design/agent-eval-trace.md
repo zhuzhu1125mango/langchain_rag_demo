@@ -185,6 +185,7 @@ Step(index, tool, args_digest, ok, observation_digest, latency_ms)
 - `relevance`：问句与答案各句的 bge-m3 余弦取最大，按 `[0.45, 0.92] → [0,1]` 线性映射。实测无关≈0.45、真实答案 0.80+；embedding 失败时降级为问题 bigram 覆盖。
 - `faithfulness`：答案子句与上下文子句的最大余弦 ≥ 0.70 计为"有依据"，**并叠加数字一致性闸门**（子句数字必须在上下文中出现，否则该子句判无依据——数值矛盾无法靠语义识别）；embedding 失败时降级为子句 bigram 覆盖。
 - 判分前统一剥离**置信度免责声明**与**引用编号 `[n]`**（展示层产物，前者系统性拉低 0.1，后者会被误当成数字）。
+- **拒答短路**：答案 ≤40 字且命中拒答模式（"无法找到/未找到/无法回答…"）时 faithfulness 直接 0——此类句子与上下文语义上常相近，若不短路会被误判为"有依据"（`hybrid_04` 实测从 1.0 纠正为 0）。
 - 移除 `strict`/`loose` 双模式（确定性规则下不再需要），`run_agent_ab.py` 同步去掉 `faithfulness_mode` 与 `AB_FAITHFULNESS_MODE`。
 
 **离线重打分（同一批 E1V 答案，不重跑 Agent）**
@@ -196,9 +197,22 @@ Step(index, tool, args_digest, ok, observation_digest, latency_ms)
 
 拒答题（`mh05` 输出"无法找到相关信息"）两维均为 0，方向正确；此前 LLM judge 对其 faithfulness 给 0.5–0.7。
 
-> **口径变更提示**：`agent-ab-evaluation.md` 中 `AB_HYBRID_NON_DEGRADE` / `AB_HYBRID_MIN`（0.30）是按旧 LLM judge 的分数分布标定的，新尺度下需重新基线后再沿用；旧历史报告里的 faithfulness/relevance 数值不可与新值直接比较。
+> **口径变更提示**：`AB_HYBRID_NON_DEGRADE` / `AB_HYBRID_MIN` 已按新尺度重标定（见下节）；旧历史报告里的 faithfulness/relevance 数值不可与新值直接比较。
+
+### A/B 门槛重标定（2026-10-21，hybrid 子集）
+
+新判分尺度下重跑两臂（hybrid 6 题，`AB_PER_QUESTION_TIMEOUT_S=240`；A 臂旧链路单题 70–124s，默认 90s 会全超时）：
+
+| 臂 | faithfulness | relevance | 备注 |
+|---|---|---|---|
+| A（固定管线） | 0.975±0.038 | 0.810±0.099 | KB 命中 1.0 |
+| B（Agent 编排） | 0.713±0.373 | 0.656±0.366 | `hybrid_04` 拒答（两维 0） |
+
+- 门槛取 `ceil(Δ(A-B)+1×SE)=0.45`（faithfulness 主导）与 `floor(B_mean−1σ)=0.30`；compare **全部门槛 PASS**。
+- **顺带修复指标失真**：Agent 工具来源缺 `source_type`、且 `_stage_generate` 把混合来源统一当 web → KB 片段被标成 web（B 臂 `kb_hit` 0.5）。修复后 B 臂 KB hit/mrr/recall = 1.0，与 A 臂持平。
+- **真实残留（非指标问题）**：`hybrid_04`（弹性打卡 vs 法定工时）Agent 调了 `kb_search`+`web_search` 却仍答"无法找到相关信息" → 待查检索/综合链路。
 
 **待办**
 - **④ 在线抽样跑批**（以 `RequestTrace` 为源，只读旁路）。
 - **`hybrid_01` 双源硬保证**（可选：首步强制 kb+web 并发调用）。
-- **A/B 门槛重标定**：用新判分器重跑一轮基线，更新 hybrid 非退化阈值。
+- **`hybrid_04` 拒答复核**：确认是检索无结果还是综合阶段丢上下文。

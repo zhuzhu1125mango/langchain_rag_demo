@@ -827,3 +827,55 @@ async def test_run_stream_emits_plan_event_when_enabled(monkeypatch):
     assert planned["step"] == "agent_loop"
     assert planned["status"] == "planned"
     assert planned["metadata"]["plan"] == ["查知识库"]
+
+
+def test_web_sources_to_metadata_preserves_channel_fields():
+    """工具来源的 source_type/source_kind 必须透传。
+
+    answer_generator 按 source_type=="kb" 合并 KB 元数据；A/B 的 kb_hit/mrr/recall
+    同样按该字段筛选——丢失会把 Agent 的 kb_search 命中计为未命中。
+    """
+    from src.services.pipeline.agent import AgentMixin
+
+    texts, metas = AgentMixin()._web_sources_to_metadata([
+        {
+            "page_content": "kb 片段",
+            "document_id": "doc-1",
+            "source_type": "kb",
+            "source_kind": "raw",
+        },
+        {
+            "page_content": "网页摘要",
+            "url": "https://example.com",
+            "source_type": "web",
+        },
+    ])
+    assert texts == ["kb 片段", "网页摘要"]
+    assert metas[0]["source_type"] == "kb"
+    assert metas[0]["source_kind"] == "raw"
+    assert metas[1]["source_type"] == "web"
+    assert metas[1]["url"] == "https://example.com"
+
+
+def test_agent_kb_source_is_rendered_as_kb_in_final_context():
+    """Agent 的 kb_search 来源在最终上下文里必须仍标记为 kb（不能被当成 web）。"""
+    from src.services.context_builder import ContextBuilder
+    from src.services.pipeline.stages import _kb_source_to_doc
+
+    kb_src = {
+        "page_content": "kb 片段",
+        "document_id": "doc-1",
+        "source": "leave_policy.txt",
+        "source_type": "kb",
+        "source_kind": "raw",
+        "score": 0.9,
+    }
+    ctx, numbered = ContextBuilder().build_context(
+        question="q",
+        kb_docs=[_kb_source_to_doc(kb_src)],
+        web_sources=[{"title": "t", "content": "web 片段", "url": "https://x", "source": "web_search"}],
+    )
+    assert "leave_policy.txt" in ctx
+    kb_items = [s for s in numbered if s["source_type"] == "kb"]
+    assert kb_items and kb_items[0]["document_id"] == "doc-1"
+    assert any(s["source_type"] == "web" for s in numbered)

@@ -68,6 +68,7 @@ class WebSearchTool(BaseTool):
                 "filename": "web_search",
                 "chunk_index": 0,
                 "total_chunks": 1,
+                "source_type": "web",
             })
 
         return ToolResult(

@@ -166,6 +166,7 @@ class WikiLookupTool(BaseTool):
             "filename": f"wiki://{page['title']}",
             "chunk_index": 0,
             "total_chunks": 1,
+            "source_type": "kb",
             "source_kind": "wiki",
             "score": 0.0,
         }]
@@ -223,6 +224,7 @@ class WikiLookupTool(BaseTool):
                 "filename": f"wiki://{index_page['title']}",
                 "chunk_index": 0,
                 "total_chunks": 1,
+                "source_type": "kb",
                 "source_kind": "wiki",
                 "score": 0.0,
             })
@@ -246,6 +248,7 @@ class WikiLookupTool(BaseTool):
                 "filename": meta.get("source", ""),
                 "chunk_index": meta.get("chunk_index", 0),
                 "total_chunks": 1,
+                "source_type": "kb",
                 "source_kind": "wiki",
                 "score": meta.get("score", 0.0),
             })

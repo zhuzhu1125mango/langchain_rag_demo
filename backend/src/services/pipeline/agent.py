@@ -110,6 +110,10 @@ class AgentMixin:
                 "total_chunks": s.get("total_chunks", 1),
                 "page_content": page_content,
                 "url": s.get("url", ""),
+                # 工具来源需保留渠道标识：answer_generator 按 source_type=="kb" 合并 KB 元数据，
+                # A/B 的 kb_hit/mrr/recall 也按该字段筛选（缺失会导致 Agent 检索被计为未命中）。
+                "source_type": s.get("source_type", ""),
+                "source_kind": s.get("source_kind", ""),
             })
         return source_texts, source_metadata
 
