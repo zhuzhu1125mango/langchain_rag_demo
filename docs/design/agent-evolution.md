@@ -176,6 +176,8 @@ class AgentOrchestrator:
 **触发条件**（满足其一才启动，否则不做）：Phase 2 后编排分支仍持续膨胀；需要 checkpoint/断点恢复；需要人机协同中断。
 
 > **评审结论（2026-09-14）：暂不启动。** 当前 Agent 循环为有界单层 plan-execute（max_steps=3 / 5 工具 / 30s 时间预算熔断），编排分支未膨胀；暂无 checkpoint 断点恢复与人机协同中断需求。三项触发条件均不满足，维持现状即最优。后续若多轮工具依赖或跨会话任务恢复成为刚需，再复审启动。
+>
+> **更新（2026-10-22）**：人机协同已以「SSE 审批闸门 + Redis 状态」轻量落地（AM-2，见 [agent-guardrails-hitl.md](agent-guardrails-hitl.md)），**未引入 LangGraph**；checkpoint / 断点恢复仍待 AM-4。
 
 - 引入 `langgraph`，将快路径 + Agent 循环 + 降级链建模为 StateGraph，节点即现有 stage 函数。
 - 收益：状态机可视化、`MemorySaver` checkpoint（会话级任务恢复）。

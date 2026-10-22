@@ -3,6 +3,7 @@
 > 状态：已确认（2026-10-20 调研定稿）
 > 关联：[agent-evolution.md](agent-evolution.md)（有界 Agent 设计；§6.1 曾暂缓 checkpoint/HITL）、[agent-ab-evaluation.md](agent-ab-evaluation.md)、[special-projects-2026-09.md](special-projects-2026-09.md)、[project-status.md](../project-status.md)（§二「Agent 成熟度差距」）
 > 说明：对标业界成熟 Agent 做法与主流产品，给出本项目的能力矩阵、差距清单与优先级。落地项已纳入台账。
+> **落地状态（2026-10-22）**：AM-1 ✅（轨迹级四维确定性评测 + 答案级判分 + A/B 门槛）、AM-2 ✅（输入/工具/输出三层护栏 + HITL 审批闸门）；AM-3~AM-7 待办。台账见 [project-status.md](../project-status.md) §二，全项目路线见 [evolution-roadmap-2026-10.md](evolution-roadmap-2026-10.md)。
 
 ## 1. 结论摘要
 

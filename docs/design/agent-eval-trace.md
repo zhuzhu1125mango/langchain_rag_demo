@@ -216,3 +216,5 @@ Step(index, tool, args_digest, ok, observation_digest, latency_ms)
 - **④ 在线抽样跑批**（以 `RequestTrace` 为源，只读旁路）。
 - **`hybrid_01` 双源硬保证**（可选：首步强制 kb+web 并发调用）。
 - **`hybrid_04` 拒答复核**：确认是检索无结果还是综合阶段丢上下文。
+
+> 台账对应：[project-status.md](../project-status.md) 「全项目完善与演进专项」**AGT-2**（在线抽样）/ **AGT-3**（hybrid_01/04 与判分跳过）；路线见 [evolution-roadmap-2026-10.md](evolution-roadmap-2026-10.md)。

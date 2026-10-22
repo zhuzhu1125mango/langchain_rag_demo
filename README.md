@@ -17,7 +17,9 @@
 | 📖 **LLM-Wiki 编译层** | 将文档预编译为结构化页面（增量编译 / 交叉链接 / 一致性检查） | ✅ |
 | 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
 | 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启，多工具/多步推理）＋原生 Function Calling / ReAct 作为回退路径 | ✅ |
-| 💬 **流式输出** | 实时打字效果，提升用户体验 | ✅ |
+| �️ **Agent 安全护栏** | 输入（提示注入/越权/超长）拦截、工具参数与 URL 安全校验、输出凭证/系统提示脱敏；高危工具可开启人工审批（SSE 审批卡片 + 回执 API，`AGENT_APPROVAL_MODE` 默认 off） | ✅ |
+| 📊 **Agent 评测** | 轨迹级四维确定性评测 + 答案级判分器 + A/B 门槛与离线 harness（`AGENT_TRAJ_EVAL_ENABLED` 默认关；在线抽样待办） | ✅ |
+| � **流式输出** | 实时打字效果，提升用户体验 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
 | 🧹 **问候过滤** | 你好 / hi / 在吗 等日常对话直接走 LLM，跳过知识库检索 | ✅ |
 | 🔗 **来源展示** | 前端同时展示知识库片段与网页搜索来源（标题/URL） | ✅ |
@@ -904,6 +906,7 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 | 监控运维指南 | 监控栈使用、指标说明、告警规则与处置 | [docs/guide/monitoring.md](docs/guide/monitoring.md) |
 | 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](docs/project-status.md) |
 | 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
+| 全项目演进路线 | 2026-10 对标审计：标配/差异化/避免、UX/视觉/代码/运维差距与三批执行序 | [docs/design/evolution-roadmap-2026-10.md](docs/design/evolution-roadmap-2026-10.md) |
 | 专项设计文档 | 检索增强/意图路由/搜索优化等设计 | `docs/design/` |
 | 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](docs/archive/code-review-2026-08.md) |
 | 快速开始 | 项目入门指南 | 本文件 |

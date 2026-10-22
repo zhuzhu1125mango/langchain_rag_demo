@@ -51,6 +51,8 @@ docs/
 │   ├── agent-ab-evaluation.md
 │   ├── agent-maturity-gap-analysis.md
 │   ├── agent-eval-trace.md
+│   ├── agent-guardrails-hitl.md
+│   ├── evolution-roadmap-2026-10.md
 │   ├── evolution-research-2026-09.md
 │   ├── wiki-navigable-workspace.md
 │   ├── e1-navigable-lookup-gap.md
@@ -87,6 +89,8 @@ docs/
 | [agent-ab-evaluation.md](design/agent-ab-evaluation.md) | 已执行验收 | A/B 两臂 live 对比完成（2026-09-14），结果与未达标项见 §7.1 |
 | [agent-maturity-gap-analysis.md](design/agent-maturity-gap-analysis.md) | 已确认 | Agent 成熟度对标与差距分析（2026-10-20）：对标业界做法与主流产品，给出能力矩阵/差距清单/优先级；落地项见 [project-status.md](project-status.md) §二「Agent 成熟度差距」 |
 | [agent-eval-trace.md](design/agent-eval-trace.md) | 部分实施 | Agent 轨迹级评测（AM-1）：①②③ 已实施（2026-10-20，单测 +16；`AGENT_TRAJ_EVAL_ENABLED` 默认关）；④ 在线抽样待办 |
+| [agent-guardrails-hitl.md](design/agent-guardrails-hitl.md) | 已实施 | Agent 护栏与 HITL（AM-2，2026-10-22）：输入/工具/输出三层确定性护栏 + 审批闸门（`AGENT_APPROVAL_MODE` 默认 off，审批名单为空时不触发）；端到端 SSE `approval_required` + 回执 API + 前端审批卡片 |
+| [evolution-roadmap-2026-10.md](design/evolution-roadmap-2026-10.md) | 已确认 | 全项目演进与完善路线（2026-10-22 审计）：业界「标配/差异化/避免」对标 + 代码/UX/视觉/运维差距证据 + 三批次执行序；任务条目见 [project-status.md](project-status.md) §二「全项目完善与演进专项」 |
 | [evolution-research-2026-09.md](design/evolution-research-2026-09.md) | 已确认 | 演进方向调研（2026-09-23）：从 RAG 问答到自进化知识运行时，四阶段路线于 2026-09-29 owner 拍板转正，立项见 special-projects-2026-09.md |
 | [wiki-navigable-workspace.md](design/wiki-navigable-workspace.md) | 已实施 | 阶段一：Wiki 升级为 Agent 可导航工作空间（D1/D3/D4 落地；D2/D5 经 A/B 证伪后回退默认值，见 §10） |
 | [special-projects-2026-09.md](design/special-projects-2026-09.md) | 部分实施 | 技术债与演进专项立项 A~E；C / D / E.6 已完成、E-1 差距盘点完成待实施（进展与证据见文末「实施进展回写」）；A/B 按触发器挂起 |
