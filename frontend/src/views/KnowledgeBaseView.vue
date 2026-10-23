@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex h-full bg-gray-50 dark:bg-dark-900 overflow-hidden">
+  <div class="flex-1 flex h-full bg-page overflow-hidden">
     <KnowledgeBaseSidebar
       :knowledge-bases="knowledgeBases || []"
       :current-k-b="currentKB"
@@ -9,20 +9,20 @@
     />
 
     <div class="flex-1 flex flex-col overflow-hidden">
-      <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-3 sm:py-4">
+      <header class="bg-surface border-b border-line px-4 sm:px-6 py-3 sm:py-4">
         <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div class="min-w-0">
-            <h1 class="text-lg lg:text-xl font-semibold text-gray-800 dark:text-white truncate">
+            <h1 class="text-lg lg:text-xl font-semibold text-content truncate">
               {{ currentKB?.name || '选择知识库' }}
             </h1>
-            <p class="hidden sm:block text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">
+            <p class="hidden sm:block text-sm text-content-muted mt-1 truncate">
               {{ currentKB?.description || '管理当前知识库的文档' }}
             </p>
             <!-- 移动端知识库切换（桌面端使用左侧列表） -->
             <select
               v-if="knowledgeBases?.length"
               :value="currentKB?.id || ''"
-              class="lg:hidden mt-2 w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-dark-600 bg-white dark:bg-dark-800 text-gray-700 dark:text-gray-200"
+              class="lg:hidden mt-2 w-full px-3 py-2 text-sm rounded-lg border border-line bg-surface text-content-secondary-strong"
               aria-label="切换知识库"
               @change="onMobileKBChange"
             >
@@ -32,7 +32,7 @@
           <div v-if="currentKB" class="flex items-center gap-1 sm:gap-3 overflow-x-auto pb-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0">
             <button
               @click="showWikiDrawer = true"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors flex-shrink-0"
+              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors flex-shrink-0"
               title="Wiki 页面"
             >
               <BookOpen class="w-4 h-4" />
@@ -40,7 +40,7 @@
             </button>
             <button
               @click="showEditKBModal = true"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors flex-shrink-0"
+              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors flex-shrink-0"
               title="编辑知识库"
             >
               <Edit3 class="w-4 h-4" />
@@ -61,7 +61,7 @@
                 'flex items-center gap-2 px-2 sm:px-4 py-2 text-sm rounded-lg transition-colors flex-shrink-0',
                 kbStore.selectedCount > 0
                   ? 'bg-red-500 text-white hover:bg-red-600'
-                  : 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+                  : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
               ]"
               title="批量删除选中文档"
             >
@@ -82,14 +82,14 @@
 
       <div v-if="currentKB" class="flex-1 overflow-auto p-4 sm:p-6">
         <!-- 标签页切换 -->
-        <div class="flex items-center gap-1 bg-gray-100 dark:bg-dark-700 rounded-lg p-1 mb-6">
+        <div class="flex items-center gap-1 bg-surface-subtle rounded-lg p-1 mb-6">
           <button
             @click="activeTab = 'documents'"
             :class="[
               'px-4 py-2 text-sm font-medium rounded-md transition-colors',
               activeTab === 'documents'
-                ? 'bg-white dark:bg-dark-600 text-gray-800 dark:text-white shadow-sm'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                ? 'bg-surface-raised-strong text-content shadow-sm'
+                : 'text-content-secondary-muted hover:text-content'
             ]"
           >
             <FileText class="w-4 h-4 inline-block mr-2" />
@@ -100,8 +100,8 @@
             :class="[
               'px-4 py-2 text-sm font-medium rounded-md transition-colors',
               activeTab === 'graph'
-                ? 'bg-white dark:bg-dark-600 text-gray-800 dark:text-white shadow-sm'
-                : 'text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200'
+                ? 'bg-surface-raised-strong text-content shadow-sm'
+                : 'text-content-secondary-muted hover:text-content'
             ]"
           >
             <Network class="w-4 h-4 inline-block mr-2" />
@@ -110,8 +110,8 @@
         </div>
 
         <!-- 文档列表视图 -->
-        <div v-if="activeTab === 'documents'" class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600">
-          <div class="p-4 border-b border-gray-200 dark:border-dark-600 flex items-center justify-between">
+        <div v-if="activeTab === 'documents'" class="bg-surface rounded-xl shadow-sm border border-line">
+          <div class="p-4 border-b border-line flex items-center justify-between">
             <div class="flex items-center gap-4">
               <div class="flex items-center gap-2">
                 <Search class="w-4 h-4 text-gray-400" />
@@ -120,11 +120,11 @@
                   type="text"
                   placeholder="搜索文档..."
                   @keyup.enter="onPerformSearch"
-                  class="px-3 py-1.5 text-sm bg-gray-100 dark:bg-dark-700 border border-gray-200 dark:border-dark-600 rounded-lg text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  class="px-3 py-1.5 text-sm bg-surface-subtle border border-line rounded-lg text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
                 <select
                   v-model="searchMode"
-                  class="px-3 py-1.5 text-sm bg-gray-100 dark:bg-dark-700 border border-gray-200 dark:border-dark-600 rounded-lg text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  class="px-3 py-1.5 text-sm bg-surface-subtle border border-line rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   <option value="filename">文件名</option>
                   <option value="content">全文</option>
@@ -132,7 +132,7 @@
               </div>
               <select
                 v-model="filterStatus"
-                class="px-3 py-1.5 text-sm bg-gray-100 dark:bg-dark-700 border border-gray-200 dark:border-dark-600 rounded-lg text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+                class="px-3 py-1.5 text-sm bg-surface-subtle border border-line rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary-500"
               >
                 <option value="all">全部状态</option>
                 <option value="active">已上架</option>
@@ -143,16 +143,16 @@
               <button
                 v-if="searchQuery && searchMode === 'content'"
                 @click="onClearSearch"
-                class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+                class="px-3 py-1.5 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
               >
                 清除搜索
               </button>
-              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+              <label class="flex items-center gap-2 text-sm text-content-tertiary">
                 <input
                   type="checkbox"
                   @change="toggleSelectAll"
                   :checked="kbStore.selectedCount === documentsData?.items?.length && documentsData?.items?.length > 0"
-                  class="rounded border-gray-300 dark:border-dark-500 bg-gray-100 dark:bg-dark-700 text-primary-600 focus:ring-primary-500"
+                  class="rounded border-line-strong bg-surface-subtle text-primary-600 focus:ring-primary-500"
                 />
                 <span>全选</span>
               </label>
@@ -172,8 +172,8 @@
           />
 
           <div v-if="!documentsData?.items?.length && !showSearchResults" class="p-12 text-center">
-            <FolderOpen class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-            <p class="text-gray-500 dark:text-gray-400">暂无文档，请上传文档</p>
+            <FolderOpen class="w-12 h-12 text-content-disabled mx-auto mb-4" />
+            <p class="text-content-muted">暂无文档，请上传文档</p>
           </div>
 
           <!-- 全文搜索结果 -->
@@ -188,15 +188,15 @@
         </div>
 
         <!-- 知识图谱视图 -->
-        <div v-if="activeTab === 'graph'" class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 h-[500px]">
+        <div v-if="activeTab === 'graph'" class="bg-surface rounded-xl shadow-sm border border-line h-[500px]">
           <KnowledgeGraph :kb-ids="currentKB ? [currentKB.id] : []" />
         </div>
       </div>
 
       <div v-else class="text-center">
-        <Database class="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
-        <h3 class="text-lg font-medium text-gray-500 dark:text-gray-400">请选择一个知识库</h3>
-        <p class="text-sm text-gray-400 dark:text-gray-500 mt-2">从左侧列表中选择或创建新的知识库</p>
+        <Database class="w-16 h-16 text-content-disabled mx-auto mb-4" />
+        <h3 class="text-lg font-medium text-content-muted">请选择一个知识库</h3>
+        <p class="text-sm text-content-subtle mt-2">从左侧列表中选择或创建新的知识库</p>
         <!-- 移动端无左侧列表，提供直接创建入口 -->
         <button
           @click="showCreateKBModal = true"
@@ -211,21 +211,21 @@
     <el-dialog v-model="showCreateKBModal" title="创建知识库" width="450px">
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">知识库名称 *</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">知识库名称 *</label>
           <input
             v-model="newKBName"
             type="text"
             placeholder="输入知识库名称"
-            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-600 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">描述</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
           <textarea
             v-model="newKBDescription"
             placeholder="输入知识库描述（可选）"
             rows="3"
-            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-600 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
           ></textarea>
         </div>
       </div>
@@ -233,7 +233,7 @@
         <div class="flex gap-2">
           <button
             @click="showCreateKBModal = false"
-            class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
           >
             取消
           </button>
@@ -244,7 +244,7 @@
               'px-4 py-2 text-sm rounded-lg transition-colors',
               newKBName.trim()
                 ? 'bg-primary-500 text-white hover:bg-primary-600'
-                : 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+                : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
             ]"
           >
             创建
@@ -256,19 +256,19 @@
     <el-dialog v-model="showEditKBModal" title="编辑知识库" width="450px">
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">知识库名称 *</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">知识库名称 *</label>
           <input
             v-model="editKBName"
             type="text"
-            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-600 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">描述</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
           <textarea
             v-model="editKBDescription"
             rows="3"
-            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-600 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
           ></textarea>
         </div>
       </div>
@@ -276,7 +276,7 @@
         <div class="flex gap-2">
           <button
             @click="showEditKBModal = false"
-            class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
           >
             取消
           </button>
@@ -287,7 +287,7 @@
               'px-4 py-2 text-sm rounded-lg transition-colors',
               editKBName.trim()
                 ? 'bg-primary-500 text-white hover:bg-primary-600'
-                : 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+                : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
             ]"
           >
             保存

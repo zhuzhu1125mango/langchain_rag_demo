@@ -9,8 +9,8 @@
               <Sparkles class="w-3.5 h-3.5 text-primary-500" />
               <span class="text-xs font-medium text-primary-600 dark:text-primary-400">问题已优化</span>
             </div>
-            <p class="text-sm text-gray-700 dark:text-gray-300 truncate">{{ rewriteResult.rewritten }}</p>
-            <p v-if="rewriteResult.changes && rewriteResult.changes !== '问题无需修改'" class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">
+            <p class="text-sm text-content-secondary truncate">{{ rewriteResult.rewritten }}</p>
+            <p v-if="rewriteResult.changes && rewriteResult.changes !== '问题无需修改'" class="text-xs text-content-subtle mt-0.5 truncate">
               {{ rewriteResult.changes }}
             </p>
           </div>
@@ -23,7 +23,7 @@
             </button>
             <button
               @click="emit('clear-rewrite')"
-              class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              class="p-1 text-gray-400 hover:text-content-tertiary transition-colors"
             >
               <X class="w-3.5 h-3.5" />
             </button>
@@ -40,18 +40,18 @@
           questionClassification.type === 'OPERATIONAL' ? 'bg-green-50 dark:bg-green-900/30 text-green-600 dark:text-green-400' :
           questionClassification.type === 'EXPLANATORY' ? 'bg-orange-50 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400' :
           questionClassification.type === 'COMPARATIVE' ? 'bg-pink-50 dark:bg-pink-900/30 text-pink-600 dark:text-pink-400' :
-          'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300'
+          'bg-surface-subtle text-content-tertiary'
         ]">
           {{ getQuestionTypeLabel(questionClassification.type) }}
         </span>
-        <span v-if="questionClassification.subtype" class="text-xs text-gray-400 dark:text-gray-500">
+        <span v-if="questionClassification.subtype" class="text-xs text-content-subtle">
           {{ questionClassification.subtype }}
         </span>
       </div>
 
       <!-- 知识库推荐（轻量 chips 行） -->
       <div v-if="kbRecommendations.length > 0 && !rewriteResult" class="mb-2 flex items-center gap-1.5 flex-wrap">
-        <span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+        <span class="flex items-center gap-1 text-xs text-content-subtle">
           <Lightbulb class="w-3.5 h-3.5" />
           推荐
         </span>
@@ -63,7 +63,7 @@
             'px-2.5 py-1 text-xs rounded-full flex items-center gap-1 transition-colors',
             selectedKbs.includes(rec.kb_id)
               ? 'bg-primary-500 text-white'
-              : 'bg-white dark:bg-dark-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-dark-600 hover:border-primary-300 dark:hover:border-primary-700'
+              : 'bg-surface text-content-tertiary border border-line hover:border-primary-300 dark:hover:border-primary-700'
           ]"
         >
           <Database class="w-3 h-3" />
@@ -74,7 +74,7 @@
 
       <!-- 智能推荐问题（紧凑行） -->
       <div v-if="suggestions.length > 0 || isGeneratingSuggestions" class="mb-2 flex items-center gap-1.5 flex-wrap">
-        <span class="flex items-center gap-1 text-xs text-gray-400 dark:text-gray-500">
+        <span class="flex items-center gap-1 text-xs text-content-subtle">
           <Sparkles class="w-3.5 h-3.5" />
           猜你想问
         </span>
@@ -87,14 +87,14 @@
           v-for="(suggestion, index) in suggestions"
           :key="index"
           @click="emit('send-quick-question', suggestion)"
-          class="px-2.5 py-1 text-xs text-gray-600 dark:text-gray-300 bg-gray-100/80 dark:bg-dark-700 rounded-full hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors max-w-[280px] truncate"
+          class="px-2.5 py-1 text-xs text-content-tertiary bg-surface-subtle/80 rounded-full hover:bg-surface-hover-strong transition-colors max-w-[280px] truncate"
         >
           {{ suggestion }}
         </button>
       </div>
 
       <!-- 主输入卡片：无边框输入区 + 底部工具条 -->
-      <div class="bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-2xl shadow-sm focus-within:border-primary-400 dark:focus-within:border-primary-600 transition-colors">
+      <div class="bg-surface border border-line rounded-2xl shadow-sm focus-within:border-primary-400 dark:focus-within:border-primary-600 transition-colors">
         <textarea
           ref="textareaRef"
           v-model="questionInput"
@@ -103,7 +103,7 @@
           placeholder="输入您的问题，Enter 发送"
           aria-label="输入问题"
           rows="1"
-          class="w-full px-4 pt-3 pb-1 bg-transparent text-base sm:text-[15px] text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-t-2xl resize-none focus:outline-none"
+          class="w-full px-4 pt-3 pb-1 bg-transparent text-base sm:text-[15px] text-content placeholder-gray-400 dark:placeholder-gray-500 rounded-t-2xl resize-none focus:outline-none"
           :maxlength="maxLength"
         ></textarea>
 
@@ -117,7 +117,7 @@
                 'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-full transition-colors',
                 deepThinking
                   ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700'
+                  : 'text-content-muted hover:bg-surface-hover'
               ]"
             >
               <Brain class="w-3.5 h-3.5" />
@@ -130,7 +130,7 @@
                 'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-full transition-colors',
                 useWebSearch
                   ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-                  : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700'
+                  : 'text-content-muted hover:bg-surface-hover'
               ]"
             >
               <Globe class="w-3.5 h-3.5" />
@@ -158,7 +158,7 @@
             <span
               :class="[
                 'hidden sm:inline text-xs tabular-nums',
-                questionInput.length >= maxLength ? 'text-red-500' : 'text-gray-300 dark:text-gray-600'
+                questionInput.length >= maxLength ? 'text-red-500' : 'text-content-disabled'
               ]"
             >
               {{ questionInput.length }}/{{ maxLength }}
@@ -166,7 +166,7 @@
             <button
               v-if="isTyping"
               @click="emit('stop')"
-              class="w-8 h-8 rounded-full flex items-center justify-center bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 hover:bg-gray-700 dark:hover:bg-gray-300 transition-all"
+              class="w-8 h-8 rounded-full flex items-center justify-center bg-content text-surface hover:bg-content-strong transition-all"
               title="停止生成"
               aria-label="停止生成"
             >
@@ -180,7 +180,7 @@
                 'w-8 h-8 rounded-full flex items-center justify-center transition-all',
                 questionInput.trim()
                   ? 'bg-primary-500 text-white hover:bg-primary-600 shadow-sm shadow-primary-500/30'
-                  : 'bg-gray-100 dark:bg-dark-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                  : 'bg-surface-subtle text-content-subtle cursor-not-allowed'
               ]"
               aria-label="发送"
             >

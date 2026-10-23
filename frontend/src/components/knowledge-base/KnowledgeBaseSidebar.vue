@@ -1,12 +1,12 @@
 <template>
-  <aside class="hidden lg:flex w-64 bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-600 flex-col">
-    <div class="p-4 border-b border-gray-200 dark:border-dark-600">
+  <aside class="hidden lg:flex w-64 bg-surface border-r border-line flex-col">
+    <div class="p-4 border-b border-line">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-semibold text-gray-800 dark:text-white">知识库列表</h2>
+        <h2 class="text-sm font-semibold text-content">知识库列表</h2>
         <button
           v-if="!isBatchKBMode"
           @click="toggleBatchMode"
-          class="text-xs text-gray-500 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400"
+          class="text-xs text-content-muted hover:text-primary-600 dark:hover:text-primary-400"
         >
           管理
         </button>
@@ -43,7 +43,7 @@
           'p-3 rounded-lg cursor-pointer transition-colors mb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400',
           currentKB?.id === kb.id && !isBatchKBMode
             ? 'bg-primary-100 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700'
-            : 'hover:bg-gray-100 dark:hover:bg-dark-700'
+            : 'hover:bg-surface-hover'
         ]"
       >
         <div class="flex items-center justify-between">
@@ -55,36 +55,36 @@
               @click.stop
               @change="kbStore.selectKB(kb)"
               :aria-label="`选择知识库 ${kb.name}`"
-              class="rounded border-gray-300 dark:border-dark-500 bg-gray-100 dark:bg-dark-700 text-primary-600 focus:ring-primary-500"
+              class="rounded border-line-strong bg-surface-subtle text-primary-600 focus:ring-primary-500"
             />
             <Database class="w-4 h-4 text-gray-400" />
-            <span class="text-sm font-medium text-gray-800 dark:text-white">{{ kb.name }}</span>
+            <span class="text-sm font-medium text-content">{{ kb.name }}</span>
           </div>
           <span v-if="kb.is_default && !isBatchKBMode" class="text-xs px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
             默认
           </span>
         </div>
-        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ kb.document_count }} 个文档</p>
+        <p class="text-xs text-content-muted mt-1">{{ kb.document_count }} 个文档</p>
       </div>
 
       <div v-if="!knowledgeBases?.length" class="p-4 text-center">
-        <Database class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
-        <p class="text-sm text-gray-500 dark:text-gray-400">暂无知识库</p>
+        <Database class="w-8 h-8 text-content-disabled mx-auto mb-2" />
+        <p class="text-sm text-content-muted">暂无知识库</p>
       </div>
     </div>
 
     <!-- 批量操作栏 -->
     <div
       v-if="isBatchKBMode"
-      class="p-3 border-t border-gray-200 dark:border-dark-600 bg-gray-50 dark:bg-dark-900"
+      class="p-3 border-t border-line bg-page"
     >
       <div class="flex items-center justify-between mb-2">
-        <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300 cursor-pointer">
+        <label class="flex items-center gap-2 text-sm text-content-tertiary cursor-pointer">
           <input
             type="checkbox"
             :checked="isAllSelected"
             @change="toggleSelectAll"
-            class="rounded border-gray-300 dark:border-dark-500 bg-gray-100 dark:bg-dark-700 text-primary-600 focus:ring-primary-500"
+            class="rounded border-line-strong bg-surface-subtle text-primary-600 focus:ring-primary-500"
           />
           <span>全选</span>
         </label>
@@ -97,7 +97,7 @@
           'w-full flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors',
           kbStore.selectedKBCount > 0
             ? 'bg-red-500 text-white hover:bg-red-600'
-            : 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+            : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
         ]"
       >
         <Trash2 class="w-4 h-4" />

@@ -1,21 +1,21 @@
 <template>
-  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-4 sm:p-6">
+  <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
     <div class="max-w-2xl mx-auto space-y-6">
       <div>
-        <h1 class="text-xl font-semibold text-gray-800 dark:text-white">常规设置</h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">管理您的偏好设置和系统配置</p>
+        <h1 class="text-xl font-semibold text-content">常规设置</h1>
+        <p class="text-sm text-content-muted mt-1">管理您的偏好设置和系统配置</p>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6">
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-medium text-gray-800 dark:text-white">外观设置</h2>
+          <h2 class="font-medium text-content">外观设置</h2>
         </div>
         
         <div class="space-y-4">
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <div>
-              <p class="font-medium text-gray-800 dark:text-white">主题模式</p>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">选择浅色或深色主题</p>
+              <p class="font-medium text-content">主题模式</p>
+              <p class="text-sm text-content-muted mt-1">选择浅色或深色主题</p>
             </div>
             <div class="flex gap-2">
               <button
@@ -24,7 +24,7 @@
                   'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                   appStore.theme === 'light'
                     ? 'bg-primary-500 text-white'
-                    : 'bg-white dark:bg-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-500'
+                    : 'bg-surface-raised-strong text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-500'
                 ]"
               >
                 <Sun class="w-4 h-4 inline mr-2" />
@@ -36,7 +36,7 @@
                   'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
                   appStore.theme === 'dark'
                     ? 'bg-primary-500 text-white'
-                    : 'bg-white dark:bg-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-500'
+                    : 'bg-surface-raised-strong text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-500'
                 ]"
               >
                 <Moon class="w-4 h-4 inline mr-2" />
@@ -47,30 +47,30 @@
         </div>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6">
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-medium text-gray-800 dark:text-white">对话设置</h2>
+          <h2 class="font-medium text-content">对话设置</h2>
         </div>
         
         <div class="space-y-4">
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <div>
-              <p class="font-medium text-gray-800 dark:text-white">打字机效果</p>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">逐字显示回答内容</p>
+              <p class="font-medium text-content">打字机效果</p>
+              <p class="text-sm text-content-muted mt-1">逐字显示回答内容</p>
             </div>
             <el-switch v-model="localSettings.typingEffect" class="w-12 h-6" />
           </div>
           
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <div>
-              <p class="font-medium text-gray-800 dark:text-white">自动滚动</p>
-              <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">新消息到达时自动滚动到底部</p>
+              <p class="font-medium text-content">自动滚动</p>
+              <p class="text-sm text-content-muted mt-1">新消息到达时自动滚动到底部</p>
             </div>
             <el-switch v-model="localSettings.autoScroll" class="w-12 h-6" />
           </div>
           
-          <div class="p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">最大输入长度</label>
+          <div class="p-4 bg-surface-muted rounded-lg">
+            <label class="block text-sm font-medium text-content-secondary mb-3">最大输入长度</label>
             <div class="flex items-center gap-4">
               <input
                 v-model.number="localSettings.maxInputLength"
@@ -78,17 +78,17 @@
                 min="500"
                 max="5000"
                 step="100"
-                class="flex-1 h-2 bg-gray-200 dark:bg-dark-600 rounded-lg appearance-none cursor-pointer"
+                class="flex-1 h-2 bg-surface-strong rounded-lg appearance-none cursor-pointer"
               />
-              <span class="text-sm font-medium text-gray-800 dark:text-white w-20 text-right">{{ localSettings.maxInputLength }}</span>
+              <span class="text-sm font-medium text-content w-20 text-right">{{ localSettings.maxInputLength }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6">
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-medium text-gray-800 dark:text-white">知识库设置</h2>
+          <h2 class="font-medium text-content">知识库设置</h2>
           <button
             @click="resetToDefault"
             :disabled="updateConfigMutation.isPending.value"
@@ -99,8 +99,8 @@
         </div>
         
         <div class="space-y-4">
-          <div class="p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">文本分片大小</label>
+          <div class="p-4 bg-surface-muted rounded-lg">
+            <label class="block text-sm font-medium text-content-secondary mb-3">文本分片大小</label>
             <div class="flex items-center gap-4">
               <input
                 v-model.number="localSettings.chunkSize"
@@ -108,15 +108,15 @@
                 min="200"
                 max="2000"
                 step="100"
-                class="flex-1 h-2 bg-gray-200 dark:bg-dark-600 rounded-lg appearance-none cursor-pointer"
+                class="flex-1 h-2 bg-surface-strong rounded-lg appearance-none cursor-pointer"
               />
-              <span class="text-sm font-medium text-gray-800 dark:text-white w-28 text-right">{{ localSettings.chunkSize }} 字符</span>
+              <span class="text-sm font-medium text-content w-28 text-right">{{ localSettings.chunkSize }} 字符</span>
             </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">影响文档切分后的每块大小，较大的值会保留更多上下文但可能增加检索时间</p>
+            <p class="text-xs text-content-muted mt-2">影响文档切分后的每块大小，较大的值会保留更多上下文但可能增加检索时间</p>
           </div>
           
-          <div class="p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">重叠字符数</label>
+          <div class="p-4 bg-surface-muted rounded-lg">
+            <label class="block text-sm font-medium text-content-secondary mb-3">重叠字符数</label>
             <div class="flex items-center gap-4">
               <input
                 v-model.number="localSettings.chunkOverlap"
@@ -124,15 +124,15 @@
                 min="0"
                 max="500"
                 step="50"
-                class="flex-1 h-2 bg-gray-200 dark:bg-dark-600 rounded-lg appearance-none cursor-pointer"
+                class="flex-1 h-2 bg-surface-strong rounded-lg appearance-none cursor-pointer"
               />
-              <span class="text-sm font-medium text-gray-800 dark:text-white w-28 text-right">{{ localSettings.chunkOverlap }} 字符</span>
+              <span class="text-sm font-medium text-content w-28 text-right">{{ localSettings.chunkOverlap }} 字符</span>
             </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">相邻分片之间的重叠部分，用于保持上下文连贯性</p>
+            <p class="text-xs text-content-muted mt-2">相邻分片之间的重叠部分，用于保持上下文连贯性</p>
           </div>
           
-          <div class="p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">检索数量 (Top-K)</label>
+          <div class="p-4 bg-surface-muted rounded-lg">
+            <label class="block text-sm font-medium text-content-secondary mb-3">检索数量 (Top-K)</label>
             <div class="flex items-center gap-4">
               <input
                 v-model.number="localSettings.topK"
@@ -140,53 +140,53 @@
                 min="1"
                 max="20"
                 step="1"
-                class="flex-1 h-2 bg-gray-200 dark:bg-dark-600 rounded-lg appearance-none cursor-pointer"
+                class="flex-1 h-2 bg-surface-strong rounded-lg appearance-none cursor-pointer"
               />
-              <span class="text-sm font-medium text-gray-800 dark:text-white w-20 text-right">{{ localSettings.topK }}</span>
+              <span class="text-sm font-medium text-content w-20 text-right">{{ localSettings.topK }}</span>
             </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">检索时返回的最相关文档块数量</p>
+            <p class="text-xs text-content-muted mt-2">检索时返回的最相关文档块数量</p>
           </div>
         </div>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6">
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-medium text-gray-800 dark:text-white">模型配置</h2>
+          <h2 class="font-medium text-content">模型配置</h2>
         </div>
         
         <div class="space-y-4 text-sm">
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <span class="text-gray-600 dark:text-gray-300">嵌入模型</span>
-            <span class="font-medium text-gray-800 dark:text-white">{{ modelConfig?.embedding_model_name }}</span>
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
+            <span class="text-content-tertiary">嵌入模型</span>
+            <span class="font-medium text-content">{{ modelConfig?.embedding_model_name }}</span>
           </div>
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <span class="text-gray-600 dark:text-gray-300">对话模型（深度思考·开）</span>
-            <span class="font-medium text-gray-800 dark:text-white">{{ modelConfig?.ollama_model_name }}</span>
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
+            <span class="text-content-tertiary">对话模型（深度思考·开）</span>
+            <span class="font-medium text-content">{{ modelConfig?.ollama_model_name }}</span>
           </div>
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <span class="text-gray-600 dark:text-gray-300">对话模型（深度思考·关）</span>
-            <span class="font-medium text-gray-800 dark:text-white">{{ modelConfig?.ollama_direct_model_name || modelConfig?.ollama_model_name }}</span>
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
+            <span class="text-content-tertiary">对话模型（深度思考·关）</span>
+            <span class="font-medium text-content">{{ modelConfig?.ollama_direct_model_name || modelConfig?.ollama_model_name }}</span>
           </div>
         </div>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6">
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-medium text-gray-800 dark:text-white">关于</h2>
+          <h2 class="font-medium text-content">关于</h2>
         </div>
         
         <div class="space-y-4 text-sm">
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <span class="text-gray-600 dark:text-gray-300">版本</span>
-            <span class="font-medium text-gray-800 dark:text-white">1.0.0</span>
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
+            <span class="text-content-tertiary">版本</span>
+            <span class="font-medium text-content">1.0.0</span>
           </div>
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <span class="text-gray-600 dark:text-gray-300">技术栈</span>
-            <span class="font-medium text-gray-800 dark:text-white">Vue 3 + FastAPI</span>
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
+            <span class="text-content-tertiary">技术栈</span>
+            <span class="font-medium text-content">Vue 3 + FastAPI</span>
           </div>
-          <div class="flex items-center justify-between p-4 bg-gray-50 dark:bg-dark-700 rounded-lg">
-            <span class="text-gray-600 dark:text-gray-300">模型</span>
-            <span class="font-medium text-gray-800 dark:text-white">Ollama Local</span>
+          <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
+            <span class="text-content-tertiary">模型</span>
+            <span class="font-medium text-content">Ollama Local</span>
           </div>
         </div>
       </div>

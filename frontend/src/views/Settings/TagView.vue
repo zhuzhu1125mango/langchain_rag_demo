@@ -1,10 +1,10 @@
 <template>
-  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-4 sm:p-6">
+  <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
     <div class="max-w-4xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-xl font-semibold text-gray-800 dark:text-white">标签管理</h1>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">管理文档标签，支持自定义颜色</p>
+          <h1 class="text-xl font-semibold text-content">标签管理</h1>
+          <p class="text-sm text-content-muted mt-1">管理文档标签，支持自定义颜色</p>
         </div>
         <button
           @click="openCreateModal"
@@ -19,7 +19,7 @@
         <div
           v-for="tag in tagsList"
           :key="tag.id"
-          class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-4 hover:shadow-md transition-shadow"
+          class="bg-surface rounded-xl shadow-sm border border-line p-4 hover:shadow-md transition-shadow"
         >
           <div class="flex items-center justify-between mb-2">
             <div class="flex items-center gap-3">
@@ -27,7 +27,7 @@
                 class="w-4 h-4 rounded-full flex-shrink-0"
                 :style="{ backgroundColor: tag.color }"
               ></div>
-              <span class="font-medium text-gray-800 dark:text-white">{{ tag.name }}</span>
+              <span class="font-medium text-content">{{ tag.name }}</span>
             </div>
             <div class="flex items-center gap-1">
               <button
@@ -46,13 +46,13 @@
               </button>
             </div>
           </div>
-          <div class="text-sm text-gray-500 dark:text-gray-400">
-            十六进制: <code class="px-2 py-0.5 bg-gray-100 dark:bg-dark-700 rounded text-xs">{{ tag.color }}</code>
+          <div class="text-sm text-content-muted">
+            十六进制: <code class="px-2 py-0.5 bg-surface-subtle rounded text-xs">{{ tag.color }}</code>
           </div>
         </div>
         <div
           v-if="tagsList.length === 0"
-          class="col-span-full flex flex-col items-center justify-center py-16 text-gray-500 dark:text-gray-400"
+          class="col-span-full flex flex-col items-center justify-center py-16 text-content-muted"
         >
           <Tags class="w-12 h-12 mb-3 opacity-50" />
           <p>暂无标签</p>
@@ -68,17 +68,17 @@
     >
       <form @submit.prevent="saveTag" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">名称 *</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">名称 *</label>
           <input
             v-model="formData.name"
             type="text"
             required
             placeholder="请输入标签名称"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">颜色</label>
+          <label class="block text-sm font-medium text-content-secondary mb-2">颜色</label>
           <div class="flex items-center gap-3">
             <input
               v-model="formData.color"
@@ -89,7 +89,7 @@
               v-model="formData.color"
               type="text"
               placeholder="#1890ff"
-              class="flex-1 px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              class="flex-1 px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
           <div class="flex flex-wrap gap-2 mt-3">
@@ -99,7 +99,7 @@
               type="button"
               @click="formData.color = preset"
               class="w-6 h-6 rounded-full border-2 transition-transform hover:scale-110"
-              :class="formData.color === preset ? 'border-gray-800 dark:border-white' : 'border-transparent'"
+              :class="formData.color === preset ? 'border-content' : 'border-transparent'"
               :style="{ backgroundColor: preset }"
             ></button>
           </div>
@@ -108,7 +108,7 @@
       <template #footer>
         <button
           @click="modalVisible = false"
-          class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
         >
           取消
         </button>
@@ -132,15 +132,15 @@
           class="w-4 h-4 rounded-full flex-shrink-0"
           :style="{ backgroundColor: deletingTag?.color }"
         ></div>
-        <p class="text-gray-700 dark:text-gray-300">
+        <p class="text-content-secondary">
           确定要删除标签 <span class="font-medium">{{ deletingTag?.name }}</span> 吗？
         </p>
       </div>
-      <p class="text-sm text-gray-500 dark:text-gray-400">此操作无法撤销。</p>
+      <p class="text-sm text-content-muted">此操作无法撤销。</p>
       <template #footer>
         <button
           @click="deleteConfirmVisible = false"
-          class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
         >
           取消
         </button>

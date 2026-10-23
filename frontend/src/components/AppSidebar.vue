@@ -7,17 +7,17 @@
       'w-72 max-w-[85vw] lg:max-w-none',
       appStore.sidebarCollapsed ? 'lg:w-16' : 'lg:w-64',
       mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-      'bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-600'
+      'bg-surface border-r border-line'
     ]"
   >
-    <div class="flex items-center justify-between h-16 px-4 border-b border-gray-200 dark:border-dark-600 shrink-0">
+    <div class="flex items-center justify-between h-16 px-4 border-b border-line shrink-0">
       <div class="flex items-center gap-3 overflow-hidden">
         <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center flex-shrink-0">
           <BookOpen class="w-5 h-5 text-white" />
         </div>
         <span 
           v-show="showLabels" 
-          class="font-bold text-gray-800 dark:text-white text-lg truncate"
+          class="font-bold text-content text-lg truncate"
         >
           RAG 知识库
         </span>
@@ -25,7 +25,7 @@
       <!-- 移动端抽屉关闭按钮 -->
       <button
         @click="emit('close')"
-        class="lg:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+        class="lg:hidden p-1.5 rounded-lg text-gray-400 hover:text-content-tertiary hover:bg-surface-hover transition-colors"
         aria-label="关闭导航菜单"
       >
         <X class="w-5 h-5" />
@@ -40,10 +40,10 @@
             @click="emit('close')"
             :class="[
               'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200',
-              'hover:bg-gray-100 dark:hover:bg-dark-700',
+              'hover:bg-surface-hover',
               $route.path === item.path 
                 ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400' 
-                : 'text-gray-600 dark:text-gray-300'
+                : 'text-content-tertiary'
             ]"
           >
             <component :is="item.icon" class="w-5 h-5 flex-shrink-0" />
@@ -56,10 +56,10 @@
     <!-- 会话历史（仅对话页展示，替代原聊天页内独立会话面板） -->
     <div
       v-if="isChatRoute && showLabels"
-      class="flex-1 min-h-0 flex flex-col border-t border-gray-100 dark:border-dark-700"
+      class="flex-1 min-h-0 flex flex-col border-t border-line-subtle"
     >
       <div class="px-4 pt-3 pb-1.5 flex items-center justify-between shrink-0">
-        <span class="text-xs font-medium text-gray-400 dark:text-gray-500">对话历史</span>
+        <span class="text-xs font-medium text-content-subtle">对话历史</span>
         <button
           @click="handleNewSession(); emit('close')"
           class="flex items-center gap-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
@@ -77,35 +77,35 @@
             'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-colors',
             chatStore.currentSession?.id === session.id
               ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-              : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700'
+              : 'text-content-tertiary hover:bg-surface-hover'
           ]"
           :title="session.title || '未命名对话'"
         >
           <MessageSquare class="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
           <span class="text-sm truncate flex-1">{{ session.title || '未命名对话' }}</span>
         </button>
-        <p v-if="!sessions?.length" class="text-xs text-gray-400 dark:text-gray-500 text-center py-4">
+        <p v-if="!sessions?.length" class="text-xs text-content-subtle text-center py-4">
           暂无会话
         </p>
       </div>
     </div>
     <div v-else class="flex-1"></div>
 
-    <div class="p-4 border-t border-gray-200 dark:border-dark-600 shrink-0">
+    <div class="p-4 border-t border-line shrink-0">
       <div class="flex items-center gap-3">
         <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-medium flex-shrink-0">
           <User class="w-5 h-5" />
         </div>
         <div v-show="showLabels" class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-800 dark:text-white truncate">
+          <p class="text-sm font-medium text-content truncate">
             {{ appStore.currentUser?.username || '未登录' }}
           </p>
-          <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ userSubtitle }}</p>
+          <p class="text-xs text-content-muted truncate">{{ userSubtitle }}</p>
         </div>
         <button
           v-show="showLabels && !!appStore.currentUser"
           @click="handleLogout"
-          class="p-2 rounded-lg bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors flex-shrink-0"
+          class="p-2 rounded-lg bg-surface-subtle text-content-tertiary hover:bg-surface-hover-strong transition-colors flex-shrink-0"
           title="退出登录"
           aria-label="退出登录"
         >
@@ -129,7 +129,7 @@
         </button>
         <button
           @click="appStore.toggleSidebar"
-          class="hidden lg:block flex-1 p-2 rounded-lg bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
+          class="hidden lg:block flex-1 p-2 rounded-lg bg-surface-subtle text-content-tertiary hover:bg-surface-hover-strong transition-colors"
           :title="appStore.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
           :aria-label="appStore.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
           :aria-expanded="!appStore.sidebarCollapsed"

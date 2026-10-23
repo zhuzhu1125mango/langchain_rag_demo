@@ -1,63 +1,63 @@
 <template>
-  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-4 sm:p-6">
+  <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
     <div class="max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 class="text-xl font-semibold text-gray-800 dark:text-white">评价反馈统计</h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">查看用户对问答结果的评价汇总</p>
+        <h1 class="text-xl font-semibold text-content">评价反馈统计</h1>
+        <p class="text-sm text-content-muted mt-1">查看用户对问答结果的评价汇总</p>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-5">
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
               <MessageSquare class="w-5 h-5 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <p class="text-sm text-gray-500 dark:text-gray-400">总评价数</p>
-              <p class="text-xl font-semibold text-gray-800 dark:text-white">{{ stats?.total_count || 0 }}</p>
+              <p class="text-sm text-content-muted">总评价数</p>
+              <p class="text-xl font-semibold text-content">{{ stats?.total_count || 0 }}</p>
             </div>
           </div>
         </div>
 
-        <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-5">
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
               <ThumbsUp class="w-5 h-5 text-green-600 dark:text-green-400" />
             </div>
             <div>
-              <p class="text-sm text-gray-500 dark:text-gray-400">好评数</p>
-              <p class="text-xl font-semibold text-gray-800 dark:text-white">{{ stats?.positive_count || 0 }}</p>
+              <p class="text-sm text-content-muted">好评数</p>
+              <p class="text-xl font-semibold text-content">{{ stats?.positive_count || 0 }}</p>
             </div>
           </div>
         </div>
 
-        <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-5">
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
               <ThumbsDown class="w-5 h-5 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <p class="text-sm text-gray-500 dark:text-gray-400">差评数</p>
-              <p class="text-xl font-semibold text-gray-800 dark:text-white">{{ stats?.negative_count || 0 }}</p>
+              <p class="text-sm text-content-muted">差评数</p>
+              <p class="text-xl font-semibold text-content">{{ stats?.negative_count || 0 }}</p>
             </div>
           </div>
         </div>
 
-        <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-5">
+        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
               <Star class="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
             </div>
             <div>
-              <p class="text-sm text-gray-500 dark:text-gray-400">平均评分</p>
-              <p class="text-xl font-semibold text-gray-800 dark:text-white">{{ (stats?.average_rating || 0).toFixed(2) }}</p>
+              <p class="text-sm text-content-muted">平均评分</p>
+              <p class="text-xl font-semibold text-content">{{ (stats?.average_rating || 0).toFixed(2) }}</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6">
-        <h2 class="font-medium text-gray-800 dark:text-white mb-6">评分分布</h2>
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+        <h2 class="font-medium text-content mb-6">评分分布</h2>
         <div class="flex items-end gap-4 justify-center h-48">
           <div
             v-for="(count, index) in ratingDistribution"
@@ -72,19 +72,19 @@
                 backgroundColor: getRatingColor(index + 1)
               }"
             ></div>
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ index + 1 }}星</span>
-            <span class="text-xs text-gray-500 dark:text-gray-400">{{ count }}</span>
+            <span class="text-sm font-medium text-content-secondary">{{ index + 1 }}星</span>
+            <span class="text-xs text-content-muted">{{ count }}</span>
           </div>
         </div>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6">
+      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
         <div class="flex items-center justify-between mb-4">
-          <h2 class="font-medium text-gray-800 dark:text-white">评价列表</h2>
+          <h2 class="font-medium text-content">评价列表</h2>
           <div class="flex items-center gap-2">
             <select
               v-model="filterRating"
-              class="px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+              class="px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="all">全部评分</option>
               <option :value="1">1星</option>
@@ -99,7 +99,7 @@
           <div
             v-for="feedback in filteredFeedbacks"
             :key="feedback.id"
-            class="p-4 bg-gray-50 dark:bg-dark-700 rounded-lg"
+            class="p-4 bg-surface-muted rounded-lg"
           >
             <div class="flex items-start justify-between">
               <div class="flex-1">
@@ -112,22 +112,22 @@
                       :class="i <= feedback.rating ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'"
                     />
                   </div>
-                  <span class="text-sm text-gray-500 dark:text-gray-400">{{ formatDate(feedback.created_at) }}</span>
+                  <span class="text-sm text-content-muted">{{ formatDate(feedback.created_at) }}</span>
                 </div>
-                <p class="text-sm text-gray-500 dark:text-gray-400">
+                <p class="text-sm text-content-muted">
                   {{ feedback.reason || '暂无评价内容' }}
                 </p>
               </div>
               <button
                 @click="confirmDelete(feedback)"
-                class="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-dark-600 rounded-lg transition-colors"
+                class="p-2 text-gray-400 hover:text-red-500 hover:bg-surface-hover-strong rounded-lg transition-colors"
                 title="删除评价"
               >
                 <Trash2 class="w-4 h-4" />
               </button>
             </div>
           </div>
-          <div v-if="filteredFeedbacks.length === 0" class="py-12 text-center text-gray-500 dark:text-gray-400">
+          <div v-if="filteredFeedbacks.length === 0" class="py-12 text-center text-content-muted">
             <MessageSquareOff class="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>暂无评价数据</p>
           </div>
@@ -140,14 +140,14 @@
       title="确认删除"
       width="360px"
     >
-      <p class="text-gray-700 dark:text-gray-300">
+      <p class="text-content-secondary">
         确定要删除这条评价吗？
       </p>
-      <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">此操作无法撤销。</p>
+      <p class="text-sm text-content-muted mt-2">此操作无法撤销。</p>
       <template #footer>
         <button
           @click="deleteConfirmVisible = false"
-          class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
         >
           取消
         </button>

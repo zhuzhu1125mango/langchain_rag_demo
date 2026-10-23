@@ -1,10 +1,10 @@
 <template>
-  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-4 sm:p-6">
+  <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
     <div class="max-w-4xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <div>
-          <h1 class="text-xl font-semibold text-gray-800 dark:text-white">分类管理</h1>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">管理文档分类，支持多级分类结构</p>
+          <h1 class="text-xl font-semibold text-content">分类管理</h1>
+          <p class="text-sm text-content-muted mt-1">管理文档分类，支持多级分类结构</p>
         </div>
         <button
           @click="openCreateModal"
@@ -15,37 +15,37 @@
         </button>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600">
+      <div class="bg-surface rounded-xl shadow-sm border border-line">
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead>
-              <tr class="border-b border-gray-200 dark:border-dark-600">
-                <th class="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">名称</th>
-                <th class="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">描述</th>
-                <th class="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">父分类</th>
-                <th class="text-left py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">排序</th>
-                <th class="text-right py-3 px-4 text-sm font-medium text-gray-500 dark:text-gray-400">操作</th>
+              <tr class="border-b border-line">
+                <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">名称</th>
+                <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">描述</th>
+                <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">父分类</th>
+                <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">排序</th>
+                <th class="text-right py-3 px-4 text-sm font-medium text-content-muted">操作</th>
               </tr>
             </thead>
             <tbody>
               <tr
                 v-for="category in categoriesList"
                 :key="category.id"
-                class="border-b border-gray-100 dark:border-dark-700 hover:bg-gray-50 dark:hover:bg-dark-700/50 transition-colors"
+                class="border-b border-line-subtle hover:bg-gray-50 dark:hover:bg-dark-700/50 transition-colors"
               >
                 <td class="py-3 px-4">
                   <div class="flex items-center gap-2">
                     <Folder class="w-4 h-4 text-gray-400" />
-                    <span class="font-medium text-gray-800 dark:text-white">{{ category.name }}</span>
+                    <span class="font-medium text-content">{{ category.name }}</span>
                   </div>
                 </td>
-                <td class="py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
+                <td class="py-3 px-4 text-sm text-content-muted">
                   {{ category.description || '-' }}
                 </td>
-                <td class="py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
+                <td class="py-3 px-4 text-sm text-content-muted">
                   {{ getParentName(category.parent_id) || '无' }}
                 </td>
-                <td class="py-3 px-4 text-sm text-gray-500 dark:text-gray-400">
+                <td class="py-3 px-4 text-sm text-content-muted">
                   {{ category.sort_order }}
                 </td>
                 <td class="py-3 px-4">
@@ -68,7 +68,7 @@
                 </td>
               </tr>
               <tr v-if="categoriesList.length === 0">
-                <td colspan="5" class="py-12 text-center text-gray-500 dark:text-gray-400">
+                <td colspan="5" class="py-12 text-center text-content-muted">
                   <FolderX class="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>暂无分类</p>
                   <p class="text-sm mt-1">点击上方按钮创建第一个分类</p>
@@ -87,29 +87,29 @@
     >
       <form @submit.prevent="saveCategory" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">名称 *</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">名称 *</label>
           <input
             v-model="formData.name"
             type="text"
             required
             placeholder="请输入分类名称"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">描述</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
           <textarea
             v-model="formData.description"
             rows="3"
             placeholder="请输入分类描述（可选）"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
           ></textarea>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">父分类</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">父分类</label>
           <select
             v-model="formData.parent_id"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content focus:outline-none focus:ring-2 focus:ring-primary-500"
           >
             <option value="">无（顶级分类）</option>
             <option
@@ -122,20 +122,20 @@
           </select>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">排序</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">排序</label>
           <input
             v-model.number="formData.sort_order"
             type="number"
             min="0"
             placeholder="0"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
       </form>
       <template #footer>
         <button
           @click="modalVisible = false"
-          class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
         >
           取消
         </button>
@@ -154,14 +154,14 @@
       title="确认删除"
       width="360px"
     >
-      <p class="text-gray-700 dark:text-gray-300">
+      <p class="text-content-secondary">
         确定要删除分类 <span class="font-medium">{{ deletingCategory?.name }}</span> 吗？
       </p>
-      <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">此操作无法撤销。</p>
+      <p class="text-sm text-content-muted mt-2">此操作无法撤销。</p>
       <template #footer>
         <button
           @click="deleteConfirmVisible = false"
-          class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
         >
           取消
         </button>

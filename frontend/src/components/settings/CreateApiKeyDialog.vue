@@ -11,7 +11,7 @@
     <!-- Step 1：表单 -->
     <div v-if="step === 'form'" class="space-y-4">
       <div>
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+        <label class="block text-sm font-medium text-content-secondary mb-1.5">
           名称 <span class="text-red-500">*</span>
         </label>
         <el-input
@@ -24,7 +24,7 @@
         <p v-if="formError" class="mt-1 text-xs text-red-500">{{ formError }}</p>
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">有效期</label>
+        <label class="block text-sm font-medium text-content-secondary mb-1.5">有效期</label>
         <el-select v-model="form.expiresInDays" class="w-full" data-testid="api-key-expiry-select">
           <el-option label="永久" :value="0" />
           <el-option label="30 天" :value="30" />
@@ -32,7 +32,7 @@
           <el-option label="180 天" :value="180" />
         </el-select>
       </div>
-      <p class="text-xs text-gray-500 dark:text-gray-400">
+      <p class="text-xs text-content-muted">
         密钥与你的账号绑定，仅能访问你有权限的数据；明文仅在创建后显示一次。
       </p>
     </div>

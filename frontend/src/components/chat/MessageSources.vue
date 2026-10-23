@@ -2,9 +2,9 @@
   <div v-if="dedupedSources.length" class="space-y-1.5">
     <!-- 标题栏：图标 + 标题 + 来源数量徽章 -->
     <div class="flex items-center gap-1.5 mb-1">
-      <BookOpen class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-      <span class="text-xs font-medium text-gray-600 dark:text-gray-300">参考来源</span>
-      <span class="text-xs px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-gray-400">
+      <BookOpen class="w-3.5 h-3.5 text-content-muted" />
+      <span class="text-xs font-medium text-content-tertiary">参考来源</span>
+      <span class="text-xs px-1.5 py-0.5 rounded-full bg-surface-subtle text-content-muted">
         {{ dedupedSources.length }}
       </span>
     </div>
@@ -14,7 +14,7 @@
       <div
         v-for="source in visibleSources"
         :key="getSourceKey(source)"
-        class="flex items-start gap-2 p-2 border rounded-lg cursor-pointer transition-all duration-150 bg-gray-50 border-gray-200 hover:-translate-y-0.5 hover:shadow-md hover:border-primary-400 dark:bg-dark-800 dark:border-dark-600 dark:hover:border-primary-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+        class="flex items-start gap-2 p-2 border rounded-lg cursor-pointer transition-all duration-150 bg-surface-muted border-line hover:-translate-y-0.5 hover:shadow-md hover:border-primary-400 dark:hover:border-primary-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
         role="button"
         tabindex="0"
         @click="emit('navigate', source)"
@@ -28,14 +28,14 @@
 
         <!-- 来源类型图标：web 与文档分别使用本地图标（W6 #38：移除第三方 favicon 请求，
              避免向 google.com/s2 泄露用户浏览行为） -->
-        <div class="flex-shrink-0 mt-0.5 flex items-center text-gray-500 dark:text-gray-400">
+        <div class="flex-shrink-0 mt-0.5 flex items-center text-content-muted">
           <Globe v-if="source.source_type === 'web'" class="w-4 h-4" />
           <FileText v-else class="w-4 h-4" />
         </div>
 
         <!-- 主体内容：标题（+编译页徽标） + 副标题 + 命中片段预览 -->
         <div class="flex-1 min-w-0">
-          <p class="text-xs font-medium text-gray-800 dark:text-gray-200 flex items-center gap-1">
+          <p class="text-xs font-medium text-content flex items-center gap-1">
             <span class="truncate">{{ getSourceTitle(source) }}</span>
             <span
               v-if="source.source_kind === 'wiki'"
@@ -45,12 +45,12 @@
               编译
             </span>
           </p>
-          <p class="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">
+          <p class="text-xs text-content-muted truncate mt-0.5">
             {{ getSourceSubtitle(source) }}
           </p>
           <p
             v-if="getSourceSnippet(source)"
-            class="text-xs text-gray-600 dark:text-gray-400 mt-1 line-clamp-2 leading-snug"
+            class="text-xs text-content-secondary-muted mt-1 line-clamp-2 leading-snug"
           >
             {{ getSourceSnippet(source) }}
           </p>
@@ -71,7 +71,7 @@
     <button
       v-if="dedupedSources.length > collapseThreshold"
       type="button"
-      class="flex items-center justify-center gap-1 w-full mt-1.5 py-1.5 text-xs text-gray-500 dark:text-gray-400 rounded-md transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-300"
+      class="flex items-center justify-center gap-1 w-full mt-1.5 py-1.5 text-xs text-content-muted rounded-md transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-300"
       @click="expanded = !expanded"
     >
       <ChevronDown class="w-3 h-3 transition-transform" :class="expanded ? 'rotate-180' : ''" />
@@ -177,6 +177,6 @@ function getScoreClass(score: number): string {
   if (score >= 0.5) {
     return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/60 dark:text-yellow-300'
   }
-  return 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+  return 'bg-surface-subtle text-content-secondary-muted'
 }
 </script>

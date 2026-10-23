@@ -3,13 +3,13 @@
     <div class="flex items-center justify-between mb-4">
       <div class="flex items-center gap-2">
         <Network class="w-4 h-4 text-primary-500" />
-        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">知识图谱</span>
+        <span class="text-sm font-medium text-content-secondary">知识图谱</span>
       </div>
       <div class="flex items-center gap-2">
         <button
           @click="refreshGraph"
           :disabled="isLoading"
-          class="p-1.5 text-gray-400 hover:text-primary-500 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors disabled:opacity-50"
+          class="p-1.5 text-gray-400 hover:text-primary-500 hover:bg-surface-hover rounded-lg transition-colors disabled:opacity-50"
           title="刷新图谱"
           aria-label="刷新图谱"
         >
@@ -17,7 +17,7 @@
         </button>
         <button
           @click="showFullGraph"
-          class="px-3 py-1.5 text-xs text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+          class="px-3 py-1.5 text-xs text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
         >
           查看完整图谱
         </button>
@@ -27,19 +27,19 @@
     <div v-if="isLoading" class="flex-1 flex items-center justify-center">
       <div class="flex flex-col items-center gap-3">
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-        <p class="text-sm text-gray-500 dark:text-gray-400">正在加载图谱...</p>
+        <p class="text-sm text-content-muted">正在加载图谱...</p>
       </div>
     </div>
 
     <div v-else-if="graphData.nodes.length === 0" class="flex-1 flex items-center justify-center">
       <div class="text-center">
-        <Network class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-        <p class="text-sm text-gray-500 dark:text-gray-400">暂无图谱数据</p>
+        <Network class="w-12 h-12 text-content-disabled mx-auto mb-3" />
+        <p class="text-sm text-content-muted">暂无图谱数据</p>
         <p class="text-xs text-gray-400 mt-1">请先选择知识库并上传文档</p>
       </div>
     </div>
 
-    <div v-else class="flex-1 relative bg-gray-50 dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-dark-600 overflow-hidden">
+    <div v-else class="flex-1 relative bg-surface-muted rounded-xl border border-line overflow-hidden">
       <svg 
         ref="svgRef"
         :width="svgWidth"
@@ -58,8 +58,7 @@
           >
             <polygon
               points="0 0, 10 3.5, 0 7"
-              fill="#9CA3AF"
-              class="dark:fill-gray-500"
+              fill="var(--color-content-subtle)"
             />
           </marker>
           <filter id="glow">
@@ -104,9 +103,8 @@
           <circle
             :r="getNodeRadius(node)"
             :fill="getNodeColor(node)"
-            :stroke="isNodeSelected(node) ? '#3B82F6' : '#E5E7EB'"
+            :stroke="isNodeSelected(node) ? 'var(--color-primary-500)' : 'var(--color-line)'"
             stroke-width="2"
-            class="dark:stroke-gray-600"
           />
           
           <!-- 节点图标 -->
@@ -124,8 +122,8 @@
             :y="getNodeRadius(node) + 18"
             text-anchor="middle"
             font-size="11"
-            fill="#6B7280"
-            class="dark:fill-gray-400 select-none"
+            fill="var(--color-content-muted)"
+            class="select-none"
             :style="{ maxWidth: getNodeRadius(node) * 2 + 'px' }"
           >
             {{ getNodeLabel(node) }}
@@ -136,16 +134,16 @@
       <!-- 节点详情面板 -->
       <div 
         v-if="selectedNode"
-        class="absolute top-2 right-2 sm:top-4 sm:right-4 w-56 sm:w-64 max-w-[calc(100%-1rem)] bg-white dark:bg-dark-700 rounded-xl shadow-lg border border-gray-200 dark:border-dark-600 p-4"
+        class="absolute top-2 right-2 sm:top-4 sm:right-4 w-56 sm:w-64 max-w-[calc(100%-1rem)] bg-surface-raised rounded-xl shadow-lg border border-line p-4"
       >
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2">
             <span class="text-xl">{{ getNodeIcon(selectedNode) }}</span>
-            <span class="font-medium text-gray-800 dark:text-white">{{ getNodeLabel(selectedNode) }}</span>
+            <span class="font-medium text-content">{{ getNodeLabel(selectedNode) }}</span>
           </div>
           <button
             @click="selectedNode = null"
-            class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            class="text-gray-400 hover:text-content-tertiary"
             aria-label="关闭节点详情"
           >
             <X class="w-4 h-4" />
@@ -153,39 +151,39 @@
         </div>
         <div class="space-y-2 text-sm">
           <div class="flex justify-between">
-            <span class="text-gray-500 dark:text-gray-400">类型</span>
-            <span class="text-gray-800 dark:text-white">{{ getNodeTypeLabel(selectedNode) }}</span>
+            <span class="text-content-muted">类型</span>
+            <span class="text-content">{{ getNodeTypeLabel(selectedNode) }}</span>
           </div>
           <div class="flex justify-between">
-            <span class="text-gray-500 dark:text-gray-400">ID</span>
-            <span class="text-gray-800 dark:text-white text-xs font-mono">{{ selectedNode.id }}</span>
+            <span class="text-content-muted">ID</span>
+            <span class="text-content text-xs font-mono">{{ selectedNode.id }}</span>
           </div>
           <div v-if="selectedNode.size" class="flex justify-between">
-            <span class="text-gray-500 dark:text-gray-400">大小</span>
-            <span class="text-gray-800 dark:text-white">{{ selectedNode.size }}</span>
+            <span class="text-content-muted">大小</span>
+            <span class="text-content">{{ selectedNode.size }}</span>
           </div>
           <div v-if="selectedNode.kb_id" class="flex justify-between">
-            <span class="text-gray-500 dark:text-gray-400">知识库</span>
-            <span class="text-gray-800 dark:text-white text-xs">{{ selectedNode.kb_id.slice(0, 8) }}...</span>
+            <span class="text-content-muted">知识库</span>
+            <span class="text-content text-xs">{{ selectedNode.kb_id.slice(0, 8) }}...</span>
           </div>
         </div>
       </div>
 
       <!-- 图例 -->
-      <div class="absolute bottom-4 left-4 bg-white dark:bg-dark-700 rounded-lg border border-gray-200 dark:border-dark-600 p-3">
-        <p class="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">图例</p>
+      <div class="absolute bottom-4 left-4 bg-surface-raised rounded-lg border border-line p-3">
+        <p class="text-xs font-medium text-content-secondary mb-2">图例</p>
         <div class="space-y-1.5">
           <div class="flex items-center gap-2">
             <div class="w-3 h-3 rounded-full bg-blue-500"></div>
-            <span class="text-xs text-gray-600 dark:text-gray-400">知识库</span>
+            <span class="text-xs text-content-secondary-muted">知识库</span>
           </div>
           <div class="flex items-center gap-2">
             <div class="w-3 h-3 rounded-full bg-green-500"></div>
-            <span class="text-xs text-gray-600 dark:text-gray-400">文档</span>
+            <span class="text-xs text-content-secondary-muted">文档</span>
           </div>
           <div class="flex items-center gap-2">
             <div class="w-3 h-3 rounded-full bg-purple-500"></div>
-            <span class="text-xs text-gray-600 dark:text-gray-400">相似关系</span>
+            <span class="text-xs text-content-secondary-muted">相似关系</span>
           </div>
         </div>
       </div>
@@ -193,26 +191,26 @@
 
     <!-- 图谱统计 -->
     <div class="mt-4 grid grid-cols-3 gap-4">
-      <div class="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 p-3">
+      <div class="bg-surface rounded-lg border border-line p-3">
         <div class="flex items-center gap-2 mb-1">
           <CircleDot class="w-4 h-4 text-blue-500" />
-          <span class="text-xs text-gray-500 dark:text-gray-400">节点数</span>
+          <span class="text-xs text-content-muted">节点数</span>
         </div>
-        <p class="text-xl font-semibold text-gray-800 dark:text-white">{{ graphData.nodes.length }}</p>
+        <p class="text-xl font-semibold text-content">{{ graphData.nodes.length }}</p>
       </div>
-      <div class="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 p-3">
+      <div class="bg-surface rounded-lg border border-line p-3">
         <div class="flex items-center gap-2 mb-1">
           <ArrowRightLeft class="w-4 h-4 text-green-500" />
-          <span class="text-xs text-gray-500 dark:text-gray-400">关系数</span>
+          <span class="text-xs text-content-muted">关系数</span>
         </div>
-        <p class="text-xl font-semibold text-gray-800 dark:text-white">{{ graphData.edges.length }}</p>
+        <p class="text-xl font-semibold text-content">{{ graphData.edges.length }}</p>
       </div>
-      <div class="bg-white dark:bg-dark-800 rounded-lg border border-gray-200 dark:border-dark-600 p-3">
+      <div class="bg-surface rounded-lg border border-line p-3">
         <div class="flex items-center gap-2 mb-1">
           <Info class="w-4 h-4 text-purple-500" />
-          <span class="text-xs text-gray-500 dark:text-gray-400">描述</span>
+          <span class="text-xs text-content-muted">描述</span>
         </div>
-        <p class="text-sm text-gray-600 dark:text-gray-300 truncate">{{ graphData.summary }}</p>
+        <p class="text-sm text-content-tertiary truncate">{{ graphData.summary }}</p>
       </div>
     </div>
   </div>
@@ -367,12 +365,12 @@ function getNodeRadius(node: GraphNode) {
 /** 计算节点填充色：选中态浅蓝，知识库浅蓝，文档浅绿。 */
 function getNodeColor(node: GraphNode) {
   if (selectedNode.value?.id === node.id) {
-    return '#DBEAFE'
+    return 'var(--color-primary-100)'
   }
   if (node.type === 'knowledge_base') {
-    return '#EFF6FF'
+    return 'var(--color-primary-50)'
   }
-  return '#ECFDF5'
+  return 'var(--color-success-soft)'
 }
 
 /** 返回节点图标 emoji：知识库 📚，文档 📄。 */
@@ -398,9 +396,9 @@ function getNodeTypeLabel(node: GraphNode) {
 /** 计算边颜色：标签含"相似"字样时为紫色（相似关系），否则为灰色（从属关系）。 */
 function getEdgeColor(edge: GraphEdge) {
   if (edge.label && edge.label.includes('相似')) {
-    return '#A78BFA'
+    return 'var(--color-accent-purple)'
   }
-  return '#9CA3AF'
+  return 'var(--color-content-subtle)'
 }
 
 /** 判断节点是否为当前选中节点。 */

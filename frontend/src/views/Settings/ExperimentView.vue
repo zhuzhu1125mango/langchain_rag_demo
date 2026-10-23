@@ -1,9 +1,9 @@
 <template>
-  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-4 sm:p-6">
+  <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
     <div class="max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 class="text-xl font-semibold text-gray-800 dark:text-white">A/B测试实验管理</h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">管理和分析A/B测试实验，优化问答策略</p>
+        <h1 class="text-xl font-semibold text-content">A/B测试实验管理</h1>
+        <p class="text-sm text-content-muted mt-1">管理和分析A/B测试实验，优化问答策略</p>
       </div>
 
       <div class="flex items-center justify-between">
@@ -16,7 +16,7 @@
               'px-3 py-1.5 rounded-full text-sm font-medium transition-colors',
               activeFilter === filter.value
                 ? 'bg-primary-500 text-white'
-                : 'bg-white dark:bg-dark-800 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700'
+                : 'bg-surface text-content-tertiary hover:bg-surface-hover'
             ]"
           >
             {{ filter.label }}
@@ -33,10 +33,10 @@
 
       <div
         v-if="selectedExperimentIds.length > 0"
-        class="flex items-center justify-between p-3 bg-white dark:bg-dark-800 rounded-lg border border-primary-200 dark:border-primary-800 shadow-sm"
+        class="flex items-center justify-between p-3 bg-surface rounded-lg border border-primary-200 dark:border-primary-800 shadow-sm"
       >
         <div class="flex items-center gap-3">
-          <span class="text-sm text-gray-700 dark:text-gray-300">
+          <span class="text-sm text-content-secondary">
             已选择 <span class="font-semibold text-primary-600 dark:text-primary-400">{{ selectedExperimentIds.length }}</span> 个实验
           </span>
           <button
@@ -49,7 +49,7 @@
         <div class="flex items-center gap-2">
           <button
             @click="clearSelection"
-            class="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+            class="px-3 py-1.5 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
           >
             取消
           </button>
@@ -68,7 +68,7 @@
         <div
           v-for="experiment in filteredExperiments"
           :key="experiment.id"
-          class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-5"
+          class="bg-surface rounded-xl shadow-sm border border-line p-5"
         >
           <div class="flex items-start justify-between mb-4">
             <div class="flex items-start gap-3">
@@ -80,7 +80,7 @@
               />
               <div>
                 <div class="flex items-center gap-2">
-                  <h3 class="font-medium text-gray-800 dark:text-white">{{ experiment.name }}</h3>
+                  <h3 class="font-medium text-content">{{ experiment.name }}</h3>
                   <span
                     :class="[
                       'px-2 py-0.5 rounded-full text-xs font-medium',
@@ -90,7 +90,7 @@
                     {{ getStatusLabel(experiment.status) }}
                   </span>
                 </div>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ experiment.description || '-' }}</p>
+                <p class="text-sm text-content-muted mt-1">{{ experiment.description || '-' }}</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
@@ -125,31 +125,31 @@
           </div>
 
           <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div class="p-3 bg-gray-50 dark:bg-dark-700 rounded-lg">
-              <p class="text-xs text-gray-500 dark:text-gray-400">变体数量</p>
-              <p class="font-semibold text-gray-800 dark:text-white">{{ experiment.variants?.length || 0 }}</p>
+            <div class="p-3 bg-surface-muted rounded-lg">
+              <p class="text-xs text-content-muted">变体数量</p>
+              <p class="font-semibold text-content">{{ experiment.variants?.length || 0 }}</p>
             </div>
-            <div class="p-3 bg-gray-50 dark:bg-dark-700 rounded-lg">
-              <p class="text-xs text-gray-500 dark:text-gray-400">监控指标</p>
-              <p class="font-semibold text-gray-800 dark:text-white">{{ experiment.metrics?.length || 0 }}</p>
+            <div class="p-3 bg-surface-muted rounded-lg">
+              <p class="text-xs text-content-muted">监控指标</p>
+              <p class="font-semibold text-content">{{ experiment.metrics?.length || 0 }}</p>
             </div>
-            <div class="p-3 bg-gray-50 dark:bg-dark-700 rounded-lg">
-              <p class="text-xs text-gray-500 dark:text-gray-400">创建时间</p>
-              <p class="font-semibold text-gray-800 dark:text-white">{{ formatDate(experiment.created_at) }}</p>
+            <div class="p-3 bg-surface-muted rounded-lg">
+              <p class="text-xs text-content-muted">创建时间</p>
+              <p class="font-semibold text-content">{{ formatDate(experiment.created_at) }}</p>
             </div>
-            <div class="p-3 bg-gray-50 dark:bg-dark-700 rounded-lg">
-              <p class="text-xs text-gray-500 dark:text-gray-400">启动时间</p>
-              <p class="font-semibold text-gray-800 dark:text-white">{{ experiment.started_at ? formatDate(experiment.started_at) : '未启动' }}</p>
+            <div class="p-3 bg-surface-muted rounded-lg">
+              <p class="text-xs text-content-muted">启动时间</p>
+              <p class="font-semibold text-content">{{ experiment.started_at ? formatDate(experiment.started_at) : '未启动' }}</p>
             </div>
           </div>
 
-          <div v-if="experiment.variants?.length" class="mt-4 pt-4 border-t border-gray-100 dark:border-dark-700">
-            <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">实验变体</p>
+          <div v-if="experiment.variants?.length" class="mt-4 pt-4 border-t border-line-subtle">
+            <p class="text-sm font-medium text-content-secondary mb-2">实验变体</p>
             <div class="flex flex-wrap gap-2">
               <span
                 v-for="variant in experiment.variants"
                 :key="variant.id"
-                class="px-3 py-1 bg-gray-100 dark:bg-dark-600 text-gray-700 dark:text-gray-300 text-sm rounded-full"
+                class="px-3 py-1 bg-surface-subtle-strong text-content-secondary text-sm rounded-full"
               >
                 {{ variant.name }} ({{ (variant.weight * 100).toFixed(0) }}%)
               </span>
@@ -158,18 +158,18 @@
 
           <div
             v-if="selectedExperiment === experiment.id && experimentResult"
-            class="mt-4 pt-4 border-t border-gray-100 dark:border-dark-700"
+            class="mt-4 pt-4 border-t border-line-subtle"
           >
-            <h4 class="font-medium text-gray-800 dark:text-white mb-3">实验结果分析</h4>
+            <h4 class="font-medium text-content mb-3">实验结果分析</h4>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div
                 v-for="result in experimentResult.variant_results"
                 :key="result.variant_id"
-                class="p-4 bg-gray-50 dark:bg-dark-700 rounded-lg"
+                class="p-4 bg-surface-muted rounded-lg"
               >
                 <div class="flex items-center justify-between mb-2">
-                  <span class="font-medium text-gray-800 dark:text-white">{{ result.variant_name }}</span>
-                  <span class="text-sm text-gray-500 dark:text-gray-400">样本量: {{ result.sample_size }}</span>
+                  <span class="font-medium text-content">{{ result.variant_name }}</span>
+                  <span class="text-sm text-content-muted">样本量: {{ result.sample_size }}</span>
                 </div>
                 <div class="space-y-2">
                   <div
@@ -177,8 +177,8 @@
                     :key="metricName"
                     class="flex items-center justify-between text-sm"
                   >
-                    <span class="text-gray-600 dark:text-gray-400">{{ metricName }}</span>
-                    <span class="font-medium text-gray-800 dark:text-white">{{ (metric.mean as number).toFixed(2) }}</span>
+                    <span class="text-content-secondary-muted">{{ metricName }}</span>
+                    <span class="font-medium text-content">{{ (metric.mean as number).toFixed(2) }}</span>
                   </div>
                 </div>
               </div>
@@ -197,7 +197,7 @@
           </div>
         </div>
 
-        <div v-if="filteredExperiments.length === 0" class="py-16 text-center text-gray-500 dark:text-gray-400">
+        <div v-if="filteredExperiments.length === 0" class="py-16 text-center text-content-muted">
           <FlaskConical class="w-16 h-16 mx-auto mb-4 opacity-50" />
           <p class="text-lg font-medium">暂无实验</p>
           <p class="text-sm mt-1">点击上方按钮创建第一个A/B测试实验</p>
@@ -212,26 +212,26 @@
     >
       <form @submit.prevent="createExperiment" class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">实验名称 *</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">实验名称 *</label>
           <input
             v-model="formData.name"
             type="text"
             required
             placeholder="请输入实验名称"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">描述</label>
+          <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
           <textarea
             v-model="formData.description"
             rows="2"
             placeholder="请输入实验描述（可选）"
-            class="w-full px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
           ></textarea>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">实验变体</label>
+          <label class="block text-sm font-medium text-content-secondary mb-2">实验变体</label>
           <div class="space-y-2">
             <div
               v-for="(variant, index) in formData.variants"
@@ -242,7 +242,7 @@
                 v-model="variant.name"
                 type="text"
                 :placeholder="`变体 ${index + 1} 名称`"
-                class="flex-1 px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                class="flex-1 px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
               <input
                 v-model.number="variant.weight"
@@ -251,7 +251,7 @@
                 max="1"
                 step="0.1"
                 placeholder="权重"
-                class="w-24 px-3 py-2 border border-gray-300 dark:border-dark-500 rounded-lg bg-white dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                class="w-24 px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
               />
               <button
                 v-if="formData.variants && formData.variants.length > 2"
@@ -274,7 +274,7 @@
           </button>
         </div>
         <div>
-          <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">监控指标</label>
+          <label class="block text-sm font-medium text-content-secondary mb-2">监控指标</label>
           <div class="flex flex-wrap gap-2">
             <button
               v-for="metric in availableMetrics"
@@ -285,7 +285,7 @@
                 'px-3 py-1 rounded-full text-sm font-medium transition-colors',
                 formData.metrics?.includes(metric)
                   ? 'bg-primary-500 text-white'
-                  : 'bg-gray-100 dark:bg-dark-600 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-500'
+                  : 'bg-surface-subtle-strong text-content-tertiary hover:bg-gray-200 dark:hover:bg-dark-500'
               ]"
             >
               {{ metric }}
@@ -296,7 +296,7 @@
       <template #footer>
         <button
           @click="modalVisible = false"
-          class="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
         >
           取消
         </button>
@@ -388,7 +388,7 @@ const isAllSelected = computed(() => {
 /** 根据实验状态返回对应的样式类，未知状态回退为待启动样式。 */
 function getStatusClass(status?: string): string {
   const classes: Record<string, string> = {
-    created: 'bg-gray-100 text-gray-600 dark:bg-dark-600 dark:text-gray-400',
+    created: 'bg-surface-subtle-strong text-content-secondary-muted',
     running: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
     stopped: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
   }

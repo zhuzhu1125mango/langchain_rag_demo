@@ -12,7 +12,7 @@
           <button
             @click="loadPreviewPage(page - 1)"
             :disabled="page <= 1 || loading"
-            class="px-2 py-1 text-xs bg-gray-100 dark:bg-dark-700 rounded hover:bg-gray-200 dark:hover:bg-dark-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-2 py-1 text-xs bg-surface-subtle rounded hover:bg-surface-hover-strong disabled:opacity-50 disabled:cursor-not-allowed"
           >
             上一页
           </button>
@@ -20,17 +20,17 @@
           <button
             @click="loadPreviewPage(page + 1)"
             :disabled="page >= totalPages || loading"
-            class="px-2 py-1 text-xs bg-gray-100 dark:bg-dark-700 rounded hover:bg-gray-200 dark:hover:bg-dark-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="px-2 py-1 text-xs bg-surface-subtle rounded hover:bg-surface-hover-strong disabled:opacity-50 disabled:cursor-not-allowed"
           >
             下一页
           </button>
         </div>
       </div>
-      <div class="max-h-96 overflow-auto bg-gray-50 dark:bg-dark-700 rounded-lg p-4">
+      <div class="max-h-96 overflow-auto bg-surface-muted rounded-lg p-4">
         <div v-if="loading" class="flex items-center justify-center py-8">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
         </div>
-        <pre v-else class="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200 font-mono leading-relaxed">{{ content }}</pre>
+        <pre v-else class="whitespace-pre-wrap text-sm text-content font-mono leading-relaxed">{{ content }}</pre>
       </div>
     </div>
   </el-dialog>

@@ -1,13 +1,13 @@
 <template>
   <slot v-if="!hasError" />
   <div v-else class="h-full min-h-screen flex items-center justify-center p-6">
-    <div class="max-w-md w-full bg-white dark:bg-dark-800 border border-red-200 dark:border-red-800 rounded-2xl p-6 text-center shadow-lg" role="alert">
+    <div class="max-w-md w-full bg-surface border border-red-200 dark:border-red-800 rounded-2xl p-6 text-center shadow-lg" role="alert">
       <AlertOctagon class="w-10 h-10 text-red-500 mx-auto mb-3" />
-      <h2 class="text-base font-semibold text-gray-800 dark:text-white mb-1">页面出现异常</h2>
-      <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+      <h2 class="text-base font-semibold text-content mb-1">页面出现异常</h2>
+      <p class="text-xs text-content-muted mb-3">
         渲染过程发生未预期错误，该区域已停止工作。可尝试重置恢复；若反复出现请刷新页面。
       </p>
-      <pre class="text-left text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-700 rounded-lg p-2 mb-4 overflow-auto max-h-32 whitespace-pre-wrap">{{ errorMessage }}</pre>
+      <pre class="text-left text-xs text-content-tertiary bg-surface-muted rounded-lg p-2 mb-4 overflow-auto max-h-32 whitespace-pre-wrap">{{ errorMessage }}</pre>
       <button
         @click="reset"
         class="px-4 py-2 text-sm bg-primary-500 text-white hover:bg-primary-600 rounded-lg transition-colors"

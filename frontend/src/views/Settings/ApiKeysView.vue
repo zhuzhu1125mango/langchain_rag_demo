@@ -1,10 +1,10 @@
 <template>
-  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-4 sm:p-6">
+  <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
     <div class="max-w-2xl mx-auto space-y-6">
       <div class="flex items-start justify-between">
         <div>
-          <h1 class="text-xl font-semibold text-gray-800 dark:text-white">API 密钥</h1>
-          <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+          <h1 class="text-xl font-semibold text-content">API 密钥</h1>
+          <p class="text-sm text-content-muted mt-1">
             以你的身份访问 API（MCP 客户端、脚本、CI 集成）。
           </p>
         </div>
@@ -32,11 +32,11 @@
       <!-- 功能未启用空态（USER_API_KEYS_ENABLED=false） -->
       <div
         v-if="!enabled"
-        class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-10 text-center"
+        class="bg-surface rounded-xl shadow-sm border border-line p-10 text-center"
         data-testid="api-keys-disabled"
       >
-        <KeyRound class="w-10 h-10 mx-auto text-gray-300 dark:text-gray-600" />
-        <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
+        <KeyRound class="w-10 h-10 mx-auto text-content-disabled" />
+        <p class="mt-3 text-sm text-content-muted">
           该功能未启用，请检查后端配置 USER_API_KEYS_ENABLED
         </p>
       </div>
@@ -44,7 +44,7 @@
       <!-- 列表 -->
       <div
         v-else
-        class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600"
+        class="bg-surface rounded-xl shadow-sm border border-line"
         data-testid="api-keys-table"
       >
         <el-skeleton v-if="isLoading" class="p-6" :rows="3" animated />
@@ -54,15 +54,15 @@
             class="p-10 text-center"
             data-testid="api-keys-empty"
           >
-            <KeyRound class="w-10 h-10 mx-auto text-gray-300 dark:text-gray-600" />
-            <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">还没有 API 密钥</p>
+            <KeyRound class="w-10 h-10 mx-auto text-content-disabled" />
+            <p class="mt-3 text-sm text-content-muted">还没有 API 密钥</p>
             <el-button type="primary" plain class="mt-4" @click="dialogVisible = true">创建第一把密钥</el-button>
           </div>
           <el-table v-else :data="keys" style="width: 100%">
             <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
             <el-table-column label="密钥" min-width="150">
               <template #default="{ row }">
-                <code class="font-mono text-xs" :class="rowMeta(row).dimmed ? 'text-gray-400 dark:text-gray-500' : ''">
+                <code class="font-mono text-xs" :class="rowMeta(row).dimmed ? 'text-content-subtle' : ''">
                   {{ row.key_prefix }}…
                 </code>
               </template>
@@ -74,7 +74,7 @@
             </el-table-column>
             <el-table-column label="最近使用" width="110">
               <template #default="{ row }">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatRelativeTime(row.last_used_at) }}</span>
+                <span class="text-xs text-content-muted">{{ formatRelativeTime(row.last_used_at) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="90" align="right">
@@ -89,7 +89,7 @@
                 >
                   吊销
                 </el-button>
-                <span v-else class="text-gray-300 dark:text-gray-600">—</span>
+                <span v-else class="text-content-disabled">—</span>
               </template>
             </el-table-column>
           </el-table>

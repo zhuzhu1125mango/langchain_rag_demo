@@ -7,7 +7,7 @@
   >
     <!-- 工具栏 -->
     <div class="flex items-center justify-between mb-4">
-      <p class="text-xs text-gray-500 dark:text-gray-400">
+      <p class="text-xs text-content-muted">
         由文档离线编译生成的补充语料，参与混合检索
       </p>
       <div class="flex items-center gap-2">
@@ -17,7 +17,7 @@
           :class="[
             'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
             lintLoading
-              ? 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+              ? 'bg-surface-disabled text-gray-400 cursor-not-allowed'
               : 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
           ]"
         >
@@ -30,7 +30,7 @@
           :class="[
             'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
             rebuilding
-              ? 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+              ? 'bg-surface-disabled text-gray-400 cursor-not-allowed'
               : 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
           ]"
         >
@@ -43,15 +43,15 @@
     <!-- 体检报告（内联展示，只报告不修复） -->
     <div
       v-if="lintReport"
-      class="mb-4 border border-gray-200 dark:border-dark-600 rounded-lg p-3"
+      class="mb-4 border border-line rounded-lg p-3"
     >
       <div class="flex items-center justify-between">
-        <p class="text-xs font-medium text-gray-700 dark:text-gray-200">
+        <p class="text-xs font-medium text-content-secondary-strong">
           体检报告 · 共检查 {{ lintReport.checked_pages }} 页
         </p>
         <button
           @click="lintReport = null"
-          class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          class="text-gray-400 hover:text-content-tertiary"
           aria-label="关闭体检报告"
         >
           <X class="w-3.5 h-3.5" />
@@ -69,8 +69,8 @@
           <span :class="['shrink-0 px-1.5 py-0.5 rounded', levelBadgeClass(issue.level)]">
             {{ levelLabel(issue.level) }}
           </span>
-          <span class="text-gray-800 dark:text-white shrink-0">{{ issue.title }}</span>
-          <span class="text-gray-500 dark:text-gray-400 min-w-0">
+          <span class="text-content shrink-0">{{ issue.title }}</span>
+          <span class="text-content-muted min-w-0">
             {{ ruleLabel(issue.rule) }}：{{ issue.message }}
           </span>
         </li>
@@ -79,13 +79,13 @@
 
     <!-- 重编译进度条 -->
     <div v-if="rebuilding" class="mb-4">
-      <div class="h-1.5 bg-gray-200 dark:bg-dark-700 rounded-full overflow-hidden">
+      <div class="h-1.5 bg-surface-disabled rounded-full overflow-hidden">
         <div
           class="h-full bg-primary-500 transition-all duration-500"
           :style="{ width: rebuildProgress + '%' }"
         ></div>
       </div>
-      <p class="text-xs text-gray-500 dark:text-gray-400 mt-1.5">{{ rebuildMessage }}</p>
+      <p class="text-xs text-content-muted mt-1.5">{{ rebuildMessage }}</p>
     </div>
 
     <!-- 页面列表 -->
@@ -94,9 +94,9 @@
     </div>
 
     <div v-else-if="!pages?.length" class="text-center py-12">
-      <BookOpen class="w-10 h-10 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-      <p class="text-sm text-gray-500 dark:text-gray-400">暂无 Wiki 页面</p>
-      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+      <BookOpen class="w-10 h-10 text-content-disabled mx-auto mb-3" />
+      <p class="text-sm text-content-muted">暂无 Wiki 页面</p>
+      <p class="text-xs text-content-subtle mt-1">
         上传文档并开启 WIKI_COMPILE_ENABLED 后自动生成
       </p>
     </div>
@@ -105,7 +105,7 @@
       <div
         v-for="page in pages"
         :key="page.id"
-        class="border border-gray-200 dark:border-dark-600 rounded-lg overflow-hidden"
+        class="border border-line rounded-lg overflow-hidden"
       >
         <button
           @click="togglePage(page)"
@@ -119,7 +119,7 @@
           >
             {{ typeLabel(page.page_type) }}
           </span>
-          <span class="flex-1 min-w-0 truncate text-sm text-gray-800 dark:text-white">
+          <span class="flex-1 min-w-0 truncate text-sm text-content">
             {{ page.title }}
           </span>
           <ChevronDown
@@ -128,8 +128,8 @@
           />
         </button>
 
-        <div v-if="expandedId === page.id" class="px-3 pb-3 border-t border-gray-100 dark:border-dark-700">
-          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-xs text-gray-500 dark:text-gray-400">
+        <div v-if="expandedId === page.id" class="px-3 pb-3 border-t border-line-subtle">
+          <div class="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-xs text-content-muted">
             <span>来源文档 {{ page.source_doc_count }} 篇</span>
             <span>v{{ page.revision }}</span>
             <span v-if="page.updated_at">{{ formatDate(page.updated_at) }}</span>
@@ -141,7 +141,7 @@
           </div>
           <div
             v-else
-            class="text-xs bg-gray-50 dark:bg-dark-900 rounded p-3 max-h-72 overflow-auto markdown-body"
+            class="text-xs bg-page rounded p-3 max-h-72 overflow-auto markdown-body"
           >
             <MarkdownRenderer :content="expandedContent" />
           </div>
@@ -231,9 +231,9 @@ function levelBadgeClass(level: string): string {
   const classes: Record<string, string> = {
     error: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
     warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
-    info: 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+    info: 'bg-surface-subtle text-content-tertiary'
   }
-  return classes[level] ?? 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+  return classes[level] ?? 'bg-surface-subtle text-content-tertiary'
 }
 
 /** 体检规则中文标签。 */
@@ -373,9 +373,9 @@ function typeBadgeClass(pageType: string): string {
   const classes: Record<string, string> = {
     entity: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
     topic: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
-    index: 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+    index: 'bg-surface-subtle text-content-tertiary'
   }
-  return classes[pageType] ?? 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
+  return classes[pageType] ?? 'bg-surface-subtle text-content-tertiary'
 }
 
 /** 格式化更新时间。 */

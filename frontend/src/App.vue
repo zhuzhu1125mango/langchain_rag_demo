@@ -19,16 +19,16 @@
         <!-- 移动端顶栏：汉堡菜单（桌面端隐藏） -->
         <div
           v-if="!isLoginPage"
-          class="lg:hidden flex items-center gap-2 h-12 px-3 border-b border-gray-200 dark:border-dark-600 bg-white dark:bg-dark-800 shrink-0"
+          class="lg:hidden flex items-center gap-2 h-12 px-3 border-b border-line bg-surface shrink-0"
         >
           <button
             @click="mobileNavOpen = true"
-            class="-ml-1 p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+            class="-ml-1 p-2 rounded-lg text-content-tertiary hover:bg-surface-hover transition-colors"
             aria-label="打开导航菜单"
           >
             <Menu class="w-5 h-5" />
           </button>
-          <span class="font-semibold text-sm text-gray-800 dark:text-white">RAG 知识库</span>
+          <span class="font-semibold text-sm text-content">RAG 知识库</span>
         </div>
         <!-- W6 #42：错误边界包住页面渲染树，单视图崩溃不再整页白屏 -->
         <ErrorBoundary class="flex-1 flex flex-col overflow-hidden">

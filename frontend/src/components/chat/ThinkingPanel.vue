@@ -4,8 +4,8 @@
     class="rounded-xl border transition-all duration-200 overflow-hidden"
     :class="[
       isExpanded
-        ? 'bg-gray-50/80 border-gray-200 dark:bg-dark-700/60 dark:border-dark-600'
-        : 'bg-gray-50 border-gray-200 hover:bg-gray-100 dark:bg-dark-700/40 dark:border-dark-600 dark:hover:bg-dark-700/60'
+        ? 'bg-surface-muted/80 border-line'
+        : 'bg-surface-muted border-line hover:bg-surface-hover/40'
     ]"
   >
     <!-- 折叠态头部：摘要 + 展开按钮 -->
@@ -24,9 +24,9 @@
         />
         <Brain
           v-else
-          class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 flex-shrink-0"
+          class="w-3.5 h-3.5 text-content-muted flex-shrink-0"
         />
-        <span class="text-xs text-gray-700 dark:text-gray-200 truncate">
+        <span class="text-xs text-content-secondary-strong truncate">
           {{ summaryText }}
         </span>
       </div>
@@ -37,8 +37,8 @@
     <div v-else class="px-3 py-2">
       <div class="flex items-center justify-between gap-2 mb-1.5">
         <div class="flex items-center gap-2">
-          <Brain class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-          <span class="text-xs font-medium text-gray-700 dark:text-gray-200">深度思考</span>
+          <Brain class="w-3.5 h-3.5 text-content-muted" />
+          <span class="text-xs font-medium text-content-secondary-strong">深度思考</span>
           <Loader2
             v-if="loading"
             class="w-3 h-3 text-blue-500 dark:text-blue-400 animate-spin"
@@ -46,7 +46,7 @@
         </div>
         <button
           type="button"
-          class="p-1 rounded hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
+          class="p-1 rounded hover:bg-surface-hover-strong transition-colors"
           aria-expanded="true"
           aria-label="收起深度思考"
           @click="toggle"
@@ -57,7 +57,7 @@
 
       <div
         ref="contentRef"
-        class="max-h-56 overflow-y-auto text-xs text-gray-600 dark:text-gray-300 leading-relaxed whitespace-pre-wrap break-words"
+        class="max-h-56 overflow-y-auto text-xs text-content-tertiary leading-relaxed whitespace-pre-wrap break-words"
       >{{ thinking }}</div>
     </div>
   </div>

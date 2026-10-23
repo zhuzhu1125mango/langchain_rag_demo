@@ -1,14 +1,14 @@
 <template>
-  <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-dark-900 overflow-hidden">
-    <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-3 sm:py-4">
+  <div class="flex-1 flex flex-col h-full bg-page overflow-hidden">
+    <header class="bg-surface border-b border-line px-4 sm:px-6 py-3 sm:py-4">
       <div>
-        <h1 class="text-xl font-semibold text-gray-800 dark:text-white">链路追踪</h1>
-        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">查看每次问答的完整执行链路：意图路由、检索、生成各阶段耗时与 token 用量</p>
+        <h1 class="text-xl font-semibold text-content">链路追踪</h1>
+        <p class="text-sm text-content-muted mt-1">查看每次问答的完整执行链路：意图路由、检索、生成各阶段耗时与 token 用量</p>
       </div>
     </header>
 
     <!-- 过滤栏 -->
-    <div class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3">
+    <div class="bg-surface border-b border-line px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3">
       <el-input
         v-model="sessionIdFilter"
         placeholder="按会话 ID 过滤（可选）"
@@ -81,8 +81,8 @@
       </div>
 
       <div v-if="!isLoading && !tracesData?.items?.length" class="flex flex-col items-center justify-center py-16">
-        <Activity class="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
-        <p class="text-gray-500 dark:text-gray-400">暂无链路记录，进行一次对话后即可查看</p>
+        <Activity class="w-16 h-16 text-content-disabled mb-4" />
+        <p class="text-content-muted">暂无链路记录，进行一次对话后即可查看</p>
       </div>
     </div>
 
@@ -92,13 +92,13 @@
         <template v-if="detail">
           <!-- 概览 -->
           <div class="grid grid-cols-2 gap-3">
-            <div class="bg-gray-50 dark:bg-dark-700 rounded-lg p-3">
-              <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">总耗时</p>
-              <p class="text-lg font-semibold text-gray-800 dark:text-white">{{ formatLatency(detail.total_latency_ms) }}</p>
+            <div class="bg-surface-muted rounded-lg p-3">
+              <p class="text-xs text-content-muted mb-1">总耗时</p>
+              <p class="text-lg font-semibold text-content">{{ formatLatency(detail.total_latency_ms) }}</p>
             </div>
-            <div class="bg-gray-50 dark:bg-dark-700 rounded-lg p-3">
-              <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Token 用量</p>
-              <p class="text-lg font-semibold text-gray-800 dark:text-white">
+            <div class="bg-surface-muted rounded-lg p-3">
+              <p class="text-xs text-content-muted mb-1">Token 用量</p>
+              <p class="text-lg font-semibold text-content">
                 {{ detail.token_usage?.prompt_tokens ?? '-' }} + {{ detail.token_usage?.completion_tokens ?? '-' }}
                 <el-tag v-if="detail.token_usage?.estimated" size="small" type="warning">字符估算</el-tag>
               </p>
@@ -106,17 +106,17 @@
           </div>
 
           <div>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">用户问题</p>
-            <p class="text-sm text-gray-800 dark:text-white">{{ detail.question }}</p>
+            <p class="text-xs text-content-muted mb-1">用户问题</p>
+            <p class="text-sm text-content">{{ detail.question }}</p>
           </div>
           <div v-if="detail.resolved_question && detail.resolved_question !== detail.question">
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">改写后问题</p>
-            <p class="text-sm text-gray-800 dark:text-white">{{ detail.resolved_question }}</p>
+            <p class="text-xs text-content-muted mb-1">改写后问题</p>
+            <p class="text-sm text-content">{{ detail.resolved_question }}</p>
           </div>
 
           <!-- 分阶段时间线 -->
           <div>
-            <p class="text-sm font-medium text-gray-800 dark:text-white mb-3">执行阶段</p>
+            <p class="text-sm font-medium text-content mb-3">执行阶段</p>
             <el-timeline>
               <el-timeline-item
                 v-for="(stage, idx) in detail.stages || []"
@@ -124,35 +124,35 @@
                 :type="stage.status === 'error' ? 'danger' : 'primary'"
                 :timestamp="formatLatency(stage.latency_ms)"
               >
-                <p class="text-sm text-gray-800 dark:text-white">
+                <p class="text-sm text-content">
                   {{ STAGE_LABELS[stage.name] || stage.name }}
                   <el-tag v-if="stage.status === 'error'" size="small" type="danger" class="ml-1">失败</el-tag>
                 </p>
-                <p v-if="stage.detail" class="text-xs text-gray-500 dark:text-gray-400 mt-1">{{ JSON.stringify(stage.detail) }}</p>
+                <p v-if="stage.detail" class="text-xs text-content-muted mt-1">{{ JSON.stringify(stage.detail) }}</p>
               </el-timeline-item>
             </el-timeline>
           </div>
 
           <!-- 检索与工具摘要 -->
           <div v-if="detail.kb_results?.length">
-            <p class="text-sm font-medium text-gray-800 dark:text-white mb-2">知识库检索命中（{{ detail.kb_results.length }} 条）</p>
+            <p class="text-sm font-medium text-content mb-2">知识库检索命中（{{ detail.kb_results.length }} 条）</p>
             <div class="space-y-2">
               <div
                 v-for="(r, idx) in detail.kb_results.slice(0, 5)"
                 :key="idx"
-                class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-700 rounded-lg p-2 line-clamp-2"
+                class="text-xs text-content-tertiary bg-surface-muted rounded-lg p-2 line-clamp-2"
               >
                 {{ r.page_content || r.content || JSON.stringify(r) }}
               </div>
             </div>
           </div>
           <div v-if="detail.tool_calls?.length">
-            <p class="text-sm font-medium text-gray-800 dark:text-white mb-2">工具调用（{{ detail.tool_calls.length }} 次）</p>
+            <p class="text-sm font-medium text-content mb-2">工具调用（{{ detail.tool_calls.length }} 次）</p>
             <div class="space-y-2">
               <div
                 v-for="(t, idx) in detail.tool_calls"
                 :key="idx"
-                class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-dark-700 rounded-lg p-2"
+                class="text-xs text-content-tertiary bg-surface-muted rounded-lg p-2"
               >
                 {{ t.tool_name || t.name || JSON.stringify(t).slice(0, 200) }}
               </div>
@@ -161,10 +161,10 @@
 
           <!-- 最终答案（可折叠） -->
           <div v-if="detail.final_answer">
-            <p class="text-sm font-medium text-gray-800 dark:text-white mb-2">最终回答</p>
+            <p class="text-sm font-medium text-content mb-2">最终回答</p>
             <el-collapse>
               <el-collapse-item :title="`${detail.final_answer.slice(0, 40)}...`">
-                <p class="text-sm text-gray-700 dark:text-gray-200 whitespace-pre-wrap">{{ detail.final_answer }}</p>
+                <p class="text-sm text-content-secondary-strong whitespace-pre-wrap">{{ detail.final_answer }}</p>
               </el-collapse-item>
             </el-collapse>
           </div>

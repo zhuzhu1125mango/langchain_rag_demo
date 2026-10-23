@@ -13,31 +13,31 @@
       <div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
         <div class="flex items-center gap-2 mb-2">
           <Tags class="w-5 h-5 text-blue-500" />
-          <span class="font-medium text-gray-800 dark:text-white">文档类型</span>
+          <span class="font-medium text-content">文档类型</span>
         </div>
         <p class="text-lg font-semibold text-blue-600 dark:text-blue-400">{{ classifyResult.document_type_label }}</p>
       </div>
       <div class="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4">
         <div class="flex items-center gap-2 mb-2">
           <Database class="w-5 h-5 text-purple-500" />
-          <span class="font-medium text-gray-800 dark:text-white">所属领域</span>
+          <span class="font-medium text-content">所属领域</span>
         </div>
         <p class="text-lg font-semibold text-purple-600 dark:text-purple-400">{{ classifyResult.domain_label }}</p>
       </div>
       <div>
-        <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">主题标签</p>
+        <p class="text-sm font-medium text-content-secondary mb-2">主题标签</p>
         <div class="flex flex-wrap gap-2">
           <span
             v-for="topic in classifyResult.topics"
             :key="topic"
-            class="px-3 py-1 text-sm bg-gray-100 dark:bg-dark-600 text-gray-700 dark:text-gray-300 rounded-full"
+            class="px-3 py-1 text-sm bg-surface-subtle-strong text-content-secondary rounded-full"
           >
             {{ topic }}
           </span>
         </div>
       </div>
-      <div class="bg-gray-50 dark:bg-dark-700 rounded-lg p-4">
-        <p class="text-sm text-gray-600 dark:text-gray-400">{{ classifyResult.summary }}</p>
+      <div class="bg-surface-muted rounded-lg p-4">
+        <p class="text-sm text-content-secondary-muted">{{ classifyResult.summary }}</p>
       </div>
       <div class="flex items-center justify-between text-sm text-gray-500">
         <span>置信度</span>
@@ -47,7 +47,7 @@
     <template #footer>
       <button
         @click="$emit('update:visibleClassify', false)"
-        class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+        class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
       >
         关闭
       </button>
@@ -75,53 +75,53 @@
       <div class="grid grid-cols-2 gap-4">
         <div class="bg-green-50 dark:bg-green-900/20 rounded-lg p-4">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-gray-600 dark:text-gray-400">完整性</span>
+            <span class="text-sm text-content-secondary-muted">完整性</span>
             <span class="text-sm font-medium text-green-600 dark:text-green-400">{{ qualityResult.completeness }}%</span>
           </div>
-          <div class="w-full bg-gray-200 dark:bg-dark-600 rounded-full h-2">
+          <div class="w-full bg-surface-strong rounded-full h-2">
             <div class="h-full bg-green-500 rounded-full" :style="{ width: qualityResult.completeness + '%' }"></div>
           </div>
-          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ qualityResult.completeness_comment }}</p>
+          <p class="mt-2 text-xs text-content-muted">{{ qualityResult.completeness_comment }}</p>
         </div>
         <div class="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-gray-600 dark:text-gray-400">可读性</span>
+            <span class="text-sm text-content-secondary-muted">可读性</span>
             <span class="text-sm font-medium text-blue-600 dark:text-blue-400">{{ qualityResult.readability }}%</span>
           </div>
-          <div class="w-full bg-gray-200 dark:bg-dark-600 rounded-full h-2">
+          <div class="w-full bg-surface-strong rounded-full h-2">
             <div class="h-full bg-blue-500 rounded-full" :style="{ width: qualityResult.readability + '%' }"></div>
           </div>
-          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ qualityResult.readability_comment }}</p>
+          <p class="mt-2 text-xs text-content-muted">{{ qualityResult.readability_comment }}</p>
         </div>
         <div class="bg-purple-50 dark:bg-purple-900/20 rounded-lg p-4">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-gray-600 dark:text-gray-400">结构</span>
+            <span class="text-sm text-content-secondary-muted">结构</span>
             <span class="text-sm font-medium text-purple-600 dark:text-purple-400">{{ qualityResult.structure }}%</span>
           </div>
-          <div class="w-full bg-gray-200 dark:bg-dark-600 rounded-full h-2">
+          <div class="w-full bg-surface-strong rounded-full h-2">
             <div class="h-full bg-purple-500 rounded-full" :style="{ width: qualityResult.structure + '%' }"></div>
           </div>
-          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ qualityResult.structure_comment }}</p>
+          <p class="mt-2 text-xs text-content-muted">{{ qualityResult.structure_comment }}</p>
         </div>
         <div class="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-4">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-sm text-gray-600 dark:text-gray-400">相关性</span>
+            <span class="text-sm text-content-secondary-muted">相关性</span>
             <span class="text-sm font-medium text-orange-600 dark:text-orange-400">{{ qualityResult.relevance }}%</span>
           </div>
-          <div class="w-full bg-gray-200 dark:bg-dark-600 rounded-full h-2">
+          <div class="w-full bg-surface-strong rounded-full h-2">
             <div class="h-full bg-orange-500 rounded-full" :style="{ width: qualityResult.relevance + '%' }"></div>
           </div>
-          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ qualityResult.relevance_comment }}</p>
+          <p class="mt-2 text-xs text-content-muted">{{ qualityResult.relevance_comment }}</p>
         </div>
       </div>
 
       <div class="bg-yellow-50 dark:bg-yellow-900/20 rounded-lg p-4">
         <div class="flex items-center gap-2 mb-2">
           <Award class="w-4 h-4 text-yellow-600" />
-          <span class="text-sm font-medium text-gray-700 dark:text-gray-300">改进建议</span>
+          <span class="text-sm font-medium text-content-secondary">改进建议</span>
         </div>
         <ul class="space-y-1">
-          <li v-for="(suggestion, index) in qualityResult.suggestions" :key="index" class="text-sm text-gray-600 dark:text-gray-400 flex items-start gap-2">
+          <li v-for="(suggestion, index) in qualityResult.suggestions" :key="index" class="text-sm text-content-secondary-muted flex items-start gap-2">
             <span class="text-yellow-500">•</span>
             {{ suggestion }}
           </li>
@@ -131,7 +131,7 @@
     <template #footer>
       <button
         @click="$emit('update:visibleQuality', false)"
-        class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+        class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
       >
         关闭
       </button>
@@ -150,24 +150,24 @@
     </div>
     <div v-else class="space-y-4">
       <div v-if="duplicateResults.length === 0" class="text-center py-8">
-        <Copy class="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-        <p class="text-gray-500 dark:text-gray-400">未检测到相似文档</p>
+        <Copy class="w-12 h-12 text-content-disabled mx-auto mb-3" />
+        <p class="text-content-muted">未检测到相似文档</p>
       </div>
       <div v-else>
         <div class="flex items-center justify-between mb-4">
-          <span class="text-sm text-gray-600 dark:text-gray-400">检测到 {{ duplicateResults.length }} 个相似文档</span>
+          <span class="text-sm text-content-secondary-muted">检测到 {{ duplicateResults.length }} 个相似文档</span>
           <span class="text-xs text-gray-400">相似度阈值: 70%</span>
         </div>
         <div class="space-y-3 max-h-80 overflow-y-auto">
           <div
             v-for="result in duplicateResults"
             :key="result.document_id"
-            class="flex items-center justify-between p-3 bg-gray-50 dark:bg-dark-700 rounded-lg"
+            class="flex items-center justify-between p-3 bg-surface-muted rounded-lg"
           >
             <div class="flex-1">
               <div class="flex items-center gap-2">
                 <FileText class="w-4 h-4 text-gray-400" />
-                <span class="text-sm font-medium text-gray-800 dark:text-white">{{ result.filename }}</span>
+                <span class="text-sm font-medium text-content">{{ result.filename }}</span>
               </div>
               <p v-if="result.kb_name" class="text-xs text-gray-500 mt-1">{{ result.kb_name }}</p>
             </div>
@@ -188,7 +188,7 @@
     <template #footer>
       <button
         @click="$emit('update:visibleDuplicate', false)"
-        class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+        class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
       >
         关闭
       </button>

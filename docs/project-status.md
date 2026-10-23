@@ -145,7 +145,7 @@
 | UX-5 | 历史页搜索 / 筛选 / 导出 | 仅批量删除，无检索与导出入口 | P2 | 前端 |
 | UX-6 | 长会话性能 | 无虚拟滚动，消息 + Markdown 全量渲染 | P2 | 前端 |
 | UX-7 | 体验细节 | 引用悬浮预览、消息内搜索、导出 Markdown、快捷键、新手引导；**对比度全量审计**（灰阶正文/次要文字） | P3 | 前端 |
-| VIS-1 | 设计 token 层 | 无 Tailwind config；22 处硬编码 hex；`dark:` 171 处但无统一变量 | P1 | 前端 |
+| VIS-1 | 设计 token 层 | ✅ **已实施（2026-10-24）**：`style.css` 建立语义化 token（page/surface/content/line/status + radius + shadow），浅色为默认值、`.dark` 统一覆盖；全局组件类（card/btn/input/badge/markdown/scrollbar）改用 `var()`；35 个前端文件将 `bg-white dark:bg-dark-800` 等成对类迁移为 `bg-surface` / `text-content` / `border-line`；KnowledgeGraph SVG 与 MarkdownRenderer 硬编码色改走 token；lint / vue-tsc / 110 单测 / build / E2E 5 项全绿 | 已完成 | 前端 |
 | VIS-2 | 组件 primitive | Button/Card/Dialog/Badge/Input 各处手写，圆角/阴影/间距漂移 | P1 | 前端 |
 | VIS-3 | 页面视觉收口 | 设置页 / 知识库页 / 聊天页密度与风格不一致 | P2 | 前端 |
 | CODE-1 | 巨型文件拆分 | `document.py` 1679 / `web_search_service.py` 1040 / `chat.py` 1026 / `wiki_compiler.py` 1000 / `stages.py` 783 / `agent_orchestrator.py` 740；前端 `queries/kb.ts` 967 | P1 | 开发 |

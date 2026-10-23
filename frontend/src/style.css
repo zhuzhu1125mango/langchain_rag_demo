@@ -21,27 +21,84 @@
   --color-dark-600: #252532;
   --color-dark-500: #32324a;
 
+  /* ============================================================
+     语义色 token（VIS-1）
+     浅色为默认值，深色在 .dark 中覆盖；组件只引用语义名，
+     不再手写 "bg-white dark:bg-dark-800" 这类成对类名。
+     ============================================================ */
+  --color-page: #f9fafb;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-surface-raised-strong: #ffffff;
+  --color-surface-muted: #f9fafb;
+  --color-surface-subtle: #f3f4f6;
+  --color-surface-subtle-strong: #f3f4f6;
+  --color-surface-strong: #e5e7eb;
+  --color-surface-disabled: #e5e7eb;
+  --color-surface-hover: #f3f4f6;
+  --color-surface-hover-strong: #e5e7eb;
+
+  --color-content-strong: #111827;
+  --color-content: #1f2937;
+  --color-content-secondary: #374151;
+  --color-content-secondary-strong: #374151;
+  --color-content-secondary-muted: #4b5563;
+  --color-content-tertiary: #4b5563;
+  --color-content-muted: #6b7280;
+  --color-content-subtle: #9ca3af;
+  --color-content-disabled: #d1d5db;
+  --color-content-inverse: #ffffff;
+  --color-on-accent: #ffffff;
+
+  --color-line: #e5e7eb;
+  --color-line-strong: #d1d5db;
+  --color-line-subtle: #f3f4f6;
+  --color-code-bg: #f6f8fa;
+  --color-scrollbar: #c1c1c1;
+  --color-scrollbar-hover: #a8a8a8;
+
+  --color-success: #22c55e;
+  --color-success-soft: #dcfce7;
+  --color-success-content: #166534;
+  --color-warning: #f59e0b;
+  --color-warning-soft: #fef3c7;
+  --color-warning-content: #92400e;
+  --color-danger: #ef4444;
+  --color-danger-soft: #fee2e2;
+  --color-danger-content: #991b1b;
+  --color-danger-hover: #dc2626;
+  --color-accent-purple: #a78bfa;
+
+  --radius-control: 0.5rem;
+  --radius-card: 0.75rem;
+  --radius-panel: 1rem;
+  --radius-pill: 9999px;
+
+  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-hover: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-elevated: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+
   --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 :root {
-  --primary-color: #2563eb;
-  --primary-dark: #1d4ed8;
-  --bg-light: #f5f7fa;
-  --bg-dark: #0a0a0f;
-  --accent-color: #52c41a;
-  --warning-color: #faad14;
-  --error-color: #f5222d;
-  --success-color: #52c41a;
+  --primary-color: var(--color-primary-500);
+  --primary-dark: var(--color-primary-600);
+  --bg-light: var(--color-page);
+  --bg-dark: var(--color-dark-900);
+  --accent-color: var(--color-success);
+  --warning-color: var(--color-warning);
+  --error-color: var(--color-danger);
+  --success-color: var(--color-success);
 
   /* Element Plus 品牌色同步（浅色）：登录/设置等 EP 组件页与整体主色保持一致 */
-  --el-color-primary: #2563eb;
-  --el-color-primary-dark-2: #1d4ed8;
-  --el-color-primary-light-3: #60a5fa;
-  --el-color-primary-light-5: #93c5fd;
-  --el-color-primary-light-7: #bfdbfe;
-  --el-color-primary-light-8: #dbeafe;
-  --el-color-primary-light-9: #eff6ff;
+  --el-color-primary: var(--color-primary-500);
+  --el-color-primary-dark-2: var(--color-primary-600);
+  --el-color-primary-light-3: var(--color-primary-400);
+  --el-color-primary-light-5: var(--color-primary-300);
+  --el-color-primary-light-7: var(--color-primary-200);
+  --el-color-primary-light-8: var(--color-primary-100);
+  --el-color-primary-light-9: var(--color-primary-50);
 }
 
 /* Element Plus 品牌色同步（深色）：EP 的 dark css-vars 会重定义调色板，需覆盖回品牌色 */
@@ -53,6 +110,46 @@
   --el-color-primary-light-7: #1e3a8a;
   --el-color-primary-light-8: #172554;
   --el-color-primary-light-9: #142246;
+}
+
+/* 语义色 token 深色覆盖（与 @theme 中浅色默认值一一对应） */
+.dark {
+  --color-page: #0a0a0f;
+  --color-surface: #12121a;
+  --color-surface-raised: #1a1a25;
+  --color-surface-raised-strong: #252532;
+  --color-surface-muted: #1a1a25;
+  --color-surface-subtle: #1a1a25;
+  --color-surface-subtle-strong: #252532;
+  --color-surface-strong: #252532;
+  --color-surface-disabled: #1a1a25;
+  --color-surface-hover: #1a1a25;
+  --color-surface-hover-strong: #252532;
+
+  --color-content-strong: #ffffff;
+  --color-content: #f9fafb;
+  --color-content-secondary: #d1d5db;
+  --color-content-secondary-strong: #e5e7eb;
+  --color-content-secondary-muted: #9ca3af;
+  --color-content-tertiary: #d1d5db;
+  --color-content-muted: #9ca3af;
+  --color-content-subtle: #6b7280;
+  --color-content-disabled: #4b5563;
+  --color-content-inverse: #111827;
+
+  --color-line: #252532;
+  --color-line-strong: #32324a;
+  --color-line-subtle: #1a1a25;
+  --color-code-bg: #1a1a25;
+  --color-scrollbar: #4a4a5a;
+  --color-scrollbar-hover: #5a5a6a;
+
+  --color-success-soft: rgb(34 197 94 / 0.15);
+  --color-success-content: #4ade80;
+  --color-warning-soft: rgb(245 158 11 / 0.15);
+  --color-warning-content: #fcd34d;
+  --color-danger-soft: rgb(239 68 68 / 0.15);
+  --color-danger-content: #f87171;
 }
 
 body {
@@ -75,20 +172,20 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: var(--color-scrollbar);
   border-radius: 3px;
 }
 
 .dark ::-webkit-scrollbar-thumb {
-  background: #4a4a5a;
+  background: var(--color-scrollbar);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: var(--color-scrollbar-hover);
 }
 
 .dark ::-webkit-scrollbar-thumb:hover {
-  background: #5a5a6a;
+  background: var(--color-scrollbar-hover);
 }
 
 .markdown-body {
@@ -101,7 +198,7 @@ body {
   font-weight: 600;
   margin-bottom: 16px;
   padding-bottom: 8px;
-  border-bottom: 1px solid #eaecef;
+  border-bottom: 1px solid var(--color-line);
 }
 
 .markdown-body h2 {
@@ -145,7 +242,7 @@ body {
   overflow: auto;
   font-size: 85%;
   line-height: 1.6;
-  background-color: #f6f8fa;
+  background-color: var(--color-code-bg);
   border-radius: 6px;
   margin-bottom: 16px;
 }
@@ -165,27 +262,27 @@ body {
 .markdown-body th,
 .markdown-body td {
   padding: 6px 13px;
-  border: 1px solid #dfe2e5;
+  border: 1px solid var(--color-line);
 }
 
 .markdown-body th {
   font-weight: 600;
-  background-color: #f6f8fa;
+  background-color: var(--color-code-bg);
 }
 
 .markdown-body tr:nth-child(2n) {
-  background-color: #f6f8fa;
+  background-color: var(--color-code-bg);
 }
 
 .markdown-body blockquote {
   padding: 0 1em;
-  color: #6a737d;
-  border-left: 0.25em solid #dfe2e5;
+  color: var(--color-content-muted);
+  border-left: 0.25em solid var(--color-line);
   margin: 0 0 16px 0;
 }
 
 .dark .markdown-body h1 {
-  border-bottom-color: #2a2a3a;
+  border-bottom-color: var(--color-line);
 }
 
 .dark .markdown-body code {
@@ -193,50 +290,48 @@ body {
 }
 
 .dark .markdown-body pre {
-  background-color: #1a1a25;
+  background-color: var(--color-code-bg);
 }
 
 .dark .markdown-body th,
 .dark .markdown-body td {
-  border-color: #32324a;
+  border-color: var(--color-line-strong);
 }
 
 .dark .markdown-body th {
-  background-color: #1a1a25;
+  background-color: var(--color-code-bg);
 }
 
 .dark .markdown-body tr:nth-child(2n) {
-  background-color: #1a1a25;
+  background-color: var(--color-code-bg);
 }
 
 .dark .markdown-body blockquote {
-  color: #8a939d;
-  border-left-color: #32324a;
+  color: var(--color-content-muted);
+  border-left-color: var(--color-line-strong);
 }
 
 /* 助手消息：白底卡片（主流 AI 产品风格），长文 Markdown 可读性优于蓝底白字 */
 .chat-bubble-assistant {
-  background-color: #ffffff;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-line);
+  box-shadow: var(--shadow-card);
 }
 
 .dark .chat-bubble-assistant {
-  background-color: #12121a;
-  border-color: #252532;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 /* 用户消息：品牌色浅底 + 同色系描边 */
 .chat-bubble-user {
-  background-color: #eff6ff;
-  border: 1px solid #dbeafe;
+  background-color: var(--color-primary-50);
+  border: 1px solid var(--color-primary-100);
   box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
 }
 
 .dark .chat-bubble-user {
-  background-color: #1a1a25;
-  border-color: #252532;
+  background-color: var(--color-surface-raised);
+  border-color: var(--color-line);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
@@ -370,153 +465,110 @@ body {
 
 .btn-primary {
   padding: 8px 16px;
-  background-color: #2563eb;
-  color: white;
-  border-radius: 8px;
+  background-color: var(--color-primary-500);
+  color: var(--color-on-accent);
+  border-radius: var(--radius-control);
   font-weight: 500;
   transition: all 0.2s ease;
 }
 
 .btn-primary:hover {
-  background-color: #1d4ed8;
+  background-color: var(--color-primary-600);
 }
 
 .btn-secondary {
   padding: 8px 16px;
-  background-color: #f3f4f6;
-  color: #4b5563;
-  border-radius: 8px;
+  background-color: var(--color-surface-subtle);
+  color: var(--color-content-tertiary);
+  border-radius: var(--radius-control);
   transition: all 0.2s ease;
 }
 
-.dark .btn-secondary {
-  background-color: #1a1a25;
-  color: #d1d5db;
-}
-
 .btn-secondary:hover {
-  background-color: #e5e7eb;
-}
-
-.dark .btn-secondary:hover {
-  background-color: #252532;
+  background-color: var(--color-surface-strong);
 }
 
 .btn-danger {
   padding: 8px 16px;
-  background-color: #ef4444;
-  color: white;
-  border-radius: 8px;
+  background-color: var(--color-danger);
+  color: var(--color-on-accent);
+  border-radius: var(--radius-control);
   font-weight: 500;
   transition: all 0.2s ease;
 }
 
 .btn-danger:hover {
-  background-color: #dc2626;
+  background-color: var(--color-danger-hover);
 }
 
 .card {
-  background-color: white;
-  border-radius: 12px;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  border: 1px solid #e5e7eb;
+  background-color: var(--color-surface);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--color-line);
   transition: all 0.2s ease;
 }
 
-.dark .card {
-  background-color: #12121a;
-  border-color: #252532;
-}
-
 .card-hover:hover {
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  border-color: #2563eb;
+  box-shadow: var(--shadow-hover);
+  border-color: var(--color-primary-500);
 }
 
 .input-field {
   padding: 8px 16px;
-  background-color: #f3f4f6;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  color: #1f2937;
+  background-color: var(--color-surface-subtle);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-control);
+  color: var(--color-content);
   font-family: inherit;
   transition: all 0.2s ease;
 }
 
 .input-field::placeholder {
-  color: #9ca3af;
-}
-
-.dark .input-field {
-  background-color: #1a1a25;
-  border-color: #252532;
-  color: #f9fafb;
-}
-
-.dark .input-field::placeholder {
-  color: #6b7280;
+  color: var(--color-content-subtle);
 }
 
 .input-field:focus {
   outline: none;
-  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
-  border-color: transparent;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary-500) 20%, transparent);
+  border-color: var(--color-primary-500);
 }
 
 .badge {
   padding: 2px 8px;
   font-size: 12px;
-  border-radius: 9999px;
+  border-radius: var(--radius-pill);
 }
 
 .badge-primary {
-  background-color: #dbeafe;
-  color: #1d4ed8;
+  background-color: var(--color-primary-100);
+  color: var(--color-primary-700);
 }
 
 .dark .badge-primary {
-  background-color: rgba(37, 99, 235, 0.15);
-  color: #60a5fa;
+  background-color: rgb(37 99 235 / 0.15);
+  color: var(--color-primary-400);
 }
 
 .badge-success {
-  background-color: #dcfce7;
-  color: #166534;
-}
-
-.dark .badge-success {
-  background-color: rgba(34, 197, 94, 0.15);
-  color: #4ade80;
+  background-color: var(--color-success-soft);
+  color: var(--color-success-content);
 }
 
 .badge-warning {
-  background-color: #fef3c7;
-  color: #92400e;
-}
-
-.dark .badge-warning {
-  background-color: rgba(250, 173, 20, 0.15);
-  color: #fcd34d;
+  background-color: var(--color-warning-soft);
+  color: var(--color-warning-content);
 }
 
 .badge-error {
-  background-color: #fee2e2;
-  color: #991b1b;
-}
-
-.dark .badge-error {
-  background-color: rgba(245, 34, 45, 0.15);
-  color: #f87171;
+  background-color: var(--color-danger-soft);
+  color: var(--color-danger-content);
 }
 
 .skeleton {
-  background-color: #e5e7eb;
+  background-color: var(--color-line);
   border-radius: 0.25rem;
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-.dark .skeleton {
-  background-color: #252532;
 }
 
 /* ============================================================
@@ -539,7 +591,7 @@ body {
   padding: 0.5rem 0.75rem;
   border-radius: 0.5rem;
   background-color: var(--color-primary-600);
-  color: #fff;
+  color: var(--color-on-accent);
   font-size: 0.875rem;
   transform: translateY(-200%);
   transition: transform 0.15s ease;

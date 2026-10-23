@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex h-full bg-gray-50 dark:bg-dark-900 relative">
+  <div class="flex-1 flex h-full bg-page relative">
     <!-- 答案对比侧边面板 -->
     <CompareAnswerPanel
       :show="showComparePanel"
@@ -10,16 +10,16 @@
     />
 
     <div class="flex-1 flex flex-col h-full">
-      <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-3 lg:py-4">
+      <header class="bg-surface border-b border-line px-4 sm:px-6 py-3 lg:py-4">
         <div class="flex items-center justify-between gap-2">
           <div class="min-w-0">
-            <h1 class="text-lg lg:text-xl font-semibold text-gray-800 dark:text-white truncate">智能助手</h1>
-            <p class="hidden sm:block text-sm text-gray-500 dark:text-gray-400 mt-1">基于知识库的智能问答系统</p>
+            <h1 class="text-lg lg:text-xl font-semibold text-content truncate">智能助手</h1>
+            <p class="hidden sm:block text-sm text-content-muted mt-1">基于知识库的智能问答系统</p>
           </div>
           <div class="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
             <button
               @click="clearChat"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-dark-700 hover:text-gray-700 dark:hover:text-gray-200 rounded-lg transition-colors"
+              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-content-muted hover:bg-surface-hover hover:text-gray-700 dark:hover:text-gray-200 rounded-lg transition-colors"
               title="清空当前对话"
             >
               <Trash2 class="w-4 h-4" />
@@ -38,8 +38,8 @@
               :class="[
                 'flex items-center gap-2 px-2 sm:px-3 py-2 text-sm rounded-lg border transition-colors',
                 selectedKBs.length >= 2 && questionInput.trim()
-                  ? 'border-gray-300 dark:border-dark-500 text-gray-700 dark:text-gray-200 hover:border-primary-400 dark:hover:border-primary-600 hover:text-primary-600 dark:hover:text-primary-400'
-                  : 'border-gray-200 dark:border-dark-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
+                  ? 'border-line-strong text-content-secondary-strong hover:border-primary-400 dark:hover:border-primary-600 hover:text-primary-600 dark:hover:text-primary-400'
+                  : 'border-line text-content-subtle cursor-not-allowed'
               ]"
               title="对比多个知识库的答案"
             >

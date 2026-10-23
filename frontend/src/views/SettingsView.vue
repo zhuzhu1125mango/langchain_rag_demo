@@ -1,6 +1,6 @@
 <template>
   <div class="flex flex-col lg:flex-row h-full">
-    <aside class="w-full lg:w-64 shrink-0 bg-white dark:bg-dark-800 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-dark-600 p-2 lg:p-4">
+    <aside class="w-full lg:w-64 shrink-0 bg-surface border-b lg:border-b-0 lg:border-r border-line p-2 lg:p-4">
       <nav class="flex lg:block gap-1 overflow-x-auto lg:space-y-1">
         <h2 class="hidden lg:block px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">设置菜单</h2>
         <button
@@ -9,10 +9,10 @@
           @click="navigateTo(item.path)"
           :class="[
             'flex-shrink-0 whitespace-nowrap w-auto lg:w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-left',
-            'hover:bg-gray-100 dark:hover:bg-dark-700',
+            'hover:bg-surface-hover',
             route.path === item.path
               ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
-              : 'text-gray-600 dark:text-gray-300'
+              : 'text-content-tertiary'
           ]"
         >
           <component :is="item.icon" class="w-5 h-5" />

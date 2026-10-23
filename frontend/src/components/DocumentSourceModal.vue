@@ -6,20 +6,20 @@
       @click.self="close"
     >
       <div class="absolute inset-0 bg-black/50 backdrop-blur-sm"></div>
-      <div class="relative bg-white dark:bg-dark-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col animate-scale-in">
-        <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-dark-600">
+      <div class="relative bg-surface rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col animate-scale-in">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-line">
           <div class="flex items-center gap-3">
             <FileText class="w-5 h-5 text-primary-500" />
             <div>
-              <h3 class="text-lg font-semibold text-gray-800 dark:text-white">{{ sourceData?.filename }}</h3>
-              <p class="text-sm text-gray-500 dark:text-gray-400">
+              <h3 class="text-lg font-semibold text-content">{{ sourceData?.filename }}</h3>
+              <p class="text-sm text-content-muted">
                 第 {{ (sourceData?.chunk_index ?? 0) + 1 }} / {{ sourceData?.total_chunks ?? 0 }} 段
               </p>
             </div>
           </div>
           <button
             @click="close"
-            class="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+            class="p-2 text-gray-400 hover:text-content-tertiary rounded-lg hover:bg-surface-hover transition-colors"
             aria-label="关闭来源详情"
           >
             <X class="w-5 h-5" />
@@ -29,7 +29,7 @@
         <div class="flex-1 overflow-y-auto p-6">
           <div v-if="isLoading" class="flex flex-col items-center justify-center py-12">
             <Loader2 class="w-8 h-8 text-primary-500 animate-spin" />
-            <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">加载中...</p>
+            <p class="mt-3 text-sm text-content-muted">加载中...</p>
           </div>
           <div v-else-if="sourceData" class="space-y-4">
             <div v-if="sourceData.kb_name" class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full text-sm">
@@ -40,10 +40,10 @@
             <div class="relative">
               <div class="absolute -left-3 top-0 bottom-0 w-0.5 bg-primary-500 rounded-full"></div>
               <div class="pl-4">
-                <h4 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">上下文内容</h4>
-                <div class="bg-gray-50 dark:bg-dark-700 rounded-xl p-4">
+                <h4 class="text-sm font-medium text-content-muted mb-2">上下文内容</h4>
+                <div class="bg-surface-muted rounded-xl p-4">
                   <p 
-                    class="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed"
+                    class="text-sm text-content-secondary whitespace-pre-wrap leading-relaxed"
                     v-html="highlightedContent"
                   ></p>
                 </div>
@@ -53,9 +53,9 @@
             <div class="relative">
               <div class="absolute -left-3 top-0 bottom-0 w-0.5 bg-green-500 rounded-full"></div>
               <div class="pl-4">
-                <h4 class="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">引用段落</h4>
+                <h4 class="text-sm font-medium text-content-muted mb-2">引用段落</h4>
                 <div class="bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-xl p-4">
-                  <p class="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                  <p class="text-sm text-content-secondary whitespace-pre-wrap leading-relaxed">
                     {{ sourceData.content }}
                   </p>
                 </div>
@@ -63,15 +63,15 @@
             </div>
           </div>
           <div v-else class="flex flex-col items-center justify-center py-12">
-            <FileQuestion class="w-12 h-12 text-gray-300 dark:text-gray-600 mb-3" />
-            <p class="text-sm text-gray-500 dark:text-gray-400">无法获取文档内容</p>
+            <FileQuestion class="w-12 h-12 text-content-disabled mb-3" />
+            <p class="text-sm text-content-muted">无法获取文档内容</p>
           </div>
         </div>
         
-        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-dark-600">
+        <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">
           <button
             @click="close"
-            class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
           >
             关闭
           </button>

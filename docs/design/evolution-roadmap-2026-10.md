@@ -79,7 +79,7 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 
 | # | 方向 | 现状 / 证据 | 优先级 |
 |---|---|---|---|
-| VIS-1 | 设计 token 层 | 无 tailwind config，22 处硬编码 hex；dark 无统一变量 | P1 |
+| VIS-1 | 设计 token 层 | ✅ 已实施（2026-10-24）：`style.css` 新增语义色（page/surface/content/line/status）、圆角与阴影 token，`.dark` 统一覆盖；全局组件类改用 `var(--token)`；35 个前端文件将 `light + dark:` 成对类迁移为 `bg-surface` / `text-content` / `border-line` 等语义类；SVG/Markdown 硬编码色改走 token | 已完成 |
 | VIS-2 | 组件 primitive | Button/Card/Dialog/Badge/Input 各处手写，风格漂移 | P1 |
 | VIS-3 | 页面视觉收口 | 设置页、知识库页、聊天页密度/圆角/阴影不一致 | P2 |
 

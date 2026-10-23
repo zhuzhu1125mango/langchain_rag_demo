@@ -11,14 +11,14 @@
       <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center mb-4 shadow-lg shadow-primary-500/20">
         <Bot class="w-7 h-7 text-white" />
       </div>
-      <h2 class="text-lg font-semibold text-gray-800 dark:text-white">有什么可以帮您？</h2>
-      <p class="text-sm text-gray-500 dark:text-gray-400 mt-1.5 mb-6">基于知识库的智能问答，点击下方问题开始对话</p>
+      <h2 class="text-lg font-semibold text-content">有什么可以帮您？</h2>
+      <p class="text-sm text-content-muted mt-1.5 mb-6">基于知识库的智能问答，点击下方问题开始对话</p>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-xl">
         <button
           v-for="question in displayQuestions"
           :key="question"
           @click="emit('send-quick-question', question)"
-          class="px-4 py-3 text-sm text-left text-gray-600 dark:text-gray-300 bg-white dark:bg-dark-800 border border-gray-200 dark:border-dark-600 rounded-xl hover:border-primary-400 dark:hover:border-primary-500 hover:shadow-sm transition-all truncate"
+          class="px-4 py-3 text-sm text-left text-content-tertiary bg-surface border border-line rounded-xl hover:border-primary-400 dark:hover:border-primary-500 hover:shadow-sm transition-all truncate"
         >
           {{ question }}
         </button>
@@ -36,7 +36,7 @@
       <!-- 用户消息：单气泡结构 -->
       <div
         v-if="message.role === 'user'"
-        class="max-w-3xl px-4 py-3 rounded-2xl chat-bubble-user text-gray-800 dark:text-gray-100 rounded-br-md"
+        class="max-w-3xl px-4 py-3 rounded-2xl chat-bubble-user text-content rounded-br-md"
       >
         <MarkdownRenderer :content="message.content" />
       </div>
@@ -50,16 +50,16 @@
         <ThinkingPanel :thinking="message.thinking" :loading="message.isLoading" />
 
         <!-- 助手卡片：身份标识 / 正文 / 加载态 -->
-        <div class="px-4 py-3 rounded-2xl rounded-bl-md chat-bubble-assistant text-gray-800 dark:text-gray-100">
+        <div class="px-4 py-3 rounded-2xl rounded-bl-md chat-bubble-assistant text-content">
           <div class="flex items-center gap-2 mb-2">
             <span class="w-5 h-5 rounded-md bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
               <Bot class="w-3 h-3 text-white" />
             </span>
-            <span class="text-xs font-medium text-gray-500 dark:text-gray-400">智能助手</span>
+            <span class="text-xs font-medium text-content-muted">智能助手</span>
           </div>
 
           <template v-if="message.isLoading">
-            <span class="text-sm text-gray-500 dark:text-gray-400">{{ message.thinking ? '正在思考...' : (message.reasoning?.length ? '正在搜索...' : '正在思考...') }}</span>
+            <span class="text-sm text-content-muted">{{ message.thinking ? '正在思考...' : (message.reasoning?.length ? '正在搜索...' : '正在思考...') }}</span>
             <div class="flex gap-1 inline-flex ml-2">
               <span class="w-2 h-2 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 0ms"></span>
               <span class="w-2 h-2 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 150ms"></span>
@@ -78,7 +78,7 @@
           </template>
           <template v-else>
             <MarkdownRenderer :content="message.content" :sources="message.sources" @cite-click="onCiteClick(message, $event)" />
-            <p v-if="message.stopped" class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">已停止生成</p>
+            <p v-if="message.stopped" class="mt-1.5 text-xs text-content-subtle">已停止生成</p>
           </template>
         </div>
 
@@ -112,7 +112,7 @@
         </div>
         <p
           v-else-if="message.approval"
-          class="text-xs text-gray-500 dark:text-gray-400 px-1"
+          class="text-xs text-content-muted px-1"
         >
           工具 {{ message.approval.tool }}：{{ approvalStatusText(message) }}
         </p>
@@ -132,7 +132,7 @@
           <div class="flex items-center gap-1">
             <button
               @click="copyMessage(message)"
-              class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+              class="p-1.5 rounded-md text-gray-400 hover:text-content-tertiary hover:bg-surface-hover transition-colors"
               :title="copiedId === message.id ? '已复制' : '复制回答'"
               :aria-label="copiedId === message.id ? '已复制回答' : '复制回答'"
             >
@@ -142,7 +142,7 @@
             <button
               v-if="isLastAssistant(index)"
               @click="emit('regenerate')"
-              class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+              class="p-1.5 rounded-md text-gray-400 hover:text-content-tertiary hover:bg-surface-hover transition-colors"
               title="重新生成"
               aria-label="重新生成回答"
             >
@@ -268,7 +268,7 @@ function getStarClass(message: Message, star: number): string {
   if (star <= getEffectiveRating(message)) {
     return 'text-yellow-400 fill-yellow-400'
   }
-  return 'text-gray-300 dark:text-gray-600'
+  return 'text-content-disabled'
 }
 
 /** 设置/清除鼠标悬停时的临时评分（未提交前的预览高亮）。 */

@@ -7,7 +7,7 @@
   >
     <div class="space-y-4">
       <div>
-        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">选择文件</label>
+        <label class="block text-sm font-medium text-content-secondary mb-2">选择文件</label>
         <input
           type="file"
           ref="fileInput"
@@ -19,10 +19,10 @@
         <button
           @click="fileInput?.click()"
           :disabled="isUploading"
-          class="w-full p-6 border-2 border-dashed border-gray-300 dark:border-dark-600 rounded-lg hover:border-primary-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          class="w-full p-6 border-2 border-dashed border-line-strong rounded-lg hover:border-primary-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <Upload class="w-8 h-8 text-gray-400 mx-auto mb-2" />
-          <p class="text-sm text-gray-600 dark:text-gray-400">点击或拖拽上传文件</p>
+          <p class="text-sm text-content-secondary-muted">点击或拖拽上传文件</p>
           <p class="text-xs text-gray-400 mt-1">支持 PDF, DOCX, XLSX, PPTX, MD, TXT 等格式</p>
         </button>
       </div>
@@ -30,10 +30,10 @@
       <!-- 实时进度条 -->
       <div v-if="isUploading" class="space-y-2">
         <div class="flex items-center justify-between text-sm">
-          <span class="text-gray-600 dark:text-gray-300">{{ currentUploadFile }}</span>
+          <span class="text-content-tertiary">{{ currentUploadFile }}</span>
           <span class="text-gray-500">{{ uploadProgress }}%</span>
         </div>
-        <div class="w-full bg-gray-200 dark:bg-dark-600 rounded-full h-2">
+        <div class="w-full bg-surface-strong rounded-full h-2">
           <div
             class="bg-primary-500 h-2 rounded-full transition-all duration-300"
             :style="{ width: uploadProgress + '%' }"
@@ -43,9 +43,9 @@
       </div>
 
       <div v-if="selectedFiles.length > 0 && !isUploading" class="space-y-2">
-        <p class="text-sm text-gray-600 dark:text-gray-300">已选择 {{ selectedFiles.length }} 个文件</p>
+        <p class="text-sm text-content-tertiary">已选择 {{ selectedFiles.length }} 个文件</p>
         <div v-for="file in selectedFiles" :key="file.name" class="flex items-center justify-between">
-          <span class="text-sm text-gray-800 dark:text-white">{{ file.name }}</span>
+          <span class="text-sm text-content">{{ file.name }}</span>
           <button @click="removeFile(file)" class="text-gray-400 hover:text-red-500">
             <X class="w-4 h-4" />
           </button>
@@ -60,7 +60,7 @@
         <div class="flex gap-2">
           <button
             @click="cancelUpload"
-            class="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
           >
             {{ isUploading ? '取消上传' : '取消' }}
           </button>
@@ -71,7 +71,7 @@
               'px-4 py-2 text-sm rounded-lg transition-colors',
               selectedFiles.length > 0 && !isUploading
                 ? 'bg-primary-500 text-white hover:bg-primary-600'
-                : 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
+                : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
             ]"
           >
             {{ isUploading ? '上传中...' : '上传' }}

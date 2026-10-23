@@ -4,8 +4,8 @@
     class="rounded-xl border transition-all duration-200 overflow-hidden"
     :class="[
       isExpanded
-        ? 'bg-gray-50/80 border-gray-200 dark:bg-dark-700/60 dark:border-dark-600'
-        : 'bg-gray-50 border-gray-200 hover:bg-gray-100 dark:bg-dark-700/40 dark:border-dark-600 dark:hover:bg-dark-700/60'
+        ? 'bg-surface-muted/80 border-line'
+        : 'bg-surface-muted border-line hover:bg-surface-hover/40'
     ]"
   >
     <!-- 折叠态头部：摘要 + 展开按钮 -->
@@ -24,9 +24,9 @@
         />
         <Sparkles
           v-else
-          class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400 flex-shrink-0"
+          class="w-3.5 h-3.5 text-content-muted flex-shrink-0"
         />
-        <span class="text-xs text-gray-700 dark:text-gray-200 truncate">
+        <span class="text-xs text-content-secondary-strong truncate">
           {{ summaryText }}
         </span>
       </div>
@@ -37,12 +37,12 @@
     <div v-else class="px-3 py-2">
       <div class="flex items-center justify-between gap-2 mb-2">
         <div class="flex items-center gap-2">
-          <Sparkles class="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
-          <span class="text-xs font-medium text-gray-700 dark:text-gray-200">思考过程</span>
+          <Sparkles class="w-3.5 h-3.5 text-content-muted" />
+          <span class="text-xs font-medium text-content-secondary-strong">思考过程</span>
         </div>
         <button
           type="button"
-          class="p-1 rounded hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
+          class="p-1 rounded hover:bg-surface-hover-strong transition-colors"
           aria-expanded="true"
           aria-label="收起思考过程"
           @click="isExpanded = false"
@@ -79,32 +79,32 @@
             <div
               v-if="index < sortedSteps.length - 1"
               class="w-px flex-1 min-h-[16px] my-0.5"
-              :class="step.status === 'failed' ? 'bg-red-200 dark:bg-red-900/40' : 'bg-gray-200 dark:bg-dark-600'"
+              :class="step.status === 'failed' ? 'bg-red-200 dark:bg-red-900/40' : 'bg-surface-strong'"
             />
           </div>
 
           <!-- 内容 -->
           <div class="flex-1 pb-3 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="text-xs font-medium text-gray-800 dark:text-gray-100">
+              <span class="text-xs font-medium text-content">
                 {{ step.title }}
               </span>
               <span
                 v-if="step.duration_ms && step.duration_ms > 0"
-                class="text-xs text-gray-400 dark:text-gray-500"
+                class="text-xs text-content-subtle"
               >
                 {{ step.duration_ms }}ms
               </span>
             </div>
             <p
               v-if="step.content"
-              class="text-xs text-gray-600 dark:text-gray-300 mt-0.5 leading-relaxed"
+              class="text-xs text-content-tertiary mt-0.5 leading-relaxed"
             >
               {{ step.content }}
             </p>
             <p
               v-if="step.metadata?.sources_count !== undefined"
-              class="text-xs text-gray-500 dark:text-gray-400 mt-0.5"
+              class="text-xs text-content-muted mt-0.5"
             >
               来源数：{{ step.metadata.sources_count }}
             </p>
@@ -210,7 +210,7 @@ function getStatusDotClass(status: ReasoningStep['status']): string {
     case 'failed':
       return 'bg-red-100 dark:bg-red-900/40'
     default:
-      return 'bg-gray-100 dark:bg-dark-600'
+      return 'bg-surface-subtle-strong'
   }
 }
 </script>

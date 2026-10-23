@@ -1,5 +1,5 @@
 <template>
-  <div class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-4">
+  <div class="bg-surface border-b border-line px-4 sm:px-6 py-4">
     <div class="mb-3">
       <div class="relative">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -7,12 +7,12 @@
           v-model="kbSearchQuery"
           type="text"
           placeholder="搜索知识库..."
-          class="w-full pl-10 pr-4 py-2 bg-gray-100 dark:bg-dark-700 text-gray-800 dark:text-white placeholder-gray-400 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+          class="w-full pl-10 pr-4 py-2 bg-surface-subtle text-content placeholder-gray-400 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
         <button
           v-if="kbSearchQuery"
           @click="kbSearchQuery = ''"
-          class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-content-tertiary"
         >
           <X class="w-4 h-4" />
         </button>
@@ -23,7 +23,7 @@
       <div v-for="group in groupedKBs" :key="group.id || 'ungrouped'" class="space-y-1">
         <div v-if="group.name" class="flex items-center gap-2 px-2 py-1">
           <Folder class="w-4 h-4 text-gray-400" />
-          <span class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ group.name }}</span>
+          <span class="text-xs font-medium text-content-muted">{{ group.name }}</span>
           <span class="text-xs text-gray-400">({{ group.kbs?.length || 0 }})</span>
         </div>
         <div class="flex flex-wrap gap-2 pl-2" :class="group.name ? 'pl-6' : ''">
@@ -35,7 +35,7 @@
               'px-3 py-1.5 rounded-full text-sm transition-all flex items-center gap-1.5',
               selectedKBs.includes(kb.id)
                 ? 'bg-primary-500 text-white'
-                : 'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600'
+                : 'bg-surface-subtle text-content-tertiary hover:bg-surface-hover-strong'
             ]"
           >
             <Database class="w-3.5 h-3.5" />
@@ -54,7 +54,7 @@
           'px-3 py-1.5 rounded-full text-sm transition-all flex items-center gap-1.5',
           selectedKBs.includes(kb.id)
             ? 'bg-primary-500 text-white'
-            : 'bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600'
+            : 'bg-surface-subtle text-content-tertiary hover:bg-surface-hover-strong'
         ]"
       >
         <Database class="w-3.5 h-3.5" />
@@ -63,14 +63,14 @@
       </button>
     </div>
     <div v-else class="text-center py-4">
-      <Database class="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+      <Database class="w-8 h-8 text-content-disabled mx-auto mb-2" />
       <p class="text-sm text-gray-400">未找到匹配的知识库</p>
     </div>
 
     <button
       v-if="selectedKBs.length > 0"
       @click="clearSelection"
-      class="mt-3 px-4 py-2 text-sm bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
+      class="mt-3 px-4 py-2 text-sm bg-surface-subtle text-content-tertiary rounded-lg hover:bg-surface-hover-strong transition-colors"
     >
       清除选择 ({{ selectedKBs.length }})
     </button>

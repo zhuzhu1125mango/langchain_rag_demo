@@ -225,7 +225,7 @@ function onContentKeydown(e: KeyboardEvent): void {
   padding: 0 4px;
   font-size: 0.7em;
   line-height: 1;
-  color: #3b82f6;
+  color: var(--color-primary-500);
   background-color: rgba(59, 130, 246, 0.1);
   border-radius: 3px;
   cursor: pointer;
@@ -239,7 +239,7 @@ function onContentKeydown(e: KeyboardEvent): void {
 
 /* 助手气泡（蓝底白字）内的引用上标使用浅色适配 */
 .chat-bubble-assistant .cite-ref {
-  color: #bfdbfe;
+  color: var(--color-primary-200);
   background-color: rgba(255, 255, 255, 0.15);
 }
 
