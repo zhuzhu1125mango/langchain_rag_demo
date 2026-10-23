@@ -54,13 +54,21 @@
         </AppCard>
       </div>
 
-      <div v-if="!sessionsData?.length" class="flex flex-col items-center justify-center h-full">
-        <MessageCircle class="w-16 h-16 text-content-disabled mb-4" />
-        <p class="text-content-muted">暂无历史对话</p>
-        <AppButton variant="primary" class="mt-4" @click="router.push('/')">
-          开始新对话
-        </AppButton>
-      </div>
+      <AppStateView
+        v-if="!sessionsData?.length"
+        state="empty"
+        title="暂无历史对话"
+        description="开始一次对话后，这里会保存你的历史记录"
+        :icon="MessageCircle"
+        padding="lg"
+        class="h-full"
+      >
+        <template #action>
+          <AppButton variant="primary" @click="router.push('/')">
+            开始新对话
+          </AppButton>
+        </template>
+      </AppStateView>
     </div>
 
     <div v-if="selectedSession" class="bg-surface border-t border-line px-6 py-4">
@@ -101,7 +109,7 @@ import { useSessions, useDeleteSession, useBatchDeleteSessions, useUpdateSession
 import type { Session } from '@/queries/chat'
 import { Trash2, X, MessageCircle, Edit3, MessageSquare, Activity } from '@lucide/vue'
 import { formatDate } from '@/utils/format'
-import { AppButton, AppCard } from '@/components/ui'
+import { AppButton, AppCard, AppStateView } from '@/components/ui'
 import { useToast } from '@/composables/useToast'
 
 const router = useRouter()

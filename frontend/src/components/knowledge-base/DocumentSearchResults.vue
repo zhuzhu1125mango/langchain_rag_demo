@@ -13,14 +13,20 @@
       </AppButton>
     </div>
 
-    <div v-if="isSearching" class="p-8 text-center">
-      <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500 mx-auto"></div>
-    </div>
+    <AppStateView
+      v-if="isSearching"
+      state="loading"
+      padding="md"
+    />
 
-    <div v-else-if="results.length === 0" class="p-8 text-center">
-      <BookOpen class="w-12 h-12 text-content-disabled mx-auto mb-4" />
-      <p class="text-content-muted">未找到匹配的内容</p>
-    </div>
+    <AppStateView
+      v-else-if="results.length === 0"
+      state="empty"
+      title="未找到匹配的内容"
+      description="换个关键词再试试"
+      :icon="BookOpen"
+      padding="md"
+    />
 
     <div v-else class="p-4 space-y-3 max-h-96 overflow-y-auto">
       <div
@@ -72,7 +78,7 @@
  */
 import { Search, ArrowLeft, BookOpen, FileText, Eye } from '@lucide/vue'
 import type { SearchResult } from '@/queries/kb'
-import { AppButton } from '@/components/ui'
+import { AppButton, AppStateView } from '@/components/ui'
 
 defineProps<{
   results: SearchResult[]

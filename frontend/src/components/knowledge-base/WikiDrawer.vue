@@ -82,17 +82,20 @@
     </div>
 
     <!-- 页面列表 -->
-    <div v-if="isLoading" class="flex items-center justify-center py-12">
-      <Loader2 class="w-6 h-6 text-gray-400 animate-spin" />
-    </div>
+    <AppStateView
+      v-if="isLoading"
+      state="loading"
+      padding="lg"
+    />
 
-    <div v-else-if="!pages?.length" class="text-center py-12">
-      <BookOpen class="w-10 h-10 text-content-disabled mx-auto mb-3" />
-      <p class="text-sm text-content-muted">暂无 Wiki 页面</p>
-      <p class="text-xs text-content-subtle mt-1">
-        上传文档并开启 WIKI_COMPILE_ENABLED 后自动生成
-      </p>
-    </div>
+    <AppStateView
+      v-else-if="!pages?.length"
+      state="empty"
+      title="暂无 Wiki 页面"
+      description="上传文档并开启 WIKI_COMPILE_ENABLED 后自动生成"
+      :icon="BookOpen"
+      padding="lg"
+    />
 
     <div v-else class="space-y-2">
       <div
@@ -153,7 +156,7 @@ import { buildWsUrl } from '@/utils/ws'
 import { getToken } from '@/utils/auth'
 import { useToast, handleMutationError } from '@/composables/useToast'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
-import { AppButton } from '@/components/ui'
+import { AppButton, AppStateView } from '@/components/ui'
 import {
   useWikiPages,
   useRebuildWiki,

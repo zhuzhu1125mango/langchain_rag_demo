@@ -5,6 +5,8 @@ import AppCard from '../ui/AppCard.vue'
 import AppBadge from '../ui/AppBadge.vue'
 import AppInput from '../ui/AppInput.vue'
 import AppSelect from '../ui/AppSelect.vue'
+import AppSkeleton from '../ui/AppSkeleton.vue'
+import AppStateView from '../ui/AppStateView.vue'
 
 describe('AppButton', () => {
   it('默认渲染 secondary/md 并透传属性', () => {
@@ -98,5 +100,42 @@ describe('AppSelect', () => {
     })
     await wrapper.get('select').setValue('b')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['b'])
+  })
+})
+
+describe('AppSkeleton', () => {
+  it('按 rows 渲染骨架行并支持头像', () => {
+    const wrapper = mount(AppSkeleton, { props: { rows: 4, avatar: true } })
+    expect(wrapper.findAll('.skeleton')).toHaveLength(5)
+  })
+})
+
+describe('AppStateView', () => {
+  it('empty 渲染标题、描述与操作槽', () => {
+    const wrapper = mount(AppStateView, {
+      props: { state: 'empty', title: '暂无会话', description: '开始一次对话吧' },
+      slots: { action: '<button>新建</button>' }
+    })
+    expect(wrapper.text()).toContain('暂无会话')
+    expect(wrapper.text()).toContain('开始一次对话吧')
+    expect(wrapper.find('button').exists()).toBe(true)
+  })
+
+  it('loading 渲染骨架且不渲染标题', () => {
+    const wrapper = mount(AppStateView, { props: { state: 'loading', skeletonRows: 2 } })
+    expect(wrapper.findAll('.skeleton')).toHaveLength(2)
+    expect(wrapper.text()).not.toContain('加载失败')
+  })
+
+  it('error 使用 alert 语义并在重试时派发事件', async () => {
+    const wrapper = mount(AppStateView, { props: { state: 'error', title: '加载失败' } })
+    expect(wrapper.get('[role="alert"]').exists()).toBe(true)
+    await wrapper.get('button').trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
+
+  it('error 不可重试时不渲染重试按钮', () => {
+    const wrapper = mount(AppStateView, { props: { state: 'error', retryable: false } })
+    expect(wrapper.find('button').exists()).toBe(false)
   })
 })

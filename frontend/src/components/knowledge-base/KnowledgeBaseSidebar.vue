@@ -70,10 +70,14 @@
         <p class="text-xs text-content-muted mt-1">{{ kb.document_count }} 个文档</p>
       </div>
 
-      <div v-if="!knowledgeBases?.length" class="p-4 text-center">
-        <Database class="w-8 h-8 text-content-disabled mx-auto mb-2" />
-        <p class="text-sm text-content-muted">暂无知识库</p>
-      </div>
+      <AppStateView
+        v-if="!knowledgeBases?.length"
+        state="empty"
+        title="暂无知识库"
+        size="sm"
+        padding="sm"
+        :icon="Database"
+      />
     </div>
 
     <!-- 批量操作栏 -->
@@ -121,7 +125,7 @@
  */
 import { computed } from 'vue'
 import { Plus, Database, Trash2 } from '@lucide/vue'
-import { AppBadge, AppButton } from '@/components/ui'
+import { AppBadge, AppButton, AppStateView } from '@/components/ui'
 import { useKBStore } from '@/stores/kb'
 import type { KnowledgeBase } from '@/queries/kb'
 

@@ -171,10 +171,14 @@
             @delete="deleteDocument"
           />
 
-          <div v-if="!documentsData?.items?.length && !showSearchResults" class="p-12 text-center">
-            <FolderOpen class="w-12 h-12 text-content-disabled mx-auto mb-4" />
-            <p class="text-content-muted">暂无文档，请上传文档</p>
-          </div>
+          <AppStateView
+            v-if="!documentsData?.items?.length && !showSearchResults"
+            state="empty"
+            title="暂无文档"
+            description="上传文档后即可开始检索与问答"
+            :icon="FolderOpen"
+            padding="lg"
+          />
 
           <!-- 全文搜索结果 -->
           <DocumentSearchResults
@@ -193,16 +197,22 @@
         </AppCard>
       </div>
 
-      <div v-else class="text-center">
-        <Database class="w-16 h-16 text-content-disabled mx-auto mb-4" />
-        <h3 class="text-lg font-medium text-content-muted">请选择一个知识库</h3>
-        <p class="text-sm text-content-subtle mt-2">从左侧列表中选择或创建新的知识库</p>
-        <!-- 移动端无左侧列表，提供直接创建入口 -->
-        <AppButton variant="primary" class="lg:hidden mt-4" @click="showCreateKBModal = true">
-          <Plus class="w-4 h-4" />
-          新建知识库
-        </AppButton>
-      </div>
+      <AppStateView
+        v-else
+        state="empty"
+        title="请选择一个知识库"
+        description="从左侧列表中选择或创建新的知识库"
+        :icon="Database"
+        padding="lg"
+        class="h-full"
+      >
+        <template #action>
+          <AppButton variant="primary" class="lg:hidden" @click="showCreateKBModal = true">
+            <Plus class="w-4 h-4" />
+            新建知识库
+          </AppButton>
+        </template>
+      </AppStateView>
     </div>
 
     <AppDialog v-model="showCreateKBModal" title="创建知识库" width="450px">
@@ -298,7 +308,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { useToast } from '@/composables/useToast'
 import { useWebSocketNotifications } from '@/composables/useNotifications'
 import KnowledgeGraph from '@/components/KnowledgeGraph.vue'
-import { AppButton, AppCard, AppDialog, AppInput, AppSelect } from '@/components/ui'
+import { AppButton, AppCard, AppDialog, AppInput, AppSelect, AppStateView } from '@/components/ui'
 import KnowledgeBaseSidebar from '@/components/knowledge-base/KnowledgeBaseSidebar.vue'
 import DocumentTable from '@/components/knowledge-base/DocumentTable.vue'
 import DocumentSearchResults from '@/components/knowledge-base/DocumentSearchResults.vue'

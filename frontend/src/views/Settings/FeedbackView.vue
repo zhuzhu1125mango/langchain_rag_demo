@@ -129,10 +129,14 @@
               </AppButton>
             </div>
           </div>
-          <div v-if="filteredFeedbacks.length === 0" class="py-12 text-center text-content-muted">
-            <MessageSquareOff class="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>暂无评价数据</p>
-          </div>
+          <AppStateView
+            v-if="filteredFeedbacks.length === 0"
+            state="empty"
+            title="暂无评价数据"
+            description="用户对回答评分后，这里会显示反馈统计"
+            :icon="MessageSquareOff"
+            padding="md"
+          />
         </div>
       </AppCard>
     </div>
@@ -174,7 +178,7 @@ import { useFeedbackStats, useFeedbackList, useDeleteFeedback, type FeedbackItem
 import { useDeleteConfirm } from '@/composables/useCrudModal'
 import { formatDate } from '@/utils/format'
 import { useToast } from '@/composables/useToast'
-import { AppButton, AppCard, AppDialog } from '@/components/ui'
+import { AppButton, AppCard, AppDialog, AppStateView } from '@/components/ui'
 
 const toast = useToast()
 

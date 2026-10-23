@@ -193,11 +193,14 @@
           </div>
         </AppCard>
 
-        <div v-if="filteredExperiments.length === 0" class="py-16 text-center text-content-muted">
-          <FlaskConical class="w-16 h-16 mx-auto mb-4 opacity-50" />
-          <p class="text-lg font-medium">暂无实验</p>
-          <p class="text-sm mt-1">点击上方按钮创建第一个A/B测试实验</p>
-        </div>
+        <AppStateView
+          v-if="filteredExperiments.length === 0"
+          state="empty"
+          title="暂无实验"
+          description="点击上方按钮创建第一个 A/B 测试实验"
+          :icon="FlaskConical"
+          padding="lg"
+        />
       </div>
     </div>
 
@@ -333,7 +336,7 @@ import {
 } from '@/queries/kb'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
-import { AppBadge, AppButton, AppCard, AppDialog, AppInput } from '@/components/ui'
+import { AppBadge, AppButton, AppCard, AppDialog, AppInput, AppStateView } from '@/components/ui'
 
 const toast = useToast()
 const queryClient = useQueryClient()

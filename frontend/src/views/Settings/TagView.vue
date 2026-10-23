@@ -51,14 +51,15 @@
             十六进制: <code class="px-2 py-0.5 bg-surface-subtle rounded text-xs">{{ tag.color }}</code>
           </div>
         </AppCard>
-        <div
+        <AppStateView
           v-if="tagsList.length === 0"
-          class="col-span-full flex flex-col items-center justify-center py-16 text-content-muted"
-        >
-          <Tags class="w-12 h-12 mb-3 opacity-50" />
-          <p>暂无标签</p>
-          <p class="text-sm mt-1">点击上方按钮创建第一个标签</p>
-        </div>
+          state="empty"
+          title="暂无标签"
+          description="点击上方按钮创建第一个标签"
+          :icon="Tags"
+          padding="lg"
+          class="col-span-full"
+        />
       </div>
     </div>
 
@@ -158,7 +159,7 @@ import { ref, computed } from 'vue'
 import { Plus, Edit, Trash2, Tags } from '@lucide/vue'
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag, type Tag, type TagCreateRequest } from '@/queries/kb'
 import { useToast } from '@/composables/useToast'
-import { AppButton, AppCard, AppDialog, AppInput } from '@/components/ui'
+import { AppButton, AppCard, AppDialog, AppInput, AppStateView } from '@/components/ui'
 
 const toast = useToast()
 

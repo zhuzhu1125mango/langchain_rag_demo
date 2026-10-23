@@ -33,13 +33,16 @@
       <AppCard
         v-if="!enabled"
         padding="none"
-        class="p-10 text-center"
         data-testid="api-keys-disabled"
       >
-        <KeyRound class="w-10 h-10 mx-auto text-content-disabled" />
-        <p class="mt-3 text-sm text-content-muted">
-          该功能未启用，请检查后端配置 USER_API_KEYS_ENABLED
-        </p>
+        <AppStateView
+          state="empty"
+          title="该功能未启用"
+          description="请检查后端配置 USER_API_KEYS_ENABLED"
+          :icon="KeyRound"
+          :retryable="false"
+          padding="lg"
+        />
       </AppCard>
 
       <!-- 列表 -->
@@ -48,17 +51,23 @@
         padding="none"
         data-testid="api-keys-table"
       >
-        <el-skeleton v-if="isLoading" class="p-6" :rows="3" animated />
+        <AppStateView v-if="isLoading" state="loading" padding="md" />
         <template v-else>
-          <div
+          <AppStateView
             v-if="!keys.length"
-            class="p-10 text-center"
+            state="empty"
+            title="还没有 API 密钥"
+            description="创建后可用于 MCP / 脚本 / CI 集成"
+            :icon="KeyRound"
+            padding="lg"
             data-testid="api-keys-empty"
           >
-            <KeyRound class="w-10 h-10 mx-auto text-content-disabled" />
-            <p class="mt-3 text-sm text-content-muted">还没有 API 密钥</p>
-            <el-button type="primary" plain class="mt-4" @click="dialogVisible = true">创建第一把密钥</el-button>
-          </div>
+            <template #action>
+              <AppButton variant="primary" @click="dialogVisible = true">
+                创建第一把密钥
+              </AppButton>
+            </template>
+          </AppStateView>
           <el-table v-else :data="keys" style="width: 100%">
             <el-table-column prop="name" label="名称" min-width="130" show-overflow-tooltip />
             <el-table-column label="密钥" min-width="150">
@@ -117,7 +126,7 @@ import { computed, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { KeyRound, Plus } from '@lucide/vue'
 import CreateApiKeyDialog from '@/components/settings/CreateApiKeyDialog.vue'
-import { AppCard } from '@/components/ui'
+import { AppButton, AppCard, AppStateView } from '@/components/ui'
 import {
   deriveKeyStatus,
   formatRelativeTime,

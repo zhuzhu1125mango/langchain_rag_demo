@@ -70,7 +70,7 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 | UX-1 | 停止生成 / 编辑重发 | ✅ 停止生成已落地（2026-10-23）：生成中停止按钮 + 部分回答落库；编辑重发待做 | 进行中 |
 | UX-2 | 移动端适配 | ✅ 已实施（2026-10-23）：侧栏抽屉 + 移动顶栏；聊天/历史/知识库/设置/追踪响应式收口；对比面板与图谱详情覆盖层；Markdown 表格内部滚动 | 已完成 |
 | UX-3 | 可访问性基础 | ✅ 已实施（2026-10-23）：skip link + 全局焦点环 + reduced-motion；抽屉 inert；消息区 role=log/aria-live；图标按钮 aria-label、评分 aria-pressed、面板 aria-expanded；卡片键盘可操作；Toast/错误态 role | 已完成 |
-| UX-4 | 三态组件体系 | 仅 2 处 skeleton；加载/空/错各页不统一 | P2 |
+| UX-4 | 三态组件体系 | ✅ 已实施（2026-10-24）：新增 AppStateView（loading/empty/error + 操作槽 + 错误重试）与 AppSkeleton；统一知识库、历史、设置各页、追踪、图谱、Wiki、搜索与来源弹窗的 14+ 处状态；知识图谱补错误态 | 已完成 |
 | UX-5 | 历史页搜索 / 筛选 / 导出 | 仅批量删除 | P2 |
 | UX-6 | 长会话性能 | 无虚拟滚动，消息 + Markdown 全量渲染 | P2 |
 | UX-7 | 细节增强 | 引用悬浮预览、消息内搜索、导出 Markdown、快捷键、新手引导；对比度全量审计 | P3 |

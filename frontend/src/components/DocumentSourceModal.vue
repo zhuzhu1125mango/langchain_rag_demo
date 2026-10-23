@@ -28,10 +28,11 @@
         </div>
         
         <div class="flex-1 overflow-y-auto p-6">
-          <div v-if="isLoading" class="flex flex-col items-center justify-center py-12">
-            <Loader2 class="w-8 h-8 text-primary-500 animate-spin" />
-            <p class="mt-3 text-sm text-content-muted">加载中...</p>
-          </div>
+          <AppStateView
+            v-if="isLoading"
+            state="loading"
+            padding="md"
+          />
           <div v-else-if="sourceData" class="space-y-4">
             <div v-if="sourceData.kb_name" class="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-full text-sm">
               <Database class="w-4 h-4" />
@@ -63,10 +64,14 @@
               </div>
             </div>
           </div>
-          <div v-else class="flex flex-col items-center justify-center py-12">
-            <FileQuestion class="w-12 h-12 text-content-disabled mb-3" />
-            <p class="text-sm text-content-muted">无法获取文档内容</p>
-          </div>
+          <AppStateView
+            v-else
+            state="error"
+            title="无法获取文档内容"
+            description="来源可能已失效，请关闭后重试"
+            :retryable="false"
+            padding="md"
+          />
         </div>
         
         <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">
@@ -91,9 +96,9 @@
  * @emits close - 关闭弹窗
  */
 import { ref, computed, watch } from 'vue'
-import { FileText, X, Database, Loader2, FileQuestion } from '@lucide/vue'
+import { FileText, X, Database } from '@lucide/vue'
 import { useGetDocumentSource } from '@/queries/kb'
-import { AppButton } from '@/components/ui'
+import { AppButton, AppStateView } from '@/components/ui'
 
 /** 文档来源数据结构 */
 interface SourceData {

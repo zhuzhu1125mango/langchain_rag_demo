@@ -69,10 +69,15 @@
                 </td>
               </tr>
               <tr v-if="categoriesList.length === 0">
-                <td colspan="5" class="py-12 text-center text-content-muted">
-                  <FolderX class="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>暂无分类</p>
-                  <p class="text-sm mt-1">点击上方按钮创建第一个分类</p>
+                <td colspan="5" class="py-8">
+                  <AppStateView
+                    state="empty"
+                    title="暂无分类"
+                    description="点击上方按钮创建第一个分类"
+                    :icon="FolderX"
+                    size="sm"
+                    padding="sm"
+                  />
                 </td>
               </tr>
             </tbody>
@@ -179,7 +184,7 @@ import { Plus, Edit, Trash2, Folder, FolderX } from '@lucide/vue'
 import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory, type Category, type CategoryCreateRequest } from '@/queries/kb'
 import { useCrudModal } from '@/composables/useCrudModal'
 import { useToast } from '@/composables/useToast'
-import { AppButton, AppCard, AppDialog, AppInput, AppSelect } from '@/components/ui'
+import { AppButton, AppCard, AppDialog, AppInput, AppSelect, AppStateView } from '@/components/ui'
 
 const toast = useToast()
 

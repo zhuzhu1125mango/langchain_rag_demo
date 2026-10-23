@@ -194,9 +194,14 @@
                 </td>
               </tr>
               <tr v-if="misclassificationCasesList.length === 0">
-                <td colspan="5" class="py-8 text-center text-content-muted">
-                  <BarChart3 class="w-10 h-10 mx-auto mb-2 opacity-50" />
-                  <p>暂无误分类案例</p>
+                <td colspan="5" class="py-6">
+                  <AppStateView
+                    state="empty"
+                    title="暂无误分类案例"
+                    :icon="BarChart3"
+                    size="sm"
+                    padding="sm"
+                  />
                 </td>
               </tr>
             </tbody>
@@ -225,7 +230,7 @@ import {
 } from '@/queries/kb'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
-import { AppButton, AppCard } from '@/components/ui'
+import { AppButton, AppCard, AppStateView } from '@/components/ui'
 
 const toast = useToast()
 

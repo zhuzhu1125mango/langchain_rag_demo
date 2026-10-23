@@ -22,20 +22,32 @@
       </div>
     </div>
 
-    <div v-if="isLoading" class="flex-1 flex items-center justify-center">
-      <div class="flex flex-col items-center gap-3">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
-        <p class="text-sm text-content-muted">正在加载图谱...</p>
-      </div>
-    </div>
+    <AppStateView
+      v-if="isLoading"
+      state="loading"
+      padding="lg"
+      class="flex-1"
+    />
 
-    <div v-else-if="graphData.nodes.length === 0" class="flex-1 flex items-center justify-center">
-      <div class="text-center">
-        <Network class="w-12 h-12 text-content-disabled mx-auto mb-3" />
-        <p class="text-sm text-content-muted">暂无图谱数据</p>
-        <p class="text-xs text-gray-400 mt-1">请先选择知识库并上传文档</p>
-      </div>
-    </div>
+    <AppStateView
+      v-else-if="graphError"
+      state="error"
+      title="图谱加载失败"
+      description="请检查网络或稍后重试"
+      padding="lg"
+      class="flex-1"
+      @retry="fetchGraphData"
+    />
+
+    <AppStateView
+      v-else-if="graphData.nodes.length === 0"
+      state="empty"
+      title="暂无图谱数据"
+      description="请先选择知识库并上传文档"
+      :icon="Network"
+      padding="lg"
+      class="flex-1"
+    />
 
     <div v-else class="flex-1 relative bg-surface-muted rounded-xl border border-line overflow-hidden">
       <svg 
@@ -229,7 +241,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { Network, RefreshCw, X, CircleDot, ArrowRightLeft, Info } from '@lucide/vue'
 import { api } from '@/utils/axios'
-import { AppButton, AppCard } from '@/components/ui'
+import { AppButton, AppCard, AppStateView } from '@/components/ui'
 
 /** 图谱节点 */
 interface GraphNode {
@@ -283,6 +295,7 @@ const svgRef = ref<SVGSVGElement | null>(null)
 const svgWidth = ref(800)
 const svgHeight = ref(500)
 const isLoading = ref(false)
+const graphError = ref(false)
 const selectedNode = ref<GraphNode | null>(null)
 const graphData = ref<GraphData>({ nodes: [], edges: [], summary: '' })
 
@@ -448,6 +461,7 @@ function handleSvgClick() {
 /** 拉取图谱数据：按 kbIds 过滤，请求成功后重新计算节点布局。失败时清空图谱并显示错误摘要。 */
 async function fetchGraphData() {
   isLoading.value = true
+  graphError.value = false
 
   try {
     const params = props.kbIds && props.kbIds.length > 0
@@ -459,6 +473,7 @@ async function fetchGraphData() {
     calculateNodePositions()
   } catch (error) {
     console.error('获取知识图谱失败:', error)
+    graphError.value = true
     graphData.value = { nodes: [], edges: [], summary: '加载失败' }
   } finally {
     isLoading.value = false

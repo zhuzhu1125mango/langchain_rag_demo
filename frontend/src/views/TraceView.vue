@@ -80,10 +80,14 @@
         />
       </div>
 
-      <div v-if="!isLoading && !tracesData?.items?.length" class="flex flex-col items-center justify-center py-16">
-        <Activity class="w-16 h-16 text-content-disabled mb-4" />
-        <p class="text-content-muted">暂无链路记录，进行一次对话后即可查看</p>
-      </div>
+      <AppStateView
+        v-if="!isLoading && !tracesData?.items?.length"
+        state="empty"
+        title="暂无链路记录"
+        description="进行一次对话后即可查看请求链路"
+        :icon="Activity"
+        padding="lg"
+      />
     </div>
 
     <!-- 详情抽屉 -->
@@ -187,6 +191,7 @@ import { useRoute } from 'vue-router'
 import { Search, RotateCcw, Activity } from '@lucide/vue'
 import { useTraces, useTraceDetail, STAGE_LABELS } from '@/queries/trace'
 import { formatDate } from '@/utils/format'
+import { AppStateView } from '@/components/ui'
 
 const route = useRoute()
 
