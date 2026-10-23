@@ -449,6 +449,48 @@ describe('HITL 审批回执（AM-2）', () => {
   })
 })
 
+describe('停止生成（UX-1）', () => {
+  it('停止后中断请求、保留已输出内容并标记 stopped，不产生错误', async () => {
+    let capturedSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedSignal = init?.signal
+      let sent = false
+      return {
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              if (!sent) {
+                sent = true
+                return {
+                  done: false,
+                  value: encoder.encode('data: {"type":"content","content":"部分回答"}\n\n')
+                }
+              }
+              // 挂起：模拟服务端持续生成，等待用户停止
+              return new Promise(() => {})
+            }
+          })
+        }
+      }
+    }))
+    const h = mountStream()
+    void h.api.sendMessage('长问题')
+
+    await vi.waitFor(() => expect(assistantOf(h.store).content).toBe('部分回答'))
+
+    h.api.stopGeneration()
+
+    await vi.waitFor(() => expect(capturedSignal?.aborted).toBe(true))
+    const assistant = assistantOf(h.store)
+    expect(assistant.isLoading).toBe(false)
+    expect(assistant.stopped).toBe(true)
+    expect(assistant.error).toBeUndefined()
+    expect(assistant.content).toBe('部分回答')
+    expect(h.searchStatus.value).toBe('idle')
+  })
+})
+
 describe('卸载中止（D4）', () => {
   it('组件卸载时 abort 在途流', async () => {
     let capturedSignal: AbortSignal | undefined

@@ -72,6 +72,7 @@
           </template>
           <template v-else>
             <MarkdownRenderer :content="message.content" :sources="message.sources" @cite-click="onCiteClick(message, $event)" />
+            <p v-if="message.stopped" class="mt-1.5 text-xs text-gray-400 dark:text-gray-500">已停止生成</p>
           </template>
         </div>
 

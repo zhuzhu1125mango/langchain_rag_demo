@@ -52,6 +52,11 @@ export function useChatStream(options: UseChatStreamOptions) {
   // 当前活动的 SSE 流控制器（D4）：提升到组合函数作用域，组件卸载时统一 abort，
   // 避免切页/卸载后流仍在后台写入已销毁的消息。
   let activeStreamController: AbortController | null = null
+  // UX-1：用户主动停止生成（区别于网络异常，停止不应展示错误卡片）
+  let stopRequested = false
+  // 当前流式回答对应的助手消息 ID（内容到达后 isLoading 即变为 false，
+  // 停止时不能只靠 isLoading 定位目标消息）
+  let activeAssistantMessageId: string | null = null
 
   // SSE reasoning 事件节流：同一帧内多次 reasoning 更新合并为一次状态提交，
   // 避免高频时间线更新导致渲染抖动。
@@ -73,6 +78,9 @@ export function useChatStream(options: UseChatStreamOptions) {
     const hasLoadingMessage = chatStore.messages.some(m => m.role === 'assistant' && m.isLoading)
     if (hasLoadingMessage) return
 
+    stopRequested = false
+    chatStore.setTyping(true)
+
     if (useWebSearch.value) {
       searchStatus.value = 'searching'
     }
@@ -93,6 +101,7 @@ export function useChatStream(options: UseChatStreamOptions) {
 
     try {
       let assistantMsgId = generateId()
+      activeAssistantMessageId = assistantMsgId
       chatStore.addMessage({
         id: assistantMsgId,
         role: 'assistant',
@@ -353,7 +362,18 @@ export function useChatStream(options: UseChatStreamOptions) {
         controller.abort()
         if (activeStreamController === controller) {
           activeStreamController = null
+          activeAssistantMessageId = null
         }
+      }
+
+      // 用户主动停止：保留已生成内容，标记 stopped，不走“连接断开”错误分支
+      if (stopRequested) {
+        cancelReasoningRaf()
+        if (activeAssistantMessageId) {
+          chatStore.updateMessage(activeAssistantMessageId, { isLoading: false, stopped: true })
+        }
+        searchStatus.value = 'idle'
+        return
       }
 
       // 流结束但未收到 end/error 事件且无内容：等价于旧 EventSource 的 onerror
@@ -367,13 +387,29 @@ export function useChatStream(options: UseChatStreamOptions) {
       }
     } catch (error) {
       searchStatus.value = 'idle'
+      if (stopRequested) return
       chatStore.addMessage({
         id: generateId(),
         role: 'assistant',
         content: '',
         error: `发送失败: ${error instanceof Error ? error.message : '未知错误'}`
       })
+    } finally {
+      // 无论正常结束、异常还是用户停止，都结束“生成中”状态（控制停止按钮）
+      chatStore.setTyping(false)
     }
+  }
+
+  /** 停止当前流式生成（UX-1）：保留已输出内容并结束加载态。 */
+  function stopGeneration(): void {
+    if (!activeStreamController) return
+    stopRequested = true
+    searchStatus.value = 'idle'
+    chatStore.setTyping(false)
+    if (activeAssistantMessageId) {
+      chatStore.updateMessage(activeAssistantMessageId, { isLoading: false, stopped: true })
+    }
+    activeStreamController.abort()
   }
 
   /** 点击快捷问题时填入输入框并发送。 */
@@ -412,6 +448,8 @@ export function useChatStream(options: UseChatStreamOptions) {
     // D4：组件卸载时中止仍在进行的 SSE 流，避免后台继续写入已销毁的响应式消息
     activeStreamController?.abort()
     activeStreamController = null
+    activeAssistantMessageId = null
+    chatStore.setTyping(false)
     cancelReasoningRaf()
   })
 
@@ -419,6 +457,7 @@ export function useChatStream(options: UseChatStreamOptions) {
     sendMessage,
     sendQuickQuestion,
     regenerateLast,
-    resolveApproval
+    resolveApproval,
+    stopGeneration
   }
 }

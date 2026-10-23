@@ -116,6 +116,8 @@ export interface Message {
   reasoning?: ReasoningStep[]
   /** 模型原始思考内容（深度思考开启时流式接收并持久化，历史回看可展开）。 */
   thinking?: string
+  /** UX-1：用户主动停止生成（保留已输出内容，不显示错误）。 */
+  stopped?: boolean
   /** AM-2：待人工审批的高危工具调用（approval_required 事件）。 */
   approval?: {
     /** 审批 ID（回执接口使用）。 */

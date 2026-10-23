@@ -389,23 +389,24 @@ async def stream_answer(
     # 保存助手消息（流式生成结束或异常时调用）。
     # C7：返回会话是否仍为默认标题，标题生成移到 end 事件之后的后台任务，
     # 不再阻塞流完成信号。
-    async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None, thinking="") -> bool:
+    async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None, thinking="", record_learning=True) -> bool:
         # LEARN W-B：记录策略执行样本（短路路径按开关补采各策略结果）。
         # 置于 DB 会话之外——补采会重跑策略投票（含 fast LLM 调用），避免期间占用连接。
         execution_id = None
-        try:
-            decision = rag_chain.get_last_decision()
-            if decision:
-                execution_id = await learning_engine.record_chat_execution(
-                    session_id=current_session_id,
-                    question=question,
-                    decision=decision,
-                    used_knowledge_base=len(source_metadata) > 0,
-                    strategy_manager=rag_chain.strategy_manager,
-                    history=history,
-                )
-        except Exception as exec_err:
-            logger.error(f"记录策略执行失败: {exec_err}", exc_info=True)
+        if record_learning:
+            try:
+                decision = rag_chain.get_last_decision()
+                if decision:
+                    execution_id = await learning_engine.record_chat_execution(
+                        session_id=current_session_id,
+                        question=question,
+                        decision=decision,
+                        used_knowledge_base=len(source_metadata) > 0,
+                        strategy_manager=rag_chain.strategy_manager,
+                        history=history,
+                    )
+            except Exception as exec_err:
+                logger.error(f"记录策略执行失败: {exec_err}", exc_info=True)
 
         async with async_session() as db:
             result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(current_session_id)))
@@ -558,6 +559,21 @@ async def stream_answer(
                 source_metadata = source_meta
                 answer_type = at
 
+        except (asyncio.CancelledError, GeneratorExit):
+            # UX-1：用户主动停止 / 客户端断连。把已生成部分落库，保证历史回看
+            # 与实时视图一致；放在独立任务中，避免随请求取消而丢失。
+            if full_answer:
+                logger.info(f"流式生成被中止，保存部分回答: length={len(full_answer)}")
+                partial_task = asyncio.create_task(
+                    save_assistant_message(
+                        full_answer, sources, source_metadata,
+                        dedupe_steps(reasoning_steps), thinking_text,
+                        record_learning=False,
+                    )
+                )
+                _stream_finalize_tasks.add(partial_task)
+                partial_task.add_done_callback(_stream_finalize_tasks.discard)
+            raise
         except Exception as e:
             logger.error(f"流式生成异常: {str(e)}", exc_info=True)
             # 如果已生成部分内容，尝试保存，避免用户消息孤立

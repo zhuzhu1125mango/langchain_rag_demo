@@ -162,14 +162,25 @@
               {{ questionInput.length }}/{{ maxLength }}
             </span>
             <button
+              v-if="isTyping"
+              @click="emit('stop')"
+              class="w-8 h-8 rounded-full flex items-center justify-center bg-gray-800 dark:bg-gray-200 text-white dark:text-gray-800 hover:bg-gray-700 dark:hover:bg-gray-300 transition-all"
+              title="停止生成"
+              aria-label="停止生成"
+            >
+              <Square class="w-3 h-3 fill-current" />
+            </button>
+            <button
+              v-else
               @click="onSend"
-              :disabled="!questionInput.trim() || isTyping"
+              :disabled="!questionInput.trim()"
               :class="[
                 'w-8 h-8 rounded-full flex items-center justify-center transition-all',
-                questionInput.trim() && !isTyping
+                questionInput.trim()
                   ? 'bg-primary-500 text-white hover:bg-primary-600 shadow-sm shadow-primary-500/30'
                   : 'bg-gray-100 dark:bg-dark-700 text-gray-400 dark:text-gray-600 cursor-not-allowed'
               ]"
+              aria-label="发送"
             >
               <Send class="w-4 h-4" />
             </button>
@@ -205,6 +216,7 @@
  *
  * @emits update:modelValue - 输入文本变化
  * @emits send - 发送当前问题
+ * @emits stop - 停止当前生成（流式回答进行中时替换发送按钮）
  * @emits send-quick-question - 发送推荐问题
  * @emits rewrite-question - 触发问题重写
  * @emits use-rewritten-question - 采用重写后的问题
@@ -215,7 +227,7 @@
  * @emits toggle-deep-thinking - 切换深度思考开关
  */
 import { computed, ref } from 'vue'
-import { Sparkles, X, Lightbulb, Database, Loader2, Send, Globe, Brain } from '@lucide/vue'
+import { Sparkles, X, Lightbulb, Database, Loader2, Send, Globe, Brain, Square } from '@lucide/vue'
 import type { RewriteResponse } from '@/queries/chat'
 import type { KBRecommendation } from '@/queries/kb'
 
@@ -240,6 +252,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
   (e: 'send'): void
+  (e: 'stop'): void
   (e: 'send-quick-question', question: string): void
   (e: 'rewrite-question'): void
   (e: 'use-rewritten-question'): void

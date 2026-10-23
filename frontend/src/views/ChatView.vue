@@ -83,6 +83,7 @@
         :deep-thinking-label="deepThinkingLabel"
         :deep-thinking-title="deepThinkingTitle"
         @send="sendMessage()"
+        @stop="stopGeneration"
         @send-quick-question="sendQuickQuestion"
         @rewrite-question="handleRewriteQuestion"
         @use-rewritten-question="useRewrittenQuestion"
@@ -171,7 +172,7 @@ const {
 } = useChatAssist({ questionInput, selectedKBs })
 
 // SSE 流式对话（卸载时自动 abort 在途流）
-const { sendMessage, sendQuickQuestion, regenerateLast, resolveApproval } = useChatStream({
+const { sendMessage, sendQuickQuestion, regenerateLast, resolveApproval, stopGeneration } = useChatStream({
   questionInput,
   selectedKBs,
   useWebSearch,
