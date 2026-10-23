@@ -165,7 +165,7 @@ async def test_tool_manager_allows_safe_call():
 # ----------------------------------------------------------------------
 def test_output_guard_redacts_credentials():
     guard = get_output_guard()
-    text = "key=sk-abcdefghijklmnopqrstuvwxyz AKIAABCDEFGHIJKLMNOP"
+    text = "key=sk-abcdefghijklmnopqrstuvwxyz AKIAABCDEFGHIJKLMNOP"  # gitleaks:allow (测试夹具假值)
     redacted, hits = guard.redact(text)
     assert REDACTION_TEXT in redacted
     assert "openai_key" in hits and "aws_key" in hits
