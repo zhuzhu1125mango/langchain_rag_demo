@@ -8,7 +8,7 @@
         <h1 class="text-2xl font-bold text-content">RAG 知识库问答系统</h1>
       </div>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6 sm:p-8">
+      <AppCard padding="none" class="p-6 sm:p-8">
         <el-tabs v-model="activeTab">
           <el-tab-pane label="登录" name="login">
             <el-form
@@ -93,7 +93,7 @@
             </el-form>
           </el-tab-pane>
         </el-tabs>
-      </div>
+      </AppCard>
     </div>
   </div>
 </template>
@@ -111,6 +111,7 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
 import { BookOpen } from '@lucide/vue'
 import { useAppStore } from '@/stores/app'
+import { AppCard } from '@/components/ui'
 
 const router = useRouter()
 const appStore = useAppStore()

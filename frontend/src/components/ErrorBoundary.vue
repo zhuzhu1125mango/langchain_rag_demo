@@ -8,12 +8,9 @@
         渲染过程发生未预期错误，该区域已停止工作。可尝试重置恢复；若反复出现请刷新页面。
       </p>
       <pre class="text-left text-xs text-content-tertiary bg-surface-muted rounded-lg p-2 mb-4 overflow-auto max-h-32 whitespace-pre-wrap">{{ errorMessage }}</pre>
-      <button
-        @click="reset"
-        class="px-4 py-2 text-sm bg-primary-500 text-white hover:bg-primary-600 rounded-lg transition-colors"
-      >
+      <AppButton variant="primary" @click="reset">
         尝试恢复
-      </button>
+      </AppButton>
     </div>
   </div>
 </template>
@@ -29,6 +26,7 @@
  */
 import { ref, onErrorCaptured } from 'vue'
 import { AlertOctagon } from '@lucide/vue'
+import { AppButton } from '@/components/ui'
 
 const hasError = ref(false)
 const errorMessage = ref('')

@@ -130,24 +130,26 @@
           class="flex items-center justify-between px-1 opacity-0 group-hover:opacity-100 hover:opacity-100 focus-within:opacity-100 transition-opacity"
         >
           <div class="flex items-center gap-1">
-            <button
-              @click="copyMessage(message)"
-              class="p-1.5 rounded-md text-gray-400 hover:text-content-tertiary hover:bg-surface-hover transition-colors"
+            <AppButton
+              variant="ghost"
+              size="icon"
               :title="copiedId === message.id ? '已复制' : '复制回答'"
               :aria-label="copiedId === message.id ? '已复制回答' : '复制回答'"
+              @click="copyMessage(message)"
             >
               <Check v-if="copiedId === message.id" class="w-3.5 h-3.5 text-green-500" />
               <Copy v-else class="w-3.5 h-3.5" />
-            </button>
-            <button
+            </AppButton>
+            <AppButton
               v-if="isLastAssistant(index)"
-              @click="emit('regenerate')"
-              class="p-1.5 rounded-md text-gray-400 hover:text-content-tertiary hover:bg-surface-hover transition-colors"
+              variant="ghost"
+              size="icon"
               title="重新生成"
               aria-label="重新生成回答"
+              @click="emit('regenerate')"
             >
               <RefreshCw class="w-3.5 h-3.5" />
-            </button>
+            </AppButton>
           </div>
 
           <div class="flex items-center gap-2">
@@ -203,6 +205,7 @@ import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import MessageSources from '@/components/chat/MessageSources.vue'
 import ReasoningPanel from '@/components/chat/ReasoningPanel.vue'
 import ThinkingPanel from '@/components/chat/ThinkingPanel.vue'
+import { AppButton } from '@/components/ui'
 
 const props = defineProps<{
   messages: Message[]

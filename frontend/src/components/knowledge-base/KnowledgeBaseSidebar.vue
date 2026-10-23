@@ -3,29 +3,32 @@
     <div class="p-4 border-b border-line">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-semibold text-content">知识库列表</h2>
-        <button
+        <AppButton
           v-if="!isBatchKBMode"
+          variant="primary-ghost"
+          size="xs"
           @click="toggleBatchMode"
-          class="text-xs text-content-muted hover:text-primary-600 dark:hover:text-primary-400"
         >
           管理
-        </button>
-        <button
+        </AppButton>
+        <AppButton
           v-else
+          variant="primary-ghost"
+          size="xs"
           @click="toggleBatchMode"
-          class="text-xs text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
         >
           完成
-        </button>
+        </AppButton>
       </div>
-      <button
+      <AppButton
         v-if="!isBatchKBMode"
+        variant="primary-soft"
+        block
         @click="$emit('create-kb')"
-        class="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/30 transition-colors"
       >
         <Plus class="w-4 h-4" />
         <span>新建知识库</span>
-      </button>
+      </AppButton>
     </div>
 
     <div class="flex-1 overflow-y-auto p-2">
@@ -57,12 +60,12 @@
               :aria-label="`选择知识库 ${kb.name}`"
               class="rounded border-line-strong bg-surface-subtle text-primary-600 focus:ring-primary-500"
             />
-            <Database class="w-4 h-4 text-gray-400" />
+            <Database class="w-4 h-4 text-content-subtle" />
             <span class="text-sm font-medium text-content">{{ kb.name }}</span>
           </div>
-          <span v-if="kb.is_default && !isBatchKBMode" class="text-xs px-2 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded">
+          <AppBadge v-if="kb.is_default && !isBatchKBMode" variant="success" size="md">
             默认
-          </span>
+          </AppBadge>
         </div>
         <p class="text-xs text-content-muted mt-1">{{ kb.document_count }} 个文档</p>
       </div>
@@ -88,21 +91,17 @@
           />
           <span>全选</span>
         </label>
-        <span class="text-xs text-gray-400">已选 {{ kbStore.selectedKBCount }} 个</span>
+        <span class="text-xs text-content-subtle">已选 {{ kbStore.selectedKBCount }} 个</span>
       </div>
-      <button
-        @click="$emit('batch-delete')"
+      <AppButton
+        :variant="kbStore.selectedKBCount > 0 ? 'danger' : 'secondary'"
         :disabled="kbStore.selectedKBCount === 0"
-        :class="[
-          'w-full flex items-center justify-center gap-2 px-3 py-2 text-sm rounded-lg transition-colors',
-          kbStore.selectedKBCount > 0
-            ? 'bg-red-500 text-white hover:bg-red-600'
-            : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-        ]"
+        block
+        @click="$emit('batch-delete')"
       >
         <Trash2 class="w-4 h-4" />
         <span>批量删除 ({{ kbStore.selectedKBCount }})</span>
-      </button>
+      </AppButton>
     </div>
   </aside>
 </template>
@@ -122,6 +121,7 @@
  */
 import { computed } from 'vue'
 import { Plus, Database, Trash2 } from '@lucide/vue'
+import { AppBadge, AppButton } from '@/components/ui'
 import { useKBStore } from '@/stores/kb'
 import type { KnowledgeBase } from '@/queries/kb'
 

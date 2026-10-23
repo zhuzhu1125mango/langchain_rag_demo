@@ -6,16 +6,13 @@
           <h1 class="text-xl font-semibold text-content">分类管理</h1>
           <p class="text-sm text-content-muted mt-1">管理文档分类，支持多级分类结构</p>
         </div>
-        <button
-          @click="openCreateModal"
-          class="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-        >
+        <AppButton variant="primary" @click="openCreateModal">
           <Plus class="w-4 h-4" />
           新建分类
-        </button>
+        </AppButton>
       </div>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line">
+      <AppCard padding="none">
         <div class="overflow-x-auto">
           <table class="w-full">
             <thead>
@@ -31,11 +28,11 @@
               <tr
                 v-for="category in categoriesList"
                 :key="category.id"
-                class="border-b border-line-subtle hover:bg-gray-50 dark:hover:bg-dark-700/50 transition-colors"
+                class="border-b border-line-subtle hover:bg-surface-muted/50 transition-colors"
               >
                 <td class="py-3 px-4">
                   <div class="flex items-center gap-2">
-                    <Folder class="w-4 h-4 text-gray-400" />
+                    <Folder class="w-4 h-4 text-content-subtle" />
                     <span class="font-medium text-content">{{ category.name }}</span>
                   </div>
                 </td>
@@ -50,20 +47,24 @@
                 </td>
                 <td class="py-3 px-4">
                   <div class="flex items-center justify-end gap-2">
-                    <button
-                      @click="openEditModal(category)"
-                      class="p-2 text-gray-500 hover:text-primary-500 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+                    <AppButton
+                      variant="ghost"
+                      size="icon"
                       title="编辑"
+                      aria-label="编辑分类"
+                      @click="openEditModal(category)"
                     >
                       <Edit class="w-4 h-4" />
-                    </button>
-                    <button
-                      @click="confirmDelete(category)"
-                      class="p-2 text-gray-500 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+                    </AppButton>
+                    <AppButton
+                      variant="danger-ghost"
+                      size="icon"
                       title="删除"
+                      aria-label="删除分类"
+                      @click="confirmDelete(category)"
                     >
                       <Trash2 class="w-4 h-4" />
-                    </button>
+                    </AppButton>
                   </div>
                 </td>
               </tr>
@@ -77,10 +78,10 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </AppCard>
     </div>
 
-    <el-dialog
+    <AppDialog
       v-model="modalVisible"
       :title="isEdit ? '编辑分类' : '新建分类'"
       width="480px"
@@ -88,29 +89,27 @@
       <form @submit.prevent="saveCategory" class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">名称 *</label>
-          <input
+          <AppInput
             v-model="formData.name"
-            type="text"
+            variant="raised"
             required
             placeholder="请输入分类名称"
-            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
-          <textarea
+          <AppInput
             v-model="formData.description"
-            rows="3"
+            variant="raised"
+            multiline
+            :rows="3"
             placeholder="请输入分类描述（可选）"
-            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-          ></textarea>
+            class="resize-none"
+          />
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">父分类</label>
-          <select
-            v-model="formData.parent_id"
-            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content focus:outline-none focus:ring-2 focus:ring-primary-500"
-          >
+          <AppSelect v-model="formData.parent_id" variant="raised" class="w-full">
             <option value="">无（顶级分类）</option>
             <option
               v-for="cat in parentOptions"
@@ -119,37 +118,32 @@
             >
               {{ cat.name }}
             </option>
-          </select>
+          </AppSelect>
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">排序</label>
-          <input
+          <AppInput
             v-model.number="formData.sort_order"
             type="number"
-            min="0"
+            variant="raised"
             placeholder="0"
-            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
       </form>
       <template #footer>
-        <button
-          @click="modalVisible = false"
-          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
-        >
-          取消
-        </button>
-        <button
-          @click="saveCategory"
+        <AppButton variant="ghost" @click="modalVisible = false">取消</AppButton>
+        <AppButton
+          variant="primary"
           :disabled="!formData.name || createMutation.isPending.value || updateMutation.isPending.value"
-          class="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :loading="createMutation.isPending.value || updateMutation.isPending.value"
+          @click="saveCategory"
         >
           {{ isEdit ? '保存修改' : '创建分类' }}
-        </button>
+        </AppButton>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog
+    <AppDialog
       v-model="deleteConfirmVisible"
       title="确认删除"
       width="360px"
@@ -159,21 +153,17 @@
       </p>
       <p class="text-sm text-content-muted mt-2">此操作无法撤销。</p>
       <template #footer>
-        <button
-          @click="deleteConfirmVisible = false"
-          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
-        >
-          取消
-        </button>
-        <button
-          @click="deleteCategory"
+        <AppButton variant="ghost" @click="deleteConfirmVisible = false">取消</AppButton>
+        <AppButton
+          variant="danger"
           :disabled="deleteMutation.isPending.value"
-          class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :loading="deleteMutation.isPending.value"
+          @click="deleteCategory"
         >
           删除
-        </button>
+        </AppButton>
       </template>
-    </el-dialog>
+    </AppDialog>
   </div>
 </template>
 
@@ -189,6 +179,7 @@ import { Plus, Edit, Trash2, Folder, FolderX } from '@lucide/vue'
 import { useCategories, useCreateCategory, useUpdateCategory, useDeleteCategory, type Category, type CategoryCreateRequest } from '@/queries/kb'
 import { useCrudModal } from '@/composables/useCrudModal'
 import { useToast } from '@/composables/useToast'
+import { AppButton, AppCard, AppDialog, AppInput, AppSelect } from '@/components/ui'
 
 const toast = useToast()
 

@@ -7,7 +7,7 @@
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
               <MessageSquare class="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -17,9 +17,9 @@
               <p class="text-xl font-semibold text-content">{{ stats?.total_count || 0 }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
 
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
               <ThumbsUp class="w-5 h-5 text-green-600 dark:text-green-400" />
@@ -29,9 +29,9 @@
               <p class="text-xl font-semibold text-content">{{ stats?.positive_count || 0 }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
 
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
               <ThumbsDown class="w-5 h-5 text-red-600 dark:text-red-400" />
@@ -41,9 +41,9 @@
               <p class="text-xl font-semibold text-content">{{ stats?.negative_count || 0 }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
 
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
               <Star class="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
@@ -53,10 +53,10 @@
               <p class="text-xl font-semibold text-content">{{ (stats?.average_rating || 0).toFixed(2) }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
       </div>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <h2 class="font-medium text-content mb-6">评分分布</h2>
         <div class="flex items-end gap-4 justify-center h-48">
           <div
@@ -76,9 +76,9 @@
             <span class="text-xs text-content-muted">{{ count }}</span>
           </div>
         </div>
-      </div>
+      </AppCard>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">评价列表</h2>
           <div class="flex items-center gap-2">
@@ -118,13 +118,15 @@
                   {{ feedback.reason || '暂无评价内容' }}
                 </p>
               </div>
-              <button
-                @click="confirmDelete(feedback)"
-                class="p-2 text-gray-400 hover:text-red-500 hover:bg-surface-hover-strong rounded-lg transition-colors"
+              <AppButton
+                variant="danger-ghost"
+                size="icon"
                 title="删除评价"
+                aria-label="删除评价"
+                @click="confirmDelete(feedback)"
               >
                 <Trash2 class="w-4 h-4" />
-              </button>
+              </AppButton>
             </div>
           </div>
           <div v-if="filteredFeedbacks.length === 0" class="py-12 text-center text-content-muted">
@@ -132,10 +134,10 @@
             <p>暂无评价数据</p>
           </div>
         </div>
-      </div>
+      </AppCard>
     </div>
 
-    <el-dialog
+    <AppDialog
       v-model="deleteConfirmVisible"
       title="确认删除"
       width="360px"
@@ -145,21 +147,17 @@
       </p>
       <p class="text-sm text-content-muted mt-2">此操作无法撤销。</p>
       <template #footer>
-        <button
-          @click="deleteConfirmVisible = false"
-          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
-        >
-          取消
-        </button>
-        <button
-          @click="deleteFeedback"
+        <AppButton variant="ghost" @click="deleteConfirmVisible = false">取消</AppButton>
+        <AppButton
+          variant="danger"
           :disabled="deleteMutation.isPending.value"
-          class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :loading="deleteMutation.isPending.value"
+          @click="deleteFeedback"
         >
           删除
-        </button>
+        </AppButton>
       </template>
-    </el-dialog>
+    </AppDialog>
   </div>
 </template>
 
@@ -176,6 +174,7 @@ import { useFeedbackStats, useFeedbackList, useDeleteFeedback, type FeedbackItem
 import { useDeleteConfirm } from '@/composables/useCrudModal'
 import { formatDate } from '@/utils/format'
 import { useToast } from '@/composables/useToast'
+import { AppButton, AppCard, AppDialog } from '@/components/ui'
 
 const toast = useToast()
 

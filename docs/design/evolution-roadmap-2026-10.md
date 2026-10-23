@@ -80,7 +80,7 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 | # | 方向 | 现状 / 证据 | 优先级 |
 |---|---|---|---|
 | VIS-1 | 设计 token 层 | ✅ 已实施（2026-10-24）：`style.css` 新增语义色（page/surface/content/line/status）、圆角与阴影 token，`.dark` 统一覆盖；全局组件类改用 `var(--token)`；35 个前端文件将 `light + dark:` 成对类迁移为 `bg-surface` / `text-content` / `border-line` 等语义类；SVG/Markdown 硬编码色改走 token | 已完成 |
-| VIS-2 | 组件 primitive | Button/Card/Dialog/Badge/Input 各处手写，风格漂移 | P1 |
+| VIS-2 | 组件 primitive | ✅ 已实施（2026-10-24）：`components/ui/` 提供 AppButton/AppCard/AppBadge/AppInput/AppSelect/AppDialog（+11 单测）；Button 6 组变体 + 6 种尺寸，Dialog 统一 EP 封装；手写 button 127→38（余量为专用控件），卡片/弹窗/表单完成迁移；删除未使用的全局 btn/card/input/badge 类 | 已完成 |
 | VIS-3 | 页面视觉收口 | 设置页、知识库页、聊天页密度/圆角/阴影不一致 | P2 |
 
 ### 3.4 代码观感（CODE）

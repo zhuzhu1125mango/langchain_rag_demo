@@ -17,13 +17,14 @@
               </p>
             </div>
           </div>
-          <button
-            @click="close"
-            class="p-2 text-gray-400 hover:text-content-tertiary rounded-lg hover:bg-surface-hover transition-colors"
+          <AppButton
+            variant="ghost"
+            size="icon"
             aria-label="关闭来源详情"
+            @click="close"
           >
             <X class="w-5 h-5" />
-          </button>
+          </AppButton>
         </div>
         
         <div class="flex-1 overflow-y-auto p-6">
@@ -69,12 +70,7 @@
         </div>
         
         <div class="flex items-center justify-end gap-3 px-6 py-4 border-t border-line">
-          <button
-            @click="close"
-            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-          >
-            关闭
-          </button>
+          <AppButton variant="ghost" @click="close">关闭</AppButton>
         </div>
       </div>
     </div>
@@ -97,6 +93,7 @@
 import { ref, computed, watch } from 'vue'
 import { FileText, X, Database, Loader2, FileQuestion } from '@lucide/vue'
 import { useGetDocumentSource } from '@/queries/kb'
+import { AppButton } from '@/components/ui'
 
 /** 文档来源数据结构 */
 interface SourceData {

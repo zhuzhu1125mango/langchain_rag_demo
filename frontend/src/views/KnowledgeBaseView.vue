@@ -30,52 +30,57 @@
             </select>
           </div>
           <div v-if="currentKB" class="flex items-center gap-1 sm:gap-3 overflow-x-auto pb-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0">
-            <button
-              @click="showWikiDrawer = true"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors flex-shrink-0"
+            <AppButton
+              variant="ghost"
+              size="nav"
+              class="flex-shrink-0"
               title="Wiki 页面"
+              @click="showWikiDrawer = true"
             >
               <BookOpen class="w-4 h-4" />
               <span class="hidden sm:inline">Wiki 页面</span>
-            </button>
-            <button
-              @click="showEditKBModal = true"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors flex-shrink-0"
+            </AppButton>
+            <AppButton
+              variant="ghost"
+              size="nav"
+              class="flex-shrink-0"
               title="编辑知识库"
+              @click="showEditKBModal = true"
             >
               <Edit3 class="w-4 h-4" />
               <span class="hidden sm:inline">编辑</span>
-            </button>
-            <button
-              @click="deleteKnowledgeBaseConfirm"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors flex-shrink-0"
+            </AppButton>
+            <AppButton
+              variant="danger-ghost"
+              size="nav"
+              class="flex-shrink-0"
               title="删除知识库"
+              @click="deleteKnowledgeBaseConfirm"
             >
               <Trash2 class="w-4 h-4" />
               <span class="hidden sm:inline">删除</span>
-            </button>
-            <button
-              @click="batchDelete"
+            </AppButton>
+            <AppButton
+              :variant="kbStore.selectedCount > 0 ? 'danger' : 'secondary'"
+              size="nav"
               :disabled="kbStore.selectedCount === 0"
-              :class="[
-                'flex items-center gap-2 px-2 sm:px-4 py-2 text-sm rounded-lg transition-colors flex-shrink-0',
-                kbStore.selectedCount > 0
-                  ? 'bg-red-500 text-white hover:bg-red-600'
-                  : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-              ]"
+              class="flex-shrink-0"
               title="批量删除选中文档"
+              @click="batchDelete"
             >
               <Trash2 class="w-4 h-4" />
               <span class="hidden md:inline">批量删除 ({{ kbStore.selectedCount }})</span>
-            </button>
-            <button
-              @click="showUploadDialog = true"
-              class="flex items-center gap-2 px-2 sm:px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors flex-shrink-0"
+            </AppButton>
+            <AppButton
+              variant="primary"
+              size="nav"
+              class="flex-shrink-0"
               title="上传文档"
+              @click="showUploadDialog = true"
             >
               <Upload class="w-4 h-4" />
               <span class="hidden sm:inline">上传文档</span>
-            </button>
+            </AppButton>
           </div>
         </div>
       </header>
@@ -110,43 +115,38 @@
         </div>
 
         <!-- 文档列表视图 -->
-        <div v-if="activeTab === 'documents'" class="bg-surface rounded-xl shadow-sm border border-line">
+        <AppCard v-if="activeTab === 'documents'" padding="none">
           <div class="p-4 border-b border-line flex items-center justify-between">
             <div class="flex items-center gap-4">
               <div class="flex items-center gap-2">
-                <Search class="w-4 h-4 text-gray-400" />
-                <input
+                <Search class="w-4 h-4 text-content-subtle" />
+                <AppInput
                   v-model="searchQuery"
-                  type="text"
                   placeholder="搜索文档..."
+                  size="sm"
+                  class="w-48"
                   @keyup.enter="onPerformSearch"
-                  class="px-3 py-1.5 text-sm bg-surface-subtle border border-line rounded-lg text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
-                <select
-                  v-model="searchMode"
-                  class="px-3 py-1.5 text-sm bg-surface-subtle border border-line rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
+                <AppSelect v-model="searchMode">
                   <option value="filename">文件名</option>
                   <option value="content">全文</option>
-                </select>
+                </AppSelect>
               </div>
-              <select
-                v-model="filterStatus"
-                class="px-3 py-1.5 text-sm bg-surface-subtle border border-line rounded-lg text-content focus:outline-none focus:ring-2 focus:ring-primary-500"
-              >
+              <AppSelect v-model="filterStatus">
                 <option value="all">全部状态</option>
                 <option value="active">已上架</option>
                 <option value="inactive">已下架</option>
-              </select>
+              </AppSelect>
             </div>
             <div class="flex items-center gap-3">
-              <button
+              <AppButton
                 v-if="searchQuery && searchMode === 'content'"
+                variant="ghost"
+                size="sm"
                 @click="onClearSearch"
-                class="px-3 py-1.5 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
               >
                 清除搜索
-              </button>
+              </AppButton>
               <label class="flex items-center gap-2 text-sm text-content-tertiary">
                 <input
                   type="checkbox"
@@ -185,12 +185,12 @@
             @close="onClearSearch"
             @preview="previewDocumentById"
           />
-        </div>
+        </AppCard>
 
         <!-- 知识图谱视图 -->
-        <div v-if="activeTab === 'graph'" class="bg-surface rounded-xl shadow-sm border border-line h-[500px]">
+        <AppCard v-if="activeTab === 'graph'" padding="none" class="h-[500px]">
           <KnowledgeGraph :kb-ids="currentKB ? [currentKB.id] : []" />
-        </div>
+        </AppCard>
       </div>
 
       <div v-else class="text-center">
@@ -198,103 +198,67 @@
         <h3 class="text-lg font-medium text-content-muted">请选择一个知识库</h3>
         <p class="text-sm text-content-subtle mt-2">从左侧列表中选择或创建新的知识库</p>
         <!-- 移动端无左侧列表，提供直接创建入口 -->
-        <button
-          @click="showCreateKBModal = true"
-          class="lg:hidden mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-        >
+        <AppButton variant="primary" class="lg:hidden mt-4" @click="showCreateKBModal = true">
           <Plus class="w-4 h-4" />
           新建知识库
-        </button>
+        </AppButton>
       </div>
     </div>
 
-    <el-dialog v-model="showCreateKBModal" title="创建知识库" width="450px">
+    <AppDialog v-model="showCreateKBModal" title="创建知识库" width="450px">
       <div class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">知识库名称 *</label>
-          <input
-            v-model="newKBName"
-            type="text"
-            placeholder="输入知识库名称"
-            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
+          <AppInput v-model="newKBName" variant="raised" placeholder="输入知识库名称" />
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
-          <textarea
+          <AppInput
             v-model="newKBDescription"
+            variant="raised"
+            multiline
+            :rows="3"
             placeholder="输入知识库描述（可选）"
-            rows="3"
-            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-          ></textarea>
+            class="resize-none"
+          />
         </div>
       </div>
       <template #footer>
         <div class="flex gap-2">
-          <button
-            @click="showCreateKBModal = false"
-            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-          >
-            取消
-          </button>
-          <button
-            @click="createKnowledgeBase"
-            :disabled="!newKBName.trim()"
-            :class="[
-              'px-4 py-2 text-sm rounded-lg transition-colors',
-              newKBName.trim()
-                ? 'bg-primary-500 text-white hover:bg-primary-600'
-                : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-            ]"
-          >
+          <AppButton variant="ghost" @click="showCreateKBModal = false">取消</AppButton>
+          <AppButton variant="primary" :disabled="!newKBName.trim()" @click="createKnowledgeBase">
             创建
-          </button>
+          </AppButton>
         </div>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog v-model="showEditKBModal" title="编辑知识库" width="450px">
+    <AppDialog v-model="showEditKBModal" title="编辑知识库" width="450px">
       <div class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">知识库名称 *</label>
-          <input
-            v-model="editKBName"
-            type="text"
-            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
-          />
+          <AppInput v-model="editKBName" variant="raised" />
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
-          <textarea
+          <AppInput
             v-model="editKBDescription"
-            rows="3"
-            class="w-full px-3 py-2 text-sm border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-          ></textarea>
+            variant="raised"
+            multiline
+            :rows="3"
+            class="resize-none"
+          />
         </div>
       </div>
       <template #footer>
         <div class="flex gap-2">
-          <button
-            @click="showEditKBModal = false"
-            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-          >
-            取消
-          </button>
-          <button
-            @click="updateKnowledgeBase"
-            :disabled="!editKBName.trim()"
-            :class="[
-              'px-4 py-2 text-sm rounded-lg transition-colors',
-              editKBName.trim()
-                ? 'bg-primary-500 text-white hover:bg-primary-600'
-                : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-            ]"
-          >
+          <AppButton variant="ghost" @click="showEditKBModal = false">取消</AppButton>
+          <AppButton variant="primary" :disabled="!editKBName.trim()" @click="updateKnowledgeBase">
             保存
-          </button>
+          </AppButton>
         </div>
       </template>
-    </el-dialog>
+    </AppDialog>
 
     <UploadDocumentDialog
       v-model:visible="showUploadDialog"
@@ -334,6 +298,7 @@ import { useQueryClient } from '@tanstack/vue-query'
 import { useToast } from '@/composables/useToast'
 import { useWebSocketNotifications } from '@/composables/useNotifications'
 import KnowledgeGraph from '@/components/KnowledgeGraph.vue'
+import { AppButton, AppCard, AppDialog, AppInput, AppSelect } from '@/components/ui'
 import KnowledgeBaseSidebar from '@/components/knowledge-base/KnowledgeBaseSidebar.vue'
 import DocumentTable from '@/components/knowledge-base/DocumentTable.vue'
 import DocumentSearchResults from '@/components/knowledge-base/DocumentSearchResults.vue'

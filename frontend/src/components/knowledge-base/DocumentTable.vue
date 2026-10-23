@@ -29,7 +29,7 @@
           v-for="doc in documents"
           :key="doc.id"
           :class="[
-            'hover:bg-gray-50 dark:hover:bg-dark-700 transition-colors',
+            'hover:bg-surface-muted transition-colors',
             kbStore.isSelected(doc) ? 'bg-primary-50 dark:bg-primary-900/20' : ''
           ]"
         >
@@ -54,22 +54,22 @@
             <span class="text-sm text-content-tertiary">{{ doc.category_name || '未分类' }}</span>
           </td>
           <td class="px-4 py-4">
-            <span class="px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded">
+            <AppBadge variant="info" size="md">
               {{ doc.document_type_label || '未识别' }}
-            </span>
+            </AppBadge>
           </td>
           <td class="px-4 py-4">
             <span class="text-sm text-content-tertiary">{{ doc.domain_label || '未分类' }}</span>
           </td>
           <td class="px-4 py-4">
             <div class="flex flex-wrap gap-1">
-              <span
+              <AppBadge
                 v-for="tag in doc.tags"
                 :key="tag"
-                class="px-2 py-0.5 text-xs bg-surface-subtle-strong text-content-tertiary rounded"
+                variant="neutral"
               >
                 {{ tag }}
-              </span>
+              </AppBadge>
             </div>
           </td>
           <td class="px-4 py-4">
@@ -102,81 +102,92 @@
                 >
                   {{ getProcessingStatusText(doc.processing_status) }}
                 </span>
-                <span v-if="doc.processing_progress !== undefined && doc.processing_progress < 100" class="text-xs text-gray-500">{{ doc.processing_progress }}%</span>
+                <span v-if="doc.processing_progress !== undefined && doc.processing_progress < 100" class="text-xs text-content-muted">{{ doc.processing_progress }}%</span>
               </div>
-              <div v-if="doc.processing_message" class="text-xs text-gray-500 truncate max-w-48" :title="doc.processing_message">
+              <div v-if="doc.processing_message" class="text-xs text-content-muted truncate max-w-48" :title="doc.processing_message">
                 {{ doc.processing_message }}
               </div>
             </div>
           </td>
           <td class="px-4 py-4">
-            <span
-              :class="[
-                'px-2 py-1 text-xs rounded-full',
-                doc.status === 'active'
-                  ? 'bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400'
-                  : 'bg-surface-subtle-strong text-content-secondary-muted'
-              ]"
-            >
+            <AppBadge :variant="doc.status === 'active' ? 'success' : 'neutral'" size="md">
               {{ doc.status === 'active' ? '已上架' : '已下架' }}
-            </span>
+            </AppBadge>
           </td>
           <td class="px-4 py-4">
             <span class="text-sm text-content-muted">{{ formatDate(doc.created_at) }}</span>
           </td>
           <td class="px-4 py-4">
             <div class="flex items-center gap-2">
-              <button
-                @click="$emit('preview', doc)"
-                class="p-1.5 text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-surface-hover rounded transition-colors"
+              <AppButton
+                variant="ghost"
+                size="icon"
                 title="预览"
+                aria-label="预览文档"
+                @click="$emit('preview', doc)"
               >
                 <Eye class="w-4 h-4" />
-              </button>
-              <button
-                @click="$emit('classify', doc)"
-                class="p-1.5 text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-surface-hover rounded transition-colors"
+              </AppButton>
+              <AppButton
+                variant="ghost"
+                size="icon"
+                class="hover:text-blue-600 dark:hover:text-blue-400"
                 title="分类"
+                aria-label="文档分类"
+                @click="$emit('classify', doc)"
               >
                 <Tags class="w-4 h-4" />
-              </button>
-              <button
-                @click="$emit('quality', doc)"
-                class="p-1.5 text-gray-500 hover:text-purple-600 dark:hover:text-purple-400 hover:bg-surface-hover rounded transition-colors"
+              </AppButton>
+              <AppButton
+                variant="ghost"
+                size="icon"
+                class="hover:text-purple-600 dark:hover:text-purple-400"
                 title="质量评估"
+                aria-label="质量评估"
+                @click="$emit('quality', doc)"
               >
                 <Award class="w-4 h-4" />
-              </button>
-              <button
-                @click="$emit('duplicate-detect', doc)"
-                class="p-1.5 text-gray-500 hover:text-orange-600 dark:hover:text-orange-400 hover:bg-surface-hover rounded transition-colors"
+              </AppButton>
+              <AppButton
+                variant="ghost"
+                size="icon"
+                class="hover:text-orange-600 dark:hover:text-orange-400"
                 title="检测重复"
+                aria-label="检测重复"
+                @click="$emit('duplicate-detect', doc)"
               >
                 <Copy class="w-4 h-4" />
-              </button>
-              <button
-                @click="$emit('toggle-status', doc)"
-                class="p-1.5 text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-surface-hover rounded transition-colors"
+              </AppButton>
+              <AppButton
+                variant="ghost"
+                size="icon"
                 :title="doc.status === 'active' ? '下架' : '上架'"
+                :aria-label="doc.status === 'active' ? '下架' : '上架'"
+                @click="$emit('toggle-status', doc)"
               >
                 <ToggleLeft v-if="doc.status === 'active'" class="w-4 h-4" />
                 <ToggleRight v-else class="w-4 h-4" />
-              </button>
-              <button
+              </AppButton>
+              <AppButton
                 v-if="doc.processing_status === 'failed'"
-                @click="$emit('reprocess', doc)"
-                class="p-1.5 text-gray-500 hover:text-green-600 dark:hover:text-green-400 hover:bg-surface-hover rounded transition-colors"
+                variant="ghost"
+                size="icon"
+                class="hover:text-green-600 dark:hover:text-green-400"
                 title="重新处理"
+                aria-label="重新处理"
+                @click="$emit('reprocess', doc)"
               >
                 <RotateCcw class="w-4 h-4" />
-              </button>
-              <button
-                @click="$emit('delete', doc)"
-                class="p-1.5 text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-surface-hover rounded transition-colors"
+              </AppButton>
+              <AppButton
+                variant="danger-ghost"
+                size="icon"
                 title="删除"
+                aria-label="删除文档"
+                @click="$emit('delete', doc)"
               >
                 <Trash2 class="w-4 h-4" />
-              </button>
+              </AppButton>
             </div>
           </td>
         </tr>
@@ -207,6 +218,7 @@ import { FileText, Eye, Tags, Award, Copy, ToggleLeft, ToggleRight, RotateCcw, T
 import { useKBStore } from '@/stores/kb'
 import type { Document } from '@/queries/kb'
 import { formatDate } from '@/utils/format'
+import { AppBadge, AppButton } from '@/components/ui'
 import {
   getProcessingStatusText,
   getProcessingStatusClass,

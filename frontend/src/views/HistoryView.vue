@@ -6,66 +6,60 @@
           <h1 class="text-lg lg:text-xl font-semibold text-content truncate">历史对话</h1>
           <p class="hidden sm:block text-sm text-content-muted mt-1">查看和管理您的历史对话记录</p>
         </div>
-        <button
-          @click="clearAllHistory"
+        <AppButton
+          :variant="sessionsData?.length ? 'danger' : 'secondary'"
           :disabled="!sessionsData?.length"
-          :class="[
-            'flex items-center gap-2 px-3 sm:px-4 py-2 text-sm rounded-lg transition-colors flex-shrink-0',
-            sessionsData?.length
-              ? 'bg-red-500 text-white hover:bg-red-600'
-              : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-          ]"
+          class="flex-shrink-0"
+          @click="clearAllHistory"
         >
           <Trash2 class="w-4 h-4" />
           <span class="hidden sm:inline">清空全部</span>
-        </button>
+        </AppButton>
       </div>
     </header>
 
     <div class="flex-1 overflow-auto p-4 sm:p-6">
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div
+        <AppCard
           v-for="session in sessionsData"
           :key="session.id"
-          @click="openSession(session)"
-          @keydown.enter="openSession(session)"
-          @keydown.space.prevent="openSession(session)"
+          hoverable
+          class="cursor-pointer hover:border-primary-500 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+          :class="selectedSession?.id === session.id ? 'ring-2 ring-primary-500' : ''"
           role="button"
           tabindex="0"
           :aria-label="`打开会话 ${session.title || '未命名对话'}`"
-          :class="[
-            'bg-surface rounded-xl shadow-sm border border-line p-4 cursor-pointer hover:shadow-md hover:border-primary-500 transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400',
-            selectedSession?.id === session.id ? 'ring-2 ring-primary-500' : ''
-          ]"
+          @click="openSession(session)"
+          @keydown.enter="openSession(session)"
+          @keydown.space.prevent="openSession(session)"
         >
           <div class="flex items-start justify-between mb-3">
             <div class="flex-1 min-w-0">
               <h3 class="font-medium text-content truncate">{{ session.title || '未命名对话' }}</h3>
               <p class="text-xs text-content-muted mt-1">{{ formatDate(session.created_at) }}</p>
             </div>
-            <button
-              @click.stop="deleteSession(session)"
-              class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus:opacity-100 transition-all"
+            <AppButton
+              variant="danger-ghost"
+              size="icon"
+              class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus:opacity-100"
               :aria-label="`删除会话 ${session.title || '未命名对话'}`"
+              @click.stop="deleteSession(session)"
             >
               <X class="w-4 h-4" />
-            </button>
+            </AppButton>
           </div>
           <div class="text-sm text-content-tertiary line-clamp-3">
             {{ session.last_message || '暂无消息' }}
           </div>
-        </div>
+        </AppCard>
       </div>
 
       <div v-if="!sessionsData?.length" class="flex flex-col items-center justify-center h-full">
         <MessageCircle class="w-16 h-16 text-content-disabled mb-4" />
         <p class="text-content-muted">暂无历史对话</p>
-        <button
-          @click="router.push('/')"
-          class="mt-4 px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-        >
+        <AppButton variant="primary" class="mt-4" @click="router.push('/')">
           开始新对话
-        </button>
+        </AppButton>
       </div>
     </div>
 
@@ -76,27 +70,18 @@
           <p class="text-xs text-content-muted">{{ selectedSession.message_count }} 条消息</p>
         </div>
         <div class="flex gap-2">
-          <button
-            @click="renameSession"
-            class="px-3 py-1.5 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-          >
-            <Edit3 class="w-4 h-4 inline mr-1" />
+          <AppButton variant="ghost" size="nav" @click="renameSession">
+            <Edit3 class="w-4 h-4" />
             重命名
-          </button>
-          <button
-            @click="viewTraces"
-            class="px-3 py-1.5 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-          >
-            <Activity class="w-4 h-4 inline mr-1" />
+          </AppButton>
+          <AppButton variant="ghost" size="nav" @click="viewTraces">
+            <Activity class="w-4 h-4" />
             链路追踪
-          </button>
-          <button
-            @click="continueSession"
-            class="px-3 py-1.5 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-          >
-            <MessageSquare class="w-4 h-4 inline mr-1" />
+          </AppButton>
+          <AppButton variant="primary" size="nav" @click="continueSession">
+            <MessageSquare class="w-4 h-4" />
             继续对话
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>
@@ -116,6 +101,7 @@ import { useSessions, useDeleteSession, useBatchDeleteSessions, useUpdateSession
 import type { Session } from '@/queries/chat'
 import { Trash2, X, MessageCircle, Edit3, MessageSquare, Activity } from '@lucide/vue'
 import { formatDate } from '@/utils/format'
+import { AppButton, AppCard } from '@/components/ui'
 import { useToast } from '@/composables/useToast'
 
 const router = useRouter()

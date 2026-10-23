@@ -1,6 +1,6 @@
 <template>
   <!-- 文档分类弹窗 -->
-  <el-dialog
+  <AppDialog
     :model-value="visibleClassify"
     @update:model-value="$emit('update:visibleClassify', $event)"
     :title="'文档分类: ' + (doc?.filename || '')"
@@ -45,17 +45,12 @@
       </div>
     </div>
     <template #footer>
-      <button
-        @click="$emit('update:visibleClassify', false)"
-        class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-      >
-        关闭
-      </button>
+      <AppButton variant="ghost" @click="$emit('update:visibleClassify', false)">关闭</AppButton>
     </template>
-  </el-dialog>
+  </AppDialog>
 
   <!-- 质量评估弹窗 -->
-  <el-dialog
+  <AppDialog
     :model-value="visibleQuality"
     @update:model-value="$emit('update:visibleQuality', $event)"
     :title="'质量评估: ' + (doc?.filename || '')"
@@ -129,17 +124,12 @@
       </div>
     </div>
     <template #footer>
-      <button
-        @click="$emit('update:visibleQuality', false)"
-        class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-      >
-        关闭
-      </button>
+      <AppButton variant="ghost" @click="$emit('update:visibleQuality', false)">关闭</AppButton>
     </template>
-  </el-dialog>
+  </AppDialog>
 
   <!-- 重复检测弹窗 -->
-  <el-dialog
+  <AppDialog
     :model-value="visibleDuplicate"
     @update:model-value="$emit('update:visibleDuplicate', $event)"
     :title="'重复检测: ' + (doc?.filename || '')"
@@ -186,14 +176,9 @@
       </div>
     </div>
     <template #footer>
-      <button
-        @click="$emit('update:visibleDuplicate', false)"
-        class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-      >
-        关闭
-      </button>
+      <AppButton variant="ghost" @click="$emit('update:visibleDuplicate', false)">关闭</AppButton>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <script setup lang="ts">
@@ -220,6 +205,7 @@ import { api } from '@/utils/axios'
 import { useToast, handleMutationError } from '@/composables/useToast'
 import { getQualityGradeClass, getQualityTextClass } from './utils'
 import type { Document } from '@/queries/kb'
+import { AppButton, AppDialog } from '@/components/ui'
 
 const props = defineProps<{
   visibleClassify: boolean

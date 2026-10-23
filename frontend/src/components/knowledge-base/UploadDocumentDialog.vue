@@ -1,5 +1,5 @@
 <template>
-  <el-dialog
+  <AppDialog
     :model-value="visible"
     @update:model-value="onVisibleChange"
     title="上传文档"
@@ -21,9 +21,9 @@
           :disabled="isUploading"
           class="w-full p-6 border-2 border-dashed border-line-strong rounded-lg hover:border-primary-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          <Upload class="w-8 h-8 text-gray-400 mx-auto mb-2" />
+          <Upload class="w-8 h-8 text-content-subtle mx-auto mb-2" />
           <p class="text-sm text-content-secondary-muted">点击或拖拽上传文件</p>
-          <p class="text-xs text-gray-400 mt-1">支持 PDF, DOCX, XLSX, PPTX, MD, TXT 等格式</p>
+          <p class="text-xs text-content-subtle mt-1">支持 PDF, DOCX, XLSX, PPTX, MD, TXT 等格式</p>
         </button>
       </div>
 
@@ -39,47 +39,45 @@
             :style="{ width: uploadProgress + '%' }"
           ></div>
         </div>
-        <p class="text-xs text-gray-500">{{ uploadMessage }}</p>
+        <p class="text-xs text-content-muted">{{ uploadMessage }}</p>
       </div>
 
       <div v-if="selectedFiles.length > 0 && !isUploading" class="space-y-2">
         <p class="text-sm text-content-tertiary">已选择 {{ selectedFiles.length }} 个文件</p>
         <div v-for="file in selectedFiles" :key="file.name" class="flex items-center justify-between">
           <span class="text-sm text-content">{{ file.name }}</span>
-          <button @click="removeFile(file)" class="text-gray-400 hover:text-red-500">
+          <AppButton
+            variant="danger-ghost"
+            size="icon"
+            :aria-label="`移除 ${file.name}`"
+            @click="removeFile(file)"
+          >
             <X class="w-4 h-4" />
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>
     <template #footer>
       <div class="flex items-center justify-between">
-        <span class="text-sm text-gray-500">
+        <span class="text-sm text-content-muted">
           进度: {{ uploadProgress }}%
         </span>
         <div class="flex gap-2">
-          <button
-            @click="cancelUpload"
-            class="px-4 py-2 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-          >
+          <AppButton variant="ghost" @click="cancelUpload">
             {{ isUploading ? '取消上传' : '取消' }}
-          </button>
-          <button
-            @click="uploadFiles"
+          </AppButton>
+          <AppButton
+            variant="primary"
             :disabled="selectedFiles.length === 0 || isUploading"
-            :class="[
-              'px-4 py-2 text-sm rounded-lg transition-colors',
-              selectedFiles.length > 0 && !isUploading
-                ? 'bg-primary-500 text-white hover:bg-primary-600'
-                : 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-            ]"
+            :loading="isUploading"
+            @click="uploadFiles"
           >
             {{ isUploading ? '上传中...' : '上传' }}
-          </button>
+          </AppButton>
         </div>
       </div>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <script setup lang="ts">
@@ -102,6 +100,7 @@
  */
 import { ref } from 'vue'
 import { Upload, X } from '@lucide/vue'
+import { AppButton, AppDialog } from '@/components/ui'
 import { api } from '@/utils/axios'
 import { buildWsUrl } from '@/utils/ws'
 import { getToken } from '@/utils/auth'

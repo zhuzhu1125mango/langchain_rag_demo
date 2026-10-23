@@ -6,20 +6,17 @@
           <h1 class="text-xl font-semibold text-content">标签管理</h1>
           <p class="text-sm text-content-muted mt-1">管理文档标签，支持自定义颜色</p>
         </div>
-        <button
-          @click="openCreateModal"
-          class="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-        >
+        <AppButton variant="primary" @click="openCreateModal">
           <Plus class="w-4 h-4" />
           新建标签
-        </button>
+        </AppButton>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div
+        <AppCard
           v-for="tag in tagsList"
           :key="tag.id"
-          class="bg-surface rounded-xl shadow-sm border border-line p-4 hover:shadow-md transition-shadow"
+          hoverable
         >
           <div class="flex items-center justify-between mb-2">
             <div class="flex items-center gap-3">
@@ -30,26 +27,30 @@
               <span class="font-medium text-content">{{ tag.name }}</span>
             </div>
             <div class="flex items-center gap-1">
-              <button
-                @click="openEditModal(tag)"
-                class="p-2 text-gray-400 hover:text-primary-500 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+              <AppButton
+                variant="ghost"
+                size="icon"
                 title="编辑"
+                aria-label="编辑标签"
+                @click="openEditModal(tag)"
               >
                 <Edit class="w-4 h-4" />
-              </button>
-              <button
-                @click="confirmDelete(tag)"
-                class="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
+              </AppButton>
+              <AppButton
+                variant="danger-ghost"
+                size="icon"
                 title="删除"
+                aria-label="删除标签"
+                @click="confirmDelete(tag)"
               >
                 <Trash2 class="w-4 h-4" />
-              </button>
+              </AppButton>
             </div>
           </div>
           <div class="text-sm text-content-muted">
             十六进制: <code class="px-2 py-0.5 bg-surface-subtle rounded text-xs">{{ tag.color }}</code>
           </div>
-        </div>
+        </AppCard>
         <div
           v-if="tagsList.length === 0"
           class="col-span-full flex flex-col items-center justify-center py-16 text-content-muted"
@@ -61,7 +62,7 @@
       </div>
     </div>
 
-    <el-dialog
+    <AppDialog
       v-model="modalVisible"
       :title="isEdit ? '编辑标签' : '新建标签'"
       width="400px"
@@ -69,12 +70,11 @@
       <form @submit.prevent="saveTag" class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">名称 *</label>
-          <input
+          <AppInput
             v-model="formData.name"
-            type="text"
+            variant="raised"
             required
             placeholder="请输入标签名称"
-            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
@@ -83,13 +83,13 @@
             <input
               v-model="formData.color"
               type="color"
-              class="w-12 h-10 rounded cursor-pointer border border-gray-300"
+              class="w-12 h-10 rounded cursor-pointer border border-line-strong"
             />
-            <input
+            <AppInput
               v-model="formData.color"
-              type="text"
+              variant="raised"
               placeholder="#1890ff"
-              class="flex-1 px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+              class="flex-1"
             />
           </div>
           <div class="flex flex-wrap gap-2 mt-3">
@@ -106,23 +106,19 @@
         </div>
       </form>
       <template #footer>
-        <button
-          @click="modalVisible = false"
-          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
-        >
-          取消
-        </button>
-        <button
-          @click="saveTag"
+        <AppButton variant="ghost" @click="modalVisible = false">取消</AppButton>
+        <AppButton
+          variant="primary"
           :disabled="!formData.name || createMutation.isPending.value || updateMutation.isPending.value"
-          class="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :loading="createMutation.isPending.value || updateMutation.isPending.value"
+          @click="saveTag"
         >
           {{ isEdit ? '保存修改' : '创建标签' }}
-        </button>
+        </AppButton>
       </template>
-    </el-dialog>
+    </AppDialog>
 
-    <el-dialog
+    <AppDialog
       v-model="deleteConfirmVisible"
       title="确认删除"
       width="360px"
@@ -138,21 +134,17 @@
       </div>
       <p class="text-sm text-content-muted">此操作无法撤销。</p>
       <template #footer>
-        <button
-          @click="deleteConfirmVisible = false"
-          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
-        >
-          取消
-        </button>
-        <button
-          @click="deleteTag"
+        <AppButton variant="ghost" @click="deleteConfirmVisible = false">取消</AppButton>
+        <AppButton
+          variant="danger"
           :disabled="deleteMutation.isPending.value"
-          class="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :loading="deleteMutation.isPending.value"
+          @click="deleteTag"
         >
           删除
-        </button>
+        </AppButton>
       </template>
-    </el-dialog>
+    </AppDialog>
   </div>
 </template>
 
@@ -166,6 +158,7 @@ import { ref, computed } from 'vue'
 import { Plus, Edit, Trash2, Tags } from '@lucide/vue'
 import { useTags, useCreateTag, useUpdateTag, useDeleteTag, type Tag, type TagCreateRequest } from '@/queries/kb'
 import { useToast } from '@/composables/useToast'
+import { AppButton, AppCard, AppDialog, AppInput } from '@/components/ui'
 
 const toast = useToast()
 

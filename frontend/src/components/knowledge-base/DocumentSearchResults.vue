@@ -7,13 +7,10 @@
           搜索结果: "{{ query }}" ({{ results.length }} 条)
         </span>
       </div>
-      <button
-        @click="$emit('close')"
-        class="flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-      >
+      <AppButton variant="ghost" size="sm" @click="$emit('close')">
         <ArrowLeft class="w-4 h-4" />
         返回列表
-      </button>
+      </AppButton>
     </div>
 
     <div v-if="isSearching" class="p-8 text-center">
@@ -46,13 +43,15 @@
             </p>
             <p class="text-sm text-content-muted line-clamp-3">{{ result.content }}</p>
           </div>
-          <button
-            @click="$emit('preview', result.id)"
-            class="p-2 text-gray-500 hover:text-primary-600 dark:hover:text-primary-400 hover:bg-surface-hover rounded transition-colors"
+          <AppButton
+            variant="ghost"
+            size="icon"
             title="预览文档"
+            aria-label="预览文档"
+            @click="$emit('preview', result.id)"
           >
             <Eye class="w-4 h-4" />
-          </button>
+          </AppButton>
         </div>
       </div>
     </div>
@@ -73,6 +72,7 @@
  */
 import { Search, ArrowLeft, BookOpen, FileText, Eye } from '@lucide/vue'
 import type { SearchResult } from '@/queries/kb'
+import { AppButton } from '@/components/ui'
 
 defineProps<{
   results: SearchResult[]

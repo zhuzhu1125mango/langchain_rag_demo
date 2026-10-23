@@ -1,5 +1,5 @@
 <template>
-  <el-dialog
+  <AppDialog
     :model-value="visible"
     :title="step === 'form' ? '新建 API 密钥' : '密钥已创建'"
     width="520px"
@@ -72,7 +72,7 @@
         <el-button type="primary" data-testid="api-key-saved-btn" @click="confirmSaved">我已保存，关闭</el-button>
       </template>
     </template>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <script setup lang="ts">
@@ -89,6 +89,7 @@ import { useClipboard } from '@vueuse/core'
 import { AlertTriangle, CheckCircle } from '@lucide/vue'
 import { useCreateApiKey, type ApiKeyCreated } from '@/queries/apiKeys'
 import { handleMutationError, useToast } from '@/composables/useToast'
+import { AppDialog } from '@/components/ui'
 
 const props = defineProps<{
   visible: boolean

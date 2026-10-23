@@ -11,32 +11,24 @@
         由文档离线编译生成的补充语料，参与混合检索
       </p>
       <div class="flex items-center gap-2">
-        <button
-          @click="onLint"
+        <AppButton
+          variant="primary-ghost"
+          size="sm"
           :disabled="lintLoading || !kbId"
-          :class="[
-            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
-            lintLoading
-              ? 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-              : 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
-          ]"
+          @click="onLint"
         >
           <Stethoscope class="w-3.5 h-3.5" :class="{ 'animate-pulse': lintLoading }" />
           <span>{{ lintLoading ? '体检中...' : '体检' }}</span>
-        </button>
-        <button
-          @click="onRebuild"
+        </AppButton>
+        <AppButton
+          variant="primary-ghost"
+          size="sm"
           :disabled="rebuilding || !kbId"
-          :class="[
-            'flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg transition-colors',
-            rebuilding
-              ? 'bg-surface-disabled text-gray-400 cursor-not-allowed'
-              : 'text-primary-600 dark:text-primary-400 hover:bg-primary-50 dark:hover:bg-primary-900/20'
-          ]"
+          @click="onRebuild"
         >
           <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': rebuilding }" />
           <span>{{ rebuilding ? '重编译中...' : '全量重编译' }}</span>
-        </button>
+        </AppButton>
       </div>
     </div>
 
@@ -49,13 +41,14 @@
         <p class="text-xs font-medium text-content-secondary-strong">
           体检报告 · 共检查 {{ lintReport.checked_pages }} 页
         </p>
-        <button
-          @click="lintReport = null"
-          class="text-gray-400 hover:text-content-tertiary"
+        <AppButton
+          variant="ghost"
+          size="icon"
           aria-label="关闭体检报告"
+          @click="lintReport = null"
         >
           <X class="w-3.5 h-3.5" />
-        </button>
+        </AppButton>
       </div>
       <p v-if="!lintReport.issues.length" class="text-xs text-emerald-600 dark:text-emerald-400 mt-2">
         未发现问题
@@ -109,7 +102,7 @@
       >
         <button
           @click="togglePage(page)"
-          class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-gray-50 dark:hover:bg-dark-700/50 transition-colors"
+          class="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-surface-muted/50 transition-colors"
         >
           <span
             :class="[
@@ -160,6 +153,7 @@ import { buildWsUrl } from '@/utils/ws'
 import { getToken } from '@/utils/auth'
 import { useToast, handleMutationError } from '@/composables/useToast'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
+import { AppButton } from '@/components/ui'
 import {
   useWikiPages,
   useRebuildWiki,

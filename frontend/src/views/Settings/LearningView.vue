@@ -7,7 +7,7 @@
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
               <Cpu class="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -17,9 +17,9 @@
               <p class="text-xl font-semibold text-content">{{ stats?.total_executions || 0 }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
 
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
               <CheckCircle class="w-5 h-5 text-green-600 dark:text-green-400" />
@@ -29,9 +29,9 @@
               <p class="text-xl font-semibold text-content">{{ stats?.successful_learnings || 0 }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
 
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-yellow-100 dark:bg-yellow-900/30 flex items-center justify-center">
               <AlertCircle class="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
@@ -41,9 +41,9 @@
               <p class="text-xl font-semibold text-content">{{ stats?.misclassification_count || 0 }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
 
-        <div class="bg-surface rounded-xl shadow-sm border border-line p-5">
+        <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-10 h-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
               <Target class="w-5 h-5 text-purple-600 dark:text-purple-400" />
@@ -53,10 +53,10 @@
               <p class="text-xl font-semibold text-content">{{ (stats?.avg_confidence || 0).toFixed(2) }}</p>
             </div>
           </div>
-        </div>
+        </AppCard>
       </div>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <div class="flex items-center justify-between mb-6">
           <h2 class="font-medium text-content">引擎状态</h2>
           <div class="flex items-center gap-2">
@@ -120,26 +120,27 @@
         </div>
 
         <div class="flex items-center gap-3 mt-6">
-          <button
-            @click="saveConfig"
+          <AppButton
+            variant="primary"
             :disabled="updateConfigMutation.isPending.value || isConfigLoading || learningInterval === null"
-            class="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            :loading="updateConfigMutation.isPending.value"
+            @click="saveConfig"
           >
-            <Save class="w-4 h-4 inline mr-2" />
+            <Save class="w-4 h-4" />
             保存配置
-          </button>
-          <button
-            @click="triggerLearning"
+          </AppButton>
+          <AppButton
+            variant="secondary"
             :disabled="triggerMutation.isPending.value || !config?.enabled"
-            class="px-4 py-2 bg-surface-subtle-strong text-content-secondary rounded-lg hover:bg-gray-200 dark:hover:bg-dark-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="triggerLearning"
           >
-            <RefreshCw class="w-4 h-4 inline mr-2" :class="{ 'animate-spin': triggerMutation.isPending.value }" />
+            <RefreshCw class="w-4 h-4" :class="{ 'animate-spin': triggerMutation.isPending.value }" />
             手动触发学习
-          </button>
+          </AppButton>
         </div>
-      </div>
+      </AppCard>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <h2 class="font-medium text-content mb-4">误分类案例分析</h2>
         <div class="overflow-x-auto">
           <table class="w-full">
@@ -201,7 +202,7 @@
             </tbody>
           </table>
         </div>
-      </div>
+      </AppCard>
     </div>
   </div>
 </template>
@@ -224,6 +225,7 @@ import {
 } from '@/queries/kb'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
+import { AppButton, AppCard } from '@/components/ui'
 
 const toast = useToast()
 

@@ -1,5 +1,5 @@
 <template>
-  <el-dialog
+  <AppDialog
     :model-value="visible"
     @update:model-value="$emit('update:visible', $event)"
     :title="'文档预览: ' + displayFilename"
@@ -9,21 +9,23 @@
       <div class="flex items-center justify-between text-sm text-gray-500">
         <span>共 {{ totalPages }} 页</span>
         <div class="flex items-center gap-2">
-          <button
-            @click="loadPreviewPage(page - 1)"
+          <AppButton
+            variant="secondary"
+            size="xs"
             :disabled="page <= 1 || loading"
-            class="px-2 py-1 text-xs bg-surface-subtle rounded hover:bg-surface-hover-strong disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="loadPreviewPage(page - 1)"
           >
             上一页
-          </button>
+          </AppButton>
           <span class="text-xs">第 {{ page }} / {{ totalPages }} 页</span>
-          <button
-            @click="loadPreviewPage(page + 1)"
+          <AppButton
+            variant="secondary"
+            size="xs"
             :disabled="page >= totalPages || loading"
-            class="px-2 py-1 text-xs bg-surface-subtle rounded hover:bg-surface-hover-strong disabled:opacity-50 disabled:cursor-not-allowed"
+            @click="loadPreviewPage(page + 1)"
           >
             下一页
-          </button>
+          </AppButton>
         </div>
       </div>
       <div class="max-h-96 overflow-auto bg-surface-muted rounded-lg p-4">
@@ -33,7 +35,7 @@
         <pre v-else class="whitespace-pre-wrap text-sm text-content font-mono leading-relaxed">{{ content }}</pre>
       </div>
     </div>
-  </el-dialog>
+  </AppDialog>
 </template>
 
 <script setup lang="ts">
@@ -50,6 +52,7 @@
  */
 import { ref, watch } from 'vue'
 import { api } from '@/utils/axios'
+import { AppButton, AppDialog } from '@/components/ui'
 
 // W6 #49：预览内容 LRU 缓存（模块级，跨弹窗开关保留）。key 为 docId+page，
 // 上限 50 条超出淘汰最旧——预览是高频翻页只读操作，缓存消除翻页重复请求。

@@ -22,13 +22,10 @@
             {{ filter.label }}
           </button>
         </div>
-        <button
-          @click="openCreateModal"
-          class="flex items-center gap-2 px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
-        >
+        <AppButton variant="primary" @click="openCreateModal">
           <Plus class="w-4 h-4" />
           创建实验
-        </button>
+        </AppButton>
       </div>
 
       <div
@@ -39,36 +36,33 @@
           <span class="text-sm text-content-secondary">
             已选择 <span class="font-semibold text-primary-600 dark:text-primary-400">{{ selectedExperimentIds.length }}</span> 个实验
           </span>
-          <button
-            @click="toggleSelectAll"
-            class="text-sm text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300"
-          >
+          <AppButton variant="primary-ghost" size="xs" @click="toggleSelectAll">
             {{ isAllSelected ? '取消全选' : '全选' }}
-          </button>
+          </AppButton>
         </div>
         <div class="flex items-center gap-2">
-          <button
-            @click="clearSelection"
-            class="px-3 py-1.5 text-sm text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-          >
+          <AppButton variant="ghost" size="sm" @click="clearSelection">
             取消
-          </button>
-          <button
-            @click="batchDelete"
+          </AppButton>
+          <AppButton
+            variant="danger"
+            size="sm"
             :disabled="deleteMutation.isPending.value"
-            class="flex items-center gap-1.5 px-3 py-1.5 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            :loading="deleteMutation.isPending.value"
+            @click="batchDelete"
           >
             <Trash2 class="w-4 h-4" />
             批量删除
-          </button>
+          </AppButton>
         </div>
       </div>
 
       <div class="space-y-4">
-        <div
+        <AppCard
           v-for="experiment in filteredExperiments"
           :key="experiment.id"
-          class="bg-surface rounded-xl shadow-sm border border-line p-5"
+          padding="none"
+          class="p-5"
         >
           <div class="flex items-start justify-between mb-4">
             <div class="flex items-start gap-3">
@@ -81,46 +75,47 @@
               <div>
                 <div class="flex items-center gap-2">
                   <h3 class="font-medium text-content">{{ experiment.name }}</h3>
-                  <span
-                    :class="[
-                      'px-2 py-0.5 rounded-full text-xs font-medium',
-                      getStatusClass(experiment.status)
-                    ]"
-                  >
+                  <AppBadge :variant="getStatusVariant(experiment.status)">
                     {{ getStatusLabel(experiment.status) }}
-                  </span>
+                  </AppBadge>
                 </div>
                 <p class="text-sm text-content-muted mt-1">{{ experiment.description || '-' }}</p>
               </div>
             </div>
             <div class="flex items-center gap-2">
-              <button
+              <AppButton
                 v-if="experiment.status === 'created'"
-                @click="startExperiment(experiment.id)"
+                variant="success"
+                size="sm"
                 :disabled="startMutation.isPending.value"
-                class="px-3 py-1.5 bg-green-500 text-white text-sm rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                :loading="startMutation.isPending.value"
+                @click="startExperiment(experiment.id)"
               >
-                <Play class="w-4 h-4 inline mr-1" />
+                <Play class="w-4 h-4" />
                 启动
-              </button>
-              <button
+              </AppButton>
+              <AppButton
                 v-if="experiment.status === 'running'"
-                @click="stopExperiment(experiment.id)"
+                variant="danger"
+                size="sm"
                 :disabled="stopMutation.isPending.value"
-                class="px-3 py-1.5 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                :loading="stopMutation.isPending.value"
+                @click="stopExperiment(experiment.id)"
               >
-                <Square class="w-4 h-4 inline mr-1" />
+                <Square class="w-4 h-4" />
                 停止
-              </button>
-              <button
+              </AppButton>
+              <AppButton
                 v-if="experiment.status === 'stopped'"
-                @click="analyzeExperiment(experiment.id)"
+                variant="primary"
+                size="sm"
                 :disabled="analyzeMutation.isPending.value"
-                class="px-3 py-1.5 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                :loading="analyzeMutation.isPending.value"
+                @click="analyzeExperiment(experiment.id)"
               >
-                <BarChart3 class="w-4 h-4 inline mr-1" />
+                <BarChart3 class="w-4 h-4" />
                 分析
-              </button>
+              </AppButton>
             </div>
           </div>
 
@@ -146,13 +141,14 @@
           <div v-if="experiment.variants?.length" class="mt-4 pt-4 border-t border-line-subtle">
             <p class="text-sm font-medium text-content-secondary mb-2">实验变体</p>
             <div class="flex flex-wrap gap-2">
-              <span
+              <AppBadge
                 v-for="variant in experiment.variants"
                 :key="variant.id"
-                class="px-3 py-1 bg-surface-subtle-strong text-content-secondary text-sm rounded-full"
+                variant="neutral"
+                size="md"
               >
                 {{ variant.name }} ({{ (variant.weight * 100).toFixed(0) }}%)
-              </span>
+              </AppBadge>
             </div>
           </div>
 
@@ -195,7 +191,7 @@
               </p>
             </div>
           </div>
-        </div>
+        </AppCard>
 
         <div v-if="filteredExperiments.length === 0" class="py-16 text-center text-content-muted">
           <FlaskConical class="w-16 h-16 mx-auto mb-4 opacity-50" />
@@ -205,7 +201,7 @@
       </div>
     </div>
 
-    <el-dialog
+    <AppDialog
       v-model="modalVisible"
       title="创建实验"
       width="560px"
@@ -213,22 +209,23 @@
       <form @submit.prevent="createExperiment" class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">实验名称 *</label>
-          <input
+          <AppInput
             v-model="formData.name"
-            type="text"
+            variant="raised"
             required
             placeholder="请输入实验名称"
-            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
           />
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-1">描述</label>
-          <textarea
+          <AppInput
             v-model="formData.description"
-            rows="2"
+            variant="raised"
+            multiline
+            :rows="2"
             placeholder="请输入实验描述（可选）"
-            class="w-full px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-          ></textarea>
+            class="resize-none"
+          />
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-2">实验变体</label>
@@ -238,40 +235,43 @@
               :key="index"
               class="flex items-center gap-2"
             >
-              <input
+              <AppInput
                 v-model="variant.name"
-                type="text"
+                variant="raised"
                 :placeholder="`变体 ${index + 1} 名称`"
-                class="flex-1 px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                class="flex-1"
               />
-              <input
+              <AppInput
                 v-model.number="variant.weight"
                 type="number"
+                variant="raised"
                 min="0"
                 max="1"
                 step="0.1"
                 placeholder="权重"
-                class="w-24 px-3 py-2 border border-line-strong rounded-lg bg-surface-raised text-content placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                class="w-24"
               />
-              <button
+              <AppButton
                 v-if="formData.variants && formData.variants.length > 2"
-                type="button"
+                variant="danger-ghost"
+                size="icon"
+                :aria-label="`移除变体 ${index + 1}`"
                 @click="removeVariant(index)"
-                class="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
               >
                 <X class="w-4 h-4" />
-              </button>
+              </AppButton>
             </div>
           </div>
-          <button
+          <AppButton
             v-if="formData.variants && formData.variants.length < 5"
-            type="button"
+            variant="primary-ghost"
+            size="xs"
+            class="mt-2"
             @click="addVariant"
-            class="mt-2 flex items-center gap-1 text-sm text-primary-500 hover:text-primary-600"
           >
             <Plus class="w-4 h-4" />
             添加变体
-          </button>
+          </AppButton>
         </div>
         <div>
           <label class="block text-sm font-medium text-content-secondary mb-2">监控指标</label>
@@ -294,21 +294,17 @@
         </div>
       </form>
       <template #footer>
-        <button
-          @click="modalVisible = false"
-          class="px-4 py-2 text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-600 rounded-lg transition-colors"
-        >
-          取消
-        </button>
-        <button
-          @click="createExperiment"
+        <AppButton variant="ghost" @click="modalVisible = false">取消</AppButton>
+        <AppButton
+          variant="primary"
           :disabled="!formData.name || createMutation.isPending.value"
-          class="px-4 py-2 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :loading="createMutation.isPending.value"
+          @click="createExperiment"
         >
           创建实验
-        </button>
+        </AppButton>
       </template>
-    </el-dialog>
+    </AppDialog>
   </div>
 </template>
 
@@ -337,6 +333,7 @@ import {
 } from '@/queries/kb'
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
+import { AppBadge, AppButton, AppCard, AppDialog, AppInput } from '@/components/ui'
 
 const toast = useToast()
 const queryClient = useQueryClient()
@@ -385,17 +382,11 @@ const isAllSelected = computed(() => {
   return filteredExperiments.value.every(e => selectedExperimentIds.value.includes(e.id))
 })
 
-/** 根据实验状态返回对应的样式类，未知状态回退为待启动样式。 */
-function getStatusClass(status?: string): string {
-  const classes: Record<string, string> = {
-    created: 'bg-surface-subtle-strong text-content-secondary-muted',
-    running: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
-    stopped: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-  }
-  if (status && status in classes) {
-    return classes[status] ?? classes.created ?? ''
-  }
-  return classes.created ?? ''
+/** 根据实验状态返回徽标变体，未知状态回退为待启动样式。 */
+function getStatusVariant(status?: string): 'neutral' | 'success' | 'danger' {
+  if (status === 'running') return 'success'
+  if (status === 'stopped') return 'danger'
+  return 'neutral'
 }
 
 /** 将状态码转换为中文标签。 */

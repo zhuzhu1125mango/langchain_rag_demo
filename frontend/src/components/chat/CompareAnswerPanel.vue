@@ -12,13 +12,14 @@
           <GitCompare class="w-4 h-4 text-primary-500" />
           <span class="text-sm font-medium text-content-secondary">答案对比</span>
         </div>
-        <button
-          @click="emit('close')"
-          class="text-gray-400 hover:text-content-tertiary"
+        <AppButton
+          variant="ghost"
+          size="icon"
           aria-label="关闭答案对比"
+          @click="emit('close')"
         >
           <X class="w-4 h-4" />
-        </button>
+        </AppButton>
       </div>
       <div class="flex-1 overflow-y-auto px-4 py-4">
         <div v-if="isComparing" class="flex flex-col items-center justify-center py-12">
@@ -180,6 +181,7 @@
 import { computed } from 'vue'
 import { GitCompare, X, Sparkles, AlertCircle, Database, FileText, GitCompareArrows } from '@lucide/vue'
 import type { CompareResponse, KBComparisonItem } from '@/queries/chat'
+import { AppButton } from '@/components/ui'
 
 const props = defineProps<{
   show: boolean

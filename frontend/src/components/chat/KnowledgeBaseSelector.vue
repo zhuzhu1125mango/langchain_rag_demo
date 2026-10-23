@@ -2,29 +2,32 @@
   <div class="bg-surface border-b border-line px-4 sm:px-6 py-4">
     <div class="mb-3">
       <div class="relative">
-        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-content-subtle" />
         <input
           v-model="kbSearchQuery"
           type="text"
           placeholder="搜索知识库..."
           class="w-full pl-10 pr-4 py-2 bg-surface-subtle text-content placeholder-gray-400 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
         />
-        <button
+        <AppButton
           v-if="kbSearchQuery"
+          variant="ghost"
+          size="icon"
+          class="absolute right-3 top-1/2 -translate-y-1/2"
+          aria-label="清空搜索"
           @click="kbSearchQuery = ''"
-          class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-content-tertiary"
         >
           <X class="w-4 h-4" />
-        </button>
+        </AppButton>
       </div>
     </div>
 
     <div v-if="groupedKBs.length > 0" class="space-y-3">
       <div v-for="group in groupedKBs" :key="group.id || 'ungrouped'" class="space-y-1">
         <div v-if="group.name" class="flex items-center gap-2 px-2 py-1">
-          <Folder class="w-4 h-4 text-gray-400" />
+          <Folder class="w-4 h-4 text-content-subtle" />
           <span class="text-xs font-medium text-content-muted">{{ group.name }}</span>
-          <span class="text-xs text-gray-400">({{ group.kbs?.length || 0 }})</span>
+          <span class="text-xs text-content-subtle">({{ group.kbs?.length || 0 }})</span>
         </div>
         <div class="flex flex-wrap gap-2 pl-2" :class="group.name ? 'pl-6' : ''">
           <button
@@ -64,16 +67,17 @@
     </div>
     <div v-else class="text-center py-4">
       <Database class="w-8 h-8 text-content-disabled mx-auto mb-2" />
-      <p class="text-sm text-gray-400">未找到匹配的知识库</p>
+      <p class="text-sm text-content-subtle">未找到匹配的知识库</p>
     </div>
 
-    <button
+    <AppButton
       v-if="selectedKBs.length > 0"
+      variant="secondary"
+      class="mt-3"
       @click="clearSelection"
-      class="mt-3 px-4 py-2 text-sm bg-surface-subtle text-content-tertiary rounded-lg hover:bg-surface-hover-strong transition-colors"
     >
       清除选择 ({{ selectedKBs.length }})
-    </button>
+    </AppButton>
   </div>
 </template>
 
@@ -90,6 +94,7 @@
 import { ref, computed } from 'vue'
 import { Search, X, Folder, Database } from '@lucide/vue'
 import type { KnowledgeBase } from '@/queries/kb'
+import { AppButton } from '@/components/ui'
 
 const props = defineProps<{
   knowledgeBases?: KnowledgeBase[]

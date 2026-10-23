@@ -17,35 +17,28 @@
             <p class="hidden sm:block text-sm text-content-muted mt-1">基于知识库的智能问答系统</p>
           </div>
           <div class="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
-            <button
-              @click="clearChat"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-content-muted hover:bg-surface-hover hover:text-gray-700 dark:hover:text-gray-200 rounded-lg transition-colors"
-              title="清空当前对话"
-            >
+            <AppButton variant="ghost" size="nav" title="清空当前对话" @click="clearChat">
               <Trash2 class="w-4 h-4" />
               <span class="hidden sm:inline">清空</span>
-            </button>
-            <button
+            </AppButton>
+            <AppButton
+              variant="primary-soft"
+              size="nav"
               @click="showKBSelector = !showKBSelector"
-              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/30 hover:bg-primary-100 dark:hover:bg-primary-900/40 rounded-lg transition-colors"
             >
               <BookOpen class="w-4 h-4" />
               <span class="hidden sm:inline">{{ selectedKBs.length > 0 ? `${selectedKBs.length}个知识库` : '选择知识库' }}</span>
-            </button>
-            <button
-              @click="handleCompareAnswers"
+            </AppButton>
+            <AppButton
+              variant="outline"
+              size="nav"
               :disabled="selectedKBs.length < 2 || !questionInput.trim()"
-              :class="[
-                'flex items-center gap-2 px-2 sm:px-3 py-2 text-sm rounded-lg border transition-colors',
-                selectedKBs.length >= 2 && questionInput.trim()
-                  ? 'border-line-strong text-content-secondary-strong hover:border-primary-400 dark:hover:border-primary-600 hover:text-primary-600 dark:hover:text-primary-400'
-                  : 'border-line text-content-subtle cursor-not-allowed'
-              ]"
               title="对比多个知识库的答案"
+              @click="handleCompareAnswers"
             >
               <GitCompare class="w-4 h-4" />
               <span class="hidden sm:inline">对比答案</span>
-            </button>
+            </AppButton>
           </div>
         </div>
       </header>
@@ -112,6 +105,7 @@ import { useChatStore } from '@/stores/chat'
 import { useKnowledgeBases } from '@/queries/kb'
 import { Trash2, BookOpen, GitCompare } from '@lucide/vue'
 import DocumentSourceModal from '@/components/DocumentSourceModal.vue'
+import { AppButton } from '@/components/ui'
 import CompareAnswerPanel from '@/components/chat/CompareAnswerPanel.vue'
 import KnowledgeBaseSelector from '@/components/chat/KnowledgeBaseSelector.vue'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'

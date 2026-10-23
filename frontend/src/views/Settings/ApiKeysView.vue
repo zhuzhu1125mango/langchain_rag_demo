@@ -30,21 +30,22 @@
       </div>
 
       <!-- 功能未启用空态（USER_API_KEYS_ENABLED=false） -->
-      <div
+      <AppCard
         v-if="!enabled"
-        class="bg-surface rounded-xl shadow-sm border border-line p-10 text-center"
+        padding="none"
+        class="p-10 text-center"
         data-testid="api-keys-disabled"
       >
         <KeyRound class="w-10 h-10 mx-auto text-content-disabled" />
         <p class="mt-3 text-sm text-content-muted">
           该功能未启用，请检查后端配置 USER_API_KEYS_ENABLED
         </p>
-      </div>
+      </AppCard>
 
       <!-- 列表 -->
-      <div
+      <AppCard
         v-else
-        class="bg-surface rounded-xl shadow-sm border border-line"
+        padding="none"
         data-testid="api-keys-table"
       >
         <el-skeleton v-if="isLoading" class="p-6" :rows="3" animated />
@@ -94,7 +95,7 @@
             </el-table-column>
           </el-table>
         </template>
-      </div>
+      </AppCard>
     </div>
 
     <CreateApiKeyDialog
@@ -116,6 +117,7 @@ import { computed, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { KeyRound, Plus } from '@lucide/vue'
 import CreateApiKeyDialog from '@/components/settings/CreateApiKeyDialog.vue'
+import { AppCard } from '@/components/ui'
 import {
   deriveKeyStatus,
   formatRelativeTime,

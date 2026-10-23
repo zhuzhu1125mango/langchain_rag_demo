@@ -6,7 +6,7 @@
         <p class="text-sm text-content-muted mt-1">管理您的偏好设置和系统配置</p>
       </div>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">外观设置</h2>
         </div>
@@ -18,36 +18,26 @@
               <p class="text-sm text-content-muted mt-1">选择浅色或深色主题</p>
             </div>
             <div class="flex gap-2">
-              <button
+              <AppButton
+                :variant="appStore.theme === 'light' ? 'primary' : 'secondary'"
                 @click="setTheme('light')"
-                :class="[
-                  'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-                  appStore.theme === 'light'
-                    ? 'bg-primary-500 text-white'
-                    : 'bg-surface-raised-strong text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-500'
-                ]"
               >
-                <Sun class="w-4 h-4 inline mr-2" />
+                <Sun class="w-4 h-4" />
                 浅色
-              </button>
-              <button
+              </AppButton>
+              <AppButton
+                :variant="appStore.theme === 'dark' ? 'primary' : 'secondary'"
                 @click="setTheme('dark')"
-                :class="[
-                  'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
-                  appStore.theme === 'dark'
-                    ? 'bg-primary-500 text-white'
-                    : 'bg-surface-raised-strong text-content-tertiary hover:bg-gray-100 dark:hover:bg-dark-500'
-                ]"
               >
-                <Moon class="w-4 h-4 inline mr-2" />
+                <Moon class="w-4 h-4" />
                 深色
-              </button>
+              </AppButton>
             </div>
           </div>
         </div>
-      </div>
+      </AppCard>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">对话设置</h2>
         </div>
@@ -84,18 +74,19 @@
             </div>
           </div>
         </div>
-      </div>
+      </AppCard>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">知识库设置</h2>
-          <button
-            @click="resetToDefault"
+          <AppButton
+            variant="ghost"
+            size="sm"
             :disabled="updateConfigMutation.isPending.value"
-            class="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors disabled:opacity-50"
+            @click="resetToDefault"
           >
             重置为默认值
-          </button>
+          </AppButton>
         </div>
         
         <div class="space-y-4">
@@ -147,9 +138,9 @@
             <p class="text-xs text-content-muted mt-2">检索时返回的最相关文档块数量</p>
           </div>
         </div>
-      </div>
+      </AppCard>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">模型配置</h2>
         </div>
@@ -168,9 +159,9 @@
             <span class="font-medium text-content">{{ modelConfig?.ollama_direct_model_name || modelConfig?.ollama_model_name }}</span>
           </div>
         </div>
-      </div>
+      </AppCard>
 
-      <div class="bg-surface rounded-xl shadow-sm border border-line p-6">
+      <AppCard padding="lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">关于</h2>
         </div>
@@ -189,16 +180,19 @@
             <span class="font-medium text-content">Ollama Local</span>
           </div>
         </div>
-      </div>
+      </AppCard>
 
-      <button
-        @click="saveSettings"
+      <AppButton
+        variant="primary"
+        size="lg"
+        block
         :disabled="updateConfigMutation.isPending.value"
-        class="w-full py-3 bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        :loading="updateConfigMutation.isPending.value"
+        @click="saveSettings"
       >
-        <Save class="w-4 h-4 inline mr-2" />
+        <Save class="w-4 h-4" />
         保存设置
-      </button>
+      </AppButton>
     </div>
   </div>
 </template>
@@ -214,6 +208,7 @@ import { ref, watch, onMounted } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { Sun, Moon, Save } from '@lucide/vue'
 import { useToast } from '@/composables/useToast'
+import { AppButton, AppCard } from '@/components/ui'
 import {
   useProcessingConfig,
   useModelConfig,

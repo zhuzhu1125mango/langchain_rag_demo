@@ -23,13 +23,15 @@
         </span>
       </div>
       <!-- 移动端抽屉关闭按钮 -->
-      <button
-        @click="emit('close')"
-        class="lg:hidden p-1.5 rounded-lg text-gray-400 hover:text-content-tertiary hover:bg-surface-hover transition-colors"
+      <AppButton
+        variant="ghost"
+        size="icon"
+        class="lg:hidden"
         aria-label="关闭导航菜单"
+        @click="emit('close')"
       >
         <X class="w-5 h-5" />
-      </button>
+      </AppButton>
     </div>
 
     <nav class="py-3 shrink-0" aria-label="主导航">
@@ -60,13 +62,14 @@
     >
       <div class="px-4 pt-3 pb-1.5 flex items-center justify-between shrink-0">
         <span class="text-xs font-medium text-content-subtle">对话历史</span>
-        <button
+        <AppButton
+          variant="primary-ghost"
+          size="xs"
           @click="handleNewSession(); emit('close')"
-          class="flex items-center gap-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
         >
           <Plus class="w-3 h-3" />
           新对话
-        </button>
+        </AppButton>
       </div>
       <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5" aria-label="对话历史列表">
         <button
@@ -102,15 +105,17 @@
           </p>
           <p class="text-xs text-content-muted truncate">{{ userSubtitle }}</p>
         </div>
-        <button
+        <AppButton
           v-show="showLabels && !!appStore.currentUser"
-          @click="handleLogout"
-          class="p-2 rounded-lg bg-surface-subtle text-content-tertiary hover:bg-surface-hover-strong transition-colors flex-shrink-0"
+          variant="secondary"
+          size="icon"
+          class="flex-shrink-0"
           title="退出登录"
           aria-label="退出登录"
+          @click="handleLogout"
         >
           <LogOut class="w-4 h-4" />
-        </button>
+        </AppButton>
       </div>
 
       <div class="mt-3 flex gap-2">
@@ -159,6 +164,7 @@ import { useSessions } from '@/queries/chat'
 import type { Session } from '@/queries/chat'
 import { api } from '@/utils/axios'
 import { useToast } from '@/composables/useToast'
+import { AppButton } from '@/components/ui'
 import { BookOpen, MessageCircle, FolderOpen, Settings, User, Sun, Moon, ChevronLeft, ChevronRight, Clock, LogOut, Activity, MessageSquare, Plus, X } from '@lucide/vue'
 
 const props = defineProps<{

@@ -6,21 +6,19 @@
         <span class="text-sm font-medium text-content-secondary">知识图谱</span>
       </div>
       <div class="flex items-center gap-2">
-        <button
-          @click="refreshGraph"
+        <AppButton
+          variant="ghost"
+          size="icon"
           :disabled="isLoading"
-          class="p-1.5 text-gray-400 hover:text-primary-500 hover:bg-surface-hover rounded-lg transition-colors disabled:opacity-50"
           title="刷新图谱"
           aria-label="刷新图谱"
+          @click="refreshGraph"
         >
           <RefreshCw class="w-4 h-4" />
-        </button>
-        <button
-          @click="showFullGraph"
-          class="px-3 py-1.5 text-xs text-content-tertiary hover:bg-surface-hover rounded-lg transition-colors"
-        >
+        </AppButton>
+        <AppButton variant="ghost" size="sm" @click="showFullGraph">
           查看完整图谱
-        </button>
+        </AppButton>
       </div>
     </div>
 
@@ -141,13 +139,14 @@
             <span class="text-xl">{{ getNodeIcon(selectedNode) }}</span>
             <span class="font-medium text-content">{{ getNodeLabel(selectedNode) }}</span>
           </div>
-          <button
-            @click="selectedNode = null"
-            class="text-gray-400 hover:text-content-tertiary"
+          <AppButton
+            variant="ghost"
+            size="icon"
             aria-label="关闭节点详情"
+            @click="selectedNode = null"
           >
             <X class="w-4 h-4" />
-          </button>
+          </AppButton>
         </div>
         <div class="space-y-2 text-sm">
           <div class="flex justify-between">
@@ -191,27 +190,27 @@
 
     <!-- 图谱统计 -->
     <div class="mt-4 grid grid-cols-3 gap-4">
-      <div class="bg-surface rounded-lg border border-line p-3">
+      <AppCard padding="sm">
         <div class="flex items-center gap-2 mb-1">
           <CircleDot class="w-4 h-4 text-blue-500" />
           <span class="text-xs text-content-muted">节点数</span>
         </div>
         <p class="text-xl font-semibold text-content">{{ graphData.nodes.length }}</p>
-      </div>
-      <div class="bg-surface rounded-lg border border-line p-3">
+      </AppCard>
+      <AppCard padding="sm">
         <div class="flex items-center gap-2 mb-1">
           <ArrowRightLeft class="w-4 h-4 text-green-500" />
           <span class="text-xs text-content-muted">关系数</span>
         </div>
         <p class="text-xl font-semibold text-content">{{ graphData.edges.length }}</p>
-      </div>
-      <div class="bg-surface rounded-lg border border-line p-3">
+      </AppCard>
+      <AppCard padding="sm">
         <div class="flex items-center gap-2 mb-1">
           <Info class="w-4 h-4 text-purple-500" />
           <span class="text-xs text-content-muted">描述</span>
         </div>
         <p class="text-sm text-content-tertiary truncate">{{ graphData.summary }}</p>
-      </div>
+      </AppCard>
     </div>
   </div>
 </template>
@@ -230,6 +229,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { Network, RefreshCw, X, CircleDot, ArrowRightLeft, Info } from '@lucide/vue'
 import { api } from '@/utils/axios'
+import { AppButton, AppCard } from '@/components/ui'
 
 /** 图谱节点 */
 interface GraphNode {
