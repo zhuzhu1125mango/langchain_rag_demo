@@ -89,7 +89,7 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 |---|---|---|---|
 | CODE-1 | 巨型文件拆分 | 见 §2 表；SA「触碰即拆」扩围到这批文件 | P1 |
 | CODE-2 | 异常分级治理 | 334 处宽泛异常；缺「可恢复/需上报/编程错误」分级 | P1 |
-| CODE-3 | eslint warning 清零 | 43 条非空断言 warning（测试为主） | P2 |
+| CODE-3 | eslint warning 清零 | ✅ 已修复（2026-10-23）：43 处非空断言清零，规则升 `error`；eslint 0 warning / vue-tsc 0 / 109 单测通过 | 已完成 |
 | CODE-4 | API/类型分层 | `queries/kb.ts` 967 行混合请求/类型/转换 | P2 |
 
 ### 3.5 工程与运维（OPS）

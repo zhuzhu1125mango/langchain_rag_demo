@@ -24,7 +24,7 @@ test('上传文档后提问并展示流式回答与引用来源', async ({ page 
   await expect(uploadDialog).toBeVisible()
 
   // 2. 选择文件并触发上传（服务端解析进度通过 WS mock 推送，auth_ok 后才发起上传）
-  await page.setInputFiles('input[type="file"]', {
+  await uploadDialog.locator('input[type="file"]').setInputFiles({
     name: 'rag.md',
     mimeType: 'text/markdown',
     buffer: Buffer.from('# RAG 原理\n\n检索增强生成（RAG）是一种结合检索与生成的技术。')

@@ -136,9 +136,17 @@ const sourceData = ref<SourceData | null>(null)
 
 const getSource = useGetDocumentSource()
 
-/** HTML 转义：将 & < > " ' 替换为对应实体，防止 surrounding_content 中的用户内容引发 XSS。 */
+/** HTML 转义映射：将 & < > " ' 替换为对应实体，防止 surrounding_content 中的用户内容引发 XSS。 */
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;'
+}
+
 function escapeHtml(str: string): string {
-  return str.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]!))
+  return str.replace(/[&<>"']/g, c => HTML_ESCAPES[c] ?? c)
 }
 
 const highlightedContent = computed(() => {

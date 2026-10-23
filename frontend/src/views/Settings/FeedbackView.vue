@@ -202,7 +202,7 @@ const ratingDistribution = computed(() => {
     const rating = fb.rating
     if (rating === undefined || rating < 1 || rating > 5) continue
     const idx = rating - 1
-    counts[idx]!++
+    counts[idx] = (counts[idx] ?? 0) + 1
   }
   return counts
 })

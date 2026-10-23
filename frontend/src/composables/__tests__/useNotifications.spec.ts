@@ -55,7 +55,8 @@ class FakeWebSocket {
 
 /** 挂载宿主组件触发 onMounted/onUnmounted 生命周期，捕获 composable 返回值。 */
 function mountNotifications() {
-  const captured: Record<string, unknown> = {}
+  // 返回值在 setup 内同步捕获；以完整类型声明避免测试中断言非空
+  const captured = {} as ReturnType<typeof useWebSocketNotifications>
   const Comp = defineComponent({
     setup() {
       Object.assign(captured, useWebSocketNotifications())
@@ -66,7 +67,11 @@ function mountNotifications() {
   return { wrapper, captured }
 }
 
-const lastSocket = () => FakeWebSocket.instances.at(-1)!
+const lastSocket = () => {
+  const socket = FakeWebSocket.instances.at(-1)
+  if (!socket) throw new Error('WebSocket 尚未创建')
+  return socket
+}
 
 beforeEach(() => {
   FakeWebSocket.instances = []
@@ -130,8 +135,8 @@ describe('通知分发', () => {
 
     const single: unknown[] = []
     const multi: unknown[] = []
-    captured.onNotification!({ type: 'kb.created', handler: n => single.push(n) })
-    captured.onNotification!({ type: ['doc.updated', 'kb.deleted'], handler: n => multi.push(n) })
+    captured.onNotification({ type: 'kb.created', handler: n => single.push(n) })
+    captured.onNotification({ type: ['doc.updated', 'kb.deleted'], handler: n => multi.push(n) })
 
     const notification = { type: 'kb.created', channel: 'kb:*', data: { id: '1' }, timestamp: 't' }
     ws.emit(notification)
@@ -148,9 +153,9 @@ describe('通知分发', () => {
     ws.open()
 
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-    captured.onNotification!({ type: 'boom', handler: () => { throw new Error('handler bug') } })
+    captured.onNotification({ type: 'boom', handler: () => { throw new Error('handler bug') } })
     const ok = vi.fn()
-    captured.onNotification!({ type: 'boom', handler: ok })
+    captured.onNotification({ type: 'boom', handler: ok })
 
     ws.emit({ type: 'boom', channel: 'kb:*', data: {}, timestamp: 't' })
     expect(ok).toHaveBeenCalledTimes(1)
@@ -163,7 +168,7 @@ describe('通知分发', () => {
     ws.open()
 
     const handler = vi.fn()
-    const off = captured.onNotification!({ type: 'kb.created', handler })
+    const off = captured.onNotification({ type: 'kb.created', handler })
     off()
 
     ws.emit({ type: 'kb.created', channel: 'kb:*', data: {}, timestamp: 't' })
@@ -187,13 +192,13 @@ describe('subscribe / unsubscribe 门控', () => {
     const ws = lastSocket()
 
     // 尚未 open（CONNECTING）：不发送
-    captured.subscribe!('kb:1')
+    captured.subscribe('kb:1')
     expect(ws.sent).toHaveLength(0)
 
     ws.open()
-    captured.subscribe!('kb:1')
-    captured.subscribe!(['doc:1', 'doc:2'])
-    captured.unsubscribe!('kb:1')
+    captured.subscribe('kb:1')
+    captured.subscribe(['doc:1', 'doc:2'])
+    captured.unsubscribe('kb:1')
 
     expect(ws.sent.slice(-3)).toEqual([
       { type: 'subscribe', channels: ['kb:1'] },
@@ -211,7 +216,7 @@ describe('断开与重连策略', () => {
 
     // 模拟服务端以 1008 关闭：readyState 先置 CLOSED 再触发 onclose
     ws.readyState = CLOSED
-    ws.onclose!({ code: 1008 })
+    ws.onclose?.({ code: 1008 })
 
     expect((captured.isConnected as Ref<boolean>).value).toBe(false)
     vi.advanceTimersByTime(60_000)
@@ -224,7 +229,7 @@ describe('断开与重连策略', () => {
     ws.open()
 
     ws.readyState = CLOSED // 同步桩状态（见 1008 用例注释）
-    ws.onclose!({ code: 1006 })
+    ws.onclose?.({ code: 1006 })
     vi.advanceTimersByTime(2_999)
     expect(FakeWebSocket.instances).toHaveLength(1)
 
@@ -237,7 +242,7 @@ describe('断开与重连策略', () => {
     const ws = lastSocket()
     ws.open()
 
-    captured.disconnect!()
+    captured.disconnect()
     vi.advanceTimersByTime(60_000)
     expect(FakeWebSocket.instances).toHaveLength(1)
 

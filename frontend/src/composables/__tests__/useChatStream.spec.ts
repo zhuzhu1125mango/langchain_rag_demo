@@ -122,12 +122,19 @@ function mountStream(): Harness {
   }
 }
 
-/** 查找当前用例产生的助手消息。 */
-const assistantOf = (store: ReturnType<typeof useChatStore>) =>
-  store.messages.find(m => m.role === 'assistant')!
+/** 查找当前用例产生的助手消息（不存在视为测试失败）。 */
+const assistantOf = (store: ReturnType<typeof useChatStore>) => {
+  const message = store.messages.find(m => m.role === 'assistant')
+  if (!message) throw new Error('未找到助手消息')
+  return message
+}
 
-const lastRequestBody = () =>
-  JSON.parse((fetch as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1].body as string)
+const lastRequestBody = () => {
+  const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls
+  const last = calls.at(-1)
+  if (!last) throw new Error('fetch 未被调用')
+  return JSON.parse(last[1].body as string)
+}
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -173,12 +180,15 @@ describe('请求构造', () => {
 
     await h.api.sendMessage('测试问题')
 
-    const [url, init] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0]
+    const calls = (fetch as ReturnType<typeof vi.fn>).mock.calls
+    const first = calls[0]
+    if (!first) throw new Error('fetch 未被调用')
+    const [url, init] = first as [string, RequestInit]
     expect(url).toBe('/api/chat/stream')
-    expect((init!.headers as Record<string, string>)['X-API-Key']).toBe('key-abc')
-    expect((init!.headers as Record<string, string>)['Authorization']).toBe('Bearer jwt-token-123')
+    expect((init.headers as Record<string, string>)['X-API-Key']).toBe('key-abc')
+    expect((init.headers as Record<string, string>)['Authorization']).toBe('Bearer jwt-token-123')
 
-    expect(JSON.parse(init!.body as string)).toMatchObject({
+    expect(JSON.parse(init.body as string)).toMatchObject({
       question: '测试问题',
       use_web_search: true,
       deep_thinking: 'on',
@@ -222,7 +232,7 @@ describe('SSE 事件分发', () => {
     expect(assistant.isLoading).toBe(false)
     expect(assistant.thinking).toBe('思考中')
     expect(assistant.reasoning).toHaveLength(1)
-    expect(assistant.reasoning![0].step).toBe('kb_retrieval')
+    expect(assistant.reasoning?.[0]?.step).toBe('kb_retrieval')
   })
 
   it('跨 chunk 的半截事件正确缓冲拼接', async () => {
@@ -275,7 +285,8 @@ describe('SSE 事件分发', () => {
 
     // message_id 替换：临时 id 消失，出现后端 id
     expect(h.store.messages.some(m => m.id === 'm-backend-1')).toBe(true)
-    const assistant = h.store.messages.find(m => m.id === 'm-backend-1')!
+    const assistant = h.store.messages.find(m => m.id === 'm-backend-1')
+    if (!assistant) throw new Error('未找到后端 message_id 对应的消息')
     expect(assistant.isLoading).toBe(false)
 
     // 来源映射：kb 来源走 source 兜底链 + source_type=kb；web 来源 source_type=web；index 从 1 起
@@ -362,7 +373,7 @@ describe('异常路径', () => {
 
     await h.api.sendMessage('hi')
 
-    expect(h.store.messages.at(-1)!.error).toBe('连接断开，无法获取响应')
+    expect(h.store.messages.at(-1)?.error).toBe('连接断开，无法获取响应')
   })
 
   it('fetch 抛错时追加发送失败消息', async () => {
@@ -373,7 +384,7 @@ describe('异常路径', () => {
 
     await h.api.sendMessage('hi')
 
-    expect(h.store.messages.at(-1)!.error).toBe('发送失败: network down')
+    expect(h.store.messages.at(-1)?.error).toBe('发送失败: network down')
     expect(h.searchStatus.value).toBe('idle')
   })
 })
@@ -442,7 +453,7 @@ describe('卸载中止（D4）', () => {
   it('组件卸载时 abort 在途流', async () => {
     let capturedSignal: AbortSignal | undefined
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
-      capturedSignal = init!.signal
+      capturedSignal = init?.signal
       // 永不完成的流：read 一直挂起，模拟长连接
       return {
         ok: true,
@@ -453,10 +464,10 @@ describe('卸载中止（D4）', () => {
     void h.api.sendMessage('长时间流')
 
     await vi.waitFor(() => expect(capturedSignal).toBeDefined())
-    expect(capturedSignal!.aborted).toBe(false)
+    expect(capturedSignal?.aborted).toBe(false)
 
     h.wrapper.unmount()
 
-    expect(capturedSignal!.aborted).toBe(true)
+    expect(capturedSignal?.aborted).toBe(true)
   })
 })

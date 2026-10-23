@@ -80,7 +80,9 @@ describe('useChatStore', () => {
   it('removeQuestionFromHistory / clearQuestionHistory', () => {
     const store = useChatStore()
     store.addQuestionToHistory('q1')
-    const id = store.questionHistory[0]!.id
+    const first = store.questionHistory[0]
+    if (!first) throw new Error('questionHistory 为空')
+    const id = first.id
     store.removeQuestionFromHistory(id)
     expect(store.questionHistory).toHaveLength(0)
     store.addQuestionToHistory('q2')

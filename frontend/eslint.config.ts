@@ -44,8 +44,8 @@ export default defineConfigWithVueTs(
       'no-console': ['error', { allow: ['warn', 'error'] }],
       'no-debugger': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
-      // 专项 C4 起步：先 warn 观察基线（当前 ~18 处），逐批清理后升 error
-      '@typescript-eslint/no-non-null-assertion': 'warn',
+      // 专项 C4：非空断言已全量清零（2026-10-23，43 处 → 0），升为 error 防回归
+      '@typescript-eslint/no-non-null-assertion': 'error',
     },
   },
 

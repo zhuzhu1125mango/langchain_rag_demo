@@ -393,9 +393,9 @@ function getStatusClass(status?: string): string {
     stopped: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
   }
   if (status && status in classes) {
-    return classes[status]!
+    return classes[status] ?? classes.created ?? ''
   }
-  return classes['created']!
+  return classes.created ?? ''
 }
 
 /** 将状态码转换为中文标签。 */
@@ -410,17 +410,21 @@ function getStatusLabel(status: string): string {
 
 /** 新增一个变体，ID 按字母序递增，权重取均分值。 */
 function addVariant(): void {
-  const id = String.fromCharCode(97 + formData.value.variants!.length)
-  formData.value.variants!.push({
+  if (!formData.value.variants) {
+    formData.value.variants = []
+  }
+  const variants = formData.value.variants
+  const id = String.fromCharCode(97 + variants.length)
+  variants.push({
     id,
     name: `变体 ${id.toUpperCase()}`,
-    weight: 1 / (formData.value.variants!.length + 1)
+    weight: 1 / (variants.length + 1)
   })
 }
 
 /** 按索引移除表单中的变体。 */
 function removeVariant(index: number): void {
-  formData.value.variants!.splice(index, 1)
+  formData.value.variants?.splice(index, 1)
 }
 
 /** 切换监控指标的选中状态，已选则移除、未选则追加。 */

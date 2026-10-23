@@ -233,7 +233,7 @@ function levelBadgeClass(level: string): string {
     warning: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300',
     info: 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
   }
-  return classes[level] || classes.info!
+  return classes[level] ?? 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
 }
 
 /** 体检规则中文标签。 */
@@ -264,8 +264,13 @@ async function togglePage(page: WikiPageSummary): Promise<void> {
 
   contentLoading.value = true
   expandedContent.value = ''
+  const kbId = props.kbId
+  if (!kbId) {
+    contentLoading.value = false
+    return
+  }
   try {
-    const data = await fetchWikiPageContent(props.kbId!, page.id)
+    const data = await fetchWikiPageContent(kbId, page.id)
     contentCache.value.set(page.id, data.content)
     // 防止用户快速切换页面后旧响应覆盖新展开页
     if (expandedId.value === page.id) {
@@ -370,7 +375,7 @@ function typeBadgeClass(pageType: string): string {
     topic: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300',
     index: 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
   }
-  return classes[pageType] || classes.index!
+  return classes[pageType] ?? 'bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300'
 }
 
 /** 格式化更新时间。 */

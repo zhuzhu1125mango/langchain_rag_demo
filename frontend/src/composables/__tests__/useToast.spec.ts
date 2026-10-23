@@ -24,9 +24,10 @@ describe('useToast', () => {
     toast.info('待移除')
     const last = toast.toasts.value[toast.toasts.value.length - 1]
     expect(last?.title).toBe('待移除')
+    if (!last) throw new Error('toast 未创建')
 
-    toast.removeToast(last!.id)
-    expect(toast.toasts.value.find(t => t.id === last!.id)).toBeUndefined()
+    toast.removeToast(last.id)
+    expect(toast.toasts.value.find(t => t.id === last.id)).toBeUndefined()
   })
 })
 

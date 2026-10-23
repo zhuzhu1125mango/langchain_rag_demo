@@ -150,7 +150,7 @@
 | VIS-3 | 页面视觉收口 | 设置页 / 知识库页 / 聊天页密度与风格不一致 | P2 | 前端 |
 | CODE-1 | 巨型文件拆分 | `document.py` 1679 / `web_search_service.py` 1040 / `chat.py` 1026 / `wiki_compiler.py` 1000 / `stages.py` 783 / `agent_orchestrator.py` 740；前端 `queries/kb.ts` 967 | P1 | 开发 |
 | CODE-2 | 异常分级治理 | 334 处 `except Exception`；缺「可恢复 / 需上报 / 编程错误」分级与统一上下文 | P1 | 开发 |
-| CODE-3 | eslint warning 清零 | 43 条非空断言 warning（测试为主），0 error | P2 | 前端 |
+| CODE-3 | eslint warning 清零 | ✅ **已修复（2026-10-23）**：43 处非空断言全量清零（生产代码改真值守卫/空值兜底，测试改类型化捕获 + 运行时断言），规则由 `warn` 升 `error` 防回归；eslint 0 warning、vue-tsc 0、109 前端单测通过 | 已完成 | 前端 |
 | CODE-4 | API / 类型分层 | `queries/kb.ts` 967 行混合请求、类型与转换 | P2 | 前端 |
 | OPS-1 | 运维手册补全 | `docs/guide` 仅 deployment/development/monitoring；无备份 / 恢复 / 回滚 / 容量 | P1 | 开发 |
 | OPS-2 | 供应链安全 | 无 dependabot / trivy / SBOM；CI 仅 gitleaks | P1 | 开发 |

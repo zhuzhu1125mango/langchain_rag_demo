@@ -33,7 +33,8 @@ function mountWithQuery<R>(setup: () => R) {
   mount(Comp, {
     global: { plugins: [[VueQueryPlugin, { queryClient: client }]] }
   })
-  return captured
+  if (captured.result === undefined) throw new Error('composable 未返回值')
+  return { result: captured.result }
 }
 
 /** 解包可能是 Ref 的值。 */
@@ -77,7 +78,7 @@ describe('useTraces', () => {
     await flushPromises()
 
     expect(mockedGet).toHaveBeenCalledWith('/traces/', { params: { session_id: 's1', limit: 10 } })
-    expect(unwrap(result!.data)).toEqual(listFixture)
+    expect(unwrap(result.data)).toEqual(listFixture)
   })
 
   it('params 变化时以新参数重新请求（queryKey 响应性回归守卫）', async () => {
@@ -94,7 +95,7 @@ describe('useTraces', () => {
     expect(mockedGet).toHaveBeenCalledTimes(2)
     expect(mockedGet).toHaveBeenLastCalledWith('/traces/', { params: { session_id: 's2' } })
     // 请求期间保留上一份数据（placeholderData）
-    expect(unwrap(result!.data)).toEqual(listFixture)
+    expect(unwrap(result.data)).toEqual(listFixture)
   })
 })
 
@@ -104,7 +105,7 @@ describe('useTraceDetail', () => {
     await flushPromises()
 
     expect(mockedGet).not.toHaveBeenCalled()
-    expect(unwrap(result!.fetchStatus)).toBe('idle')
+    expect(unwrap(result.fetchStatus)).toBe('idle')
   })
 
   it('id 就绪后请求 /traces/{id} 并透传详情', async () => {
@@ -120,6 +121,6 @@ describe('useTraceDetail', () => {
     await flushPromises()
 
     expect(mockedGet).toHaveBeenCalledWith('/traces/abc-1')
-    expect(unwrap(captured.result!.data)).toEqual(detail)
+    expect(unwrap(captured.result.data)).toEqual(detail)
   })
 })
