@@ -135,7 +135,7 @@
       <!-- 节点详情面板 -->
       <div 
         v-if="selectedNode"
-        class="absolute top-4 right-4 w-64 bg-white dark:bg-dark-700 rounded-xl shadow-lg border border-gray-200 dark:border-dark-600 p-4"
+        class="absolute top-2 right-2 sm:top-4 sm:right-4 w-56 sm:w-64 max-w-[calc(100%-1rem)] bg-white dark:bg-dark-700 rounded-xl shadow-lg border border-gray-200 dark:border-dark-600 p-4"
       >
         <div class="flex items-center justify-between mb-3">
           <div class="flex items-center gap-2">

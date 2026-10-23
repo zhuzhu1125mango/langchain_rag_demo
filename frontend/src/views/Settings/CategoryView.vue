@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-6">
+  <div class="flex-1 overflow-auto bg-gray-50 dark:bg-dark-900 p-4 sm:p-6">
     <div class="max-w-4xl mx-auto">
       <div class="flex items-center justify-between mb-6">
         <div>

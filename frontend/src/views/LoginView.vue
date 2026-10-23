@@ -8,7 +8,7 @@
         <h1 class="text-2xl font-bold text-gray-800 dark:text-white">RAG 知识库问答系统</h1>
       </div>
 
-      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-8">
+      <div class="bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-6 sm:p-8">
         <el-tabs v-model="activeTab">
           <el-tab-pane label="登录" name="login">
             <el-form

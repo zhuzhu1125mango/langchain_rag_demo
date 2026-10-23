@@ -1,14 +1,14 @@
 <template>
-  <div class="flex h-full">
-    <aside class="w-64 bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-600 p-4">
-      <nav class="space-y-1">
-        <h2 class="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">设置菜单</h2>
+  <div class="flex flex-col lg:flex-row h-full">
+    <aside class="w-full lg:w-64 shrink-0 bg-white dark:bg-dark-800 border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-dark-600 p-2 lg:p-4">
+      <nav class="flex lg:block gap-1 overflow-x-auto lg:space-y-1">
+        <h2 class="hidden lg:block px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">设置菜单</h2>
         <button
           v-for="item in menuItems"
           :key="item.name"
           @click="navigateTo(item.path)"
           :class="[
-            'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-left',
+            'flex-shrink-0 whitespace-nowrap w-auto lg:w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-left',
             'hover:bg-gray-100 dark:hover:bg-dark-700',
             route.path === item.path
               ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
@@ -20,7 +20,7 @@
         </button>
       </nav>
     </aside>
-    <main class="flex-1 overflow-auto">
+    <main class="flex-1 overflow-auto min-w-0">
       <router-view />
     </main>
   </div>

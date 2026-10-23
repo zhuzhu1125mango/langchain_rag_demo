@@ -1,23 +1,33 @@
 <template>
   <aside 
     :class="[
-      'fixed lg:relative z-50 flex flex-col transition-all duration-300',
-      appStore.sidebarCollapsed ? 'w-16' : 'w-64',
+      'fixed lg:relative inset-y-0 left-0 z-50 flex flex-col h-full transition-transform lg:transition-all duration-300',
+      'w-72 max-w-[85vw] lg:max-w-none',
+      appStore.sidebarCollapsed ? 'lg:w-16' : 'lg:w-64',
+      mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
       'bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-600'
     ]"
   >
-    <div class="flex items-center h-16 px-4 border-b border-gray-200 dark:border-dark-600 shrink-0">
+    <div class="flex items-center justify-between h-16 px-4 border-b border-gray-200 dark:border-dark-600 shrink-0">
       <div class="flex items-center gap-3 overflow-hidden">
         <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center flex-shrink-0">
           <BookOpen class="w-5 h-5 text-white" />
         </div>
         <span 
-          v-show="!appStore.sidebarCollapsed" 
+          v-show="showLabels" 
           class="font-bold text-gray-800 dark:text-white text-lg truncate"
         >
           RAG 知识库
         </span>
       </div>
+      <!-- 移动端抽屉关闭按钮 -->
+      <button
+        @click="emit('close')"
+        class="lg:hidden p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+        aria-label="关闭导航菜单"
+      >
+        <X class="w-5 h-5" />
+      </button>
     </div>
 
     <nav class="py-3 shrink-0">
@@ -25,6 +35,7 @@
         <li v-for="item in menuItems" :key="item.name">
           <router-link
             :to="item.path"
+            @click="emit('close')"
             :class="[
               'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200',
               'hover:bg-gray-100 dark:hover:bg-dark-700',
@@ -34,7 +45,7 @@
             ]"
           >
             <component :is="item.icon" class="w-5 h-5 flex-shrink-0" />
-            <span v-show="!appStore.sidebarCollapsed" class="truncate">{{ item.label }}</span>
+            <span v-show="showLabels" class="truncate">{{ item.label }}</span>
           </router-link>
         </li>
       </ul>
@@ -42,13 +53,13 @@
 
     <!-- 会话历史（仅对话页展示，替代原聊天页内独立会话面板） -->
     <div
-      v-if="isChatRoute && !appStore.sidebarCollapsed"
+      v-if="isChatRoute && showLabels"
       class="flex-1 min-h-0 flex flex-col border-t border-gray-100 dark:border-dark-700"
     >
       <div class="px-4 pt-3 pb-1.5 flex items-center justify-between shrink-0">
         <span class="text-xs font-medium text-gray-400 dark:text-gray-500">对话历史</span>
         <button
-          @click="handleNewSession"
+          @click="handleNewSession(); emit('close')"
           class="flex items-center gap-1 px-2 py-1 text-xs text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-50 dark:hover:bg-primary-900/30 transition-colors"
         >
           <Plus class="w-3 h-3" />
@@ -59,7 +70,7 @@
         <button
           v-for="session in sessions"
           :key="session.id"
-          @click="switchSession(session)"
+          @click="switchSession(session); emit('close')"
           :class="[
             'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-colors',
             chatStore.currentSession?.id === session.id
@@ -83,14 +94,14 @@
         <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-medium flex-shrink-0">
           <User class="w-5 h-5" />
         </div>
-        <div v-show="!appStore.sidebarCollapsed" class="flex-1 min-w-0">
+        <div v-show="showLabels" class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-800 dark:text-white truncate">
             {{ appStore.currentUser?.username || '未登录' }}
           </p>
           <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ userSubtitle }}</p>
         </div>
         <button
-          v-show="!appStore.sidebarCollapsed && !!appStore.currentUser"
+          v-show="showLabels && !!appStore.currentUser"
           @click="handleLogout"
           class="p-2 rounded-lg bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors flex-shrink-0"
           title="退出登录"
@@ -113,7 +124,7 @@
         </button>
         <button
           @click="appStore.toggleSidebar"
-          class="flex-1 p-2 rounded-lg bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
+          class="hidden lg:block flex-1 p-2 rounded-lg bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
           :title="appStore.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
         >
           <ChevronLeft v-if="!appStore.sidebarCollapsed" class="w-4 h-4 mx-auto" />
@@ -140,13 +151,25 @@ import { useSessions } from '@/queries/chat'
 import type { Session } from '@/queries/chat'
 import { api } from '@/utils/axios'
 import { useToast } from '@/composables/useToast'
-import { BookOpen, MessageCircle, FolderOpen, Settings, User, Sun, Moon, ChevronLeft, ChevronRight, Clock, LogOut, Activity, MessageSquare, Plus } from '@lucide/vue'
+import { BookOpen, MessageCircle, FolderOpen, Settings, User, Sun, Moon, ChevronLeft, ChevronRight, Clock, LogOut, Activity, MessageSquare, Plus, X } from '@lucide/vue'
+
+const props = defineProps<{
+  /** 移动端抽屉是否展开（桌面端忽略，始终按折叠态宽度展示） */
+  mobileOpen?: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'close'): void
+}>()
 
 const appStore = useAppStore()
 const chatStore = useChatStore()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+
+// 移动端抽屉展开时始终显示文字（不受桌面折叠态影响）
+const showLabels = computed(() => Boolean(props.mobileOpen) || !appStore.sidebarCollapsed)
 
 // 与 ChatView 共享同一 vue-query 缓存（queryKey: ['sessions']）
 const { data: sessions } = useSessions()

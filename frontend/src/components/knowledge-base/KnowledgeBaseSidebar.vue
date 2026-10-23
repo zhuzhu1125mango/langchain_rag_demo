@@ -1,5 +1,5 @@
 <template>
-  <aside class="w-64 bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-600 flex flex-col">
+  <aside class="hidden lg:flex w-64 bg-white dark:bg-dark-800 border-r border-gray-200 dark:border-dark-600 flex-col">
     <div class="p-4 border-b border-gray-200 dark:border-dark-600">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-semibold text-gray-800 dark:text-white">知识库列表</h2>

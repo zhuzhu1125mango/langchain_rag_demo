@@ -1,5 +1,5 @@
 <template>
-  <div ref="messagesContainer" class="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+  <div ref="messagesContainer" class="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
     <!-- 空状态 Welcome：无消息时展示引导与示例问题 -->
     <div v-if="!messages.length" class="h-full min-h-full flex flex-col items-center justify-center text-center -mt-8">
       <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center mb-4 shadow-lg shadow-primary-500/20">

@@ -9,63 +9,78 @@
     />
 
     <div class="flex-1 flex flex-col overflow-hidden">
-      <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-6 py-4">
-        <div class="flex items-center justify-between">
-          <div>
-            <h1 class="text-xl font-semibold text-gray-800 dark:text-white">
+      <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-3 sm:py-4">
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div class="min-w-0">
+            <h1 class="text-lg lg:text-xl font-semibold text-gray-800 dark:text-white truncate">
               {{ currentKB?.name || '选择知识库' }}
             </h1>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <p class="hidden sm:block text-sm text-gray-500 dark:text-gray-400 mt-1 truncate">
               {{ currentKB?.description || '管理当前知识库的文档' }}
             </p>
+            <!-- 移动端知识库切换（桌面端使用左侧列表） -->
+            <select
+              v-if="knowledgeBases?.length"
+              :value="currentKB?.id || ''"
+              class="lg:hidden mt-2 w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-dark-600 bg-white dark:bg-dark-800 text-gray-700 dark:text-gray-200"
+              aria-label="切换知识库"
+              @change="onMobileKBChange"
+            >
+              <option v-for="kb in knowledgeBases" :key="kb.id" :value="kb.id">{{ kb.name }}</option>
+            </select>
           </div>
-          <div v-if="currentKB" class="flex items-center gap-3">
+          <div v-if="currentKB" class="flex items-center gap-1 sm:gap-3 overflow-x-auto pb-1 -mx-1 px-1 sm:mx-0 sm:px-0 sm:pb-0">
             <button
               @click="showWikiDrawer = true"
-              class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors flex-shrink-0"
+              title="Wiki 页面"
             >
               <BookOpen class="w-4 h-4" />
-              <span>Wiki 页面</span>
+              <span class="hidden sm:inline">Wiki 页面</span>
             </button>
             <button
               @click="showEditKBModal = true"
-              class="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors"
+              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors flex-shrink-0"
+              title="编辑知识库"
             >
               <Edit3 class="w-4 h-4" />
-              <span>编辑</span>
+              <span class="hidden sm:inline">编辑</span>
             </button>
             <button
               @click="deleteKnowledgeBaseConfirm"
-              class="flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+              class="flex items-center gap-2 px-2 sm:px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors flex-shrink-0"
+              title="删除知识库"
             >
               <Trash2 class="w-4 h-4" />
-              <span>删除</span>
+              <span class="hidden sm:inline">删除</span>
             </button>
             <button
               @click="batchDelete"
               :disabled="kbStore.selectedCount === 0"
               :class="[
-                'flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-colors',
+                'flex items-center gap-2 px-2 sm:px-4 py-2 text-sm rounded-lg transition-colors flex-shrink-0',
                 kbStore.selectedCount > 0
                   ? 'bg-red-500 text-white hover:bg-red-600'
                   : 'bg-gray-200 dark:bg-dark-700 text-gray-400 cursor-not-allowed'
               ]"
+              title="批量删除选中文档"
             >
               <Trash2 class="w-4 h-4" />
-              <span>批量删除 ({{ kbStore.selectedCount }})</span>
+              <span class="hidden md:inline">批量删除 ({{ kbStore.selectedCount }})</span>
             </button>
             <button
               @click="showUploadDialog = true"
-              class="flex items-center gap-2 px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+              class="flex items-center gap-2 px-2 sm:px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors flex-shrink-0"
+              title="上传文档"
             >
               <Upload class="w-4 h-4" />
-              <span>上传文档</span>
+              <span class="hidden sm:inline">上传文档</span>
             </button>
           </div>
         </div>
       </header>
 
-      <div v-if="currentKB" class="flex-1 overflow-auto p-6">
+      <div v-if="currentKB" class="flex-1 overflow-auto p-4 sm:p-6">
         <!-- 标签页切换 -->
         <div class="flex items-center gap-1 bg-gray-100 dark:bg-dark-700 rounded-lg p-1 mb-6">
           <button
@@ -182,6 +197,14 @@
         <Database class="w-16 h-16 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
         <h3 class="text-lg font-medium text-gray-500 dark:text-gray-400">请选择一个知识库</h3>
         <p class="text-sm text-gray-400 dark:text-gray-500 mt-2">从左侧列表中选择或创建新的知识库</p>
+        <!-- 移动端无左侧列表，提供直接创建入口 -->
+        <button
+          @click="showCreateKBModal = true"
+          class="lg:hidden mt-4 inline-flex items-center gap-2 px-4 py-2 text-sm bg-primary-500 text-white rounded-lg hover:bg-primary-600 transition-colors"
+        >
+          <Plus class="w-4 h-4" />
+          新建知识库
+        </button>
       </div>
     </div>
 
@@ -306,7 +329,7 @@ import { ref, watch, computed, onMounted } from 'vue'
 import { useKBStore } from '@/stores/kb'
 import { useDocuments, useKnowledgeBases } from '@/queries/kb'
 import type { KnowledgeBase } from '@/queries/kb'
-import { Trash2, Upload, Edit3, FileText, Network, Search, FolderOpen, Database, BookOpen } from '@lucide/vue'
+import { Trash2, Upload, Edit3, FileText, Network, Search, FolderOpen, Database, BookOpen, Plus } from '@lucide/vue'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useToast } from '@/composables/useToast'
 import { useWebSocketNotifications } from '@/composables/useNotifications'
@@ -456,6 +479,13 @@ function onPerformSearch(): void {
 function selectKnowledgeBase(kb: KnowledgeBase): void {
   kbStore.setCurrentKB(kb)
   kbStore.clearSelection()
+}
+
+/** 移动端下拉切换知识库（桌面端使用左侧列表）。 */
+function onMobileKBChange(event: Event): void {
+  const id = (event.target as HTMLSelectElement).value
+  const kb = (knowledgeBases.value || []).find(item => item.id === id)
+  if (kb) selectKnowledgeBase(kb)
 }
 
 /** 上传完成回调：文档列表由 WebSocket 通知自动刷新，此处无需手动处理。 */

@@ -1,6 +1,6 @@
 <template>
   <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-dark-900 overflow-hidden">
-    <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-6 py-4">
+    <header class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-3 sm:py-4">
       <div>
         <h1 class="text-xl font-semibold text-gray-800 dark:text-white">链路追踪</h1>
         <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">查看每次问答的完整执行链路：意图路由、检索、生成各阶段耗时与 token 用量</p>
@@ -8,7 +8,7 @@
     </header>
 
     <!-- 过滤栏 -->
-    <div class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-6 py-3 flex flex-wrap items-center gap-3">
+    <div class="bg-white dark:bg-dark-800 border-b border-gray-200 dark:border-dark-600 px-4 sm:px-6 py-3 flex flex-wrap items-center gap-3">
       <el-input
         v-model="sessionIdFilter"
         placeholder="按会话 ID 过滤（可选）"
@@ -30,7 +30,7 @@
     </div>
 
     <!-- 列表 -->
-    <div class="flex-1 overflow-auto p-6">
+    <div class="flex-1 overflow-auto p-4 sm:p-6">
       <el-table :data="tracesData?.items || []" v-loading="isLoading" stripe>
         <el-table-column label="时间" width="170">
           <template #default="{ row }">{{ formatDate(row.created_at) }}</template>

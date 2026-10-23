@@ -1,5 +1,5 @@
 <template>
-  <div class="px-6 pb-4 pt-1">
+  <div class="px-3 sm:px-6 pb-3 sm:pb-4 pt-1">
     <div class="max-w-4xl mx-auto">
       <!-- 问题重写结果显示 -->
       <div v-if="rewriteResult" class="mb-2 px-3 py-2 bg-primary-50/60 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800/60 rounded-xl">
@@ -102,11 +102,11 @@
           @input="onInput"
           placeholder="输入您的问题，Enter 发送"
           rows="1"
-          class="w-full px-4 pt-3 pb-1 bg-transparent text-[15px] text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-t-2xl resize-none focus:outline-none"
+          class="w-full px-4 pt-3 pb-1 bg-transparent text-base sm:text-[15px] text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-t-2xl resize-none focus:outline-none"
           :maxlength="maxLength"
         ></textarea>
 
-        <div class="flex items-center justify-between gap-2 px-3 pb-2.5 pt-1">
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-1">
           <!-- 左侧：功能开关 pills（深度思考在前，联网搜索在后） -->
           <div class="flex items-center gap-1.5">
             <button
@@ -155,7 +155,7 @@
             </button>
             <span
               :class="[
-                'text-xs tabular-nums',
+                'hidden sm:inline text-xs tabular-nums',
                 questionInput.length >= maxLength ? 'text-red-500' : 'text-gray-300 dark:text-gray-600'
               ]"
             >

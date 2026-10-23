@@ -518,3 +518,35 @@ body {
 .dark .skeleton {
   background-color: #252532;
 }
+
+/* ============================================================
+   移动端基础适配（UX-2）
+   - 禁止窄屏横向溢出（避免 1px 溢出导致整页可左右拖动）
+   - Markdown 表格/代码块在窄屏内部横向滚动，不撑破气泡
+   - 移动端正文略降字号，提升长文可读性
+   ============================================================ */
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+@media (max-width: 639px) {
+  .markdown-body {
+    font-size: 14px;
+  }
+
+  .markdown-body table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .markdown-body pre {
+    max-width: 100%;
+  }
+}

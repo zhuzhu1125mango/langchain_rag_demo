@@ -1,8 +1,9 @@
 <template>
+  <!-- 移动端改为全屏覆盖层，避免 480px 固定宽度在窄屏溢出 -->
   <aside
     :class="[
       'bg-white dark:bg-dark-800 border-l border-gray-200 dark:border-dark-600 transition-all duration-300 overflow-hidden',
-      show ? 'w-[480px]' : 'w-0'
+      show ? 'fixed sm:static inset-0 z-40 sm:z-auto w-full sm:w-[480px]' : 'w-0'
     ]"
   >
     <div v-if="show" class="h-full flex flex-col">
