@@ -1,5 +1,11 @@
 <template>
-  <div ref="messagesContainer" class="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4">
+  <div
+    ref="messagesContainer"
+    class="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4"
+    role="log"
+    aria-live="polite"
+    aria-label="对话消息"
+  >
     <!-- 空状态 Welcome：无消息时展示引导与示例问题 -->
     <div v-if="!messages.length" class="h-full min-h-full flex flex-col items-center justify-center text-center -mt-8">
       <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center mb-4 shadow-lg shadow-primary-500/20">
@@ -128,6 +134,7 @@
               @click="copyMessage(message)"
               class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
               :title="copiedId === message.id ? '已复制' : '复制回答'"
+              :aria-label="copiedId === message.id ? '已复制回答' : '复制回答'"
             >
               <Check v-if="copiedId === message.id" class="w-3.5 h-3.5 text-green-500" />
               <Copy v-else class="w-3.5 h-3.5" />
@@ -137,13 +144,14 @@
               @click="emit('regenerate')"
               class="p-1.5 rounded-md text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
               title="重新生成"
+              aria-label="重新生成回答"
             >
               <RefreshCw class="w-3.5 h-3.5" />
             </button>
           </div>
 
           <div class="flex items-center gap-2">
-            <div class="flex items-center gap-0.5">
+            <div class="flex items-center gap-0.5" role="group" aria-label="回答评分">
               <button
                 v-for="star in 5"
                 :key="star"
@@ -153,6 +161,8 @@
                 :disabled="!!message.feedback?.rating"
                 class="p-0.5 transition-all disabled:cursor-default"
                 :class="!message.feedback?.rating ? 'hover:scale-110 cursor-pointer' : ''"
+                :aria-label="`评分 ${star} 星`"
+                :aria-pressed="getEffectiveRating(message) >= star"
               >
                 <Star
                   class="w-4 h-4 transition-colors"
@@ -248,10 +258,14 @@ function isLastAssistant(index: number): boolean {
   return true
 }
 
+/** 当前展示的评分值：已提交评分优先，其次为悬停预览。 */
+function getEffectiveRating(message: Message): number {
+  return message.feedback?.rating || hoverRatings.value[message.id] || 0
+}
+
 /** 计算单颗星星的样式类：已评分或悬停评级以内的高亮黄色，否则为灰色。 */
 function getStarClass(message: Message, star: number): string {
-  const effectiveRating = message.feedback?.rating || hoverRatings.value[message.id] || 0
-  if (star <= effectiveRating) {
+  if (star <= getEffectiveRating(message)) {
     return 'text-yellow-400 fill-yellow-400'
   }
   return 'text-gray-300 dark:text-gray-600'

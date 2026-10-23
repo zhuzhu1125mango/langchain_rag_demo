@@ -20,6 +20,7 @@
           <button
             @click="close"
             class="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-dark-700 transition-colors"
+            aria-label="关闭来源详情"
           >
             <X class="w-5 h-5" />
           </button>

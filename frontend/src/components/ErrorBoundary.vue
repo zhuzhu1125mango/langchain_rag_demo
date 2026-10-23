@@ -1,7 +1,7 @@
 <template>
   <slot v-if="!hasError" />
   <div v-else class="h-full min-h-screen flex items-center justify-center p-6">
-    <div class="max-w-md w-full bg-white dark:bg-dark-800 border border-red-200 dark:border-red-800 rounded-2xl p-6 text-center shadow-lg">
+    <div class="max-w-md w-full bg-white dark:bg-dark-800 border border-red-200 dark:border-red-800 rounded-2xl p-6 text-center shadow-lg" role="alert">
       <AlertOctagon class="w-10 h-10 text-red-500 mx-auto mb-3" />
       <h2 class="text-base font-semibold text-gray-800 dark:text-white mb-1">页面出现异常</h2>
       <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">

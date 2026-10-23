@@ -28,8 +28,13 @@
           v-for="session in sessionsData"
           :key="session.id"
           @click="openSession(session)"
+          @keydown.enter="openSession(session)"
+          @keydown.space.prevent="openSession(session)"
+          role="button"
+          tabindex="0"
+          :aria-label="`打开会话 ${session.title || '未命名对话'}`"
           :class="[
-            'bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-4 cursor-pointer hover:shadow-md hover:border-primary-500 transition-all group',
+            'bg-white dark:bg-dark-800 rounded-xl shadow-sm border border-gray-200 dark:border-dark-600 p-4 cursor-pointer hover:shadow-md hover:border-primary-500 transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400',
             selectedSession?.id === session.id ? 'ring-2 ring-primary-500' : ''
           ]"
         >
@@ -40,7 +45,8 @@
             </div>
             <button
               @click.stop="deleteSession(session)"
-              class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+              class="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus:opacity-100 transition-all"
+              :aria-label="`删除会话 ${session.title || '未命名对话'}`"
             >
               <X class="w-4 h-4" />
             </button>

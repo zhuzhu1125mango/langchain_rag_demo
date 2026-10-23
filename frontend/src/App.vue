@@ -1,5 +1,7 @@
 <template>
   <div class="min-h-screen transition-colors duration-300">
+    <!-- UX-3：键盘用户首个 Tab 可跳过导航直达主内容 -->
+    <a href="#main-content" class="skip-link">跳到主要内容</a>
     <div class="flex h-screen">
       <AppSidebar
         v-if="!isLoginPage"
@@ -13,7 +15,7 @@
         aria-hidden="true"
         @click="mobileNavOpen = false"
       ></div>
-      <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+      <main id="main-content" tabindex="-1" class="flex-1 flex flex-col overflow-hidden min-w-0">
         <!-- 移动端顶栏：汉堡菜单（桌面端隐藏） -->
         <div
           v-if="!isLoginPage"

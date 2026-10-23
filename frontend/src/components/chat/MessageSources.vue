@@ -19,6 +19,7 @@
         tabindex="0"
         @click="emit('navigate', source)"
         @keydown.enter="emit('navigate', source)"
+        @keydown.space.prevent="emit('navigate', source)"
       >
         <!-- 编号徽章 -->
         <span class="flex-shrink-0 w-5 h-5 inline-flex items-center justify-center text-xs font-semibold rounded-full bg-primary-50 text-primary-600 dark:bg-primary-900/40 dark:text-primary-300 mt-0.5">

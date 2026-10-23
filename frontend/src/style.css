@@ -520,6 +520,46 @@ body {
 }
 
 /* ============================================================
+   可访问性基础（UX-3）
+   - 统一键盘焦点环（覆盖浏览器默认移除 outline 的场景）
+   - 跳转主内容链接（Tab 首站）
+   - 尊重系统「减少动态效果」偏好
+   ============================================================ */
+:focus-visible {
+  outline: 2px solid var(--color-primary-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.skip-link {
+  position: fixed;
+  top: 0.5rem;
+  left: 0.5rem;
+  z-index: 100;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background-color: var(--color-primary-600);
+  color: #fff;
+  font-size: 0.875rem;
+  transform: translateY(-200%);
+  transition: transform 0.15s ease;
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* ============================================================
    移动端基础适配（UX-2）
    - 禁止窄屏横向溢出（避免 1px 溢出导致整页可左右拖动）
    - Markdown 表格/代码块在窄屏内部横向滚动，不撑破气泡

@@ -1,6 +1,6 @@
 <template>
   <Teleport to="body">
-    <div class="fixed top-4 right-4 z-50 space-y-2">
+    <div class="fixed top-4 right-4 z-50 space-y-2" role="status" aria-live="polite">
       <TransitionGroup name="toast">
         <div
           v-for="toast in toasts"
@@ -18,6 +18,7 @@
           <button
             @click="removeToast(toast.id)"
             class="p-1 rounded hover:bg-white/20 transition-colors flex-shrink-0"
+            aria-label="关闭通知"
           >
             <X class="w-4 h-4" />
           </button>

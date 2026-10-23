@@ -33,8 +33,14 @@
         v-for="kb in knowledgeBases"
         :key="kb.id"
         @click="handleClick(kb)"
+        @keydown.enter="!isBatchKBMode && handleClick(kb)"
+        @keydown.space.prevent="!isBatchKBMode && handleClick(kb)"
+        :role="isBatchKBMode ? 'group' : 'button'"
+        :tabindex="isBatchKBMode ? undefined : 0"
+        :aria-label="isBatchKBMode ? undefined : `知识库 ${kb.name}`"
+        :aria-pressed="isBatchKBMode ? undefined : currentKB?.id === kb.id"
         :class="[
-          'p-3 rounded-lg cursor-pointer transition-colors mb-1',
+          'p-3 rounded-lg cursor-pointer transition-colors mb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400',
           currentKB?.id === kb.id && !isBatchKBMode
             ? 'bg-primary-100 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700'
             : 'hover:bg-gray-100 dark:hover:bg-dark-700'
@@ -48,6 +54,7 @@
               :checked="kbStore.isKBSelected(kb)"
               @click.stop
               @change="kbStore.selectKB(kb)"
+              :aria-label="`选择知识库 ${kb.name}`"
               class="rounded border-gray-300 dark:border-dark-500 bg-gray-100 dark:bg-dark-700 text-primary-600 focus:ring-primary-500"
             />
             <Database class="w-4 h-4 text-gray-400" />

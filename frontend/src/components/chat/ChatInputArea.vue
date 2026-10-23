@@ -101,6 +101,7 @@
           @keydown.enter.exact.prevent="onSend"
           @input="onInput"
           placeholder="输入您的问题，Enter 发送"
+          aria-label="输入问题"
           rows="1"
           class="w-full px-4 pt-3 pb-1 bg-transparent text-base sm:text-[15px] text-gray-800 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 rounded-t-2xl resize-none focus:outline-none"
           :maxlength="maxLength"
@@ -149,6 +150,7 @@
               :disabled="isRewritingQuestion"
               class="p-1.5 text-gray-400 hover:text-primary-500 transition-colors disabled:opacity-50"
               title="优化问题"
+              aria-label="优化问题"
             >
               <Loader2 v-if="isRewritingQuestion" class="w-4 h-4 animate-spin" />
               <Sparkles v-else class="w-4 h-4" />

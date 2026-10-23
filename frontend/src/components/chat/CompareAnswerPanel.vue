@@ -15,6 +15,7 @@
         <button
           @click="emit('close')"
           class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+          aria-label="关闭答案对比"
         >
           <X class="w-4 h-4" />
         </button>

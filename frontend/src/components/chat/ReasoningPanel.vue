@@ -13,6 +13,8 @@
       v-if="!isExpanded"
       type="button"
       class="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+      aria-expanded="false"
+      aria-label="展开思考过程"
       @click="isExpanded = true"
     >
       <div class="flex items-center gap-2 min-w-0">
@@ -41,6 +43,8 @@
         <button
           type="button"
           class="p-1 rounded hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
+          aria-expanded="true"
+          aria-label="收起思考过程"
           @click="isExpanded = false"
         >
           <ChevronUp class="w-3.5 h-3.5 text-gray-400" />

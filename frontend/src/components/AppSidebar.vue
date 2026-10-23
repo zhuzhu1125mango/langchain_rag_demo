@@ -1,5 +1,7 @@
 <template>
   <aside 
+    :inert="sidebarInert"
+    :aria-hidden="sidebarInert || undefined"
     :class="[
       'fixed lg:relative inset-y-0 left-0 z-50 flex flex-col h-full transition-transform lg:transition-all duration-300',
       'w-72 max-w-[85vw] lg:max-w-none',
@@ -30,7 +32,7 @@
       </button>
     </div>
 
-    <nav class="py-3 shrink-0">
+    <nav class="py-3 shrink-0" aria-label="主导航">
       <ul class="space-y-1 px-2">
         <li v-for="item in menuItems" :key="item.name">
           <router-link
@@ -66,7 +68,7 @@
           新对话
         </button>
       </div>
-      <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+      <div class="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5" aria-label="对话历史列表">
         <button
           v-for="session in sessions"
           :key="session.id"
@@ -105,6 +107,7 @@
           @click="handleLogout"
           class="p-2 rounded-lg bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors flex-shrink-0"
           title="退出登录"
+          aria-label="退出登录"
         >
           <LogOut class="w-4 h-4" />
         </button>
@@ -118,6 +121,8 @@
             appStore.isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
           ]"
           :title="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'"
+          :aria-label="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'"
+          :aria-pressed="appStore.isDark"
         >
           <Sun v-if="!appStore.isDark" class="w-4 h-4 mx-auto" />
           <Moon v-else class="w-4 h-4 mx-auto" />
@@ -126,6 +131,8 @@
           @click="appStore.toggleSidebar"
           class="hidden lg:block flex-1 p-2 rounded-lg bg-gray-100 dark:bg-dark-700 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-dark-600 transition-colors"
           :title="appStore.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :aria-label="appStore.sidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :aria-expanded="!appStore.sidebarCollapsed"
         >
           <ChevronLeft v-if="!appStore.sidebarCollapsed" class="w-4 h-4 mx-auto" />
           <ChevronRight v-else class="w-4 h-4 mx-auto" />
@@ -144,6 +151,7 @@
  */
 import { computed } from 'vue'
 import type { Component } from 'vue'
+import { useMediaQuery } from '@vueuse/core'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
@@ -170,6 +178,10 @@ const toast = useToast()
 
 // 移动端抽屉展开时始终显示文字（不受桌面折叠态影响）
 const showLabels = computed(() => Boolean(props.mobileOpen) || !appStore.sidebarCollapsed)
+
+// 移动端抽屉关闭时禁用交互/屏读（避免键盘 focus 落到屏外元素）
+const isDesktop = useMediaQuery('(min-width: 1024px)')
+const sidebarInert = computed(() => !isDesktop.value && !props.mobileOpen)
 
 // 与 ChatView 共享同一 vue-query 缓存（queryKey: ['sessions']）
 const { data: sessions } = useSessions()

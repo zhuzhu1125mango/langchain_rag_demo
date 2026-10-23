@@ -11,6 +11,7 @@
           :disabled="isLoading"
           class="p-1.5 text-gray-400 hover:text-primary-500 hover:bg-gray-100 dark:hover:bg-dark-700 rounded-lg transition-colors disabled:opacity-50"
           title="刷新图谱"
+          aria-label="刷新图谱"
         >
           <RefreshCw class="w-4 h-4" />
         </button>
@@ -145,6 +146,7 @@
           <button
             @click="selectedNode = null"
             class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+            aria-label="关闭节点详情"
           >
             <X class="w-4 h-4" />
           </button>
