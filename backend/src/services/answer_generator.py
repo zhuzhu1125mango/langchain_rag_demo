@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from src.services.tools.tool_manager import ToolResult
 from src.services.prompts.prompt_loader import PromptLoader
 from src.services.context_builder import ContextBuilder
+from src.services.identity import IDENTITY_PROMPT_RULE
 from src.services.numerical_validator import NumericalValidator
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ class AnswerGenerator:
                     question=question,
                 )
             return f"""你是一个智能助手。
+{IDENTITY_PROMPT_RULE}
 
 {('当前问题涉及时效性信息，但你未获得实时数据来源。' if is_realtime else '请基于已有知识回答以下问题。')}
 
@@ -132,6 +134,7 @@ class AnswerGenerator:
         return f"""你是一个严谨的智能助手，请基于以下参考信息回答用户问题。
 
 回答要求：
+0. {IDENTITY_PROMPT_RULE}
 1. 优先使用参考信息中的内容，禁止编造参考信息里不存在的信息。
 2. 如果参考信息中没有答案，直接说明"无法找到相关信息"。
 3. 尽量在事实性陈述后标注来源编号，如[1]、[2]，对应参考信息中的来源编号。

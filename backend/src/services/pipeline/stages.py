@@ -42,6 +42,7 @@ from src.services.reasoning import (
     REASONING_STEP_TOOL_EXECUTE,
 )
 from src.services.semantic_cache_service import SemanticCacheService
+from src.services.identity import build_identity_answer
 from src.services.trace_collector import TraceCollector
 from src.services.tools.plugins._datetime_impl import build_datetime_answer
 
@@ -178,6 +179,18 @@ class PipelineStagesMixin:
             state.answer_type = "guardrail_blocked"
             state.final_answer = INPUT_BLOCK_MESSAGE
             yield ("chunk", INPUT_BLOCK_MESSAGE, [], [], "guardrail_blocked")
+            async for ev in self._finalize(state):
+                yield ev
+            return
+
+        # 身份问题直接返回产品口径：小模型无上下文时容易自称 Qwen/阿里云，
+        # 固定回答同时避免一次无意义的模型调用。
+        identity_answer = build_identity_answer(state.question)
+        if identity_answer:
+            state.answer_type = "identity"
+            state.final_answer = identity_answer
+            state.trace.add_stage("identity", "done", latency_ms=0)
+            yield ("chunk", identity_answer, [], [], "identity")
             async for ev in self._finalize(state):
                 yield ev
             return

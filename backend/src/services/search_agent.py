@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.config import settings
+from src.services.identity import IDENTITY_PROMPT_RULE
 from .tools.plugins._datetime_impl import get_current_datetime
 from .tools.plugins.web_search_tool import WebSearchTool
 from .tools.plugins.fetch_webpage_tool import FetchWebpageTool
@@ -401,6 +402,7 @@ class FunctionCallingHandler(BaseSearchAgent):
         bound = self.llm.bind_tools(self._native_tools_schema())
         prompt = (
             "你是一个智能助手，可以使用工具辅助回答。\n"
+            f"{IDENTITY_PROMPT_RULE}\n"
             "若是时效性问题（天气/新闻/价格/汇率/比分等实时数据），必须调用相应工具；\n"
             "稳定知识（概念解释/历史事实）可直接回答，不必调用工具。\n\n"
             f"对话历史：\n{history_context}\n\n用户问题：{question}"
@@ -521,6 +523,7 @@ class FunctionCallingHandler(BaseSearchAgent):
 
     def _build_decision_prompt(self, question: str, history_context: str) -> str:
         return f"""你是一个智能助手，可以使用工具来辅助回答用户问题。
+{IDENTITY_PROMPT_RULE}
 
 可用工具：
 {self.toolkit.tools_prompt()}
@@ -575,6 +578,7 @@ class FunctionCallingHandler(BaseSearchAgent):
 3. 关键事实标注来源编号，如[1]、[2]，对应工具结果中的条目编号。
 4. 保持回答简洁、准确、连贯。
 5. **禁止输出任何工具调用 JSON、```json 代码块、<tool_call> 标签或 <think> 思考过程**。
+6. {IDENTITY_PROMPT_RULE}
 
 对话历史：
 {history_context}

@@ -141,22 +141,23 @@
       </AppCard>
 
       <AppCard padding="lg">
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex flex-col gap-1 mb-4">
           <h2 class="font-medium text-content">模型配置</h2>
+          <p class="text-sm text-content-muted">具体模型版本由管理员在部署配置中管理。</p>
         </div>
 
         <div class="space-y-4 text-sm">
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <span class="text-content-tertiary">嵌入模型</span>
-            <span class="font-medium text-content">{{ modelConfig?.embedding_model_name }}</span>
+            <span class="font-medium text-content">本地向量模型</span>
           </div>
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
-            <span class="text-content-tertiary">对话模型（深度思考·开）</span>
-            <span class="font-medium text-content">{{ modelConfig?.ollama_model_name }}</span>
+            <span class="text-content-tertiary">主回答模型（深度思考·开）</span>
+            <span class="font-medium text-content">本地推理模型</span>
           </div>
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
-            <span class="text-content-tertiary">对话模型（深度思考·关）</span>
-            <span class="font-medium text-content">{{ modelConfig?.ollama_direct_model_name || modelConfig?.ollama_model_name }}</span>
+            <span class="text-content-tertiary">直答模型（深度思考·关）</span>
+            <span class="font-medium text-content">本地直答模型</span>
           </div>
         </div>
       </AppCard>
@@ -215,7 +216,6 @@ import FeatureStatusPanel from '@/components/settings/FeatureStatusPanel.vue'
 import { useSystemFeatures } from '@/queries/features'
 import {
   useProcessingConfig,
-  useModelConfig,
   useUpdateProcessingConfig,
   useResetConfig,
   type ProcessingConfig
@@ -225,7 +225,6 @@ const appStore = useAppStore()
 const toast = useToast()
 
 const { data: processingConfig, refetch: refetchProcessing } = useProcessingConfig()
-const { data: modelConfig } = useModelConfig()
 const { data: systemFeatures, isLoading: isFeaturesLoading } = useSystemFeatures()
 const updateConfigMutation = useUpdateProcessingConfig()
 const resetMutation = useResetConfig()

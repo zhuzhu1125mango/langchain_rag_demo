@@ -131,12 +131,12 @@ class ProcessingConfigUpdate(BaseModel):
 
 
 @router.get("/", response_model=SystemConfigResponse)
-async def get_system_config():
+async def get_system_config(current_user: CurrentUser = Depends(require_admin)):
     """
-    获取系统配置
-    
-    Returns:
-        SystemConfigResponse: 系统配置信息
+    获取系统配置（管理操作：需 ADMIN_KEY 或开发模式）
+
+    响应包含原始模型名，因此仅管理员可读；普通用户可继续使用
+    `/config/processing` 与不含模型名的 `/config/info`。
     """
     return SystemConfigResponse(
         processing=ProcessingConfig(
@@ -148,6 +148,7 @@ async def get_system_config():
             embedding_model_name=settings.model.EMBEDDING_MODEL_NAME,
             embedding_dimension=settings.model.EMBEDDING_DIMENSION,
             ollama_model_name=settings.model.OLLAMA_MODEL_NAME,
+            ollama_direct_model_name=settings.model.OLLAMA_DIRECT_MODEL_NAME or "",
             fast_llm_model_name=settings.model.FAST_LLM_MODEL_NAME,
         ),
         supported_extensions=SUPPORTED_EXTENSIONS
@@ -236,12 +237,11 @@ async def update_processing_config(
 
 
 @router.get("/model", response_model=ModelConfig)
-async def get_model_config():
+async def get_model_config(current_user: CurrentUser = Depends(require_admin)):
     """
-    获取模型配置
-    
-    Returns:
-        ModelConfig: 模型配置信息
+    获取模型配置（管理操作：需 ADMIN_KEY 或开发模式）
+
+    原始模型名会暴露底层模型/厂商，仅管理员可读。
     """
     return ModelConfig(
         embedding_model_name=settings.model.EMBEDDING_MODEL_NAME,

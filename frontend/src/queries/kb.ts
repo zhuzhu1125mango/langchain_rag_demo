@@ -815,13 +815,6 @@ export interface ProcessingConfig {
   top_k: number
 }
 
-export interface ModelConfig {
-  embedding_model_name: string
-  ollama_model_name: string
-  /** 深度思考关闭时使用的非思考直答模型；未配置时为空串 */
-  ollama_direct_model_name?: string
-}
-
 /** 获取处理相关配置。 */
 export function useProcessingConfig() {
   return useQuery({
@@ -846,18 +839,6 @@ export function useUpdateProcessingConfig() {
       queryClient.invalidateQueries({ queryKey: ['processing_config'] })
       queryClient.invalidateQueries({ queryKey: ['system_config'] })
     }
-  })
-}
-
-/** 获取模型相关配置。 */
-export function useModelConfig() {
-  return useQuery({
-    queryKey: ['model_config'],
-    queryFn: async (): Promise<ModelConfig> => {
-      const data = await api.get<ModelConfig>('/config/model')
-      return data
-    },
-    staleTime: 5 * 60 * 1000
   })
 }
 

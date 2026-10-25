@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from src.config import settings
 from src.services.decision_pipeline import DecisionResult
+from src.services.identity import IDENTITY_PROMPT_RULE
 
 logger = logging.getLogger("rag_system")
 
@@ -58,6 +59,7 @@ KB_ANSWER_TEMPLATE = """
 你是一个严谨的智能助手，请基于以下参考信息回答用户问题。
 
 回答要求：
+0. """ + IDENTITY_PROMPT_RULE + """
 1. 优先使用参考信息中的内容，禁止编造参考信息里不存在的信息。
 2. 如果参考信息中没有答案，直接说明"无法找到相关信息"。
 3. **关键事实必须标注来源编号**，如[1]、[2]，对应参考信息中的来源编号；
@@ -84,6 +86,7 @@ KB_ANSWER_TEMPLATE = """
 
 LLM_DIRECT_TEMPLATE = """
 你是一个智能助手。本次联网搜索未能返回有效结果。
+""" + IDENTITY_PROMPT_RULE + """
 请基于你已有的知识回答用户问题：
 - 非时效性问题：正常回答。
 - 涉及时效性信息（如价格、新闻、天气、实时数据等）：基于你的知识作答，

@@ -62,6 +62,7 @@
 | D15 | **系统能力透明度（CF-1）** | ✅ `/api/config/info` 新增只读 `features`（Wiki 编译/网页抓取/高危审批/A-B 聊天分流/学习权重回载/样本补采/轨迹评测：enabled + scope + risk + env_var + note）；设置-常规新增“系统能力”面板；学习引擎页提示权重回载/补采未开启；A/B 页提示聊天分流未开启；Wiki 抽屉按开关展示状态并**修复 WikiDrawer 未导入导致点击入口无反应**。验证：后端 +3 / 前端 +4 单测，131 前端单测、lint/typecheck/build 全过；浏览器实测三处提示与 Wiki 抽屉 | （本次） |
 | D16 | **VIS-4 视觉刷新** | ✅ 中性 zinc 色板 + sidebar/chat-user 语义色；侧栏/设置子导航 active 改为白色浮起卡片；聊天主画布改白、头部 64px、欢迎态 2×2 示例卡、助手回答去卡片正文流、用户消息中性灰气泡、浮起式 composer；知识库 KB 列表/分段 tab/表格、历史页与设置页头部统一。验证：lint 0 / typecheck / 131 单测 / build / E2E 5/5 + 1440×900 浅深色与 390×844 移动端截图。详见 [ui-visual-polish-2026-10.md](design/ui-visual-polish-2026-10.md) §6 | （本次） |
 | D17 | **VIS-5 知澜品牌 + 克制版液态玻璃** | ✅ 产品更名为「知澜 / 企业知识问答」；新增涟漪源点 BrandMark 与 favicon.svg/ico/png/apple-touch-icon；侧栏、顶栏、composer、EP Dialog/Drawer/Dropdown/MessageBox/Toast 接入 glass-chrome/panel/subtle + ambient；内容/表格保持实色；支持 backdrop-filter 降级、reduced-transparency、移动端低 blur。验证：lint 0 / typecheck / 131 单测 / build / E2E 5/5 + 浅深色与移动端截图。详见 [ui-visual-polish-2026-10.md](design/ui-visual-polish-2026-10.md) §7 | （本次） |
+| D18 | **知澜身份口径治理** | ✅ 新增身份识别短路（你是谁/你是什么模型/谁开发了你/你背后的公司/训练数据截止/与 ChatGPT 对比等）直接返回知澜固定口径；直答、KB、工具优先、Agent/搜索提示词统一追加身份约束，避免小模型自称 Qwen/阿里云；模型询问如实说明“由部署环境配置的本地大模型驱动”。设置页模型配置改为「本地推理/直答/向量模型」产品化显示，前端不再请求 `/config/model`；后端 `GET /api/config` 与 `GET /api/config/model` 改为管理员鉴权，普通用户仅保留不含模型名的 `/config/processing` 与 `/config/info`。验证：身份/配置暴露/提示词/安全 52+3 测试通过；真机“你是谁”“你好”“你由谁开发”“你背后的公司是谁”“你和 ChatGPT 有什么区别”均以知澜回答，身份短路 <0.4s | （本次，未提交） |
 
 ---
 

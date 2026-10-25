@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
 from src.config import settings
+from src.services.identity import IDENTITY_PROMPT_RULE
 
 logger = logging.getLogger("rag_system")
 
@@ -177,6 +178,7 @@ class AgentOrchestrator:
             )
         return (
             "你是一个严谨的智能助手，可以调用工具来回答用户问题。\n"
+            f"{IDENTITY_PROMPT_RULE}\n"
             "规则：\n"
             "1. 每次只做一步决策：要么调用一个工具，要么给出最终答案。\n"
             "2. 已有观察结果足够回答时，立即给出最终答案，不要重复调用工具。\n"

@@ -33,8 +33,9 @@ curl -X POST http://localhost:8000/api/chat/messages \
 补充说明：
 
 - **开发模式放行**：未配置 `API_KEY` 且**非 Docker** 时允许匿名访问，身份记为 `default`
-- **管理操作**：`POST /api/config/*`、`POST /metrics/reset` 等还需携带 `X-Admin-Key: <ADMIN_KEY>`；
-  生产模式未配置 `ADMIN_KEY` 时这些接口一律 403
+- **管理操作**：`GET /api/config`、`GET /api/config/model`、`POST /api/config/*`、`POST /metrics/reset`
+  等还需携带 `X-Admin-Key: <ADMIN_KEY>`；生产模式未配置 `ADMIN_KEY` 时这些接口一律 403。
+  返回原始模型名的配置接口仅管理员可读，普通用户请使用 `/api/config/processing` 与不含模型名的 `/api/config/info`
 - **对象级隔离**：资源（知识库/文档/会话/反馈）按 `owner_id` 隔离，非所有者访问返回 **403**；
   `owner_id` 为空的遗留数据对任意登录用户放行
 - **JWT 有效期为 `ACCESS_TOKEN_EXPIRE_MINUTES`（默认 60 分钟）**；token 未过期且签发时间未超过
@@ -935,6 +936,8 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 
 **GET** `/api/config`
 
+**鉴权**：管理员（`X-Admin-Key` 或开发模式）。响应包含原始模型名，普通用户不可读。
+
 **成功响应** (200):
 ```json
 {
@@ -983,6 +986,8 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 
 **GET** `/api/config/model`
 
+**鉴权**：管理员（`X-Admin-Key` 或开发模式）。原始模型名会暴露底层模型/厂商，仅管理员可读。
+
 ### 10.5 重置配置
 
 **POST** `/api/config/reset`
@@ -997,6 +1002,8 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 ### 10.6 获取系统信息
 
 **GET** `/api/config/info`
+
+公开只读接口，不含原始模型名；用于前端能力面板、API Key 开关与支持格式展示。
 
 **成功响应** (200):
 ```json
