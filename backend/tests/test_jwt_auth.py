@@ -5,6 +5,7 @@ JWT 多用户认证单元测试（P1-1）。
 register/login 端点逻辑（依赖覆盖 + 假 DB）、get_current_user JWT 分支。
 """
 
+import itertools
 import uuid
 
 import jwt as pyjwt
@@ -25,6 +26,7 @@ from src.config import settings
 from src.api.auth import register, login, me, RegisterRequest, LoginRequest
 
 TEST_SECRET = "unit-test-secret-key-0123456789abcdef0123456789abcdef"
+_RATE_LIMIT_IP_COUNTER = itertools.count(10)
 
 
 @pytest.fixture(autouse=True)
@@ -143,9 +145,15 @@ class TestAuthEndpoints:
         yield
         reset_rate_limits()
 
-    @staticmethod
-    def _request() -> StarletteRequest:
-        return StarletteRequest({"type": "http", "client": ("127.0.0.1", 123)})
+    @pytest.fixture(autouse=True)
+    def _unique_rate_limit_ip(self, monkeypatch):
+        """每个用例独立客户端 IP：Redis 限流 key 不跨用例累计（CI 与本地一致）。"""
+        ip = f"198.51.100.{next(_RATE_LIMIT_IP_COUNTER)}"
+        self._rate_limit_ip = ip
+        monkeypatch.setattr("src.utils.rate_limit.get_client_ip", lambda request: ip)
+
+    def _request(self) -> StarletteRequest:
+        return StarletteRequest({"type": "http", "client": (self._rate_limit_ip, 123)})
 
     async def test_register_success(self):
         db = FakeDb(scalar_result=None)  # 用户名不存在
@@ -207,10 +215,11 @@ class TestAuthEndpoints:
 
     async def test_login_rate_limited_429(self):
         """超限请求返回 429（限流在凭据校验之前）。"""
-        from src.utils.rate_limit import check_rate_limit
+        from src.utils.rate_limit import check_rate_limit_async
 
+        key = f"login:{self._rate_limit_ip}"
         for _ in range(5):
-            check_rate_limit("login:127.0.0.1", 5)
+            assert await check_rate_limit_async(key, 5) is True
         db = FakeDb()
         with pytest.raises(HTTPException) as exc:
             await login(LoginRequest(username="alice", password="pw123456"), request=self._request(), db=db)

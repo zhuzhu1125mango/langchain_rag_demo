@@ -12,6 +12,7 @@
 
 import asyncio
 import hashlib
+import itertools
 import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -28,6 +29,7 @@ from src.utils.rate_limit import reset_rate_limits
 
 USER_ID = str(uuid.uuid4())
 OTHER_ID = str(uuid.uuid4())
+_RATE_LIMIT_IP_COUNTER = itertools.count(10)
 
 
 class FakeScalars:
@@ -170,6 +172,9 @@ def client(monkeypatch):
 
     monkeypatch.setattr(settings.security, "USER_API_KEYS_ENABLED", True)
     monkeypatch.setattr("src.services.audit_service.record_audit", _noop_audit)
+    # 每个用例独立客户端 IP：Redis 限流 key 不跨用例累计（CI 与本地一致）
+    ip = f"198.51.100.{next(_RATE_LIMIT_IP_COUNTER)}"
+    monkeypatch.setattr("src.utils.rate_limit.get_client_ip", lambda request: ip)
     reset_rate_limits()
     return TestClient(app), db, user
 
