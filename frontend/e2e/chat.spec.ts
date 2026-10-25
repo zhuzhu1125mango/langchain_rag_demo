@@ -37,7 +37,7 @@ test('上传文档后提问并展示流式回答与引用来源', async ({ page 
 
   // 4. 切换到对话页提问
   await page.getByRole('link', { name: '对话', exact: true }).click()
-  const input = page.getByPlaceholder('输入您的问题，Enter 发送')
+  const input = page.getByPlaceholder('给智能助手发消息…')
   await expect(input).toBeVisible()
   await input.fill('什么是 RAG？')
   await input.press('Enter')

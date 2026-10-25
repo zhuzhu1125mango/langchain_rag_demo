@@ -6,18 +6,18 @@
           v-for="toast in toasts"
           :key="toast.id"
           :class="[
-            'flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg min-w-[280px] max-w-[400px] backdrop-blur-sm',
+            'flex items-center gap-3 px-4 py-3 rounded-xl glass-panel border min-w-[280px] max-w-[400px] text-content',
             toastClass(toast.type)
           ]"
         >
-          <component :is="toastIcon(toast.type)" class="w-5 h-5 flex-shrink-0" />
+          <component :is="toastIcon(toast.type)" class="w-5 h-5 flex-shrink-0" :class="toastIconClass(toast.type)" />
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium">{{ toast.title }}</p>
             <p v-if="toast.message" class="text-xs opacity-80 mt-0.5 truncate">{{ toast.message }}</p>
           </div>
           <button
             @click="removeToast(toast.id)"
-            class="p-1 rounded hover:bg-white/20 transition-colors flex-shrink-0"
+            class="p-1 rounded hover:bg-surface-hover transition-colors flex-shrink-0"
             aria-label="关闭通知"
           >
             <X class="w-4 h-4" />
@@ -39,13 +39,24 @@ import { useToast, type ToastType } from '@/composables/useToast'
 
 const { toasts, removeToast } = useToast()
 
-/** 根据 Toast 类型返回对应的背景色 + 文本色 Tailwind 类。 */
+/** Toast 统一走玻璃浮层，仅保留极轻的类型描边色。 */
 function toastClass(type: ToastType): string {
   const classes: Record<ToastType, string> = {
-    success: 'bg-green-500 text-white',
-    error: 'bg-red-500 text-white',
-    warning: 'bg-yellow-500 text-white',
-    info: 'bg-blue-500 text-white'
+    success: 'ring-1 ring-green-500/20',
+    error: 'ring-1 ring-red-500/20',
+    warning: 'ring-1 ring-amber-500/20',
+    info: 'ring-1 ring-blue-500/20'
+  }
+  return classes[type]
+}
+
+/** 类型只体现在图标颜色上，避免整块高饱和背景。 */
+function toastIconClass(type: ToastType): string {
+  const classes: Record<ToastType, string> = {
+    success: 'text-green-500',
+    error: 'text-red-500',
+    warning: 'text-amber-500',
+    info: 'text-blue-500'
   }
   return classes[type]
 }

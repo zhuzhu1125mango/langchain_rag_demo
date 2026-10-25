@@ -4,6 +4,7 @@
     :title="title"
     :width="width"
     append-to-body
+    align-center
     destroy-on-close
     class="app-dialog"
     v-bind="$attrs"

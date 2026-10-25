@@ -27,6 +27,17 @@ class FetchWebpageTool(BaseTool):
         self.web_search_service = web_search_service
 
     async def execute(self, **kwargs) -> ToolResult:
+        # SEC-5：深度抓取默认关闭，避免成为提示注入后的数据外泄通道。
+        from src.config import settings
+
+        if not settings.search.AGENT_WEB_FETCH_ENABLED:
+            return ToolResult(
+                tool_name=self.name,
+                input_arguments=kwargs,
+                success=False,
+                error="网页深度抓取已禁用（AGENT_WEB_FETCH_ENABLED=false）",
+            )
+
         # 延迟导入，避免工具发现阶段因环境缺少依赖而失败
         from src.services.web_search_service import WebSearchService
 

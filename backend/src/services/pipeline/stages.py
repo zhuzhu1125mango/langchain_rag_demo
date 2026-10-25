@@ -110,27 +110,47 @@ class PipelineStagesMixin:
         try:
             # 各阶段执行内部生成器
             output_guard = get_output_guard()
+            from src.services.guardrails import StreamingOutputGuard
+
+            stream_guard = StreamingOutputGuard(output_guard)
             recorded_output_rules: set = set()
+
+            def _record_output_hits(hits):
+                new_rules = [r for r in hits if r not in recorded_output_rules]
+                if new_rules:
+                    recorded_output_rules.update(new_rules)
+                    logger.warning(f"输出护栏脱敏: rules={new_rules}")
+                    state.trace.add_stage(
+                        "guardrail_output",
+                        "redacted",
+                        latency_ms=0,
+                        detail={"rules": new_rules},
+                    )
+
             async for ev in self._pipeline_process(state):
-                # AM-2 输出护栏：所有 chunk 的统一出口脱敏，保证 SSE/落库/trace 一致
+                # AM-2 输出护栏：所有 chunk 的统一出口脱敏，保证 SSE/落库/trace 一致。
+                # SEC-5：StreamingOutputGuard 额外处理跨 chunk 的密钥/系统提示。
                 if ev[0] == "chunk" and ev[1]:
-                    redacted, hits = output_guard.redact(ev[1])
+                    redacted, hits = stream_guard.feed(ev[1])
                     if hits:
                         # 阶段在 yield 前已把原文累加进 final_answer，这里同步修正
                         state.final_answer, full_hits = output_guard.redact(state.final_answer)
-                        new_rules = [
-                            r for r in (hits + full_hits) if r not in recorded_output_rules
-                        ]
-                        if new_rules:
-                            recorded_output_rules.update(new_rules)
-                            logger.warning(f"输出护栏脱敏: rules={new_rules}")
-                            state.trace.add_stage(
-                                "guardrail_output",
-                                "redacted",
-                                latency_ms=0,
-                                detail={"rules": new_rules},
-                            )
-                        ev = (ev[0], redacted) + tuple(ev[2:])
+                        _record_output_hits(hits + full_hits)
+                    if not redacted:
+                        continue
+                    ev = (ev[0], redacted) + tuple(ev[2:])
+                elif ev[0] == "final":
+                    tail, tail_hits = stream_guard.flush()
+                    state.final_answer, full_hits = output_guard.redact(state.final_answer)
+                    _record_output_hits(tail_hits + full_hits)
+                    if tail:
+                        yield (
+                            "chunk",
+                            tail,
+                            state.source_texts,
+                            state.source_metadata,
+                            state.answer_type or "knowledge_base",
+                        )
                 yield ev
         finally:
             # SSE 断连兜底：客户端中途断连会 aclose 当前生成器，中断于某条
@@ -346,6 +366,12 @@ class PipelineStagesMixin:
             for tr in successful_results:
                 all_sources.extend(tr.sources or [])
             source_texts, source_metadata = self._web_sources_to_metadata(all_sources)
+            # 同步到 state：流末尾 OutputGuard flush 补发的 tail chunk 会读取
+            # state.source_* / answer_type，未同步会导致 end 事件来源被清空、
+            # 回答类型被回退成 llm_direct。
+            state.source_texts = source_texts
+            state.source_metadata = source_metadata
+            state.answer_type = "tool_first"
 
             async for chunk, _, thinking in self.answer_generator.generate_stream(
                 question=state.resolved_question,
@@ -617,6 +643,24 @@ class PipelineStagesMixin:
             state.source_metadata = numbered_sources
 
         if final_context:
+            # SEC-5：所有检索/网页内容按不可信资料包裹，避免文档内指令被模型执行。
+            from src.services.guardrails import (
+                contains_injection_signals,
+                injection_signal_reason,
+                wrap_untrusted_context,
+            )
+
+            signal = injection_signal_reason(final_context)
+            if signal:
+                state.trace.add_stage(
+                    "guardrail_context",
+                    "suspected",
+                    latency_ms=0,
+                    detail={"rule": signal},
+                )
+            safe_context = wrap_untrusted_context(final_context, "retrieved")
+            if contains_injection_signals(final_context):
+                logger.warning("检索上下文含疑似注入信号，已按不可信资料隔离并记录 trace")
             if PROMETHEUS_AVAILABLE:
                 if state.search_context and state.docs:
                     record_kb_query("hybrid_search")
@@ -634,7 +678,7 @@ class PipelineStagesMixin:
 
             prompt = KB_ANSWER_TEMPLATE.format(
                 history=state.history_context,
-                context=final_context,
+                context=safe_context,
                 question=state.resolved_question,
             )
             answer_generate_start = time.time()

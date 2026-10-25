@@ -217,7 +217,8 @@ export function useGetSuggestions() {
   return async function getSuggestions(
     question?: string,
     sessionId?: string,
-    kbIds?: string[]
+    kbIds?: string[],
+    signal?: AbortSignal
   ): Promise<string[]> {
     const data = await api.post<SuggestionsResponse>('/chat/suggestions', {
       question,
@@ -225,8 +226,9 @@ export function useGetSuggestions() {
       kb_ids: kbIds
     }, {
       // 推荐问题是辅助功能且与主回答共用本地 LLM 串行推理：主回答进行中
-      // 该请求会排队，60s 默认超时只会白等刷屏，10s 快速失败静默降级
-      timeout: 10000
+      // 该请求会排队，10s 快速失败静默降级
+      timeout: 10000,
+      signal
     })
     return data.suggestions
   }

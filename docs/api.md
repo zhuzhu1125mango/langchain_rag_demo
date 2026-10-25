@@ -150,8 +150,9 @@ curl -X POST http://localhost:8000/api/documents/upload \
 请求体 `{"username": "...", "password": "..."}`，响应同上。
 用户名或密码错误统一返回 401，不区分具体原因。
 
-> 限流（W2-9）：login/register 按 IP 滑动窗口限流（默认 login 5 次/分钟、register 3 次/分钟，
+> 限流（W2-9 / SEC-3）：login/register 按**受信代理后的真实 IP**滑动窗口限流（默认 login 5 次/分钟、register 3 次/分钟，
 > `AUTH_RATE_LIMIT_LOGIN` / `AUTH_RATE_LIMIT_REGISTER` 可调，0 = 不限流），超限返回 429。
+> 多 worker/多副本下使用 Redis 统一计数；Redis 不可用时降级进程内桶。
 
 ### 0.3 刷新 Token（滑动窗口续期）
 
@@ -347,13 +348,18 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 | 纯知识库 | false / 不填 | - | 仅检索知识库，无结果时可能降级为 LLM |
 | 纯联网搜索 | true | `simple` | 仅使用联网搜索生成回答 |
 | 混合搜索 | true + 传入 `kb_ids` | `simple` | 同时使用知识库检索与联网搜索 |
-| Function Calling | true | `function_calling` | 有界 Agent 循环调用 `web_search` / `fetch_webpage` / `kb_search` / `wiki_lookup` 等工具（步数与时间预算受限）；可传 `kb_ids` 进入混合模式（Agent 工具收集 + 知识库检索合并生成） |
+| Function Calling | true | `function_calling` | 有界 Agent 循环调用 `web_search` / `fetch_webpage` / `kb_search` / `wiki_lookup` 等工具（步数与时间预算受限）；`fetch_webpage` 默认关闭（`AGENT_WEB_FETCH_ENABLED=false`），需要时显式开启并受审批/域名策略约束；可传 `kb_ids` 进入混合模式（Agent 工具收集 + 知识库检索合并生成） |
 | ReAct Agent | true | `agent` | 同 Function Calling 的有界 Agent 循环，多轮 DECIDE → ACT → OBSERVE 迭代搜索 |
 
 **降级策略**：
 - 当 `search_mode=function_calling|agent` 但对应功能开关未开启时，自动降级为 `simple` 联网搜索
 - Agent 循环输出为空或被工具 JSON 污染时，降级为 Phase 2 联网搜索
 - 问候/日常对话（如“你好”）会跳过知识库检索，直接由 LLM 回答
+
+> **资源配额（SEC-2）**：`POST /api/chat/messages` 与 `/api/chat/stream` 受
+> `CHAT_RATE_LIMIT_PER_MINUTE`、`CHAT_MAX_CONCURRENT_STREAMS_PER_USER`、
+> `CHAT_DAILY_MESSAGE_QUOTA` 约束；超限返回 429（并发槽在响应/流结束后释放）。
+> 上传受 `UPLOAD_MAX_FILES_PER_BATCH`、`UPLOAD_MAX_BATCH_MB`、`UPLOAD_DAILY_MB_PER_USER` 约束。
 
 ---
 
@@ -511,6 +517,8 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 | status | string | 否 | 状态筛选。`active` → 映射为库内 `published`；`inactive` → 映射为 `draft` 或 `archived` |
 
 结果始终限定为**当前用户拥有的文档**（`owner_id` 过滤）。
+
+> **状态语义（SEC-4）**：`published` 可被 RAG 检索；切到 `draft/archived` 会先删除该文档向量再改状态（删除失败返回 503 且状态不变），`published` 重新上架/移动 KB 会后台重建索引并返回 `更新成功，索引重建中`；处理中的文档禁止状态切换/移动（409）。状态/KB 变更会失效相关语义缓存。
 
 **成功响应** (200)：`DocumentResponse` 的**裸数组**（非分页对象）：
 
@@ -746,19 +754,21 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 
 ## 8. 学习引擎接口
 
-前缀 `/api/learning`。全部端点仅需登录，其中修改全局引擎状态的 4 个端点
-（`trigger` / `config` / `enable` / `disable`）**与 `/api/config/*` 的 `require_admin` 尺度不一致**，
-属已知问题（见 `docs/archive/code-review-2026-09.md` P1-A7）。
+前缀 `/api/learning`。**SEC-1 起**：
+- `/stats`、`/misclassification` 仅返回**当前用户**的样本与统计（按 `owner_id` 过滤）；
+- `/trigger`、`/config`、`/enable`、`/disable` 及 `/record-execution`、`/record-feedback` 均为 **`require_admin`**（生产需 `X-Admin-Key`），其中 `record-execution` 的 owner 由会话归属派生，不信任请求方传值。
 
 ### 8.1 获取学习统计
 
 **GET** `/api/learning/stats`
 
-**成功响应** (200)：`learning_engine.get_learning_stats()` 的返回，并按前端期望结构补充 `misclassification_count`。
+**成功响应** (200)：`learning_engine.get_learning_stats(owner_id=当前用户)` 的返回（仅本人样本），并按前端期望结构补充 `misclassification_count`。
 
 ### 8.2 获取误分类分析
 
 **GET** `/api/learning/misclassification?limit=50`
+
+仅返回当前用户的误分类样本。
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
@@ -766,7 +776,7 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 
 ### 8.3 触发学习
 
-**POST** `/api/learning/trigger`
+**POST** `/api/learning/trigger`（`require_admin`）
 
 **请求体**：无（该端点不接受请求体）
 
@@ -777,8 +787,8 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 
 ### 8.4 记录执行 / 记录反馈
 
-- **POST** `/api/learning/record-execution`
-- **POST** `/api/learning/record-feedback`
+- **POST** `/api/learning/record-execution`（`require_admin`；owner 由 `session_id` 归属派生）
+- **POST** `/api/learning/record-feedback`（`require_admin`；反馈写入会校验 execution 归属）
 
 由问答链路内部调用，用于在线学习闭环采样。
 
@@ -998,9 +1008,22 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
     "chunk_size": 500,
     "chunk_overlap": 50,
     "top_k": 3
-  }
+  },
+  "features": [
+    {
+      "key": "wiki_compile",
+      "title": "LLM-Wiki 编译",
+      "enabled": false,
+      "scope": "admin",
+      "risk": "low",
+      "env_var": "WIKI_COMPILE_ENABLED",
+      "note": "将文档预编译为结构化 Wiki 页面；会增加文档处理时间和模型调用成本。"
+    }
+  ]
 }
 ```
+
+`features` 为只读能力状态，用于设置页展示默认关闭/需运维开启的能力；不提供在线修改入口，避免误开安全相关开关。
 
 ---
 
@@ -1336,7 +1359,7 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 文档 | GET | `/api/documents/{doc_id}` | 获取文档详情 |
 | 文档 | PUT | `/api/documents/{doc_id}` | 更新文档 |
 | 文档 | DELETE | `/api/documents/{doc_id}` | 删除文档 |
-| 文档 | PUT | `/api/documents/{doc_id}/status` | 更新文档状态 |
+| 文档 | PUT | `/api/documents/{doc_id}/status` | 更新文档状态（SEC-4：下架删向量 / 上架后台重建） |
 | 文档 | GET | `/api/documents/{doc_id}/preview` | 文档预览 |
 | 文档 | GET | `/api/documents/{doc_id}/chunks` | 获取分块列表 |
 | 文档 | GET | `/api/documents/{doc_id}/source/{chunk_index}` | 引用溯源到原文片段 |

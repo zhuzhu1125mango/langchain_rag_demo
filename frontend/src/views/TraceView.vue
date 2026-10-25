@@ -1,9 +1,9 @@
 <template>
   <div class="flex-1 flex flex-col h-full bg-page overflow-hidden">
-    <header class="bg-surface border-b border-line px-4 sm:px-6 py-3 sm:py-4">
+    <header class="bg-surface/95 backdrop-blur border-b border-line px-4 sm:px-6 py-3">
       <div>
-        <h1 class="text-xl font-semibold text-content">链路追踪</h1>
-        <p class="text-sm text-content-muted mt-1">查看每次问答的完整执行链路：意图路由、检索、生成各阶段耗时与 token 用量</p>
+        <h1 class="text-base lg:text-lg font-semibold tracking-tight text-content">链路追踪</h1>
+        <p class="text-xs sm:text-sm text-content-muted mt-0.5">查看每次问答的完整执行链路：意图路由、检索、生成各阶段耗时与 token 用量</p>
       </div>
     </header>
 

@@ -214,7 +214,10 @@ class RAGChain(
         # 4B⇄3B 拉锯导致 generate 41~75s（server.log evicting + qwen3:4b 加载时序实证）。
         # fast_llm 已绑定 think=False，摘要/指代消解等结构化小任务无需思考模型。
         self.context_enhancer = ContextEnhancer(fast_llm)
-        self.question_processor = QuestionProcessor(self.llm)
+        # 推荐问题/问题重写/分类同为结构化小任务，必须走 fast 模型：
+        # 注入 4B 主模型会让每次输入防抖都拉起 4B、驱逐 3B 直答模型，
+        # 与主回答在 Ollama 队列中串行排队（实测单次推荐 90~245s）。
+        self.question_processor = QuestionProcessor(fast_llm)
         # P2-2：KB 多查询改写器（LLM 懒加载，规则路径零模型成本）
         self.query_rewriter = QueryRewriter()
         self.kb_comparator = KBComparator(self.llm, self)

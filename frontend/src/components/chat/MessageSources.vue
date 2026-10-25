@@ -4,7 +4,7 @@
     <div class="flex items-center gap-1.5 mb-1">
       <BookOpen class="w-3.5 h-3.5 text-content-muted" />
       <span class="text-xs font-medium text-content-tertiary">参考来源</span>
-      <span class="text-xs px-1.5 py-0.5 rounded-full bg-surface-subtle text-content-muted">
+      <span class="text-xs px-2 py-0.5 rounded-pill bg-surface-subtle text-content-muted">
         {{ dedupedSources.length }}
       </span>
     </div>
@@ -14,7 +14,7 @@
       <div
         v-for="source in visibleSources"
         :key="getSourceKey(source)"
-        class="flex items-start gap-2 p-2 border rounded-lg cursor-pointer transition-all duration-150 bg-surface-muted border-line hover:-translate-y-0.5 hover:shadow-md hover:border-primary-400 dark:hover:border-primary-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+        class="flex items-start gap-2.5 p-2.5 border rounded-xl cursor-pointer transition-colors duration-150 bg-surface-muted border-line hover:bg-surface-hover hover:border-primary-300 dark:hover:border-primary-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
         role="button"
         tabindex="0"
         @click="emit('navigate', source)"
@@ -71,7 +71,7 @@
     <button
       v-if="dedupedSources.length > collapseThreshold"
       type="button"
-      class="flex items-center justify-center gap-1 w-full mt-1.5 py-1.5 text-xs text-content-muted rounded-md transition-colors hover:bg-gray-100 hover:text-gray-700 dark:hover:bg-dark-700 dark:hover:text-gray-300"
+      class="flex items-center justify-center gap-1 w-full mt-1.5 py-1.5 text-xs text-content-muted rounded-lg transition-colors hover:bg-surface-hover hover:text-content-secondary"
       @click="expanded = !expanded"
     >
       <ChevronDown class="w-3 h-3 transition-transform" :class="expanded ? 'rotate-180' : ''" />

@@ -39,6 +39,7 @@ class StrategyExecution(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True))                     # 关联会话ID
+    user_id = Column(String(64), nullable=False, default="__legacy__", index=True)  # 样本所有者（SEC-1）
     question = Column(String, nullable=False)                   # 用户问题
     final_decision = Column(Boolean)                            # 最终决策
     final_confidence = Column(Float)                            # 综合置信度

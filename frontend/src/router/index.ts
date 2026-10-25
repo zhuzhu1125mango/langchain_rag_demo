@@ -100,7 +100,7 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   if (to.meta.title) {
-    document.title = `${to.meta.title} - RAG 知识库问答系统`
+    document.title = `${to.meta.title} - 知澜`
   }
 
   // 认证守卫：公开页面直接放行；业务页面要求有效 JWT（未过期）或 API Key。

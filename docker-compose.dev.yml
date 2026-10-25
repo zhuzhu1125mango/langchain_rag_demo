@@ -152,6 +152,8 @@ services:
       MILVUS_PORT: "19530"
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      # SEC-3：Docker 内网网段视为受信代理（Vite/Nginx 转发头）；公网直连仍忽略转发头
+      TRUSTED_PROXY_CIDRS: "172.16.0.0/12,127.0.0.1/32,::1/128"
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问本地 Ollama
       SKIP_OLLAMA_CHECK: "true"
       NLTK_DATA: /app/data/nltk_data                   # nltk 语料离线目录（BM25 中文分词依赖 stopwords）

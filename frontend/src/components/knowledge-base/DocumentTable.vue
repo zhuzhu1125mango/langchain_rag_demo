@@ -1,9 +1,9 @@
 <template>
   <div class="overflow-x-auto">
-    <table class="w-full">
-      <thead>
+    <table class="w-full min-w-[960px]">
+      <thead class="sticky top-0 z-10">
         <tr class="bg-surface-muted">
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider w-12">
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider w-12 whitespace-nowrap">
             <input
               type="checkbox"
               @change="$emit('toggle-select-all', $event)"
@@ -11,17 +11,17 @@
               class="rounded border-line-strong bg-surface-subtle text-primary-600 focus:ring-primary-500"
             />
           </th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">文件名</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">类型</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">分类</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">文档类型</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">领域</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">标签</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">质量评分</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">处理状态</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">状态</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">上传时间</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-content-muted uppercase tracking-wider">操作</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">文件名</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">类型</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">分类</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">文档类型</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">领域</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">标签</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">质量评分</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">处理状态</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">状态</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">上传时间</th>
+          <th class="px-4 py-3 text-left text-[11px] font-medium text-content-muted uppercase tracking-wider whitespace-nowrap">操作</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-line">

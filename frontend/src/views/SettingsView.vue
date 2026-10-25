@@ -1,21 +1,25 @@
 <template>
   <div class="flex flex-col lg:flex-row h-full">
-    <aside class="w-full lg:w-64 shrink-0 bg-surface border-b lg:border-b-0 lg:border-r border-line p-2 lg:p-4">
+    <aside class="w-full lg:w-60 shrink-0 glass-subtle border-b lg:border-b-0 lg:border-r p-2 lg:p-3">
       <nav class="flex lg:block gap-1 overflow-x-auto lg:space-y-1">
-        <h2 class="hidden lg:block px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider">设置菜单</h2>
+        <h2 class="hidden lg:block px-3 py-2 text-[11px] font-semibold text-content-subtle uppercase tracking-wider">设置菜单</h2>
         <button
           v-for="item in menuItems"
           :key="item.name"
           @click="navigateTo(item.path)"
+          :aria-current="route.path === item.path ? 'page' : undefined"
           :class="[
-            'flex-shrink-0 whitespace-nowrap w-auto lg:w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200 text-left',
-            'hover:bg-surface-hover',
+            'flex-shrink-0 whitespace-nowrap w-auto lg:w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-all duration-200 text-left text-sm font-medium',
             route.path === item.path
-              ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
-              : 'text-content-tertiary'
+              ? 'bg-surface text-content shadow-card ring-1 ring-line/70'
+              : 'text-content-secondary hover:bg-sidebar-hover hover:text-content'
           ]"
         >
-          <component :is="item.icon" class="w-5 h-5" />
+          <component
+            :is="item.icon"
+            class="w-5 h-5"
+            :class="route.path === item.path ? 'text-primary-600 dark:text-primary-400' : 'text-content-muted'"
+          />
           <span>{{ item.label }}</span>
         </button>
       </nav>

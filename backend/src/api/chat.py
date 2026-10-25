@@ -34,6 +34,7 @@ from src.services.pipeline.state import set_ab_config, reset_ab_config
 from src.services.title_generator import TitleGenerator
 from src.utils.sensitive_words import sensitive_filter
 from src.utils.validators import parse_uuid_list, validate_kb_ownership
+from src.utils.quota import QuotaUnavailable, acquire_chat_slot, release_chat_slot
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,22 @@ def _parse_session_id(raw: Optional[str]) -> Optional[uuid.UUID]:
         return uuid.UUID(raw)
     except (ValueError, TypeError, AttributeError):
         raise HTTPException(status_code=400, detail="无效的会话ID")
+
+
+async def chat_quota_dependency(current_user: CurrentUser = Depends(get_current_user)):
+    """SEC-2：聊天入口统一扣减速率/日额度/并发配额，响应结束后释放并发槽。"""
+    try:
+        await acquire_chat_slot(current_user.user_id)
+    except QuotaUnavailable as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="配额服务暂不可用，请稍后再试",
+            headers={"Retry-After": "30"},
+        ) from exc
+    try:
+        yield
+    finally:
+        await release_chat_slot(current_user.user_id)
 
 
 # LEARN W-C：A/B 变体可实验化参数白名单（仅这些键可从 variant.config 覆盖到问答链路）
@@ -129,7 +146,7 @@ async def _record_ab_metric(ab_config: Optional[dict], elapsed_ms: float) -> Non
         logger.warning(f"记录 A/B 指标失败: {e}")
 
 
-@router.post("/messages")
+@router.post("/messages", dependencies=[Depends(chat_quota_dependency)])
 async def send_message(
     request: MessageRequest,
     current_user: CurrentUser = Depends(get_current_user),
@@ -232,6 +249,7 @@ async def send_message(
                 used_knowledge_base=answer_type in ("knowledge_base", "hybrid_search"),
                 strategy_manager=rag_chain.strategy_manager,
                 history=history,
+                user_id=current_user.user_id,
             )
     except Exception as e:
         logger.error(f"记录策略执行失败: {e}", exc_info=True)
@@ -329,7 +347,7 @@ async def _prepare_stream_session(
         return current_session_id, history
 
 
-@router.post("/stream")
+@router.post("/stream", dependencies=[Depends(chat_quota_dependency)])
 async def stream_answer(
     request: Request,
     payload: MessageRequest,
@@ -389,7 +407,16 @@ async def stream_answer(
     # 保存助手消息（流式生成结束或异常时调用）。
     # C7：返回会话是否仍为默认标题，标题生成移到 end 事件之后的后台任务，
     # 不再阻塞流完成信号。
-    async def save_assistant_message(full_answer, sources, source_metadata, reasoning=None, thinking="", record_learning=True) -> bool:
+    async def save_assistant_message(
+        full_answer,
+        sources,
+        source_metadata,
+        reasoning=None,
+        thinking="",
+        record_learning=True,
+        stopped=False,
+        error=None,
+    ) -> bool:
         # LEARN W-B：记录策略执行样本（短路路径按开关补采各策略结果）。
         # 置于 DB 会话之外——补采会重跑策略投票（含 fast LLM 调用），避免期间占用连接。
         execution_id = None
@@ -404,6 +431,7 @@ async def stream_answer(
                         used_knowledge_base=len(source_metadata) > 0,
                         strategy_manager=rag_chain.strategy_manager,
                         history=history,
+                        user_id=current_user.user_id,
                     )
             except Exception as exec_err:
                 logger.error(f"记录策略执行失败: {exec_err}", exc_info=True)
@@ -432,6 +460,12 @@ async def stream_answer(
                 message_payload["reasoning"] = reasoning
             if thinking:
                 message_payload["thinking"] = thinking
+            # 中断/失败状态随消息持久化：刷新或切回会话时仍能复现
+            # “已停止/生成失败”，而不是只剩一条孤立的用户问题。
+            if stopped:
+                message_payload["stopped"] = True
+            if error:
+                message_payload["error"] = error
             # 原子追加（服务端 jsonb 拼接）
             assistant_msg_count = await append_session_message(db, session.id, message_payload)
 
@@ -560,29 +594,36 @@ async def stream_answer(
                 answer_type = at
 
         except (asyncio.CancelledError, GeneratorExit):
-            # UX-1：用户主动停止 / 客户端断连。把已生成部分落库，保证历史回看
-            # 与实时视图一致；放在独立任务中，避免随请求取消而丢失。
-            if full_answer:
-                logger.info(f"流式生成被中止，保存部分回答: length={len(full_answer)}")
-                partial_task = asyncio.create_task(
-                    save_assistant_message(
-                        full_answer, sources, source_metadata,
-                        dedupe_steps(reasoning_steps), thinking_text,
-                        record_learning=False,
-                    )
+            # UX-1：用户主动停止 / 客户端断连。始终落库一条助手消息：
+            # 有部分内容就保存部分内容，没有内容也保留 stopped 标记，
+            # 否则刷新/切回会话后只剩孤立的用户问题。独立任务避免随取消丢失。
+            logger.info(f"流式生成被中止，保存部分回答: length={len(full_answer)}")
+            partial_task = asyncio.create_task(
+                save_assistant_message(
+                    full_answer, sources, source_metadata,
+                    dedupe_steps(reasoning_steps), thinking_text,
+                    record_learning=False, stopped=True,
                 )
-                _stream_finalize_tasks.add(partial_task)
-                partial_task.add_done_callback(_stream_finalize_tasks.discard)
+            )
+            _stream_finalize_tasks.add(partial_task)
+            partial_task.add_done_callback(_stream_finalize_tasks.discard)
             raise
         except Exception as e:
             logger.error(f"流式生成异常: {str(e)}", exc_info=True)
-            # 如果已生成部分内容，尝试保存，避免用户消息孤立
-            if full_answer:
-                try:
-                    save_task = asyncio.create_task(save_assistant_message(full_answer, sources, source_metadata, dedupe_steps(reasoning_steps), thinking_text))
-                    await asyncio.shield(save_task)
-                except Exception as save_err:
-                    logger.error(f"异常时保存部分助手消息失败: {save_err}", exc_info=True)
+            # 同样保证助手消息落库：即使一个 token 都没产出，也把失败状态
+            # 写进历史，避免刷新后“问题还在、回答消失”。
+            error_text = "生成回答失败，请稍后重试"
+            try:
+                save_task = asyncio.create_task(
+                    save_assistant_message(
+                        full_answer, sources, source_metadata,
+                        dedupe_steps(reasoning_steps), thinking_text,
+                        record_learning=False, stopped=True, error=error_text,
+                    )
+                )
+                await asyncio.shield(save_task)
+            except Exception as save_err:
+                logger.error(f"异常时保存助手消息失败: {save_err}", exc_info=True)
             # 详细错误仅进日志（上方 logger.error 已带 exc_info），客户端只收通用文案 + request_id
             error_payload = {'type': 'error', 'error': '生成回答失败，请稍后重试', 'request_id': request_id}
             logger.debug(f"SSE error payload: {error_payload}")
@@ -771,13 +812,19 @@ async def get_suggestions(
     rag_chain = await RAGChain.get_instance(vector_store)
 
     try:
-        suggestions = await rag_chain.generate_suggestions(
-            request.question, history_context, kb_ids
+        # 辅助功能必须有硬上限：前端超时后旧请求仍会占用本地模型队列，
+        # 8s 内未完成直接取消并返回空列表，避免推荐反压主回答。
+        suggestions = await asyncio.wait_for(
+            rag_chain.generate_suggestions(request.question, history_context, kb_ids),
+            timeout=8.0,
         )
         return {"suggestions": suggestions}
+    except asyncio.TimeoutError:
+        logger.warning("生成推荐问题超时，跳过本次推荐")
+        return {"suggestions": []}
     except Exception as e:
         logger.error(f"生成推荐问题失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail="生成推荐问题失败，请稍后重试")
+        return {"suggestions": []}
 
 
 class FeedbackRequest(BaseModel):
@@ -942,7 +989,9 @@ async def submit_message_feedback(
             await learning_engine.record_feedback(
                 execution_id=execution_id,
                 feedback_score=feedback_score,
-                reason=request.reason
+                reason=request.reason,
+                owner_id=current_user.user_id,
+                enforce_owner=True,
             )
             logger.info(f"学习反馈已记录: execution_id={execution_id}, score={feedback_score}")
     except HTTPException:

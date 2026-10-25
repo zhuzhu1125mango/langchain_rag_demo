@@ -15,7 +15,7 @@ test('侧栏会话列表切换并加载对应历史消息', async ({ page }) => 
   await page.goto('/')
 
   // 侧栏展示两个 mock 会话
-  await expect(page.getByText('对话历史')).toBeVisible()
+  await expect(page.getByText('最近对话')).toBeVisible()
   await expect(page.getByRole('button', { name: /RAG 原理讨论/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Milvus 调优/ })).toBeVisible()
 

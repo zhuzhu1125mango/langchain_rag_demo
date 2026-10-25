@@ -42,6 +42,7 @@ from src.services.document_analyzer import DocumentAnalyzer
 from src.schemas.document import DuplicateDetectionRequest, DocumentQualityResponse, DocumentClassificationResponse
 from src.api.knowledge_base import invalidate_kb_list_cache
 from src.utils.validators import validate_kb_ownership
+from src.utils.quota import consume_upload_quota, refund_upload_quota
 from src.services.progress_manager import (
     create_upload_progress,
     update_upload_progress,
@@ -115,6 +116,108 @@ async def _get_owned_document(
     return doc
 
 
+# SEC-4：文档状态 / KB 移动与向量索引、语义缓存的一致性。
+# 采用「下架删向量、上架重建」的 fail-closed 方案：宁可短暂不可检索，
+# 也不让已下架内容继续进入 RAG 上下文。
+_reindex_tasks: set = set()
+
+
+def _invalidate_doc_cache(*kb_ids: Optional[str]) -> None:
+    for kb_id in {str(k) for k in kb_ids if k}:
+        try:
+            _schedule_semantic_cache_invalidation(kb_id)
+        except Exception as exc:
+            logger.warning("文档状态变更后失效语义缓存失败 [kb_id=%s]: %s", kb_id, exc)
+
+
+async def _delete_document_vectors(doc_id: str) -> None:
+    """删除文档全部向量；失败抛 503，调用方不得继续改状态（fail-closed）。"""
+    try:
+        vector_store = await VectorStoreManager.get_instance()
+        await vector_store.delete_by_document_id(doc_id)
+    except Exception as exc:
+        logger.error("删除文档向量失败，状态变更已中止: doc=%s err=%s", doc_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="向量索引暂不可用，文档状态未变更，请稍后重试",
+        )
+
+
+def _doc_has_indexed_vectors(doc: Document) -> bool:
+    """判断文档是否可能有向量：published，或已处理完成且 chunks_count > 0。"""
+    return getattr(doc, "status", None) == "published" or (
+        getattr(doc, "processing_status", None) == "completed"
+        and (getattr(doc, "chunks_count", 0) or 0) > 0
+    )
+
+
+def _schedule_document_reindex(doc: Document, background_tasks: Optional[BackgroundTasks]) -> None:
+    """提交后台重建索引任务（上架 / 移动 KB 后调用，调用前需先 commit）。"""
+    if not doc.file_path:
+        raise HTTPException(status_code=409, detail="文档原文件缺失，无法重建索引")
+
+    task_id = f"reindex_{doc.id}_{uuid.uuid4().hex[:8]}"
+    create_upload_progress(task_id, doc.filename, doc.size or 0, owner_id=doc.owner_id)
+    update_upload_progress(task_id, status="processing", message="正在重建索引...")
+
+    args = (
+        str(doc.id),
+        doc.file_path,
+        str(doc.kb_id) if doc.kb_id else "",
+        task_id,
+        None,
+        None,
+    )
+    if background_tasks is not None:
+        background_tasks.add_task(process_document_async, *args)
+        return
+
+    # 直接调用（如单测/内部调用）时用受引用保护的后台任务，避免 GC 丢失。
+    task = asyncio.create_task(process_document_async(*args))
+    _reindex_tasks.add(task)
+    task.add_done_callback(_reindex_tasks.discard)
+
+
+async def _apply_document_status(
+    db: AsyncSession,
+    doc: Document,
+    new_status: str,
+    background_tasks: Optional[BackgroundTasks],
+) -> None:
+    """应用状态变更，并同步向量索引与语义缓存。"""
+    old_status = doc.status
+    if new_status == old_status:
+        return
+    if getattr(doc, "processing_status", None) == "processing":
+        # 处理/重建期间禁止切换状态，避免后台任务完成后把状态覆盖回去。
+        raise HTTPException(status_code=409, detail="文档正在处理中，请稍后再试")
+
+    if new_status != "published":
+        # 下架/归档：先删向量，删除失败则保持原状态。
+        if _doc_has_indexed_vectors(doc):
+            await _delete_document_vectors(str(doc.id))
+        doc.status = new_status
+        doc.chunks_count = 0
+        await db.commit()
+        _invalidate_doc_cache(str(doc.kb_id) if doc.kb_id else None)
+        return
+
+    # 上架：只有非 published 才需要重建。
+    if old_status == "published":
+        return
+
+    # 存量异常：旧状态非 published 但可能残留向量，先清干净再重建。
+    if _doc_has_indexed_vectors(doc):
+        await _delete_document_vectors(str(doc.id))
+    doc.processing_status = "processing"
+    doc.processing_message = "正在重建索引..."
+    doc.processing_progress = 0
+    doc.chunks_count = 0
+    await db.commit()
+    _schedule_document_reindex(doc, background_tasks)
+    _invalidate_doc_cache(str(doc.kb_id) if doc.kb_id else None)
+
+
 class DocumentResponse(BaseModel):
     """文档响应模型。"""
     id: str
@@ -146,7 +249,7 @@ class DocumentUpdate(BaseModel):
     """文档更新请求模型。"""
     category_id: Optional[str] = None
     tags: Optional[List[str]] = None
-    status: Optional[str] = None
+    status: Optional[Literal["draft", "published", "archived"]] = None
     kb_id: Optional[str] = None
 
 
@@ -572,6 +675,15 @@ async def upload_document(
     kb = await _resolve_target_kb(db, kb_id, current_user)
     kb_uuid = kb.id
 
+    # SEC-2：上传日配额（按用户字节数；超限直接 429，不落 MinIO）
+    if not await consume_upload_quota(current_user.user_id, actual_size):
+        raise HTTPException(
+            status_code=429,
+            detail="上传日配额已用尽，请明日再试或联系管理员",
+            headers={"Retry-After": "3600"},
+        )
+    quota_consumed = True
+
     # 生成上传ID（如果没有提供）
     task_upload_id = upload_id if upload_id else str(uuid.uuid4())
     doc_id = uuid.uuid4()
@@ -652,12 +764,16 @@ async def upload_document(
         }
 
     except HTTPException:
+        if quota_consumed:
+            await refund_upload_quota(current_user.user_id, actual_size)
         raise
     except Exception as e:
         logger.error(f"上传文件失败: {str(e)}", exc_info=True)
         update_upload_progress(task_upload_id, status="failed", message="上传失败，请稍后重试")
         await notify_task_failed(task_upload_id, "文件处理失败")
         await db.rollback()
+        if quota_consumed:
+            await refund_upload_quota(current_user.user_id, actual_size)
         raise HTTPException(status_code=500, detail="上传文件失败，请稍后重试")
 
 
@@ -673,6 +789,16 @@ async def batch_upload(
 ):
     kb = await _resolve_target_kb(db, kb_id, current_user)
     kb_id = str(kb.id)
+
+    # SEC-2：批量上传的请求级上限（文件数 / 总字节）；单文件仍受 MAX_UPLOAD_SIZE_MB
+    max_files = settings.security.UPLOAD_MAX_FILES_PER_BATCH
+    if len(files) > max_files:
+        raise HTTPException(
+            status_code=413,
+            detail=f"单次最多上传 {max_files} 个文件",
+        )
+    batch_limit = settings.security.UPLOAD_MAX_BATCH_MB * 1024 * 1024
+    batch_total = 0
 
     from src.services.minio_service import MinioService
 
@@ -690,8 +816,28 @@ async def batch_upload(
             continue
 
         try:
+            quota_reserved = 0
             # 大小上限校验（实测字节数）；超限计入该文件的失败原因
             actual_size = _ensure_upload_size(file)
+
+            # SEC-2：单批总量 + 用户日配额
+            if batch_total + actual_size > batch_limit:
+                results.append({
+                    "filename": file.filename,
+                    "status": "failed",
+                    "reason": f"超过单批总量上限 {settings.security.UPLOAD_MAX_BATCH_MB} MB",
+                })
+                continue
+            if not await consume_upload_quota(current_user.user_id, actual_size):
+                results.append({
+                    "filename": file.filename,
+                    "status": "failed",
+                    "reason": "上传日配额已用尽",
+                })
+                continue
+            quota_reserved = actual_size
+            batch_total += actual_size
+
             doc_id = uuid.uuid4()
             file_path = await minio_service.upload_file_async(file, doc_id)
 
@@ -737,9 +883,15 @@ async def batch_upload(
             })
         except HTTPException as e:
             # 校验类失败（413 超限等）：保留业务提示，不泄露内部错误
+            if quota_reserved:
+                await refund_upload_quota(current_user.user_id, quota_reserved)
+                batch_total -= quota_reserved
             results.append({"filename": file.filename, "status": "failed", "reason": str(e.detail)})
         except Exception as e:
             logger.error(f"批量上传单文件失败: {file.filename}: {e}", exc_info=True)
+            if quota_reserved:
+                await refund_upload_quota(current_user.user_id, quota_reserved)
+                batch_total -= quota_reserved
             results.append({"filename": file.filename, "status": "failed", "reason": "处理失败，请稍后重试"})
 
     # 使知识库列表缓存失效，确保批量上传后文档数量实时更新
@@ -1011,13 +1163,12 @@ async def update_status(
     doc_id: str,
     # W6 #28：Literal 限制合法值（非法值 422），与 Document.status 枚举对齐
     status: Literal["draft", "published", "archived"],
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     doc = await _get_owned_document(db, doc_id, current_user)
-
-    doc.status = status
-    await db.commit()
+    await _apply_document_status(db, doc, status, background_tasks)
     return {"message": "状态更新成功"}
 
 
@@ -1306,11 +1457,15 @@ async def get_document(
 async def update_document(
     doc_id: str,
     data: DocumentUpdate,
+    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     try:
         doc = await _get_owned_document(db, doc_id, current_user)
+        old_kb_id = doc.kb_id
+        new_kb_id = doc.kb_id
+        kb_moved = False
 
         if data.category_id:
             # 外键校验：Category 为全局资源（无归属字段），仅校验存在性
@@ -1326,8 +1481,7 @@ async def update_document(
             doc.category_id = category_uuid
         if data.tags is not None:
             doc.tags = data.tags
-        if data.status:
-            doc.status = data.status
+
         if data.kb_id:
             # 外键校验：kb_id 必须存在且属于当前用户，防止越权移动文档
             try:
@@ -1335,10 +1489,73 @@ async def update_document(
             except ValueError:
                 raise HTTPException(status_code=400, detail="无效的知识库ID")
             await validate_kb_ownership(db, [data.kb_id], current_user)
-            doc.kb_id = kb_uuid
+            new_kb_id = kb_uuid
+            kb_moved = kb_uuid != old_kb_id
+
+        if kb_moved and getattr(doc, "processing_status", None) == "processing":
+            raise HTTPException(status_code=409, detail="文档正在处理中，请稍后再试")
+
+        vectors_deleted = False
+        # 移动 KB 前先清理旧 KB 向量（失败则拒绝整个更新，避免双库残留）。
+        if kb_moved and _doc_has_indexed_vectors(doc):
+            await _delete_document_vectors(str(doc.id))
+            vectors_deleted = True
+        if kb_moved:
+            doc.kb_id = new_kb_id
+            doc.chunks_count = 0
+
+        new_status = data.status or doc.status
+        if new_status != doc.status and getattr(doc, "processing_status", None) == "processing":
+            raise HTTPException(status_code=409, detail="文档正在处理中，请稍后再试")
+        if new_status != doc.status:
+            if new_status != "published":
+                if _doc_has_indexed_vectors(doc) and not vectors_deleted:
+                    await _delete_document_vectors(str(doc.id))
+                    vectors_deleted = True
+                doc.status = new_status
+                doc.chunks_count = 0
+                await db.commit()
+                _invalidate_doc_cache(
+                    str(old_kb_id) if old_kb_id else None,
+                    str(new_kb_id) if new_kb_id else None,
+                )
+                return {"message": "更新成功"}
+
+            if _doc_has_indexed_vectors(doc) and not vectors_deleted:
+                await _delete_document_vectors(str(doc.id))
+                vectors_deleted = True
+            doc.processing_status = "processing"
+            doc.processing_message = "正在重建索引..."
+            doc.processing_progress = 0
+            doc.chunks_count = 0
+            await db.commit()
+            _schedule_document_reindex(doc, background_tasks)
+            _invalidate_doc_cache(
+                str(old_kb_id) if old_kb_id else None,
+                str(new_kb_id) if new_kb_id else None,
+            )
+            return {"message": "更新成功，索引重建中"}
+
+        # 仅移动 KB 且原状态为 published：需要在新的 kb 下重建索引。
+        if kb_moved and doc.status == "published":
+            doc.processing_status = "processing"
+            doc.processing_message = "正在重建索引..."
+            doc.processing_progress = 0
+            doc.chunks_count = 0
+            await db.commit()
+            _schedule_document_reindex(doc, background_tasks)
+            _invalidate_doc_cache(
+                str(old_kb_id) if old_kb_id else None,
+                str(new_kb_id) if new_kb_id else None,
+            )
+            return {"message": "更新成功，索引重建中"}
 
         await db.commit()
-        await db.refresh(doc)
+        if kb_moved:
+            _invalidate_doc_cache(
+                str(old_kb_id) if old_kb_id else None,
+                str(new_kb_id) if new_kb_id else None,
+            )
         return {"message": "更新成功"}
     except HTTPException:
         raise

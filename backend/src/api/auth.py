@@ -89,7 +89,7 @@ def _get_jwt_settings():
 async def register(data: RegisterRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """注册新用户并直接签发 token（是否开放由 AUTH_ALLOW_REGISTRATION 控制）。"""
     login_limit, register_limit = get_auth_rate_limits()
-    enforce_auth_rate_limit(request, "register", register_limit)
+    await enforce_auth_rate_limit(request, "register", register_limit)
     secret, allow_registration = _get_jwt_settings()
     if not secret:
         raise HTTPException(
@@ -125,7 +125,7 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
 async def login(data: LoginRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """校验用户名密码，签发 JWT access token。"""
     login_limit, _ = get_auth_rate_limits()
-    enforce_auth_rate_limit(request, "login", login_limit)
+    await enforce_auth_rate_limit(request, "login", login_limit)
     secret, _ = _get_jwt_settings()
     if not secret:
         raise HTTPException(
@@ -269,7 +269,7 @@ async def create_api_key(
         getattr(settings, "AUTH_RATE_LIMIT_API_KEY_CREATE", None)
         or getattr(settings.security, "AUTH_RATE_LIMIT_API_KEY_CREATE", 5)
     )
-    enforce_auth_rate_limit(request, "api_key_create", create_limit)
+    await enforce_auth_rate_limit(request, "api_key_create", create_limit)
 
     owner_uuid = _resolve_owner_uuid(current_user)
     if owner_uuid is None:

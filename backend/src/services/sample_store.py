@@ -15,17 +15,18 @@ from src.models.strategy import StrategyExecution, StrategyFeedback, StrategyCon
 class SampleStore:
     """
     样本存储服务类
-    
+
     提供策略执行样本的存储、查询和统计功能
     """
-    
-    async def save_execution(self, session_id: str, question: str, 
+
+    async def save_execution(self, session_id: str, question: str,
                             final_decision: bool, final_confidence: float,
-                            strategy_results: Dict[str, float], 
-                            used_knowledge_base: bool) -> str:
+                            strategy_results: Dict[str, float],
+                            used_knowledge_base: bool,
+                            user_id: Optional[str] = None) -> str:
         """
         保存策略执行记录
-        
+
         Args:
             session_id: 会话ID
             question: 用户问题
@@ -33,13 +34,15 @@ class SampleStore:
             final_confidence: 综合置信度
             strategy_results: 各策略执行结果
             used_knowledge_base: 是否使用知识库
-            
+            user_id: 样本所有者（缺失时标记为 __legacy__，仅后台训练可见）
+
         Returns:
             str: 执行记录ID
         """
         async with async_session() as session:
             execution = StrategyExecution(
                 session_id=session_id,
+                user_id=user_id or "__legacy__",
                 question=question,
                 final_decision=final_decision,
                 final_confidence=final_confidence,
@@ -50,12 +53,12 @@ class SampleStore:
             await session.commit()
             await session.refresh(execution)
             return str(execution.id)
-    
+
     async def save_feedback(self, execution_id: str, strategy_name: str,
                            feedback_score: float, reason: Optional[str] = None):
         """
         保存策略反馈记录
-        
+
         Args:
             execution_id: 执行记录ID
             strategy_name: 策略名称
@@ -71,14 +74,14 @@ class SampleStore:
             )
             session.add(feedback)
             await session.commit()
-    
+
     async def get_execution(self, execution_id: str) -> Optional[Dict[str, Any]]:
         """
         获取单个执行记录
-        
+
         Args:
             execution_id: 执行记录ID
-            
+
         Returns:
             Dict[str, Any] or None: 执行记录信息
         """
@@ -91,6 +94,7 @@ class SampleStore:
                 return {
                     "id": str(execution.id),
                     "session_id": str(execution.session_id),
+                    "user_id": execution.user_id,
                     "question": execution.question,
                     "final_decision": execution.final_decision,
                     "final_confidence": execution.final_confidence,
@@ -99,21 +103,24 @@ class SampleStore:
                     "created_at": execution.created_at.isoformat()
                 }
             return None
-    
-    async def get_executions_by_session(self, session_id: str) -> List[Dict[str, Any]]:
+
+    async def get_executions_by_session(self, session_id: str,
+                                        owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         获取指定会话的所有执行记录
-        
+
         Args:
             session_id: 会话ID
-            
+            owner_id: 可选，仅返回该所有者的记录
+
         Returns:
             List[Dict[str, Any]]: 执行记录列表
         """
         async with async_session() as session:
-            result = await session.execute(
-                select(StrategyExecution).where(StrategyExecution.session_id == session_id)
-            )
+            query = select(StrategyExecution).where(StrategyExecution.session_id == session_id)
+            if owner_id is not None:
+                query = query.where(StrategyExecution.user_id == owner_id)
+            result = await session.execute(query)
             executions = result.scalars().all()
             return [
                 {
@@ -126,25 +133,31 @@ class SampleStore:
                 }
                 for e in executions
             ]
-    
-    async def get_recent_executions(self, limit: int = 100) -> List[Dict[str, Any]]:
+
+    async def get_recent_executions(self, limit: int = 100,
+                                    owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         获取最近的执行记录
-        
+
         Args:
             limit: 返回数量限制
-            
+            owner_id: 可选，仅返回该所有者的记录（API 查询必须传入）
+
         Returns:
             List[Dict[str, Any]]: 执行记录列表
         """
         async with async_session() as session:
+            query = select(StrategyExecution)
+            if owner_id is not None:
+                query = query.where(StrategyExecution.user_id == owner_id)
             result = await session.execute(
-                select(StrategyExecution).order_by(StrategyExecution.created_at.desc()).limit(limit)
+                query.order_by(StrategyExecution.created_at.desc()).limit(limit)
             )
             executions = result.scalars().all()
             return [
                 {
                     "id": str(e.id),
+                    "user_id": e.user_id,
                     "question": e.question,
                     "final_decision": e.final_decision,
                     "final_confidence": e.final_confidence,
@@ -153,30 +166,35 @@ class SampleStore:
                 }
                 for e in executions
             ]
-    
-    async def get_executions_with_feedback(self, limit: int = 100) -> List[Dict[str, Any]]:
+
+    async def get_executions_with_feedback(self, limit: int = 100,
+                                           owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         获取最近的执行记录及其反馈（单次查询，避免N+1问题）
-        
+
         Args:
             limit: 返回数量限制
-            
+            owner_id: 可选，仅返回该所有者的记录（训练默认全局）
+
         Returns:
             List[Dict[str, Any]]: 执行记录列表，包含反馈信息
         """
         async with async_session() as session:
-            result = await session.execute(
+            query = (
                 select(StrategyExecution, StrategyFeedback)
                 .outerjoin(StrategyFeedback, StrategyExecution.id == StrategyFeedback.execution_id)
-                .order_by(StrategyExecution.created_at.desc())
-                .limit(limit)
             )
-            
+            if owner_id is not None:
+                query = query.where(StrategyExecution.user_id == owner_id)
+            result = await session.execute(
+                query.order_by(StrategyExecution.created_at.desc()).limit(limit)
+            )
+
             execution_map = {}
-            
+
             for execution, feedback in result.all():
                 exec_id = str(execution.id)
-                
+
                 if exec_id not in execution_map:
                     execution_map[exec_id] = {
                         "id": exec_id,
@@ -186,23 +204,23 @@ class SampleStore:
                         "strategy_results": execution.strategy_results,
                         "feedbacks": []
                     }
-                
+
                 if feedback:
                     execution_map[exec_id]["feedbacks"].append({
                         "strategy_name": feedback.strategy_name,
                         "feedback_score": feedback.feedback_score,
                         "reason": feedback.reason
                     })
-            
+
             return list(execution_map.values())
-    
+
     async def get_feedback_for_execution(self, execution_id: str) -> List[Dict[str, Any]]:
         """
         获取指定执行记录的反馈
-        
+
         Args:
             execution_id: 执行记录ID
-            
+
         Returns:
             List[Dict[str, Any]]: 反馈列表
         """
@@ -221,48 +239,62 @@ class SampleStore:
                 }
                 for f in feedbacks
             ]
-    
-    async def get_strategy_feedback_stats(self, strategy_name: str) -> Dict[str, float]:
+
+    async def get_strategy_feedback_stats(self, strategy_name: str,
+                                          owner_id: Optional[str] = None) -> Dict[str, float]:
         """
         获取策略的反馈统计
-        
+
         Args:
             strategy_name: 策略名称
-            
+            owner_id: 可选，仅统计该所有者的执行反馈
+
         Returns:
             Dict[str, float]: 统计信息
         """
         async with async_session() as session:
+            query = select(StrategyFeedback)
+            if owner_id is not None:
+                query = query.join(
+                    StrategyExecution,
+                    StrategyFeedback.execution_id == StrategyExecution.id,
+                ).where(StrategyExecution.user_id == owner_id)
             result = await session.execute(
-                select(StrategyFeedback).where(StrategyFeedback.strategy_name == strategy_name)
+                query.where(StrategyFeedback.strategy_name == strategy_name)
             )
             feedbacks = result.scalars().all()
-            
+
             if not feedbacks:
                 return {"count": 0, "average_score": 0.0, "positive_count": 0, "negative_count": 0}
-            
+
             scores = [f.feedback_score for f in feedbacks]
             positive_count = sum(1 for s in scores if s > 0)
             negative_count = sum(1 for s in scores if s < 0)
-            
+
             return {
                 "count": len(feedbacks),
                 "average_score": sum(scores) / len(scores),
                 "positive_count": positive_count,
                 "negative_count": negative_count
             }
-    
-    async def get_execution_stats(self) -> Dict[str, Any]:
+
+    async def get_execution_stats(self, owner_id: Optional[str] = None) -> Dict[str, Any]:
         """
         获取执行记录统计
-        
+
+        Args:
+            owner_id: 可选，仅统计该所有者的记录
+
         Returns:
             Dict[str, Any]: 统计信息
         """
         async with async_session() as session:
-            result = await session.execute(select(StrategyExecution))
+            query = select(StrategyExecution)
+            if owner_id is not None:
+                query = query.where(StrategyExecution.user_id == owner_id)
+            result = await session.execute(query)
             executions = result.scalars().all()
-            
+
             if not executions:
                 return {
                     "total_count": 0,
@@ -270,26 +302,26 @@ class SampleStore:
                     "average_confidence": 0.0,
                     "daily_counts": {}
                 }
-            
+
             knowledge_base_count = sum(1 for e in executions if e.used_knowledge_base)
             avg_confidence = sum(e.final_confidence for e in executions) / len(executions)
-            
+
             daily_counts = {}
             for e in executions:
                 date_str = e.created_at.date().isoformat()
                 daily_counts[date_str] = daily_counts.get(date_str, 0) + 1
-            
+
             return {
                 "total_count": len(executions),
                 "knowledge_base_used_count": knowledge_base_count,
                 "average_confidence": avg_confidence,
                 "daily_counts": daily_counts
             }
-    
+
     async def update_strategy_config(self, strategy_name: str, config: Dict[str, Any]):
         """
         更新策略配置
-        
+
         Args:
             strategy_name: 策略名称
             config: 配置字典
@@ -299,23 +331,23 @@ class SampleStore:
                 select(StrategyConfig).where(StrategyConfig.strategy_name == strategy_name)
             )
             config_obj = result.scalar_one_or_none()
-            
+
             if config_obj:
                 for key, value in config.items():
                     setattr(config_obj, key, value)
             else:
                 config_obj = StrategyConfig(strategy_name=strategy_name, **config)
                 session.add(config_obj)
-            
+
             await session.commit()
-    
+
     async def get_strategy_config(self, strategy_name: str) -> Optional[Dict[str, Any]]:
         """
         获取策略配置
-        
+
         Args:
             strategy_name: 策略名称
-            
+
         Returns:
             Dict[str, Any] or None: 配置信息
         """
@@ -333,11 +365,11 @@ class SampleStore:
                     "updated_at": config.updated_at.isoformat() if config.updated_at else None
                 }
             return None
-    
+
     async def delete_old_executions(self, days_to_keep: int = 30):
         """
         删除旧的执行记录
-        
+
         Args:
             days_to_keep: 保留天数
         """

@@ -6,6 +6,10 @@ import asyncio
 import os
 import sys
 
+# SEC-2：单测默认关闭资源配额，避免共享用户/IP 跨用例累计触发 429；
+# 配额逻辑由 tests/test_quota.py 直接覆盖。
+os.environ.setdefault("QUOTA_ENFORCEMENT_ENABLED", "false")
+
 import pytest
 
 # 添加项目路径到Python路径

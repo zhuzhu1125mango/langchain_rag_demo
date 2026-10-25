@@ -1,6 +1,6 @@
 <template>
   <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
-    <div class="max-w-2xl mx-auto space-y-6">
+    <div class="max-w-4xl mx-auto space-y-6">
       <div class="flex items-start justify-between">
         <div>
           <h1 class="text-xl font-semibold text-content">API 密钥</h1>

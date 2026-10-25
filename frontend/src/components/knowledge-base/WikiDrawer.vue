@@ -5,6 +5,14 @@
     size="560px"
     @update:model-value="(val: boolean) => emit('update:visible', val)"
   >
+    <FeatureNotice
+      :enabled="wikiCompile?.enabled"
+      class="mb-4"
+      title="Wiki 编译未开启"
+      description="该能力由部署配置控制，开启后上传文档会自动编译生成 Wiki 页面。"
+      env-var="WIKI_COMPILE_ENABLED"
+    />
+
     <!-- 工具栏 -->
     <div class="flex items-center justify-between mb-4">
       <p class="text-xs text-content-muted">
@@ -14,7 +22,7 @@
         <AppButton
           variant="primary-ghost"
           size="sm"
-          :disabled="lintLoading || !kbId"
+          :disabled="lintLoading || !kbId || !wikiEnabled"
           @click="onLint"
         >
           <Stethoscope class="w-3.5 h-3.5" :class="{ 'animate-pulse': lintLoading }" />
@@ -23,7 +31,7 @@
         <AppButton
           variant="primary-ghost"
           size="sm"
-          :disabled="rebuilding || !kbId"
+          :disabled="rebuilding || !kbId || !wikiEnabled"
           @click="onRebuild"
         >
           <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': rebuilding }" />
@@ -91,8 +99,10 @@
     <AppStateView
       v-else-if="!pages?.length"
       state="empty"
-      title="暂无 Wiki 页面"
-      description="上传文档并开启 WIKI_COMPILE_ENABLED 后自动生成"
+      :title="wikiEnabled ? '暂无 Wiki 页面' : 'Wiki 编译未开启'"
+      :description="wikiEnabled
+        ? '上传文档并等待编译完成后，这里会出现结构化 Wiki 页面'
+        : '该能力由部署配置控制，请联系管理员开启 Wiki 编译后再上传文档'"
       :icon="BookOpen"
       padding="lg"
     />
@@ -156,7 +166,9 @@ import { buildWsUrl } from '@/utils/ws'
 import { getToken } from '@/utils/auth'
 import { useToast, handleMutationError } from '@/composables/useToast'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
+import FeatureNotice from '@/components/settings/FeatureNotice.vue'
 import { AppButton, AppStateView } from '@/components/ui'
+import { findFeature, useSystemFeatures } from '@/queries/features'
 import {
   useWikiPages,
   useRebuildWiki,
@@ -189,6 +201,10 @@ const queryClient = useQueryClient()
 const kbIdRef = computed(() => props.kbId)
 const { data: pages, isLoading } = useWikiPages(kbIdRef)
 const rebuildMutation = useRebuildWiki()
+const { data: systemFeatures } = useSystemFeatures()
+const wikiCompile = computed(() => findFeature(systemFeatures.value, 'wiki_compile'))
+// 状态未知（加载中/请求失败）时按可用处理，避免空态闪烁“未开启”
+const wikiEnabled = computed(() => wikiCompile.value?.enabled ?? true)
 
 // 正文预览：单页展开 + 懒加载（切换页面时重新加载，内容缓存至本次会话）
 const expandedId = ref('')

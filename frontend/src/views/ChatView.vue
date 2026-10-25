@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 flex h-full bg-page relative">
+  <div class="flex-1 flex h-full chat-canvas relative">
     <!-- 答案对比侧边面板 -->
     <CompareAnswerPanel
       :show="showComparePanel"
@@ -10,34 +10,36 @@
     />
 
     <div class="flex-1 flex flex-col h-full">
-      <header class="bg-surface border-b border-line px-4 sm:px-6 py-3 lg:py-4">
-        <div class="flex items-center justify-between gap-2">
+      <header class="relative z-20 h-16 shrink-0 glass-chrome border-b px-4 sm:px-6">
+        <div class="h-full max-w-[1200px] mx-auto flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <h1 class="text-lg lg:text-xl font-semibold text-content truncate">智能助手</h1>
-            <p class="hidden sm:block text-sm text-content-muted mt-1">基于知识库的智能问答系统</p>
+            <h1 class="text-[15px] font-semibold tracking-tight text-content truncate">
+              {{ chatStore.currentSession?.title || '智能助手' }}
+            </h1>
+            <p class="hidden sm:block text-xs text-content-muted mt-0.5">知识库问答 · 本地模型</p>
           </div>
-          <div class="flex items-center gap-1.5 sm:gap-2 flex-shrink-0">
+          <div class="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
             <AppButton variant="ghost" size="nav" title="清空当前对话" @click="clearChat">
               <Trash2 class="w-4 h-4" />
-              <span class="hidden sm:inline">清空</span>
+              <span class="hidden md:inline">清空</span>
             </AppButton>
             <AppButton
-              variant="primary-soft"
+              :variant="selectedKBs.length > 0 ? 'primary-soft' : 'outline'"
               size="nav"
               @click="showKBSelector = !showKBSelector"
             >
               <BookOpen class="w-4 h-4" />
-              <span class="hidden sm:inline">{{ selectedKBs.length > 0 ? `${selectedKBs.length}个知识库` : '选择知识库' }}</span>
+              <span class="hidden sm:inline">{{ selectedKBs.length > 0 ? `${selectedKBs.length} 个知识库` : '选择知识库' }}</span>
             </AppButton>
             <AppButton
-              variant="outline"
+              variant="ghost"
               size="nav"
               :disabled="selectedKBs.length < 2 || !questionInput.trim()"
               title="对比多个知识库的答案"
               @click="handleCompareAnswers"
             >
               <GitCompare class="w-4 h-4" />
-              <span class="hidden sm:inline">对比答案</span>
+              <span class="hidden md:inline">对比答案</span>
             </AppButton>
           </div>
         </div>

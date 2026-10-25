@@ -491,6 +491,66 @@ describe('停止生成（UX-1）', () => {
   })
 })
 
+describe('流接管（D4 回归）', () => {
+  it('新消息接管旧流时，旧流的 AbortError 不产生“发送失败”卡片', async () => {
+    let call = 0
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      call += 1
+      if (call === 1) {
+        let sent = false
+        return {
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                if (!sent) {
+                  sent = true
+                  return {
+                    done: false,
+                    value: encoder.encode('data: {"type":"content","content":"部分回答"}\n\n')
+                  }
+                }
+                // 旧流挂起，等待被下一条消息 abort
+                return new Promise((_, reject) => {
+                  init?.signal?.addEventListener('abort', () => {
+                    const err = new Error('signal is aborted without reason')
+                    err.name = 'AbortError'
+                    reject(err)
+                  })
+                })
+              }
+            })
+          }
+        }
+      }
+      let endSent = false
+      return {
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              if (!endSent) {
+                endSent = true
+                return { done: false, value: encoder.encode('data: {"type":"end"}\n\n') }
+              }
+              return { done: true, value: undefined }
+            }
+          })
+        }
+      }
+    }))
+    const h = mountStream()
+
+    const first = h.api.sendMessage('第一问')
+    await vi.waitFor(() => expect(assistantOf(h.store).content).toBe('部分回答'))
+
+    await h.api.sendMessage('第二问')
+    await first
+
+    expect(h.store.messages.some(m => m.error)).toBe(false)
+  })
+})
+
 describe('卸载中止（D4）', () => {
   it('组件卸载时 abort 在途流', async () => {
     let capturedSignal: AbortSignal | undefined

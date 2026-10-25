@@ -15,47 +15,51 @@
   --color-primary-800: #1e3a8a;
   --color-primary-900: #172554;
 
-  --color-dark-900: #0a0a0f;
-  --color-dark-800: #12121a;
-  --color-dark-700: #1a1a25;
-  --color-dark-600: #252532;
-  --color-dark-500: #32324a;
+  --color-dark-900: #0e0e10;
+  --color-dark-800: #151517;
+  --color-dark-700: #1b1b1e;
+  --color-dark-600: #222225;
+  --color-dark-500: #2a2a2e;
 
   /* ============================================================
      语义色 token（VIS-1）
      浅色为默认值，深色在 .dark 中覆盖；组件只引用语义名，
      不再手写 "bg-white dark:bg-dark-800" 这类成对类名。
      ============================================================ */
-  --color-page: #f9fafb;
+  --color-page: #f6f6f7;
   --color-surface: #ffffff;
   --color-surface-raised: #ffffff;
   --color-surface-raised-strong: #ffffff;
-  --color-surface-muted: #f9fafb;
-  --color-surface-subtle: #f3f4f6;
-  --color-surface-subtle-strong: #f3f4f6;
-  --color-surface-strong: #e5e7eb;
-  --color-surface-disabled: #e5e7eb;
-  --color-surface-hover: #f3f4f6;
-  --color-surface-hover-strong: #e5e7eb;
+  --color-surface-muted: #f7f7f8;
+  --color-surface-subtle: #f4f4f5;
+  --color-surface-subtle-strong: #ececee;
+  --color-surface-strong: #e4e4e7;
+  --color-surface-disabled: #e4e4e7;
+  --color-surface-hover: #f4f4f5;
+  --color-surface-hover-strong: #e4e4e7;
+  /* 工作区侧栏与用户消息：中性灰而非品牌色，避免整页蓝色块过多 */
+  --color-sidebar: #fafafa;
+  --color-sidebar-hover: #f4f4f5;
+  --color-chat-user: #f4f4f5;
 
-  --color-content-strong: #111827;
-  --color-content: #1f2937;
-  --color-content-secondary: #374151;
-  --color-content-secondary-strong: #374151;
-  --color-content-secondary-muted: #4b5563;
-  --color-content-tertiary: #4b5563;
-  --color-content-muted: #6b7280;
-  --color-content-subtle: #9ca3af;
-  --color-content-disabled: #d1d5db;
+  --color-content-strong: #111113;
+  --color-content: #18181b;
+  --color-content-secondary: #3f3f46;
+  --color-content-secondary-strong: #27272a;
+  --color-content-secondary-muted: #52525b;
+  --color-content-tertiary: #52525b;
+  --color-content-muted: #71717a;
+  --color-content-subtle: #a1a1aa;
+  --color-content-disabled: #d4d4d8;
   --color-content-inverse: #ffffff;
   --color-on-accent: #ffffff;
 
-  --color-line: #e5e7eb;
-  --color-line-strong: #d1d5db;
-  --color-line-subtle: #f3f4f6;
-  --color-code-bg: #f6f8fa;
-  --color-scrollbar: #c1c1c1;
-  --color-scrollbar-hover: #a8a8a8;
+  --color-line: #e4e4e7;
+  --color-line-strong: #d4d4d8;
+  --color-line-subtle: #f0f0f1;
+  --color-code-bg: #f6f7f9;
+  --color-scrollbar: #c8c8cd;
+  --color-scrollbar-hover: #a8a8b0;
 
   --color-success: #22c55e;
   --color-success-soft: #dcfce7;
@@ -70,14 +74,14 @@
   --color-danger-hover: #dc2626;
   --color-accent-purple: #a78bfa;
 
-  --radius-control: 0.5rem;
-  --radius-card: 0.75rem;
-  --radius-panel: 1rem;
+  --radius-control: 0.625rem;
+  --radius-card: 0.875rem;
+  --radius-panel: 1.125rem;
   --radius-pill: 9999px;
 
-  --shadow-card: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --shadow-hover: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-elevated: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --shadow-card: 0 1px 2px 0 rgb(16 24 40 / 0.04);
+  --shadow-hover: 0 6px 16px -6px rgb(16 24 40 / 0.12);
+  --shadow-elevated: 0 18px 40px -16px rgb(16 24 40 / 0.22);
 
   --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
@@ -91,6 +95,15 @@
   --warning-color: var(--color-warning);
   --error-color: var(--color-danger);
   --success-color: var(--color-success);
+
+  /* 克制版液态玻璃：只用于导航壳与浮层，内容面保持实色 */
+  --glass-chrome-bg: rgb(255 255 255 / 0.7);
+  --glass-panel-bg: rgb(255 255 255 / 0.8);
+  --glass-subtle-bg: rgb(255 255 255 / 0.62);
+  --glass-border: rgb(255 255 255 / 0.62);
+  --glass-highlight: rgb(255 255 255 / 0.92);
+  --glass-shadow: 0 16px 44px -20px rgb(16 24 40 / 0.28);
+  --glass-blur: 18px;
 
   /* Element Plus 品牌色同步（浅色）：登录/设置等 EP 组件页与整体主色保持一致 */
   --el-color-primary: var(--color-primary-500);
@@ -115,35 +128,38 @@
 
 /* 语义色 token 深色覆盖（与 @theme 中浅色默认值一一对应） */
 .dark {
-  --color-page: #0a0a0f;
-  --color-surface: #12121a;
-  --color-surface-raised: #1a1a25;
-  --color-surface-raised-strong: #252532;
-  --color-surface-muted: #1a1a25;
-  --color-surface-subtle: #1a1a25;
-  --color-surface-subtle-strong: #252532;
-  --color-surface-strong: #252532;
-  --color-surface-disabled: #1a1a25;
-  --color-surface-hover: #1a1a25;
-  --color-surface-hover-strong: #252532;
+  --color-page: #0e0e10;
+  --color-surface: #151517;
+  --color-surface-raised: #1b1b1e;
+  --color-surface-raised-strong: #222225;
+  --color-surface-muted: #19191c;
+  --color-surface-subtle: #1e1e21;
+  --color-surface-subtle-strong: #27272b;
+  --color-surface-strong: #2a2a2e;
+  --color-surface-disabled: #1e1e21;
+  --color-surface-hover: #1e1e21;
+  --color-surface-hover-strong: #27272b;
+  --color-sidebar: #111113;
+  --color-sidebar-hover: #1b1b1e;
+  --color-chat-user: #26262a;
 
-  --color-content-strong: #ffffff;
-  --color-content: #f9fafb;
-  --color-content-secondary: #d1d5db;
-  --color-content-secondary-strong: #e5e7eb;
-  --color-content-secondary-muted: #9ca3af;
-  --color-content-tertiary: #d1d5db;
-  --color-content-muted: #9ca3af;
-  --color-content-subtle: #6b7280;
-  --color-content-disabled: #4b5563;
-  --color-content-inverse: #111827;
+  --color-content-strong: #fafafa;
+  --color-content: #f4f4f5;
+  --color-content-secondary: #d4d4d8;
+  --color-content-secondary-strong: #e4e4e7;
+  --color-content-secondary-muted: #a1a1aa;
+  --color-content-tertiary: #a1a1aa;
+  --color-content-muted: #8f8f98;
+  --color-content-subtle: #71717a;
+  --color-content-disabled: #52525b;
+  --color-content-inverse: #18181b;
 
-  --color-line: #252532;
-  --color-line-strong: #32324a;
-  --color-line-subtle: #1a1a25;
-  --color-code-bg: #1a1a25;
-  --color-scrollbar: #4a4a5a;
-  --color-scrollbar-hover: #5a5a6a;
+  --color-line: #27272a;
+  --color-line-strong: #3f3f46;
+  --color-line-subtle: #1e1e21;
+  --color-code-bg: #1b1b1e;
+  --color-scrollbar: #4a4a52;
+  --color-scrollbar-hover: #5c5c66;
 
   --color-success-soft: rgb(34 197 94 / 0.15);
   --color-success-content: #4ade80;
@@ -151,12 +167,124 @@
   --color-warning-content: #fcd34d;
   --color-danger-soft: rgb(239 68 68 / 0.15);
   --color-danger-content: #f87171;
+
+  --glass-chrome-bg: rgb(17 17 19 / 0.72);
+  --glass-panel-bg: rgb(21 21 23 / 0.84);
+  --glass-subtle-bg: rgb(17 17 19 / 0.66);
+  --glass-border: rgb(255 255 255 / 0.1);
+  --glass-highlight: rgb(255 255 255 / 0.14);
+  --glass-shadow: 0 22px 54px -22px rgb(0 0 0 / 0.72);
 }
 
 body {
   font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.006em;
+  background-color: var(--color-page);
+}
+
+/* 环境光层：给侧栏/浮层的 backdrop-filter 提供可感知的底色变化 */
+.app-ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(55% 45% at 8% 0%, rgb(37 99 235 / 0.1), transparent 62%),
+    radial-gradient(42% 38% at 94% 4%, rgb(139 92 246 / 0.07), transparent 62%),
+    radial-gradient(46% 40% at 52% 100%, rgb(14 165 233 / 0.05), transparent 60%),
+    var(--color-page);
+}
+
+.dark .app-ambient {
+  background:
+    radial-gradient(55% 45% at 8% 0%, rgb(37 99 235 / 0.16), transparent 62%),
+    radial-gradient(42% 38% at 94% 4%, rgb(139 92 246 / 0.12), transparent 62%),
+    radial-gradient(46% 40% at 52% 100%, rgb(14 165 233 / 0.08), transparent 60%),
+    var(--color-page);
+}
+
+/* 聊天画布：极淡的品牌渐变，避免纯白底上玻璃完全不可见 */
+.chat-canvas {
+  background:
+    radial-gradient(70% 55% at 50% 0%, rgb(37 99 235 / 0.035), transparent 72%),
+    var(--color-surface);
+}
+
+.dark .chat-canvas {
+  background:
+    radial-gradient(70% 55% at 50% 0%, rgb(59 130 246 / 0.07), transparent 72%),
+    var(--color-surface);
+}
+
+/* 玻璃材质：只给导航壳、输入区与浮层使用，内容/表格不套用 */
+.glass-chrome,
+.glass-panel,
+.glass-subtle {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(170%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(170%);
+  border-color: var(--glass-border);
+}
+
+.glass-chrome {
+  background-color: var(--glass-chrome-bg);
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+}
+
+.glass-panel {
+  background-color: var(--glass-panel-bg);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--glass-shadow);
+}
+
+.glass-subtle {
+  background-color: var(--glass-subtle-bg);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-chrome {
+    background-color: var(--color-surface);
+  }
+  .glass-panel {
+    background-color: var(--color-surface);
+  }
+  .glass-subtle {
+    background-color: var(--color-page);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .glass-chrome {
+    background-color: var(--color-surface);
+  }
+  .glass-panel {
+    background-color: var(--color-surface);
+  }
+  .glass-subtle {
+    background-color: var(--color-page);
+  }
+  .glass-chrome,
+  .glass-panel,
+  .glass-subtle {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .glass-chrome,
+  .glass-panel,
+  .glass-subtle {
+    --glass-blur: 12px;
+  }
+}
+
+::selection {
+  background: rgb(37 99 235 / 0.18);
 }
 
 * {
@@ -313,27 +441,9 @@ body {
 }
 
 /* 助手消息：白底卡片（主流 AI 产品风格），长文 Markdown 可读性优于蓝底白字 */
+/* 助手正文不再使用卡片容器；保留类名供 Markdown 引用样式挂载 */
 .chat-bubble-assistant {
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-line);
-  box-shadow: var(--shadow-card);
-}
-
-.dark .chat-bubble-assistant {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-/* 用户消息：品牌色浅底 + 同色系描边 */
-.chat-bubble-user {
-  background-color: var(--color-primary-50);
-  border: 1px solid var(--color-primary-100);
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
-}
-
-.dark .chat-bubble-user {
-  background-color: var(--color-surface-raised);
-  border-color: var(--color-line);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  min-width: 0;
 }
 
 @keyframes typing {
@@ -482,6 +592,14 @@ body {
   border-radius: 4px;
 }
 
+/* 文本类控件已有自己的 focus 边框/ring（AppInput/AppSelect/EP/聊天输入卡片），
+   不再叠加全局 outline，避免出现“双蓝框”。复选框/单选框仍保留全局焦点环。 */
+input:not([type='checkbox']):not([type='radio']):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+
 .skip-link {
   position: fixed;
   top: 0.5rem;
@@ -539,5 +657,271 @@ body {
 
   .markdown-body pre {
     max-width: 100%;
+  }
+}
+/* ============================================================
+   视觉收口（VIS-3 / UI polish，2026-10-24）
+   - 8px 网格与字体细节
+   - Element Plus 弹窗/下拉/表单/表格统一到语义 token
+   - 保持单一主色 + 语义状态色，暗色同源
+   ============================================================ */
+:root {
+  --color-overlay: rgb(15 23 42 / 0.42);
+  --shadow-popover: 0 12px 32px -8px rgb(15 23 42 / 0.18),
+    0 4px 12px -4px rgb(15 23 42 / 0.08);
+  --el-border-radius-base: 10px;
+  --el-border-radius-small: 8px;
+  --el-border-radius-round: 9999px;
+  --el-font-size-base: 14px;
+  --el-box-shadow-light: var(--shadow-popover);
+}
+
+.dark {
+  --color-overlay: rgb(0 0 0 / 0.62);
+  --shadow-popover: 0 16px 40px -8px rgb(0 0 0 / 0.55),
+    0 4px 12px -4px rgb(0 0 0 / 0.35);
+}
+
+body {
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  letter-spacing: -0.011em;
+}
+
+::selection {
+  background-color: var(--color-primary-100);
+  color: var(--color-primary-900);
+}
+
+.dark ::selection {
+  background-color: rgb(37 99 235 / 0.35);
+  color: #ffffff;
+}
+
+/* ---------- Element Plus：弹窗 ---------- */
+.el-overlay {
+  background-color: var(--color-overlay);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.el-overlay-dialog {
+  padding: 1.5rem;
+}
+
+.el-dialog {
+  overflow: hidden;
+  max-width: calc(100vw - 2rem);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-panel);
+  background-color: var(--glass-panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  backdrop-filter: blur(24px) saturate(170%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-popover);
+}
+
+.el-dialog__header {
+  margin-right: 0;
+  padding: 20px 24px 0;
+}
+
+.el-dialog__headerbtn {
+  top: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+
+.el-dialog__headerbtn:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.el-dialog__title {
+  color: var(--color-content);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.el-dialog__body {
+  max-height: calc(100vh - 12rem);
+  overflow-y: auto;
+  padding: 16px 24px 8px;
+  color: var(--color-content-secondary);
+}
+
+.el-dialog__footer {
+  margin-top: 8px;
+  padding: 16px 24px 20px;
+  border-top: 1px solid var(--color-line);
+}
+
+.app-dialog .el-dialog__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+/* ---------- Element Plus：下拉/选择 ---------- */
+.el-popper.is-light,
+.el-select__popper.el-popper {
+  border: 1px solid var(--glass-border);
+  border-radius: 14px;
+  background-color: var(--glass-panel-bg);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-popover);
+}
+
+.el-select-dropdown__list {
+  padding: 6px;
+}
+
+.el-select-dropdown__item {
+  height: 34px;
+  margin: 2px 4px;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--color-content-secondary);
+  font-size: 13px;
+  line-height: 34px;
+}
+
+.el-select-dropdown__item.is-hovering {
+  background-color: var(--color-surface-hover);
+}
+
+.el-select-dropdown__item.is-selected {
+  background-color: var(--color-primary-50);
+  color: var(--color-primary-600);
+  font-weight: 500;
+}
+
+.dark .el-select-dropdown__item.is-selected {
+  background-color: rgb(37 99 235 / 0.18);
+  color: var(--color-primary-300);
+}
+
+.el-select__wrapper {
+  min-height: 38px;
+  border-radius: 10px;
+  background-color: var(--color-surface-subtle);
+  box-shadow: 0 0 0 1px var(--color-line) inset;
+}
+
+.el-select__wrapper.is-focused {
+  box-shadow:
+    0 0 0 1px var(--color-primary-400) inset,
+    0 0 0 3px rgb(37 99 235 / 0.12);
+}
+
+/* ---------- Element Plus：表单/按钮 ---------- */
+.el-input__wrapper,
+.el-textarea__inner {
+  border-radius: 10px;
+  background-color: var(--color-surface-subtle);
+  box-shadow: 0 0 0 1px var(--color-line) inset;
+}
+
+.el-input__wrapper.is-focus,
+.el-textarea__inner:focus {
+  box-shadow:
+    0 0 0 1px var(--color-primary-400) inset,
+    0 0 0 3px rgb(37 99 235 / 0.12);
+}
+
+.el-textarea__inner {
+  padding: 10px 12px;
+}
+
+.el-button {
+  border-radius: 10px;
+  font-weight: 500;
+}
+
+/* ---------- Element Plus：表格/其他 ---------- */
+.el-table {
+  --el-table-border-color: var(--color-line);
+  --el-table-header-bg-color: var(--color-surface-muted);
+  --el-table-row-hover-bg-color: var(--color-surface-hover);
+  color: var(--color-content-secondary);
+  font-size: 13px;
+}
+
+.el-table th.el-table__cell {
+  color: var(--color-content-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.el-table .cell {
+  line-height: 1.45;
+}
+
+.el-message-box {
+  max-width: calc(100vw - 2rem);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-panel);
+  background-color: var(--glass-panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  backdrop-filter: blur(24px) saturate(170%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-popover);
+}
+
+.el-drawer {
+  border-left: 1px solid var(--glass-border);
+  background-color: var(--glass-panel-bg);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  backdrop-filter: blur(24px) saturate(170%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-highlight),
+    var(--shadow-popover);
+}
+
+.el-tag {
+  border-radius: 9999px;
+}
+
+.el-switch {
+  --el-switch-on-color: var(--color-primary-500);
+}
+
+/* 玻璃材质降级：不支持 backdrop-filter 或用户要求减少透明时回退实色 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .el-dialog,
+  .el-message-box,
+  .el-drawer,
+  .el-popper.is-light,
+  .el-select__popper.el-popper {
+    background-color: var(--color-surface);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .el-dialog,
+  .el-message-box,
+  .el-drawer,
+  .el-popper.is-light,
+  .el-select__popper.el-popper {
+    background-color: var(--color-surface);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .el-overlay {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 }

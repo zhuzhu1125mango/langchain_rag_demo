@@ -186,7 +186,10 @@ class SearchToolkit:
         self.tool_manager.register_tool(WebSearchTool(web_search_service))
         self.tool_manager.register_tool(FetchWebpageTool(web_search_service))
         # 白名单视图（旧 Agent 只见搜索核心工具；P2 Agent 循环用 AGENT_TOOLS_ENABLED 扩展）
-        self._tool_names = tuple(tool_names) if tool_names else self.DEFAULT_TOOL_NAMES
+        names = tuple(tool_names) if tool_names else self.DEFAULT_TOOL_NAMES
+        if not settings.search.AGENT_WEB_FETCH_ENABLED:
+            names = tuple(n for n in names if n != "fetch_webpage")
+        self._tool_names = names
         self._tools = self._build_tools()
 
     def _build_tools(self) -> List[Tool]:

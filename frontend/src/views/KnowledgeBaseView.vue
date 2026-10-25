@@ -9,13 +9,13 @@
     />
 
     <div class="flex-1 flex flex-col overflow-hidden">
-      <header class="bg-surface border-b border-line px-4 sm:px-6 py-3 sm:py-4">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+      <header class="glass-chrome border-b px-4 sm:px-6">
+        <div class="min-h-16 py-2 sm:py-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
           <div class="min-w-0">
-            <h1 class="text-lg lg:text-xl font-semibold text-content truncate">
+            <h1 class="text-[15px] font-semibold tracking-tight text-content truncate">
               {{ currentKB?.name || '选择知识库' }}
             </h1>
-            <p class="hidden sm:block text-sm text-content-muted mt-1 truncate">
+            <p class="hidden sm:block text-xs text-content-muted mt-0.5 truncate">
               {{ currentKB?.description || '管理当前知识库的文档' }}
             </p>
             <!-- 移动端知识库切换（桌面端使用左侧列表） -->
@@ -87,14 +87,14 @@
 
       <div v-if="currentKB" class="flex-1 overflow-auto p-4 sm:p-6">
         <!-- 标签页切换 -->
-        <div class="flex items-center gap-1 bg-surface-subtle rounded-lg p-1 mb-6">
+        <div class="inline-flex items-center gap-1 bg-surface-subtle rounded-xl p-1 mb-6">
           <button
             @click="activeTab = 'documents'"
             :class="[
-              'px-4 py-2 text-sm font-medium rounded-md transition-colors',
+              'px-4 py-1.5 text-sm font-medium rounded-lg transition-all',
               activeTab === 'documents'
-                ? 'bg-surface-raised-strong text-content shadow-sm'
-                : 'text-content-secondary-muted hover:text-content'
+                ? 'bg-surface text-content shadow-card'
+                : 'text-content-muted hover:text-content'
             ]"
           >
             <FileText class="w-4 h-4 inline-block mr-2" />
@@ -103,10 +103,10 @@
           <button
             @click="activeTab = 'graph'"
             :class="[
-              'px-4 py-2 text-sm font-medium rounded-md transition-colors',
+              'px-4 py-1.5 text-sm font-medium rounded-lg transition-all',
               activeTab === 'graph'
-                ? 'bg-surface-raised-strong text-content shadow-sm'
-                : 'text-content-secondary-muted hover:text-content'
+                ? 'bg-surface text-content shadow-card'
+                : 'text-content-muted hover:text-content'
             ]"
           >
             <Network class="w-4 h-4 inline-block mr-2" />
@@ -115,16 +115,16 @@
         </div>
 
         <!-- 文档列表视图 -->
-        <AppCard v-if="activeTab === 'documents'" padding="none">
-          <div class="p-4 border-b border-line flex items-center justify-between">
-            <div class="flex items-center gap-4">
-              <div class="flex items-center gap-2">
+        <AppCard v-if="activeTab === 'documents'" padding="none" class="overflow-hidden">
+          <div class="p-3 sm:p-4 border-b border-line flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div class="flex flex-wrap items-center gap-2">
+              <div class="flex items-center gap-2 w-full sm:w-auto">
                 <Search class="w-4 h-4 text-content-subtle" />
                 <AppInput
                   v-model="searchQuery"
                   placeholder="搜索文档..."
                   size="sm"
-                  class="w-48"
+                  class="w-full sm:w-48"
                   @keyup.enter="onPerformSearch"
                 />
                 <AppSelect v-model="searchMode">
@@ -138,7 +138,7 @@
                 <option value="inactive">已下架</option>
               </AppSelect>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex items-center justify-between sm:justify-end gap-3">
               <AppButton
                 v-if="searchQuery && searchMode === 'content'"
                 variant="ghost"
@@ -192,7 +192,7 @@
         </AppCard>
 
         <!-- 知识图谱视图 -->
-        <AppCard v-if="activeTab === 'graph'" padding="none" class="h-[500px]">
+        <AppCard v-if="activeTab === 'graph'" padding="none" class="h-[500px] overflow-hidden">
           <KnowledgeGraph :kb-ids="currentKB ? [currentKB.id] : []" />
         </AppCard>
       </div>
@@ -315,6 +315,7 @@ import DocumentSearchResults from '@/components/knowledge-base/DocumentSearchRes
 import UploadDocumentDialog from '@/components/knowledge-base/UploadDocumentDialog.vue'
 import DocumentPreviewDialog from '@/components/knowledge-base/DocumentPreviewDialog.vue'
 import DocumentAnalysisDialogs from '@/components/knowledge-base/DocumentAnalysisDialogs.vue'
+import WikiDrawer from '@/components/knowledge-base/WikiDrawer.vue'
 import { useDocumentActions } from '@/composables/useDocumentActions'
 import { useKbManage } from '@/composables/useKbManage'
 import { useDocumentDialogs } from '@/composables/useDocumentDialogs'

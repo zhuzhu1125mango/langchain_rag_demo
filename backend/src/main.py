@@ -107,6 +107,14 @@ class RequestTracingMiddleware:
         # W6 #16：写入 contextvar，服务层日志经 RequestIdLogFilter 自动关联
         token = _request_id_var.set(request_id)
 
+        # SEC-3：统一解析受信代理后的真实客户端 IP，写回 scope["client"]，
+        # 使限流/审计等所有 request.client.host 读取点口径一致。
+        from src.utils.rate_limit import resolve_client_ip
+
+        client_ip = resolve_client_ip(scope)
+        if scope.get("client"):
+            scope["client"] = (client_ip, scope["client"][1])
+
         if scope["type"] == "http":
             request = Request(scope, receive)
             request.state.request_id = request_id
@@ -233,6 +241,22 @@ async def _validate_model_config() -> None:
     logger.info("模型配置校验通过: " + ", ".join(f"{k}={v}" for k, v in to_check))
 
 
+def _validate_registration_policy() -> None:
+    """SEC-2：生产默认关闭开放注册；确需开放必须显式确认。"""
+    if not settings.IS_PRODUCTION or not settings.security.AUTH_ALLOW_REGISTRATION:
+        return
+    if not settings.security.ALLOW_OPEN_REGISTRATION_IN_PROD:
+        raise RuntimeError(
+            "生产环境启动失败: AUTH_ALLOW_REGISTRATION=true。"
+            "请设置 AUTH_ALLOW_REGISTRATION=false，或显式设置 "
+            "ALLOW_OPEN_REGISTRATION_IN_PROD=true 以确认开放注册。"
+        )
+    logger.warning(
+        "生产环境已显式允许开放注册（ALLOW_OPEN_REGISTRATION_IN_PROD=true）；"
+        "请确认已配置聊天/上传配额与外部访问控制"
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -260,6 +284,11 @@ async def lifespan(app: FastAPI):
             _msg = f"生产环境启动失败: 关键凭据为空: {', '.join(_missing_creds)}，请在环境配置中设置强密码"
             logger.error(_msg)
             raise RuntimeError(_msg)
+
+        # SEC-2：生产默认关闭开放注册。AUTH_ALLOW_REGISTRATION 默认 true 是
+        # 为了开发体验；生产若仍为 true，必须显式设置
+        # ALLOW_OPEN_REGISTRATION_IN_PROD=true 才允许启动。
+        _validate_registration_policy()
 
         # W6 #11：生产未启用 MinIO TLS 时告警（compose 内网明文为已知取舍，
         # 须显式设置 MINIO_SECURE=false 声明；暴露公网必须启用 TLS）

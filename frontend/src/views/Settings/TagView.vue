@@ -1,6 +1,6 @@
 <template>
   <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
-    <div class="max-w-4xl mx-auto">
+    <div class="max-w-4xl mx-auto space-y-6">
       <div class="flex items-center justify-between mb-6">
         <div>
           <h1 class="text-xl font-semibold text-content">标签管理</h1>

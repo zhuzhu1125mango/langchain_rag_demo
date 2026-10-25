@@ -110,7 +110,9 @@ async def create_feedback(
             await learning_engine.record_feedback(
                 execution_id=execution_id,
                 feedback_score=feedback_score,
-                reason=data.reason
+                reason=data.reason,
+                owner_id=current_user.user_id,
+                enforce_owner=True,
             )
             logger.info(f"学习反馈已记录: execution_id={execution_id}, score={feedback_score}")
     except Exception as e:

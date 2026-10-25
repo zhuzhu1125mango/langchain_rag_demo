@@ -38,9 +38,10 @@
 - 两栈基础设施端口均仅绑定 `127.0.0.1`（对外只暴露 dev frontend 5173 / prod frontend 8080——容器内非 root 监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）；MinIO 镜像使用社区 fork `pgsty/minio`（官方 `minio/minio` 镜像已下架）
 - 后端启动约束（`src/main.py` 的 lifespan，按顺序）：
   1. 生产模式强制校验 `SECRET_KEY` 强度与关键凭据非空，缺失即拒绝启动
-  2. 校验三个模型名非空且存在于本地 Ollama（`/api/tags`），缺失即拒绝启动
-  3. 建表（`init_db`）+ 预热 `CacheService`（Redis 为必需依赖，8 秒超时）
-  4. LLM 预热为 best-effort，失败仅告警不中断启动
+  2. 生产模式校验注册策略：`AUTH_ALLOW_REGISTRATION=true` 且未显式 `ALLOW_OPEN_REGISTRATION_IN_PROD=true` → 拒绝启动（SEC-2）
+  3. 校验三个模型名非空且存在于本地 Ollama（`/api/tags`），缺失即拒绝启动
+  4. 建表（`init_db`）+ 预热 `CacheService`（Redis 为必需依赖，8 秒超时）
+  5. LLM 预热为 best-effort，失败仅告警不中断启动
 
 ## 3. 问答核心链路（RAG 决策管线）
 
@@ -90,7 +91,8 @@
 | `services/` | 业务核心：决策管线、检索、生成、搜索、工具、评估、学习引擎 |
 | `services/rag_chain.py` | RAG 问答链编排门面：依赖装配（`__init__`/`_async_init`）+ 公开 API（`run`/`arun_stream`）+ 生命周期；管线各阶段已拆入 `services/pipeline/`（文件已从约 2000 行瘦身为门面） |
 | `services/pipeline/` | 管线拆分（自 `rag_chain.py` 抽出）：`state.py`（共享状态 / ContextVar / 提示词模板）、`stages.py`（阶段 1-9 编排 + 终态清理）、`retrieval.py`、`agent.py`、`generation.py`、`insights.py` |
-| `services/agent_orchestrator.py` | 有界 Agent 编排：plan-execute 循环（max_steps=3 + 时间预算熔断），KB/Wiki/搜索工具统一接入，`AGENT_ORCHESTRATOR_ENABLED` 默认开启（W6 灰度转正 2026-09-29；有界循环自带降级链） |
+| `services/agent_orchestrator.py` | 有界 Agent 编排：plan-execute 循环（max_steps=3 + 时间预算熔断），KB/Wiki/搜索工具统一接入，`AGENT_ORCHESTRATOR_ENABLED` 默认开启（W6 灰度转正 2026-09-29；有界循环自带降级链）；SEC-5：不可信观察隔离、工具出站域名/DLP、`fetch_webpage` 默认关闭 |
+| `services/guardrails/` | AM-2 确定性护栏：input/output/tool/approval + SEC-5 `context_guard`（不可信上下文包裹、注入信号检测）与流式输出跨 chunk 脱敏 |
 | `services/context_enhancer.py` / `context_builder.py` | 历史摘要增强 / 上下文预算与 Lost-in-the-Middle 重排 |
 | `services/semantic_cache_service.py` | 语义缓存（P1-3）：命中直接回放，Redis 不可用时 fail-open |
 | `services/wiki_*.py` | LLM-Wiki 编译层：编译器、去抖调度、级联重写、交叉链接扩展、一致性 lint、分布式锁 |
@@ -103,7 +105,8 @@
 | `services/trace_collector.py` | 请求链路追踪采集（对应 `/api/traces`） |
 | `services/audit_service.py` | 审计日志记录与查询（P2-4，best-effort 写入不阻断主流程，对应 `/api/audit`） |
 | `middleware/` | Prometheus 指标、自定义 Metrics 中间件 |
-| `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验） |
+| `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验）、`rate_limit.py`（受信代理 IP + Redis/进程内限流）、`quota.py`（聊天/上传资源配额） |
+| `models/strategy.py` | 学习样本：`strategy_executions.user_id`（SEC-1 owner 隔离） |
 | `auth.py` | 认证：`X-API-Key`（全局单租户 / 用户级 API Key，后者解析为真实 `user_id`）+ JWT 多用户（注册/登录/`/me`/`/refresh`）+ `require_owner` 对象级授权 + WS 首帧鉴权 |
 | `prompts/` | 提示词模板（aiofiles 异步加载） |
 
@@ -113,6 +116,7 @@
 - **单例统一**：服务单例继承 `AsyncSingleton`，统一异步初始化/清理生命周期
 - **可降级**：混合检索失败回退 dense；联网搜索失败不影响知识库回答；工具失败降级为 LLM 直答
 - **输出净化**：答案不携带推理前缀、不整段复述原文，关键事实标注 `[n]` 来源编号
+- **安全边界（SEC-1~5）**：主资源按 `owner_id` 隔离；学习样本 owner 过滤；生产默认关闭开放注册；受信代理 IP + Redis 限流；聊天/上传配额；下架/移动 KB 与向量、语义缓存保持一致；检索/网页/工具观察按不可信上下文隔离，工具出站受域名/DLP 约束，`fetch_webpage` 默认关闭
 - **离线优先**：所有模型本地部署，禁用付费 API
 
 ## 7. 相关文档
@@ -122,4 +126,5 @@
 - 开发与测试：[guide/development.md](guide/development.md)
 - 监控运维：[guide/monitoring.md](guide/monitoring.md)
 - 后续优化：[design/improvement-roadmap.md](design/improvement-roadmap.md)
+- 安全与多租户：[design/security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md)
 - 专项设计：见 `design/` 目录

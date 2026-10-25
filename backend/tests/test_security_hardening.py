@@ -152,6 +152,13 @@ def _fake_request(ip: str = "1.2.3.4") -> StarletteRequest:
 class TestRateLimit:
     """进程内滑动窗口限流（W2-9）。"""
 
+    @pytest.fixture(autouse=True)
+    def _no_redis(self, monkeypatch):
+        """限流单测固定走进程内降级，避免受 Redis 单例状态影响。"""
+        import src.utils.rate_limit as rl
+
+        monkeypatch.setattr(rl, "_redis_client", lambda: None)
+
     def setup_method(self):
         reset_rate_limits()
 
@@ -177,23 +184,83 @@ class TestRateLimit:
         assert check_rate_limit("a:k", 1) is True
         assert check_rate_limit("b:k", 1) is True
 
-    def test_enforce_throws_429_with_retry_after(self):
+    async def test_enforce_throws_429_with_retry_after(self):
         for _ in range(2):
             check_rate_limit("enf:1.2.3.4", 2)
         with pytest.raises(HTTPException) as exc:
-            enforce_auth_rate_limit(_fake_request("1.2.3.4"), "enf", 2)
+            await enforce_auth_rate_limit(_fake_request("1.2.3.4"), "enf", 2)
         assert exc.value.status_code == 429
         assert exc.value.headers.get("Retry-After")
 
-    def test_enforce_noop_when_limit_zero(self):
-        enforce_auth_rate_limit(_fake_request(), "enf0", 0)  # 不抛即通过
+    async def test_enforce_noop_when_limit_zero(self):
+        await enforce_auth_rate_limit(_fake_request(), "enf0", 0)  # 不抛即通过
 
-    def test_enforce_uses_client_ip(self):
-        enforce_auth_rate_limit(_fake_request("5.6.7.8"), "enf1", 1)
+    async def test_enforce_uses_client_ip(self):
+        await enforce_auth_rate_limit(_fake_request("5.6.7.8"), "enf1", 1)
         # 同一 IP 第二次被拒；另一 IP 不受影响
         with pytest.raises(HTTPException):
-            enforce_auth_rate_limit(_fake_request("5.6.7.8"), "enf1", 1)
-        enforce_auth_rate_limit(_fake_request("9.9.9.9"), "enf1", 1)
+            await enforce_auth_rate_limit(_fake_request("5.6.7.8"), "enf1", 1)
+        await enforce_auth_rate_limit(_fake_request("9.9.9.9"), "enf1", 1)
+
+    async def test_forwarded_ip_only_trusted_from_proxy(self, monkeypatch):
+        from src.utils.rate_limit import get_client_ip
+
+        monkeypatch.setattr(settings.security, "TRUSTED_PROXY_CIDRS", "172.17.0.0/16")
+        proxied = StarletteRequest(
+            {
+                "type": "http",
+                "client": ("172.17.0.2", 12345),
+                "headers": [
+                    (b"x-forwarded-for", b"203.0.113.9, 172.17.0.2"),
+                    (b"x-real-ip", b"203.0.113.9"),
+                ],
+            }
+        )
+        assert get_client_ip(proxied) == "203.0.113.9"
+
+        direct = StarletteRequest(
+            {
+                "type": "http",
+                "client": ("198.51.100.7", 12345),
+                "headers": [(b"x-forwarded-for", b"1.2.3.4")],
+            }
+        )
+        # 非受信直连客户端伪造 XFF 无效
+        assert get_client_ip(direct) == "198.51.100.7"
+
+
+async def test_redis_sliding_window_uses_eval(monkeypatch):
+    """REDIS 分支：eval 返回 1/0 直接映射为放行/拒绝。"""
+    import src.utils.rate_limit as rl
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def eval(self, *args, **kwargs):
+            self.calls += 1
+            return 1 if self.calls == 1 else 0
+
+    fake = FakeClient()
+    monkeypatch.setattr(rl, "_redis_client", lambda: fake)
+
+    assert await rl.check_rate_limit_async("redis:k", 1) is True
+    assert await rl.check_rate_limit_async("redis:k", 1) is False
+
+
+def test_production_open_registration_rejected(monkeypatch):
+    """SEC-2：生产默认不允许开放注册，必须显式确认。"""
+    from src.main import _validate_registration_policy
+
+    monkeypatch.setattr(settings, "APP_ENV", "prod")
+    monkeypatch.setattr(settings, "IN_DOCKER", False)
+    monkeypatch.setattr(settings.security, "AUTH_ALLOW_REGISTRATION", True)
+    monkeypatch.setattr(settings.security, "ALLOW_OPEN_REGISTRATION_IN_PROD", False)
+    with pytest.raises(RuntimeError):
+        _validate_registration_policy()
+
+    monkeypatch.setattr(settings.security, "AUTH_ALLOW_REGISTRATION", False)
+    _validate_registration_policy()  # 不抛即通过
 
 
 _TEST_SECRET = "Unit-Test-Secret-Key-0123456789abcdef!"

@@ -5,11 +5,14 @@
 """
 
 import logging
+import uuid
 
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from src.auth import get_current_user, require_admin, CurrentUser
+from src.database import async_session
+from src.models import Session as SessionModel
 from src.services.learning_engine import learning_engine
 from src.services.strategy_manager import get_strategy_manager
 
@@ -29,12 +32,14 @@ async def get_learning_stats(current_user: CurrentUser = Depends(get_current_use
     """获取学习引擎的统计信息"""
     try:
         await learning_engine.load_config()
-        stats = await learning_engine.get_learning_stats()
+        stats = await learning_engine.get_learning_stats(owner_id=current_user.user_id)
         execution_stats = stats.get("execution_stats", {})
 
         misclassification_count = 0
         try:
-            misclassified = await learning_engine.get_misclassification_analysis(50)
+            misclassified = await learning_engine.get_misclassification_analysis(
+                50, owner_id=current_user.user_id
+            )
             misclassification_count = len(misclassified.get("misclassified_cases", []))
         except Exception:
             pass
@@ -59,7 +64,9 @@ async def get_misclassification_analysis(
 ):
     """获取误分类案例分析报告"""
     try:
-        analysis = await learning_engine.get_misclassification_analysis(limit)
+        analysis = await learning_engine.get_misclassification_analysis(
+            limit, owner_id=current_user.user_id
+        )
         misclassified_cases = analysis.get("misclassified_cases", [])
 
         # 适配前端期望的数据结构，将 rule_learner 的格式转换为前端 MisclassificationCase 格式
@@ -92,6 +99,19 @@ async def trigger_learning(current_user: CurrentUser = Depends(require_admin)):
         raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
+async def _session_owner_id(session_id: str) -> str:
+    """读取会话归属；会话不存在返回 404，用于学习样本落库时派生 owner。"""
+    try:
+        session_uuid = uuid.UUID(session_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="无效的会话ID")
+    async with async_session() as db:
+        session = await db.get(SessionModel, session_uuid)
+        if session is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return session.user_id
+
+
 @router.post("/record-execution", summary="记录执行")
 async def record_execution(
     session_id: str,
@@ -100,19 +120,23 @@ async def record_execution(
     final_confidence: float,
     strategy_results: Dict[str, float],
     used_knowledge_base: bool,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
-    """记录策略执行"""
+    """记录策略执行（管理操作；owner 由会话归属派生，不信任请求方）。"""
     try:
+        owner_id = await _session_owner_id(session_id)
         execution_id = await learning_engine.record_execution(
             session_id=session_id,
             question=question,
             final_decision=final_decision,
             final_confidence=final_confidence,
             strategy_results=strategy_results,
-            used_knowledge_base=used_knowledge_base
+            used_knowledge_base=used_knowledge_base,
+            user_id=owner_id,
         )
         return {"success": True, "execution_id": execution_id}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("学习引擎操作失败", exc_info=True)
         raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
@@ -123,9 +147,9 @@ async def record_feedback(
     execution_id: str,
     feedback_score: float,
     reason: Optional[str] = None,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
-    """记录用户反馈"""
+    """记录用户反馈（管理操作；execution 归属由样本记录自身决定）。"""
     try:
         await learning_engine.record_feedback(
             execution_id=execution_id,

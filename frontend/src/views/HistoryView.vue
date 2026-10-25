@@ -1,13 +1,13 @@
 <template>
   <div class="flex-1 flex flex-col h-full bg-page overflow-hidden">
-    <header class="bg-surface border-b border-line px-4 sm:px-6 py-3 sm:py-4">
-      <div class="flex items-center justify-between gap-2">
+    <header class="h-16 shrink-0 glass-chrome border-b px-4 sm:px-6">
+      <div class="h-full flex items-center justify-between gap-2">
         <div class="min-w-0">
-          <h1 class="text-lg lg:text-xl font-semibold text-content truncate">历史对话</h1>
-          <p class="hidden sm:block text-sm text-content-muted mt-1">查看和管理您的历史对话记录</p>
+          <h1 class="text-[15px] font-semibold tracking-tight text-content truncate">历史对话</h1>
+          <p class="hidden sm:block text-xs text-content-muted mt-0.5">查看和管理您的历史对话记录</p>
         </div>
         <AppButton
-          :variant="sessionsData?.length ? 'danger' : 'secondary'"
+          :variant="sessionsData?.length ? 'danger-ghost' : 'secondary'"
           :disabled="!sessionsData?.length"
           class="flex-shrink-0"
           @click="clearAllHistory"
@@ -19,12 +19,12 @@
     </header>
 
     <div class="flex-1 overflow-auto p-4 sm:p-6">
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         <AppCard
           v-for="session in sessionsData"
           :key="session.id"
           hoverable
-          class="cursor-pointer hover:border-primary-500 group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
+          class="cursor-pointer hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-hover transition-all group focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400"
           :class="selectedSession?.id === session.id ? 'ring-2 ring-primary-500' : ''"
           role="button"
           tabindex="0"

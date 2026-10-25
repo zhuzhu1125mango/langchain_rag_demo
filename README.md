@@ -1,6 +1,6 @@
-# 📚 LangChain RAG 知识库问答系统
+# 知澜 · 企业知识问答系统
 
-基于 **LangChain + Ollama + Milvus** 构建的企业级私有文档 RAG（Retrieval-Augmented Generation）知识库问答系统，支持完全离线运行，数据安全可控。
+**知澜**是基于 **LangChain + Ollama + Milvus** 构建的企业级私有文档 RAG（Retrieval-Augmented Generation）知识问答平台，支持完全离线运行，数据安全可控。
 
 ---
 
@@ -17,14 +17,16 @@
 | 📖 **LLM-Wiki 编译层** | 将文档预编译为结构化页面（增量编译 / 交叉链接 / 一致性检查） | ✅ |
 | 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
 | 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启，多工具/多步推理）＋原生 Function Calling / ReAct 作为回退路径 | ✅ |
-| 🛡️ **Agent 安全护栏** | 输入（提示注入/越权/超长）拦截、工具参数与 URL 安全校验、输出凭证/系统提示脱敏；高危工具可开启人工审批（SSE 审批卡片 + 回执 API，`AGENT_APPROVAL_MODE` 默认 off） | ✅ |
+| 🛡️ **Agent 安全护栏** | 输入（提示注入/越权/超长）拦截、工具参数与 URL 安全校验、输出凭证/系统提示脱敏；高危工具可开启人工审批（SSE 审批卡片 + 回执 API，`AGENT_APPROVAL_MODE` 默认 off）；SEC-5：检索/网页内容按不可信上下文隔离、工具域名/DLP 策略、`fetch_webpage` 默认关闭 | ✅ |
+| 🔐 **多租户安全与配额** | SEC-1~5：学习样本按 owner 隔离；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致 | ✅ |
 | 📊 **Agent 评测** | 轨迹级四维确定性评测 + 答案级判分器 + A/B 门槛与离线 harness（`AGENT_TRAJ_EVAL_ENABLED` 默认关；在线抽样待办） | ✅ |
 | 💬 **流式输出** | 实时打字效果，提升用户体验 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
 | 🧹 **问候过滤** | 你好 / hi / 在吗 等日常对话直接走 LLM，跳过知识库检索 | ✅ |
 | 🔗 **来源展示** | 前端同时展示知识库片段与网页搜索来源（标题/URL） | ✅ |
 | 🔒 **完全离线（模型侧）** | 使用本地 Ollama 模型，无需付费 API；联网搜索默认走 Tavily 在线 API（可选，`SEARCH_PROVIDER` 可切换） | ✅ |
-| 🖥️ **界面支持** | Vue3 生产级界面 | ✅ |
+| 🖥️ **界面支持** | Vue3 + Tailwind/Element Plus 设计系统：语义 token、组件 primitive、三态组件、响应式布局与暗色模式 | ✅ |
+| 🧭 **系统能力状态** | 设置页只读展示默认关闭/需运维开启的能力（Wiki 编译、网页抓取、高危审批、A-B 聊天分流、学习权重回载、轨迹评测）及风险与开启方式 | ✅ |
 | 📊 **实验框架** | A/B 实验管理 API（创建/分流/度量）；**已接入 chat 链路**（变体白名单覆盖 decision/检索参数 + response_time 指标回收），灰度开关 `AB_EXPERIMENT_CHAT_ENABLED` 默认关 | ✅ |
 | 🧠 **动态学习** | 基于用户反馈的规则学习引擎；**写回闭环已接入**（单例权重回载 + KB 短路路径样本补采），灰度开关 `LEARNING_WEIGHT_RELOAD_ENABLED` / `LEARNING_SAMPLE_COLLECT_BG_ENABLED` 默认关 | ✅ |
 | 🔎 **答案可信度** | 引用补全（embedding 匹配补 `[n]`）+ 数值幻觉校验 + 分档置信度提示 | ✅ |
@@ -252,6 +254,8 @@ docker logs -f frontend-dev
 **启动前准备：**
 1. 基于 `.env.example` 创建并配置 `.env.prod` 文件
 2. 务必为所有密码项设置强密码（POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / GF_SECURITY_ADMIN_PASSWORD）
+3. 设置 `AUTH_ALLOW_REGISTRATION=false`（生产默认安全值；若确需开放注册，必须同时设置 `ALLOW_OPEN_REGISTRATION_IN_PROD=true`，否则后端拒绝启动）
+4. 设置强随机 `ADMIN_KEY`（学习写入、系统配置、指标重置等管理接口使用）
 
 **一键启动：**
 ```bash
@@ -706,6 +710,16 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `MINIO_BUCKET_NAME` | MinIO 存储桶名称 | `documents` | - |
 | `MINIO_SECURE` | 是否启用 HTTPS | `false` | true/false |
 | `SECRET_KEY` | JWT/安全签名密钥 | 无（开发缺失时启动自动生成临时密钥） | 生产环境必须设置为强密钥，否则启动失败 |
+| `AUTH_ALLOW_REGISTRATION` | 是否开放注册 | `true`（开发） | 生产建议 `false`；生产为 true 且未显式确认时拒绝启动 |
+| `ALLOW_OPEN_REGISTRATION_IN_PROD` | 生产显式允许开放注册 | `false` | 仅确需开放注册时设 true |
+| `TRUSTED_PROXY_CIDRS` | 受信代理网段（逗号分隔 CIDR/IP） | `127.0.0.1/32,::1/128` | Docker 由 compose 注入内网网段；仅受信代理的 XFF/X-Real-IP 生效 |
+| `QUOTA_ENFORCEMENT_ENABLED` | 聊天/上传配额总开关 | `true` | true/false；0 配额表示不限 |
+| `CHAT_RATE_LIMIT_PER_MINUTE` | 聊天每分钟请求上限 | `10` | - |
+| `CHAT_MAX_CONCURRENT_STREAMS_PER_USER` | 每用户并发流上限 | `2` | - |
+| `CHAT_DAILY_MESSAGE_QUOTA` | 每用户每日消息上限 | `200` | - |
+| `UPLOAD_MAX_FILES_PER_BATCH` | 单次批量上传文件数上限 | `20` | - |
+| `UPLOAD_MAX_BATCH_MB` | 单批上传总大小上限（MB） | `200` | - |
+| `UPLOAD_DAILY_MB_PER_USER` | 每用户每日上传字节上限（MB） | `500` | - |
 | `USER_API_KEYS_ENABLED` | 用户级 API Key 开关（设置页自助签发/吊销） | `false` | true/false；开启后用户可签发 `rag_` 前缀 Key，以其本人 `user_id` 调 API（owner 隔离同 JWT），MCP/脚本/CI 集成用 |
 | `USER_API_KEYS_MAX_PER_USER` | 每用户 Key 数量上限 | `5` | - |
 | `AUTH_RATE_LIMIT_API_KEY_CREATE` | 签发端点限流（次/分/IP） | `5` | 0 = 不限流 |
@@ -734,6 +748,9 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `SEARCH_CACHE_TTL` | 搜索结果缓存时间（秒） | 3600 | - |
 | `SEARCH_CONTENT_CACHE_TTL` | 网页内容缓存时间（秒） | 86400 | - |
 | `SEARCH_ENABLE_FUNCTION_CALLING` | 是否启用 Function Calling | `true` | true/false |
+| `AGENT_WEB_FETCH_ENABLED` | 是否向 Agent 暴露网页深度抓取（`fetch_webpage`） | `false` | SEC-5：默认关闭；开启后受审批/域名/DLP 策略约束 |
+| `GUARDRAIL_TOOL_DOMAIN_ALLOWLIST` / `GUARDRAIL_TOOL_DOMAIN_DENYLIST` | 工具出站域名白/黑名单（逗号分隔） | 空 | 空 allowlist = 允许任意公网域名；denylist 优先 |
+| `AGENT_APPROVAL_MODE` / `AGENT_APPROVAL_TOOLS` | HITL 审批模式 / 强制审批工具 | `off` / `fetch_webpage` | 审批模式 off 时名单不生效；开启 wait/reject 后生效 |
 | `SEARCH_ENABLE_REACT` | 是否启用 ReAct Agent | `false` | true/false |
 | `SEARCH_REACT_MAX_STEPS` | ReAct 最大推理步数 | 3 | - |
 | `SEARCH_AGENT_FALLBACK_TO_PHASE2` | Agent 失败是否回退到普通搜索 | `true` | true/false |
@@ -806,7 +823,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | 模式 | `search_mode` | 说明 |
 |------|---------------|------|
 | 简单联网搜索 | `simple` | 单次搜索，结果经 LLM 改写、Cross-Encoder 重排后进入上下文 |
-| Function Calling | `function_calling` | 本地模型优先走原生 FC（`bind_tools`），不支持时回退 prompt-based JSON 约定。该路径暴露 3 个工具：`web_search` / `fetch_webpage` / `get_current_time`（需开启 `SEARCH_ENABLE_FUNCTION_CALLING`，默认已开启） |
+| Function Calling | `function_calling` | 本地模型优先走原生 FC（`bind_tools`），不支持时回退 prompt-based JSON 约定。该路径暴露 `web_search` / `fetch_webpage` / `get_current_time`（需开启 `SEARCH_ENABLE_FUNCTION_CALLING`，默认已开启）；**`fetch_webpage` 默认关闭**（`AGENT_WEB_FETCH_ENABLED=false`），需要时显式开启并受审批/域名/DLP 策略约束 |
 | ReAct Agent | `agent` | 多轮 Thought → Action → Observation 迭代搜索（需开启 `SEARCH_ENABLE_REACT=true`） |
 
 **前端使用示例**：
@@ -907,6 +924,8 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 | 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](docs/project-status.md) |
 | 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
 | 全项目演进路线 | 2026-10 对标审计：标配/差异化/避免、UX/视觉/代码/运维差距与三批执行序 | [docs/design/evolution-roadmap-2026-10.md](docs/design/evolution-roadmap-2026-10.md) |
+| 安全与多租户加固 | SEC-1~5 实施方案、验收与任务清单（公网多租户前置） | [docs/design/security-multitenancy-hardening-2026-10.md](docs/design/security-multitenancy-hardening-2026-10.md) |
+| UI 视觉收口 | VIS-3 调研结论、设计方向与实施记录（8px 网格/聊天主列/弹窗下拉） | [docs/design/ui-visual-polish-2026-10.md](docs/design/ui-visual-polish-2026-10.md) |
 | 专项设计文档 | 检索增强/意图路由/搜索优化等设计 | `docs/design/` |
 | 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](docs/archive/code-review-2026-08.md) |
 | 快速开始 | 项目入门指南 | 本文件 |
@@ -951,6 +970,7 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8080, 9002, 9003, 19531, 9092, 3001, 9094, 9095；前端 8080 绑定 0.0.0.0，其余均仅绑定回环地址。前端容器内监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
 10. **联网搜索稳定性**: 联网搜索默认走 Tavily 在线 API，需在 `SEARCH_API_KEY` 配置有效的 Key；如遇网络或配额限制可切换其它 provider
+11. **公网多租户边界**: SEC-1~5 已完成（学习隔离/注册配额/代理限流/状态索引/Agent 出站），但 SEC-6~15（通知频道、SSRF 纵深、JWT 吊销、备份/供应链等）仍未完成；公网多租户请按受控网络 + 最小权限运营，详见 [安全与多租户加固](docs/design/security-multitenancy-hardening-2026-10.md)
 
 ### 环境启停
 

@@ -6,7 +6,7 @@
 
 import logging
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from src.config import settings
 
@@ -52,6 +52,79 @@ class OutputGuard:
 
 
 _default_guard = OutputGuard()
+
+
+class StreamingOutputGuard:
+    """流式输出脱敏：跨 chunk 的密钥/系统提示不会因切片而漏检。
+
+    策略：无触发器时仅保留极短尾部（8 字符）以捕获跨切片的触发前缀；
+    一旦发现触发器（sk-/AKIA/Bearer/私钥/DB URL/系统提示首句），从触发器
+    位置起暂存，直到 flush 或超过 max_buffer 后释放已脱敏前缀。这样正常
+    文本几乎无延迟，可疑片段最多延迟 max_buffer 字符。
+    """
+
+    _TRIGGERS = (
+        "sk-",
+        "AKIA",
+        "Bearer ",
+        "-----BEGIN",
+        "postgres://",
+        "postgresql://",
+        "你是一个严谨的智能助手",
+    )
+
+    def __init__(self, guard: Optional[OutputGuard] = None, holdback: int = 8, max_buffer: int = 256):
+        self.guard = guard or _default_guard
+        self.holdback = holdback
+        self.max_buffer = max_buffer
+        self.buffer = ""
+
+    def _enabled(self) -> bool:
+        return bool(
+            settings.guardrail.GUARDRAIL_ENABLED
+            and settings.guardrail.GUARDRAIL_OUTPUT_ENABLED
+        )
+
+    def feed(self, chunk: str) -> Tuple[str, List[str]]:
+        if not chunk:
+            return "", []
+        if not self._enabled():
+            return chunk, []
+
+        self.buffer += chunk
+        trigger_idx = -1
+        for trigger in self._TRIGGERS:
+            idx = self.buffer.find(trigger)
+            if idx != -1 and (trigger_idx == -1 or idx < trigger_idx):
+                trigger_idx = idx
+
+        if trigger_idx == -1:
+            if len(self.buffer) <= self.holdback:
+                return "", []
+            emit = self.buffer[:-self.holdback]
+            self.buffer = self.buffer[-self.holdback:]
+        else:
+            if trigger_idx > 0:
+                emit = self.buffer[:trigger_idx]
+                self.buffer = self.buffer[trigger_idx:]
+            else:
+                emit = ""
+            if len(self.buffer) > self.max_buffer:
+                cut = len(self.buffer) - self.max_buffer
+                prefix, prefix_hits = self.guard.redact(self.buffer[:cut])
+                self.buffer = self.buffer[cut:]
+                safe, hits = self.guard.redact(emit + prefix)
+                return safe, prefix_hits + hits
+
+        safe, hits = self.guard.redact(emit)
+        return safe, hits
+
+    def flush(self) -> Tuple[str, List[str]]:
+        if not self.buffer:
+            return "", []
+        text, hits = self.guard.redact(self.buffer)
+        self.buffer = ""
+        return text, hits
 
 
 def get_output_guard() -> OutputGuard:

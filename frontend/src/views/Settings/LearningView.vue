@@ -6,6 +6,19 @@
         <p class="text-sm text-content-muted mt-1">管理策略学习和优化引擎的配置</p>
       </div>
 
+      <FeatureNotice
+        :enabled="weightReload?.enabled"
+        title="学习权重回载未开启"
+        description="当前学习结果只做统计，不会作用于在线决策。"
+        env-var="LEARNING_WEIGHT_RELOAD_ENABLED"
+      />
+      <FeatureNotice
+        :enabled="sampleCollect?.enabled"
+        title="学习样本后台补采未开启"
+        description="KB 勾选短路时不会补采策略样本，学习数据可能不完整。"
+        env-var="LEARNING_SAMPLE_COLLECT_BG_ENABLED"
+      />
+
       <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <AppCard padding="none" class="p-5">
           <div class="flex items-center gap-3 mb-3">
@@ -231,8 +244,13 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
 import { AppButton, AppCard, AppStateView } from '@/components/ui'
+import FeatureNotice from '@/components/settings/FeatureNotice.vue'
+import { findFeature, useSystemFeatures } from '@/queries/features'
 
 const toast = useToast()
+const { data: systemFeatures } = useSystemFeatures()
+const weightReload = computed(() => findFeature(systemFeatures.value, 'learning_weight_reload'))
+const sampleCollect = computed(() => findFeature(systemFeatures.value, 'learning_sample_collect'))
 
 const { data: stats } = useLearningStats()
 const { data: config, refetch, isLoading: isConfigLoading } = useLearningConfig()

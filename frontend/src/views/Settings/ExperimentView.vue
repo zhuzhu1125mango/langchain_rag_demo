@@ -6,6 +6,13 @@
         <p class="text-sm text-content-muted mt-1">管理和分析A/B测试实验，优化问答策略</p>
       </div>
 
+      <FeatureNotice
+        :enabled="abChat?.enabled"
+        title="聊天分流未开启"
+        description="实验管理可用，但问答请求不会自动进入实验变体；开启后才会按运行中的实验配置分流并回收指标。"
+        env-var="AB_EXPERIMENT_CHAT_ENABLED"
+      />
+
       <div class="flex items-center justify-between">
         <div class="flex items-center gap-2">
           <button
@@ -337,9 +344,14 @@ import {
 import { useToast } from '@/composables/useToast'
 import { formatDate } from '@/utils/format'
 import { AppBadge, AppButton, AppCard, AppDialog, AppInput, AppStateView } from '@/components/ui'
+import FeatureNotice from '@/components/settings/FeatureNotice.vue'
+import { findFeature, useSystemFeatures } from '@/queries/features'
 
 const toast = useToast()
 const queryClient = useQueryClient()
+
+const { data: systemFeatures } = useSystemFeatures()
+const abChat = computed(() => findFeature(systemFeatures.value, 'ab_chat'))
 
 const { data: experiments, refetch } = useExperiments()
 

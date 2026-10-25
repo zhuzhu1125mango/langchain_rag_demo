@@ -1,5 +1,5 @@
 <template>
-  <aside 
+  <aside
     :inert="sidebarInert"
     :aria-hidden="sidebarInert || undefined"
     :class="[
@@ -7,20 +7,16 @@
       'w-72 max-w-[85vw] lg:max-w-none',
       appStore.sidebarCollapsed ? 'lg:w-16' : 'lg:w-64',
       mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
-      'bg-surface border-r border-line'
+      'glass-chrome border-r'
     ]"
   >
-    <div class="flex items-center justify-between h-16 px-4 border-b border-line shrink-0">
+    <div class="flex items-center justify-between h-16 px-4 shrink-0">
       <div class="flex items-center gap-3 overflow-hidden">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center flex-shrink-0">
-          <BookOpen class="w-5 h-5 text-white" />
+        <BrandMark class="w-8 h-8 flex-shrink-0" />
+        <div v-show="showLabels" class="flex flex-col min-w-0 leading-tight">
+          <span class="font-semibold tracking-tight text-content text-[15px] truncate">知澜</span>
+          <span class="text-[10px] text-content-subtle tracking-wide truncate">企业知识问答</span>
         </div>
-        <span 
-          v-show="showLabels" 
-          class="font-bold text-content text-lg truncate"
-        >
-          RAG 知识库
-        </span>
       </div>
       <!-- 移动端抽屉关闭按钮 -->
       <AppButton
@@ -40,15 +36,20 @@
           <router-link
             :to="item.path"
             @click="emit('close')"
+            :title="item.label"
+            :aria-current="$route.path === item.path ? 'page' : undefined"
             :class="[
-              'flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all duration-200',
-              'hover:bg-surface-hover',
-              $route.path === item.path 
-                ? 'bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400' 
-                : 'text-content-tertiary'
+              'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200',
+              $route.path === item.path
+                ? 'bg-surface text-content shadow-card ring-1 ring-line/70'
+                : 'text-content-secondary hover:bg-sidebar-hover hover:text-content'
             ]"
           >
-            <component :is="item.icon" class="w-5 h-5 flex-shrink-0" />
+            <component
+              :is="item.icon"
+              class="w-5 h-5 flex-shrink-0 transition-colors"
+              :class="$route.path === item.path ? 'text-primary-600 dark:text-primary-400' : 'text-content-muted'"
+            />
             <span v-show="showLabels" class="truncate">{{ item.label }}</span>
           </router-link>
         </li>
@@ -60,11 +61,12 @@
       v-if="isChatRoute && showLabels"
       class="flex-1 min-h-0 flex flex-col border-t border-line-subtle"
     >
-      <div class="px-4 pt-3 pb-1.5 flex items-center justify-between shrink-0">
-        <span class="text-xs font-medium text-content-subtle">对话历史</span>
+      <div class="px-4 pt-4 pb-2 flex items-center justify-between shrink-0">
+        <span class="text-[11px] font-medium uppercase tracking-wider text-content-subtle">最近对话</span>
         <AppButton
-          variant="primary-ghost"
+          variant="ghost"
           size="xs"
+          class="text-content-tertiary hover:text-primary-600 dark:hover:text-primary-400"
           @click="handleNewSession(); emit('close')"
         >
           <Plus class="w-3 h-3" />
@@ -77,15 +79,19 @@
           :key="session.id"
           @click="switchSession(session); emit('close')"
           :class="[
-            'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left transition-colors',
+            'w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-left text-sm transition-all',
             chatStore.currentSession?.id === session.id
-              ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-              : 'text-content-tertiary hover:bg-surface-hover'
+              ? 'bg-surface text-content shadow-card ring-1 ring-line/70'
+              : 'text-content-secondary hover:bg-sidebar-hover hover:text-content'
           ]"
+          :aria-current="chatStore.currentSession?.id === session.id ? 'page' : undefined"
           :title="session.title || '未命名对话'"
         >
-          <MessageSquare class="w-3.5 h-3.5 flex-shrink-0 opacity-60" />
-          <span class="text-sm truncate flex-1">{{ session.title || '未命名对话' }}</span>
+          <MessageSquare
+            class="w-3.5 h-3.5 flex-shrink-0"
+            :class="chatStore.currentSession?.id === session.id ? 'text-primary-500' : 'text-content-subtle'"
+          />
+          <span class="text-[13px] truncate flex-1">{{ session.title || '未命名对话' }}</span>
         </button>
         <p v-if="!sessions?.length" class="text-xs text-content-subtle text-center py-4">
           暂无会话
@@ -94,10 +100,10 @@
     </div>
     <div v-else class="flex-1"></div>
 
-    <div class="p-4 border-t border-line shrink-0">
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-full bg-gradient-to-br from-primary-400 to-primary-600 flex items-center justify-center text-white font-medium flex-shrink-0">
-          <User class="w-5 h-5" />
+    <div class="p-3 border-t border-line shrink-0">
+      <div class="flex items-center gap-3 px-1 py-1">
+        <div class="w-8 h-8 rounded-full bg-surface-strong flex items-center justify-center text-content-secondary flex-shrink-0 ring-1 ring-line">
+          <User class="w-4 h-4" />
         </div>
         <div v-show="showLabels" class="flex-1 min-w-0">
           <p class="text-sm font-medium text-content truncate">
@@ -123,7 +129,9 @@
           @click="appStore.toggleDark"
           :class="[
             'flex-1 p-2 rounded-lg transition-colors',
-            appStore.isDark ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            appStore.isDark
+              ? 'bg-primary-900/30 text-primary-300 hover:bg-primary-900/40'
+              : 'bg-surface-subtle text-content-tertiary hover:bg-surface-hover'
           ]"
           :title="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'"
           :aria-label="appStore.isDark ? '切换到浅色模式' : '切换到深色模式'"
@@ -165,7 +173,8 @@ import type { Session } from '@/queries/chat'
 import { api } from '@/utils/axios'
 import { useToast } from '@/composables/useToast'
 import { AppButton } from '@/components/ui'
-import { BookOpen, MessageCircle, FolderOpen, Settings, User, Sun, Moon, ChevronLeft, ChevronRight, Clock, LogOut, Activity, MessageSquare, Plus, X } from '@lucide/vue'
+import BrandMark from '@/components/BrandMark.vue'
+import { MessageCircle, FolderOpen, Settings, User, Sun, Moon, ChevronLeft, ChevronRight, Clock, LogOut, Activity, MessageSquare, Plus, X } from '@lucide/vue'
 
 const props = defineProps<{
   /** 移动端抽屉是否展开（桌面端忽略，始终按折叠态宽度展示） */

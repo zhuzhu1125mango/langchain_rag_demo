@@ -26,17 +26,19 @@ class RuleLearner:
         self.confidence_threshold = 0.7
         self.pattern_min_frequency = 3
     
-    async def extract_training_samples(self, limit: int = 1000) -> List[Dict[str, Any]]:
+    async def extract_training_samples(self, limit: int = 1000,
+                                       owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         提取训练样本
         
         Args:
             limit: 样本数量限制
+            owner_id: 可选，仅提取该所有者的样本（API 查询必须传入；后台训练不传）
             
         Returns:
             List[Dict[str, Any]]: 训练样本列表
         """
-        executions = await sample_store.get_executions_with_feedback(limit)
+        executions = await sample_store.get_executions_with_feedback(limit, owner_id=owner_id)
         samples = []
         
         for execution in executions:
@@ -156,17 +158,19 @@ class RuleLearner:
             "new_weights": strategy_manager.weights.copy()
         }
     
-    async def analyze_misclassifications(self, limit: int = 50) -> List[Dict[str, Any]]:
+    async def analyze_misclassifications(self, limit: int = 50,
+                                         owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         分析误分类案例
         
         Args:
             limit: 返回数量限制
+            owner_id: 可选，仅分析该所有者的样本
             
         Returns:
             List[Dict[str, Any]]: 误分类案例列表
         """
-        samples = await self.extract_training_samples()
+        samples = await self.extract_training_samples(owner_id=owner_id)
         misclassified = []
         
         for sample in samples[:limit]:
@@ -244,17 +248,19 @@ class RuleLearner:
         
         return result[:20]
     
-    async def suggest_new_keywords(self, limit: int = 20) -> List[Dict[str, Any]]:
+    async def suggest_new_keywords(self, limit: int = 20,
+                                   owner_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         基于误分类案例建议新关键词
         
         Args:
             limit: 返回数量限制
+            owner_id: 可选，仅分析该所有者的样本
             
         Returns:
             List[Dict[str, Any]]: 建议的关键词列表
         """
-        misclassified = await self.analyze_misclassifications(limit * 10)
+        misclassified = await self.analyze_misclassifications(limit * 10, owner_id=owner_id)
         keywords = defaultdict(int)
         
         for case in misclassified:
@@ -272,17 +278,19 @@ class RuleLearner:
             for kw, freq in sorted_keywords[:limit]
         ]
     
-    async def discover_question_patterns(self, limit: int = 50) -> Dict[str, Any]:
+    async def discover_question_patterns(self, limit: int = 50,
+                                         owner_id: Optional[str] = None) -> Dict[str, Any]:
         """
         从误分类案例中发现问题模式
         
         Args:
             limit: 返回数量限制
+            owner_id: 可选，仅分析该所有者的样本
             
         Returns:
             Dict[str, Any]: 模式分析结果
         """
-        misclassified = await self.analyze_misclassifications(limit * 10)
+        misclassified = await self.analyze_misclassifications(limit * 10, owner_id=owner_id)
         
         false_positive_questions = [
             case["question"] for case in misclassified 

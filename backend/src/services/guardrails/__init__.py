@@ -11,8 +11,13 @@
 
 from .approval import ApprovalGate, get_approval_gate
 from .base import GuardrailHit, REDACTION_TEXT
+from .context_guard import (
+    contains_injection_signals,
+    injection_signal_reason,
+    wrap_untrusted_context,
+)
 from .input_guard import INPUT_BLOCK_MESSAGE, InputGuard, get_input_guard
-from .output_guard import OutputGuard, get_output_guard
+from .output_guard import OutputGuard, StreamingOutputGuard, get_output_guard
 from .tool_guard import ToolGuard, get_tool_guard
 
 __all__ = [
@@ -22,9 +27,13 @@ __all__ = [
     "InputGuard",
     "OutputGuard",
     "REDACTION_TEXT",
+    "StreamingOutputGuard",
     "ToolGuard",
+    "contains_injection_signals",
     "get_approval_gate",
     "get_input_guard",
     "get_output_guard",
     "get_tool_guard",
+    "injection_signal_reason",
+    "wrap_untrusted_context",
 ]

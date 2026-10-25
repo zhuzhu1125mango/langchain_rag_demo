@@ -26,9 +26,15 @@ pnpm install
 cd backend
 uv run pytest -q            # 全量
 uv run pytest tests/test_rag_chain.py -q   # 单文件
+
+# SEC-1~5 专项回归（学习隔离 / 配额 / 文档状态 / Agent 出站 / 限流）
+uv run pytest tests/test_learning_isolation.py tests/test_quota.py \
+  tests/test_document_state_consistency.py tests/test_agent_security.py \
+  tests/test_security_hardening.py -q
 ```
 
-基线：1019 passed / 102 skipped（2026-10-15 实测）。
+基线：本机（Windows，排除 5 个已知 `python-magic` 崩溃模块）**1073 passed / 105 skipped**（2026-10-24）；Linux CI 跑全量。
+单测默认在 `tests/conftest.py` 设置 `QUOTA_ENFORCEMENT_ENABLED=false`，避免跨用例累计触发 429；配额逻辑由 `test_quota.py` 直接覆盖。
 
 ### 2.2 集成测试（需容器）
 
@@ -118,6 +124,7 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 12. **本机代理 Fake-IP 陷阱**：Clash 类代理的 Fake-IP 模式把外网域名解析到 198.18.0.0/15（is_private=True）→ `validate_url_safe` 判受限，联网搜索在本机开代理时不可用（环境限制非缺陷）；URL 安全测试需 mock `getaddrinfo` 消除对真实 DNS 的依赖
 13. **宿主端口占用静默失效**：本地已有 redis（如 WSL 内实例）占 6379 时，docker compose 的端口发布可能静默不生效（容器正常跑但 `docker port` 为空、宿主连到的是另一个无密码实例）；排查用 `docker port <容器>` 与 `netstat` 对照，勿假设 compose ports 必然生效
 14. **GHA runner 无预装 uv/uvx**：CI 里用 `uvx ruff` 等必须先 `astral-sh/setup-uv`；PowerShell 不支持 bash heredoc，Windows 本地写多行 commit message 用 `git commit -F <文件>`
+15. **Windows python-magic 挂死**：本机 `.venv` 若残留 `python-magic`（与 `python-magic-bin` 冲突），全量测试会卡在 document loader/OCR 的 `magic/compat.py` 并以 access violation 退出；先用 `uv sync --frozen` 重建环境。临时跑其余全量可排除 `test_document_loaders.py`、`test_ocr_parsing.py`、`test_document_processor.py`、`test_structured_chunking.py`、`evaluation/test_structured_vs_recursive.py`；Linux CI 不受影响
 
 ## 5. 代码约定
 

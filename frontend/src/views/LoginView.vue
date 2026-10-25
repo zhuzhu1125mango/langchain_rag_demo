@@ -1,14 +1,15 @@
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-page px-4">
+  <div class="min-h-screen flex items-center justify-center bg-transparent px-4">
     <div class="w-full max-w-md">
-      <div class="flex items-center justify-center gap-3 mb-8">
-        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
-          <BookOpen class="w-6 h-6 text-white" />
+      <div class="flex flex-col items-center gap-3 mb-8">
+        <BrandMark class="w-12 h-12" />
+        <div class="text-center">
+          <h1 class="text-2xl font-semibold tracking-tight text-content">知澜</h1>
+          <p class="text-sm text-content-muted mt-1">企业知识问答</p>
         </div>
-        <h1 class="text-2xl font-bold text-content">RAG 知识库问答系统</h1>
       </div>
 
-      <AppCard padding="none" class="p-6 sm:p-8">
+      <AppCard padding="none" class="glass-panel border p-6 sm:p-8">
         <el-tabs v-model="activeTab">
           <el-tab-pane label="登录" name="login">
             <el-form
@@ -109,7 +110,7 @@ import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import { ElMessage } from 'element-plus'
-import { BookOpen } from '@lucide/vue'
+import BrandMark from '@/components/BrandMark.vue'
 import { useAppStore } from '@/stores/app'
 import { AppCard } from '@/components/ui'
 

@@ -28,6 +28,8 @@ export function useSessionLoader() {
         reasoning?: ReasoningStep[]
         thinking?: string
         source_metadata?: RawSourceMeta[]
+        error?: string
+        stopped?: boolean
       }
 
       interface SessionResponse {
@@ -51,6 +53,8 @@ export function useSessionLoader() {
           content: msg.content,
           reasoning: msg.reasoning,
           thinking: msg.thinking,
+          error: msg.error,
+          stopped: msg.stopped,
           sources: msg.source_metadata?.map((meta, idx: number) => ({
             source: meta.filename || meta.document_id || 'unknown',
             score: meta.score || 0,

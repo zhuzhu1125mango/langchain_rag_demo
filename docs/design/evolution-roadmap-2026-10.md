@@ -1,6 +1,6 @@
 # 全项目演进与完善路线（2026-10 审计）
 
-> 状态：已确认（2026-10-22 审计定稿）
+> 状态：已确认（2026-10-22 审计定稿；2026-10-24 补安全与多租户专项）
 > 关联：[project-status.md](../project-status.md)（唯一任务台账）、[agent-maturity-gap-analysis.md](agent-maturity-gap-analysis.md)、[agent-guardrails-hitl.md](agent-guardrails-hitl.md)
 > 目标：不仅「好用」（能力与交互），也要「好看」（设计系统与代码观感）。
 
@@ -81,7 +81,7 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 |---|---|---|---|
 | VIS-1 | 设计 token 层 | ✅ 已实施（2026-10-24）：`style.css` 新增语义色（page/surface/content/line/status）、圆角与阴影 token，`.dark` 统一覆盖；全局组件类改用 `var(--token)`；35 个前端文件将 `light + dark:` 成对类迁移为 `bg-surface` / `text-content` / `border-line` 等语义类；SVG/Markdown 硬编码色改走 token | 已完成 |
 | VIS-2 | 组件 primitive | ✅ 已实施（2026-10-24）：`components/ui/` 提供 AppButton/AppCard/AppBadge/AppInput/AppSelect/AppDialog（+11 单测）；Button 6 组变体 + 6 种尺寸，Dialog 统一 EP 封装；手写 button 127→38（余量为专用控件），卡片/弹窗/表单完成迁移；删除未使用的全局 btn/card/input/badge 类 | 已完成 |
-| VIS-3 | 页面视觉收口 | 设置页、知识库页、聊天页密度/圆角/阴影不一致 | P2 |
+| VIS-3 | 页面视觉收口 | ✅ 已实施（2026-10-24）：EP 弹窗/下拉/表单/表格 token 化；聊天 768px 主列 + 欢迎态/气泡；知识库移动端工具栏与表格滚动；设置页宽度/侧栏统一；浅深色/移动端截图验证 | 已完成 |
 
 ### 3.4 代码观感（CODE）
 
@@ -102,7 +102,32 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 | OPS-4 | 回归与演练 | 无 nightly 性能回归、无迁移回滚演练 | P2 |
 | OPS-5 | 覆盖率上调 | 62.12% → 65%（只升不降） | P3 |
 
+### 3.6 安全与多租户（SEC，2026-10-24 对抗性审查）
+
+> 方案与验收见 [security-multitenancy-hardening-2026-10.md](security-multitenancy-hardening-2026-10.md)；任务台账见 [project-status.md](../project-status.md)「安全与多租户加固专项」。
+
+| # | 方向 | 结论 | 优先级 |
+|---|---|---|---|
+| SEC-1 | 学习模块隔离 | ✅ 已实施（2026-10-24）：execution owner 回填 + 查询过滤 + record-* 收口 | P1 |
+| SEC-2 | 注册与资源配额 | ✅ 已实施（2026-10-24）：生产注册护栏 + chat/upload 配额 | P1 |
+| SEC-3 | 代理感知限流 | ✅ 已实施（2026-10-24）：受信代理 IP + Redis 滑动窗口 + 降级 | P1 |
+| SEC-4 | 状态/索引一致性 | ✅ 已实施（2026-10-24）：下架删向量/上架重建 + KB 移动重建 + 缓存失效 | P1 |
+| SEC-5 | Agent 注入与出站 | ✅ 已实施（2026-10-24）：不可信上下文 + 工具域名/DLP + fetch 默认关 + 红队回归 | P1 |
+| SEC-6~15 | 企业级加固 | 待办；建议序：SEC-6 实验 → SEC-8 通知 → SEC-7 分类标签 → SEC-9 SSRF → SEC-10 JWT → SEC-11 缓存索引 → SEC-12 健康 → SEC-13 运维/供应链 → SEC-14 隐私 → SEC-15 测试 | P2 |
+| SEC-16~21 | 纵深与体验 | SEC-20/21 已完成；SEC-18 部分完成（status Literal）；剩余建议序：SEC-19 → SEC-16 → SEC-17 → SEC-18 分页/上限 | P3 |
+
+**上线红线**：SEC-1~5 已完成；SEC-6~15 未完成前，公网多租户仍按受控网络运营。
+
 ## 4. 执行批次
+
+**批次 0：安全加固（公网前置，P1）——✅ 已完成（2026-10-24）**
+- SEC-1 学习隔离 → SEC-3 代理限流 → SEC-2 注册/配额 → SEC-4 状态/索引 → SEC-5 Agent 出站
+
+**批次 0.5：安全 P2（企业级）**
+- SEC-6 实验 → SEC-8 通知 → SEC-7 分类标签 → SEC-9 SSRF → SEC-10 JWT → SEC-11 缓存索引 → SEC-12 健康 → SEC-13 运维/供应链 → SEC-14 隐私 → SEC-15 测试
+
+**批次 0.6：安全 P3（纵深）**
+- SEC-19 ToolGuard DNS → SEC-16 CSP/TLS → SEC-17 评估配额 → SEC-18 分页/上限（SEC-20/21 已完成）
 
 **批次 1：体感与观感（P1，优先）**
 - UX-1 停止生成 / 编辑重发；UX-2 移动端；UX-3 a11y 基础；UX-4 三态组件

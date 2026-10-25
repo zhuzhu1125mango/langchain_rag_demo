@@ -1,6 +1,6 @@
 <template>
-  <div class="px-3 sm:px-6 pb-3 sm:pb-4 pt-1">
-    <div class="max-w-4xl mx-auto">
+  <div class="px-3 sm:px-6 pb-4 sm:pb-5 pt-3 bg-gradient-to-t from-surface via-surface/95 to-transparent">
+    <div class="max-w-3xl mx-auto">
       <!-- 问题重写结果显示 -->
       <div v-if="rewriteResult" class="mb-2 px-3 py-2 bg-primary-50/60 dark:bg-primary-900/20 border border-primary-100 dark:border-primary-800/60 rounded-xl">
         <div class="flex items-start justify-between gap-2">
@@ -75,7 +75,7 @@
       <!-- 智能推荐问题（紧凑行） -->
       <div v-if="suggestions.length > 0 || isGeneratingSuggestions" class="mb-2 flex items-center gap-1.5 flex-wrap">
         <span class="flex items-center gap-1 text-xs text-content-subtle">
-          <Sparkles class="w-3.5 h-3.5" />
+          <MessageCircleQuestion class="w-3.5 h-3.5" />
           猜你想问
         </span>
         <span v-if="isGeneratingSuggestions" class="flex gap-0.5 inline-flex items-center">
@@ -93,21 +93,21 @@
         </button>
       </div>
 
-      <!-- 主输入卡片：无边框输入区 + 底部工具条 -->
-      <div class="bg-surface border border-line rounded-2xl shadow-sm focus-within:border-primary-400 dark:focus-within:border-primary-600 transition-colors">
+      <!-- 主输入卡片：浮起式 composer + 底部工具条 -->
+      <div class="glass-panel border rounded-3xl transition-all focus-within:border-primary-300 dark:focus-within:border-primary-700">
         <textarea
           ref="textareaRef"
           v-model="questionInput"
           @keydown.enter.exact.prevent="onSend"
           @input="onInput"
-          placeholder="输入您的问题，Enter 发送"
+          placeholder="给智能助手发消息…"
           aria-label="输入问题"
           rows="1"
-          class="w-full px-4 pt-3 pb-1 bg-transparent text-base sm:text-[15px] text-content placeholder-gray-400 dark:placeholder-gray-500 rounded-t-2xl resize-none focus:outline-none"
+          class="w-full px-5 pt-4 pb-1 bg-transparent text-base sm:text-[15px] leading-6 text-content placeholder:text-content-subtle rounded-t-3xl resize-none focus:outline-none"
           :maxlength="maxLength"
         ></textarea>
 
-        <div class="flex flex-wrap items-center justify-between gap-2 px-3 pb-2.5 pt-1">
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3.5 pb-3 pt-1.5">
           <!-- 左侧：功能开关 pills（深度思考在前，联网搜索在后） -->
           <div class="flex items-center gap-1.5">
             <button
@@ -120,7 +120,7 @@
                   : 'text-content-muted hover:bg-surface-hover'
               ]"
             >
-              <Brain class="w-3.5 h-3.5" />
+              <BrainCircuit class="w-3.5 h-3.5" />
               <span>{{ deepThinkingLabel }}</span>
             </button>
             <button
@@ -133,7 +133,7 @@
                   : 'text-content-muted hover:bg-surface-hover'
               ]"
             >
-              <Globe class="w-3.5 h-3.5" />
+              <Globe2 class="w-3.5 h-3.5" />
               <span>{{ webSearchLabel }}</span>
               <span
                 class="w-1.5 h-1.5 rounded-full"
@@ -166,7 +166,7 @@
             <button
               v-if="isTyping"
               @click="emit('stop')"
-              class="w-8 h-8 rounded-full flex items-center justify-center bg-content text-surface hover:bg-content-strong transition-all"
+              class="w-9 h-9 rounded-full flex items-center justify-center bg-content text-surface hover:bg-content-strong transition-all active:scale-95"
               title="停止生成"
               aria-label="停止生成"
             >
@@ -177,14 +177,14 @@
               @click="onSend"
               :disabled="!questionInput.trim()"
               :class="[
-                'w-8 h-8 rounded-full flex items-center justify-center transition-all',
+                'w-9 h-9 rounded-full flex items-center justify-center transition-all',
                 questionInput.trim()
-                  ? 'bg-primary-500 text-white hover:bg-primary-600 shadow-sm shadow-primary-500/30'
+                  ? 'bg-primary-500 text-white hover:bg-primary-600 shadow-sm shadow-primary-500/30 hover:scale-[1.03] active:scale-95'
                   : 'bg-surface-subtle text-content-subtle cursor-not-allowed'
               ]"
               aria-label="发送"
             >
-              <Send class="w-4 h-4" />
+              <ArrowUp class="w-4 h-4" />
             </button>
           </div>
         </div>
@@ -229,7 +229,7 @@
  * @emits toggle-deep-thinking - 切换深度思考开关
  */
 import { computed, ref } from 'vue'
-import { Sparkles, X, Lightbulb, Database, Loader2, Send, Globe, Brain, Square } from '@lucide/vue'
+import { Sparkles, MessageCircleQuestion, X, Lightbulb, Database, Loader2, ArrowUp, Globe2, BrainCircuit, Square } from '@lucide/vue'
 import type { RewriteResponse } from '@/queries/chat'
 import type { KBRecommendation } from '@/queries/kb'
 

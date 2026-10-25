@@ -247,11 +247,20 @@ GF_SECURITY_ADMIN_PASSWORD=your_secure_grafana_password_here
 
 # 安全密钥（必须设置为强密钥，否则后端启动失败）
 SECRET_KEY=your_very_long_random_secret_key_here_min_32_chars
+# 管理密钥（学习写入 / 系统配置 / 指标重置；必须是强随机值）
+ADMIN_KEY=your_secure_admin_key_here
+
+# SEC-2：生产默认关闭开放注册（若确需开放，设 true 并显式 ALLOW_OPEN_REGISTRATION_IN_PROD=true）
+AUTH_ALLOW_REGISTRATION=false
+ALLOW_OPEN_REGISTRATION_IN_PROD=false
 
 # 联网搜索配置（默认走 Tavily 在线 API）
 SEARCH_PROVIDER=tavily
 SEARCH_API_KEY=your_tavily_api_key
 ```
+
+> SEC-3/5：`TRUSTED_PROXY_CIDRS` 由 compose 注入 Docker 内网网段；`AGENT_WEB_FETCH_ENABLED=false`
+> 默认关闭网页深度抓取；聊天/上传配额默认开启（见 §6.3.1）。
 
 #### 4.2.2 验证配置
 
@@ -459,6 +468,22 @@ services:
 
 > `.env.dev` / `.env.prod` 均被 gitignore 不入库（含凭据）；新增配置键时必须同步更新
 > `.env.example`，CI 的 env-consistency 步骤会校验键集合一致。
+
+### 6.3.1 安全与多租户加固配置（SEC）
+
+> 方案与验收见 [security-multitenancy-hardening-2026-10.md](../design/security-multitenancy-hardening-2026-10.md)。
+
+| 配置 | 生产建议 | 说明 |
+|---|---|---|
+| `AUTH_ALLOW_REGISTRATION` | **false** | 生产开启且未显式确认时启动会拒绝 |
+| `ALLOW_OPEN_REGISTRATION_IN_PROD` | false | 确需开放注册时显式设 true |
+| `QUOTA_ENFORCEMENT_ENABLED` | true | 聊天/上传配额总开关 |
+| `CHAT_RATE_LIMIT_PER_MINUTE` / `CHAT_MAX_CONCURRENT_STREAMS_PER_USER` / `CHAT_DAILY_MESSAGE_QUOTA` | 按容量校准 | 聊天 RPM / 并发流 / 日消息数 |
+| `UPLOAD_MAX_FILES_PER_BATCH` / `UPLOAD_MAX_BATCH_MB` / `UPLOAD_DAILY_MB_PER_USER` | 按磁盘校准 | 上传文件数 / 单批总量 / 日字节 |
+| `TRUSTED_PROXY_CIDRS` | Docker 内网网段 | 仅受信代理的 XFF/X-Real-IP 生效；compose 已注入 |
+| `AGENT_WEB_FETCH_ENABLED` | **false** | 网页深度抓取默认关闭，避免注入后外泄 |
+| `GUARDRAIL_TOOL_DOMAIN_ALLOWLIST` / `DENYLIST` | 按需 | 工具出站域名策略 |
+| `ADMIN_KEY` | 强随机值 | 学习写入/系统配置/指标重置等管理接口必需 |
 
 ### 6.4 核心配置参数对比
 

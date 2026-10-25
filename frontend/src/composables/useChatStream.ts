@@ -99,6 +99,14 @@ export function useChatStream(options: UseChatStreamOptions) {
 
     messageListRef.value?.scrollToBottom()
 
+    // 本次调用的控制器快照：用于在 finally 中判断“我是否仍是在途流”，
+    // 避免旧流被新消息接管后把新流的 typing 状态误置为 false。
+    let invocationController: AbortController | null = null
+    // 跨 try/catch 使用：主动关闭标记与 AbortError 判定（catch 中需忽略）。
+    let streamEnded = false
+    const isAbortError = (error: unknown) =>
+      typeof error === 'object' && error !== null && (error as { name?: string }).name === 'AbortError'
+
     try {
       let assistantMsgId = generateId()
       activeAssistantMessageId = assistantMsgId
@@ -144,11 +152,13 @@ export function useChatStream(options: UseChatStreamOptions) {
       }
 
       const controller = new AbortController()
+      invocationController = controller
       activeStreamController?.abort()
       activeStreamController = controller
       let receivedContent = false
       let receivedEnd = false
-      let streamEnded = false
+      // streamEnded 同时表示“本端主动关闭”：此后 reader 抛出的 AbortError
+      // 属于预期行为，不能再走网络异常分支追加错误卡片。
       const closeStream = () => {
         if (!streamEnded) {
           streamEnded = true
@@ -363,6 +373,7 @@ export function useChatStream(options: UseChatStreamOptions) {
         if (activeStreamController === controller) {
           activeStreamController = null
           activeAssistantMessageId = null
+          invocationController = null
         }
       }
 
@@ -387,16 +398,27 @@ export function useChatStream(options: UseChatStreamOptions) {
       }
     } catch (error) {
       searchStatus.value = 'idle'
-      if (stopRequested) return
-      chatStore.addMessage({
-        id: generateId(),
-        role: 'assistant',
-        content: '',
-        error: `发送失败: ${error instanceof Error ? error.message : '未知错误'}`
-      })
+      // 主动停止 / 主动关闭（收到 error 事件、重新发送、切页）都会触发
+      // AbortError；它不是网络故障，也不能覆盖已经渲染的错误卡片。
+      if (stopRequested || streamEnded || isAbortError(error)) return
+      const message = `发送失败: ${error instanceof Error ? error.message : '未知错误'}`
+      const target = chatStore.messages.find(m => m.id === activeAssistantMessageId)
+      if (target) {
+        chatStore.updateMessage(target.id, { error: message, isLoading: false })
+      } else {
+        chatStore.addMessage({
+          id: generateId(),
+          role: 'assistant',
+          content: '',
+          error: message
+        })
+      }
     } finally {
-      // 无论正常结束、异常还是用户停止，都结束“生成中”状态（控制停止按钮）
-      chatStore.setTyping(false)
+      // 仅当本次流仍是活动流（或被新流接管前的网络异常）时才结束生成态；
+      // 已被新消息取代的旧流不能把新流的 typing 置为 false。
+      if (invocationController === null || activeStreamController === invocationController) {
+        chatStore.setTyping(false)
+      }
     }
   }
 

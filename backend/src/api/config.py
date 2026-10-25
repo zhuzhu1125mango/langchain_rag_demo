@@ -10,7 +10,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 from src.config import settings
 from src.auth import get_current_user, require_admin, CurrentUser
 from src.services.document_processor import SUPPORTED_EXTENSIONS
@@ -40,6 +40,87 @@ class SystemConfigResponse(BaseModel):
     processing: ProcessingConfig
     model: ModelConfig
     supported_extensions: list
+
+
+class FeatureStatus(BaseModel):
+    """部署级能力开关状态（只读，供前端能力面板展示）。"""
+    key: str
+    title: str
+    enabled: bool
+    scope: str
+    risk: str
+    env_var: str
+    note: str
+
+
+def _feature_statuses() -> List[FeatureStatus]:
+    """汇总默认关闭或需运维显式开启的能力，避免前端误以为已生效。"""
+    approval_mode = str(getattr(settings.guardrail, "AGENT_APPROVAL_MODE", "off")).lower()
+    return [
+        FeatureStatus(
+            key="wiki_compile",
+            title="LLM-Wiki 编译",
+            enabled=bool(settings.wiki_compile.WIKI_COMPILE_ENABLED),
+            scope="admin",
+            risk="low",
+            env_var="WIKI_COMPILE_ENABLED",
+            note="将文档预编译为结构化 Wiki 页面；会增加文档处理时间和模型调用成本。",
+        ),
+        FeatureStatus(
+            key="agent_web_fetch",
+            title="Agent 网页抓取",
+            enabled=bool(settings.search.AGENT_WEB_FETCH_ENABLED),
+            scope="admin",
+            risk="high",
+            env_var="AGENT_WEB_FETCH_ENABLED",
+            note="允许 Agent 抓取网页正文；存在 SSRF/提示注入外泄风险，开启后建议同时开启高危工具审批。",
+        ),
+        FeatureStatus(
+            key="agent_approval",
+            title="高危工具人工审批",
+            enabled=approval_mode != "off",
+            scope="admin",
+            risk="medium",
+            env_var="AGENT_APPROVAL_MODE",
+            note=f"当前模式：{approval_mode}；开启后高危工具执行前会在聊天中弹出审批卡片。",
+        ),
+        FeatureStatus(
+            key="ab_chat",
+            title="A/B 实验接入聊天",
+            enabled=bool(settings.experiment.AB_EXPERIMENT_CHAT_ENABLED),
+            scope="admin",
+            risk="low",
+            env_var="AB_EXPERIMENT_CHAT_ENABLED",
+            note="开启后聊天请求会按实验配置分流并回收指标；未开启时实验管理页可建实验但不会自动分流。",
+        ),
+        FeatureStatus(
+            key="learning_weight_reload",
+            title="学习权重回载",
+            enabled=bool(settings.decision.LEARNING_WEIGHT_RELOAD_ENABLED),
+            scope="admin",
+            risk="medium",
+            env_var="LEARNING_WEIGHT_RELOAD_ENABLED",
+            note="开启后学习到的策略权重会作用于在线决策；反馈样本不足时可能影响效果。",
+        ),
+        FeatureStatus(
+            key="learning_sample_collect",
+            title="学习样本后台补采",
+            enabled=bool(settings.decision.LEARNING_SAMPLE_COLLECT_BG_ENABLED),
+            scope="admin",
+            risk="low",
+            env_var="LEARNING_SAMPLE_COLLECT_BG_ENABLED",
+            note="KB 勾选短路时后台补采策略结果；会增加少量模型调用和写入开销。",
+        ),
+        FeatureStatus(
+            key="agent_traj_eval",
+            title="Agent 轨迹评测",
+            enabled=bool(settings.search.AGENT_TRAJ_EVAL_ENABLED),
+            scope="admin",
+            risk="low",
+            env_var="AGENT_TRAJ_EVAL_ENABLED",
+            note="仅影响 A/B compare 判定门；在线抽样尚未启用，当前主要走离线评测。",
+        ),
+    ]
 
 
 class ProcessingConfigUpdate(BaseModel):
@@ -227,5 +308,7 @@ async def get_system_info():
         "user_api_keys_max_per_user": int(
             getattr(settings, "USER_API_KEYS_MAX_PER_USER", None)
             or getattr(settings.security, "USER_API_KEYS_MAX_PER_USER", 5)
-        )
+        ),
+        # 能力面板：只读展示默认关闭/需运维开启的功能，避免界面“看起来可用但不生效”
+        "features": [feature.model_dump() for feature in _feature_statuses()],
     }

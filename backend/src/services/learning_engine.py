@@ -66,14 +66,15 @@ class LearningEngine:
                 )
                 session.add(config)
             await session.commit()
-    
-    async def record_execution(self, session_id: str, question: str, 
+
+    async def record_execution(self, session_id: str, question: str,
                               final_decision: bool, final_confidence: float,
-                              strategy_results: Dict[str, float], 
-                              used_knowledge_base: bool) -> str:
+                              strategy_results: Dict[str, float],
+                              used_knowledge_base: bool,
+                              user_id: Optional[str] = None) -> str:
         """
         记录策略执行
-        
+
         Args:
             session_id: 会话ID
             question: 用户问题
@@ -81,7 +82,8 @@ class LearningEngine:
             final_confidence: 综合置信度
             strategy_results: 各策略执行结果
             used_knowledge_base: 是否使用知识库
-            
+            user_id: 样本所有者（SEC-1；缺失时标记 __legacy__）
+
         Returns:
             str: 执行记录ID
         """
@@ -91,7 +93,8 @@ class LearningEngine:
             final_decision=final_decision,
             final_confidence=final_confidence,
             strategy_results=strategy_results,
-            used_knowledge_base=used_knowledge_base
+            used_knowledge_base=used_knowledge_base,
+            user_id=user_id,
         )
 
     async def collect_strategy_results(self, strategy_manager, question: str,
@@ -111,7 +114,8 @@ class LearningEngine:
 
     async def record_chat_execution(self, *, session_id, question, decision,
                                     used_knowledge_base: bool, strategy_manager,
-                                    history: Optional[List[dict]] = None) -> Optional[str]:
+                                    history: Optional[List[dict]] = None,
+                                    user_id: Optional[str] = None) -> Optional[str]:
         """LEARN W-B：记录一次问答的策略执行样本，短路路径按开关补采。
 
         `decision.strategy_results` 非空时直接使用；为空且开启补采开关
@@ -130,23 +134,34 @@ class LearningEngine:
             final_confidence=decision.confidence,
             strategy_results=strategy_results,
             used_knowledge_base=used_knowledge_base,
+            user_id=user_id,
         )
-    
-    async def record_feedback(self, execution_id: str, feedback_score: float, 
-                             reason: Optional[str] = None):
+
+    async def record_feedback(self, execution_id: str, feedback_score: float,
+                             reason: Optional[str] = None,
+                             owner_id: Optional[str] = None,
+                             enforce_owner: bool = False):
         """
         记录用户反馈
-        
+
         Args:
             execution_id: 执行记录ID
             feedback_score: 反馈分数（-1到1）
             reason: 反馈原因（可选）
+            owner_id: 可选，当前用户 ID（SEC-1）
+            enforce_owner: 为 True 时校验 execution 归属；不匹配则不写入
         """
         execution = await sample_store.get_execution(execution_id)
-        
+
         if execution:
+            if enforce_owner and owner_id is not None and execution.get("user_id") != owner_id:
+                logger.warning(
+                    "拒绝为他人执行记录写反馈: execution=%s owner=%s current=%s",
+                    execution_id, execution.get("user_id"), owner_id,
+                )
+                return
             strategy_results = execution.get("strategy_results", {})
-            
+
             for strategy_name in strategy_results.keys():
                 await sample_store.save_feedback(
                     execution_id=execution_id,
@@ -154,7 +169,7 @@ class LearningEngine:
                     feedback_score=feedback_score,
                     reason=reason
                 )
-    
+
     async def trigger_learning(self, strategy_manager) -> Dict[str, Any]:
         """
         触发学习流程
@@ -178,47 +193,50 @@ class LearningEngine:
         await self.save_config()
 
         return results
-    
+
     async def check_and_trigger_learning(self, strategy_manager) -> Dict[str, Any]:
         """
         检查是否需要触发学习并执行
-        
+
         Args:
             strategy_manager: 策略管理器实例
-            
+
         Returns:
             Dict[str, Any]: 学习结果
         """
         if not self.enabled:
             return {"status": "skipped", "reason": "学习引擎已禁用"}
-        
+
         if self.last_learning_time is None:
             return await self.trigger_learning(strategy_manager)
-        
+
         time_since_last_learning = datetime.now(timezone.utc) - self.last_learning_time
-        
+
         if time_since_last_learning >= timedelta(hours=self.learning_interval_hours):
             return await self.trigger_learning(strategy_manager)
-        
+
         return {
             "status": "skipped",
             "reason": f"学习间隔未到，下次学习时间: {(self.last_learning_time + timedelta(hours=self.learning_interval_hours)).isoformat()}"
         }
-    
-    async def get_learning_stats(self) -> Dict[str, Any]:
+
+    async def get_learning_stats(self, owner_id: Optional[str] = None) -> Dict[str, Any]:
         """
         获取学习统计信息
+
+        Args:
+            owner_id: 可选，仅统计该所有者的样本（API 查询必须传入）
 
         Returns:
             Dict[str, Any]: 统计信息
         """
         await self.load_config()
 
-        execution_stats = await sample_store.get_execution_stats()
+        execution_stats = await sample_store.get_execution_stats(owner_id=owner_id)
 
         strategy_stats = {}
         for strategy_name in ["keyword", "semantic", "llm_inference", "context"]:
-            stats = await sample_store.get_strategy_feedback_stats(strategy_name)
+            stats = await sample_store.get_strategy_feedback_stats(strategy_name, owner_id=owner_id)
             strategy_stats[strategy_name] = stats
 
         return {
@@ -228,53 +246,55 @@ class LearningEngine:
             "learning_interval_hours": self.learning_interval_hours,
             "enabled": self.enabled
         }
-    
-    async def get_misclassification_analysis(self, limit: int = 50) -> Dict[str, Any]:
+
+    async def get_misclassification_analysis(self, limit: int = 50,
+                                             owner_id: Optional[str] = None) -> Dict[str, Any]:
         """
         获取误分类分析报告
-        
+
         Args:
             limit: 返回数量限制
-            
+            owner_id: 可选，仅分析该所有者的样本（API 查询必须传入）
+
         Returns:
             Dict[str, Any]: 分析报告
         """
-        misclassified = await rule_learner.analyze_misclassifications(limit)
-        suggested_keywords = await rule_learner.suggest_new_keywords(limit)
-        
+        misclassified = await rule_learner.analyze_misclassifications(limit, owner_id=owner_id)
+        suggested_keywords = await rule_learner.suggest_new_keywords(limit, owner_id=owner_id)
+
         return {
             "misclassified_cases": misclassified,
             "suggested_keywords": suggested_keywords,
             "analysis_time": datetime.now(timezone.utc).isoformat()
         }
-    
+
     async def schedule_periodic_learning(self, strategy_manager, interval_hours: int = 24):
         """
         定时调度学习任务
-        
+
         Args:
             strategy_manager: 策略管理器实例
             interval_hours: 学习间隔（小时）
         """
         self.learning_interval_hours = interval_hours
-        
+
         while True:
             await self.check_and_trigger_learning(strategy_manager)
             await asyncio.sleep(interval_hours * 3600)
-    
+
     def set_learning_interval(self, hours: int):
         """
         设置学习间隔
-        
+
         Args:
             hours: 间隔小时数
         """
         self.learning_interval_hours = hours
-    
+
     def enable(self):
         """启用学习引擎"""
         self.enabled = True
-    
+
     def disable(self):
         """禁用学习引擎"""
         self.enabled = False

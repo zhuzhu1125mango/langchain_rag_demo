@@ -140,6 +140,21 @@ class SecuritySettings(SecretsFirstMixin, BaseSettings):
     METRICS_TOKEN: str = ""
     # 是否开放 /api/auth/register 注册接口（关闭后仅能由已有账号或直接写库建号）
     AUTH_ALLOW_REGISTRATION: bool = True
+    # 生产环境显式允许开放注册（默认 False：生产开启注册会在启动时拒绝）
+    ALLOW_OPEN_REGISTRATION_IN_PROD: bool = False
+    # 受信代理网段（逗号分隔 CIDR/IP）：仅当直连 peer 属于这些网段时才解析
+    # X-Forwarded-For / X-Real-IP；公网直连客户端伪造转发头会被忽略。
+    # Docker 部署需把 Nginx 所在内网网段加入（见 compose env）。
+    TRUSTED_PROXY_CIDRS: str = "127.0.0.1/32,::1/128"
+    # 聊天资源配额（SEC-2；按 user_id 计数；0 = 不限）
+    QUOTA_ENFORCEMENT_ENABLED: bool = True
+    CHAT_RATE_LIMIT_PER_MINUTE: int = 10
+    CHAT_MAX_CONCURRENT_STREAMS_PER_USER: int = 2
+    CHAT_DAILY_MESSAGE_QUOTA: int = 200
+    # 上传配额（SEC-2）
+    UPLOAD_MAX_FILES_PER_BATCH: int = 20
+    UPLOAD_MAX_BATCH_MB: int = 200
+    UPLOAD_DAILY_MB_PER_USER: int = 500
     # 用户级 API Key（E.6，阶段二 MCP 前置）：每用户可发放/吊销自己的 Key，
     # 认证链在全局 API_KEY 未命中时解析出真实 user_id（owner 隔离与 JWT 一致）。
     # 关闭时认证链跳过该分支（零开销）、/auth/api-keys 端点 404。
@@ -391,6 +406,8 @@ class SearchSettings(BaseSettings):
     AGENT_TIME_BUDGET_MS: int = 30000          # 循环时间预算（毫秒）
     AGENT_OBS_MAX_CHARS: int = 2000            # 单工具观察截断字符数
     AGENT_TOOLS_ENABLED: str = "web_search,fetch_webpage,kb_search,wiki_lookup,calculator"
+    # SEC-5：fetch_webpage 默认关闭（深度抓取是主要外泄通道；需要时显式开启）
+    AGENT_WEB_FETCH_ENABLED: bool = False
 
     # L2 分层规划（默认关闭灰度开启）：循环首步产 ≤3 步提纲并注入后续 DECIDE。
     # 仅 AGENT_RESEARCH/复杂 web 判定才启用，保 P95 不劣化（见 docs/design/agent-evolution.md §11.5）。
@@ -479,12 +496,20 @@ class GuardrailSettings(BaseSettings):
     GUARDRAIL_TOOL_ENABLED: bool = True
     # 输入长度上限（字符）
     GUARDRAIL_INPUT_MAX_CHARS: int = 4000
-    # 工具参数 JSON 长度上限（字符）
+    # 工具护栏：参数 JSON 长度上限（字符）
     GUARDRAIL_TOOL_MAX_ARG_CHARS: int = 4000
+    # SEC-5：工具出站域名策略（逗号分隔；allowlist 为空 = 允许任意公网域名）
+    GUARDRAIL_TOOL_DOMAIN_ALLOWLIST: str = ""
+    GUARDRAIL_TOOL_DOMAIN_DENYLIST: str = ""
+    # URL 总长度 / 单个查询参数值长度 / 文本型参数长度上限（防把 KB 片段拼进外链）
+    GUARDRAIL_TOOL_URL_MAX_CHARS: int = 2000
+    GUARDRAIL_TOOL_URL_MAX_TEXT_CHARS: int = 300
+    GUARDRAIL_TOOL_ARG_MAX_TEXT_CHARS: int = 1000
     # HITL：off=不检查 | reject=高危工具直接拒绝 | wait=SSE 内等待人工批准
     AGENT_APPROVAL_MODE: str = "off"
     # 强制审批的工具名单（逗号分隔；risk_level=write 的工具自动纳入）
-    AGENT_APPROVAL_TOOLS: str = ""
+    # SEC-5：fetch_webpage 默认纳入；审批模式仍由 AGENT_APPROVAL_MODE 决定
+    AGENT_APPROVAL_TOOLS: str = "fetch_webpage"
     # wait 模式等待审批的超时（秒），超时按拒绝处理
     AGENT_APPROVAL_TIMEOUT_S: int = 60
 

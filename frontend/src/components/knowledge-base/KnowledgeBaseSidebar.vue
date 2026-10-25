@@ -1,6 +1,6 @@
 <template>
-  <aside class="hidden lg:flex w-64 bg-surface border-r border-line flex-col">
-    <div class="p-4 border-b border-line">
+  <aside class="hidden lg:flex w-64 glass-subtle border-r flex-col">
+    <div class="p-4">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-semibold text-content">知识库列表</h2>
         <AppButton
@@ -43,10 +43,10 @@
         :aria-label="isBatchKBMode ? undefined : `知识库 ${kb.name}`"
         :aria-pressed="isBatchKBMode ? undefined : currentKB?.id === kb.id"
         :class="[
-          'p-3 rounded-lg cursor-pointer transition-colors mb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400',
+          'p-3 rounded-xl cursor-pointer transition-all mb-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-400',
           currentKB?.id === kb.id && !isBatchKBMode
-            ? 'bg-primary-100 dark:bg-primary-900/30 border border-primary-300 dark:border-primary-700'
-            : 'hover:bg-surface-hover'
+            ? 'bg-surface shadow-card ring-1 ring-line/70'
+            : 'hover:bg-sidebar-hover'
         ]"
       >
         <div class="flex items-center justify-between">
@@ -60,8 +60,11 @@
               :aria-label="`选择知识库 ${kb.name}`"
               class="rounded border-line-strong bg-surface-subtle text-primary-600 focus:ring-primary-500"
             />
-            <Database class="w-4 h-4 text-content-subtle" />
-            <span class="text-sm font-medium text-content">{{ kb.name }}</span>
+            <Database
+              class="w-4 h-4"
+              :class="currentKB?.id === kb.id && !isBatchKBMode ? 'text-primary-500' : 'text-content-subtle'"
+            />
+            <span class="text-[13px] font-medium text-content">{{ kb.name }}</span>
           </div>
           <AppBadge v-if="kb.is_default && !isBatchKBMode" variant="success" size="md">
             默认

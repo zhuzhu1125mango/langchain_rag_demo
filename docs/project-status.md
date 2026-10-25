@@ -1,8 +1,8 @@
 # 项目状态与待办台账
 
-> 状态：持续维护 · 最后更新：2026-10-22
+> 状态：持续维护 · 最后更新：2026-10-25
 > 职责：**项目已完成 / 剩余待办的唯一台账**（见 [README.md](README.md) 目录结构）；各专题的方案与实测细节见对应的 `design/` 文档，本表只做汇总与索引。
-> 关联：[special-projects-2026-09.md](design/special-projects-2026-09.md)、[improvement-roadmap.md](design/improvement-roadmap.md)、[chat-latency-and-model-config.md](design/chat-latency-and-model-config.md)、[e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md)
+> 关联：[special-projects-2026-09.md](design/special-projects-2026-09.md)、[improvement-roadmap.md](design/improvement-roadmap.md)、[chat-latency-and-model-config.md](design/chat-latency-and-model-config.md)、[e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md)、[security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md)
 
 ---
 
@@ -56,12 +56,18 @@
 | D9 | 文档整理（第二轮） | ✅ README 结构/CI/功能表回写（api 17 模块、CI 7 个 job、FC/ReAct 默认开关、pytest 命令）；功能表诚实化（实验框架「未接入问答链路」/动态学习「写回闭环待打通」）；归档 direct-model-switch-plan（→ archive/direct-model-switch-plan-2026-10-03.md）；architecture 代码地图修正（rag_chain 拆分/pipeline/、Agent 默认开启）；设计文档模型名与工具路径漂移修正 | 6202ff5 |
 | D10 | **学习闭环接入（LEARN）** | ✅ 三断链修复：W-A 单例策略管理器 + 权重/阈值回载、W-B KB 短路路径样本补采、W-C A/B 分流接入 chat（白名单覆盖 decision/检索 + response_time 指标）。三开关灰度默认关；新增/扩展单测 12 例；全量 **1042 passed / 105 skipped**；**dev 三开关全开端到端验证通过**（W-A 回载日志 / W-B 补采非空 / W-C 分流+覆盖+指标）。详见 [learning-loop-wiring.md](design/learning-loop-wiring.md) | （本次，未提交） |
 | D11 | **Agent 轨迹级评测（AM-1）+ hybrid 双源 + 输出污染修复** | ✅ 新增 `TrajectoryEvaluator`（**四维全确定性规则**，**去 LLM**）+ 轨迹双入口还原 + 数据集 29 例标注 + `run_agent_ab` 接入（开关 `AGENT_TRAJ_EVAL_ENABLED` 默认关）；三轮抽检证明 3B judge 四维皆不可靠 → 逐维规则化。**① hybrid/multi「未走 web」**：编排器未透传路由 `needs_web` → 注入 kb+web 双源引导（`tool_selection` 0.5→1.0）。**② 答案输出污染**：纯 Agent 直答分支未清洗 + sanitizer 只认 JSON 型 → 新增「叙述型」工具调用检测并接入直答路径（污染 2/29→**0/29**）。**dev 真机基线（live B 臂 29 题，0 错误）**：已判分 15 / 跳过 14，`traj_score` **0.981** / `traj_pass_rate` **1.000**（15/15）。单测 +7；全量 **1070 passed / 104 skipped**。详见 [agent-eval-trace.md](design/agent-eval-trace.md) §7 | （本次，未提交） |
+| D12 | **批次 1 UI 收口（UX-3 / VIS-1 / VIS-2 / UX-4）** | ✅ 4 个提交全绿：可访问性（skip link/焦点环/屏读语义）、设计 token（语义色/圆角/阴影 + 暗色统一，35 文件迁移）、组件 primitive（Button/Card/Badge/Input/Select/Dialog，手写 button 127→38）、三态组件（AppStateView/AppSkeleton，14+ 处接入）。验证：eslint 0 / vue-tsc 0 / 126 单测 / build / E2E 5/5 + 浅深色截图 | c9126a3 / 878f47c / 892a7fd / 2aae261 |
+| D13 | **SEC P1 安全与多租户加固** | ✅ SEC-1~5 已实施：学习样本 user_id/owner 过滤、生产注册护栏 + 聊天/上传配额、受信代理 IP + Redis 限流、下架删向量/上架重建 + KB 移动重建 + 缓存失效、不可信上下文隔离 + 工具域名/DLP + fetch 默认关闭 + 跨 chunk 输出脱敏；新增 4 个测试文件与 21 例注入红队数据。验证：后端 **1073 passed / 105 skipped**（排除 Windows magic 环境坑模块）、env-consistency 通过、迁移 SQL 离线生成通过 | （本次） |
+| D14 | **VIS-3 前端视觉收口** | ✅ 全局 EP 弹窗/下拉/输入/表格 token 化；侧栏、聊天 768px 主列、欢迎态/气泡/来源卡、知识库移动端工具栏与表格滚动、设置页宽度/侧栏统一；修复输入框全局焦点环与自身 focus ring 叠加的“双蓝框”；输入区图标刷新；lint 0 / typecheck / 126 单测 / build / E2E 5/5 + 浅深色/移动端截图。详见 [ui-visual-polish-2026-10.md](design/ui-visual-polish-2026-10.md) | （本次） |
+| D15 | **系统能力透明度（CF-1）** | ✅ `/api/config/info` 新增只读 `features`（Wiki 编译/网页抓取/高危审批/A-B 聊天分流/学习权重回载/样本补采/轨迹评测：enabled + scope + risk + env_var + note）；设置-常规新增“系统能力”面板；学习引擎页提示权重回载/补采未开启；A/B 页提示聊天分流未开启；Wiki 抽屉按开关展示状态并**修复 WikiDrawer 未导入导致点击入口无反应**。验证：后端 +3 / 前端 +4 单测，131 前端单测、lint/typecheck/build 全过；浏览器实测三处提示与 Wiki 抽屉 | （本次） |
+| D16 | **VIS-4 视觉刷新** | ✅ 中性 zinc 色板 + sidebar/chat-user 语义色；侧栏/设置子导航 active 改为白色浮起卡片；聊天主画布改白、头部 64px、欢迎态 2×2 示例卡、助手回答去卡片正文流、用户消息中性灰气泡、浮起式 composer；知识库 KB 列表/分段 tab/表格、历史页与设置页头部统一。验证：lint 0 / typecheck / 131 单测 / build / E2E 5/5 + 1440×900 浅深色与 390×844 移动端截图。详见 [ui-visual-polish-2026-10.md](design/ui-visual-polish-2026-10.md) §6 | （本次） |
+| D17 | **VIS-5 知澜品牌 + 克制版液态玻璃** | ✅ 产品更名为「知澜 / 企业知识问答」；新增涟漪源点 BrandMark 与 favicon.svg/ico/png/apple-touch-icon；侧栏、顶栏、composer、EP Dialog/Drawer/Dropdown/MessageBox/Toast 接入 glass-chrome/panel/subtle + ambient；内容/表格保持实色；支持 backdrop-filter 降级、reduced-transparency、移动端低 blur。验证：lint 0 / typecheck / 131 单测 / build / E2E 5/5 + 浅深色与移动端截图。详见 [ui-visual-polish-2026-10.md](design/ui-visual-polish-2026-10.md) §7 | （本次） |
 
 ---
 
 ## 二、剩余待办
 
-### 优先级执行序（汇总视图 · 2026-10-20 刷新）
+### 优先级执行序（汇总视图 · 2026-10-24 刷新）
 
 | 级别 | 项 | 内容 | 依赖 / 归属 |
 |---|---|---|---|
@@ -76,10 +82,11 @@
 | ✅ | ENV | `.env.dev` rerank 模型漂移——**经核实为虚警**（三份 env 均已是 `bge-reranker-base`），无需修正 | 无 |
 | ✅ | SCHEMA | prod 库 schema 漂移**已修复**（`upgrade head` 后 `alembic check` 无漂移，2026-10-19）；详见 §二 SCHEMA 行 | 无 |
 | **P1** | AM | **Agent 成熟度差距**（2026-10-20 对标业界）：AM-1 轨迹级评测 / AM-2 HITL+护栏 **均已落地**；AM-3 MCP 客户端 / AM-4 持久化 / AM-5 记忆 为 P2；AM-6 工具治理 / AM-7 同名跨档页合并 为 P3。详见下方「Agent 成熟度差距」与 [agent-maturity-gap-analysis.md](design/agent-maturity-gap-analysis.md) | 开发 |
+| **P1** | **SEC ✅** | **安全与多租户加固（2026-10-24 对抗性审查）**：SEC-1~5 已完成（学习隔离、注册/配额、代理限流、状态/索引一致性、Agent 注入与出站）；**P2 SEC-6~15 待办**；**P3：SEC-16/17/19 待办、SEC-18 部分、SEC-20/21 已完成**。详见「安全与多租户加固专项」与 [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) | 开发 |
 | **P1** | **完善专项** | **UX / VIS / CODE / OPS（2026-10-22 全项目审计新增）**：停止生成、移动端、可访问性、设计 token、异常治理、巨型文件拆分、运维手册、供应链扫描。详见「全项目完善与演进专项」与 [evolution-roadmap-2026-10.md](design/evolution-roadmap-2026-10.md) | 开发 |
 | P3 | D-U / DEV / W0 / HG | 覆盖率上调 / dev 栈回收 / owner 手动项 / 挂起区 | 见各条 |
 
-> **一句话执行序**（2026-10-22 刷新）：P0 已清 → **AM-1 轨迹级评测已落地并推送** → **E1V 已收口**（无增益，W1 保持默认关）→ **答案级判分器确定性化 + A/B 门槛重标定**（0.45/0.30）→ **AM-2 HITL+护栏 已落地**（护栏默认开 / 审批默认 off）→ **完善专项按批次 1 启动**（停止生成 / 移动端 / a11y / 设计 token）→ AM-3 MCP 客户端 → E2/SA/D-U/AM-4~7 视排期。
+> **一句话执行序**（2026-10-24 刷新）：**安全加固 SEC P1 已完成**（SEC-1 学习隔离 / SEC-3 代理限流 / SEC-2 注册配额 / SEC-4 状态索引 / SEC-5 Agent 出站）→ 下一步 SEC-6~15（P2）→ 完善专项批次 2（AGT-1/CODE-1/CODE-2/OPS）→ AM-3 MCP 客户端 → E2/SA/D-U/AM-4~7 视排期。
 
 ### E-1 导航式 wiki_lookup（阶段一，已收口）
 
@@ -147,7 +154,7 @@
 | UX-7 | 体验细节 | 引用悬浮预览、消息内搜索、导出 Markdown、快捷键、新手引导；**对比度全量审计**（灰阶正文/次要文字） | P3 | 前端 |
 | VIS-1 | 设计 token 层 | ✅ **已实施（2026-10-24）**：`style.css` 建立语义化 token（page/surface/content/line/status + radius + shadow），浅色为默认值、`.dark` 统一覆盖；全局组件类（card/btn/input/badge/markdown/scrollbar）改用 `var()`；35 个前端文件将 `bg-white dark:bg-dark-800` 等成对类迁移为 `bg-surface` / `text-content` / `border-line`；KnowledgeGraph SVG 与 MarkdownRenderer 硬编码色改走 token；lint / vue-tsc / 110 单测 / build / E2E 5 项全绿 | 已完成 | 前端 |
 | VIS-2 | 组件 primitive | ✅ **已实施（2026-10-24）**：新增 `src/components/ui/`（AppButton / AppCard / AppBadge / AppInput / AppSelect / AppDialog）+ 11 项单测；Button 变体覆盖 primary/soft/ghost/outline/danger/success，Card/Badge/Input/Dialog 统一 token 与暗色；**手写 `<button>` 127→38**（剩余为开关/星级/标签胶囊/手风琴等专用控件），卡片与 11 个弹窗完成迁移；删除未使用的全局 btn/card/input/badge 类；lint / vue-tsc / **121 单测** / build / E2E 5 项全绿 + 浅深色截图复核 | 已完成 | 前端 |
-| VIS-3 | 页面视觉收口 | 设置页 / 知识库页 / 聊天页密度与风格不一致 | P2 | 前端 |
+| VIS-3 | 页面视觉收口 | ✅ **已实施（2026-10-24）**：全局 EP 弹窗/下拉/输入/表格 token 化（16px 弹窗、选中 soft、遮罩模糊、移动端不溢出）；侧栏 active/字号/主题按钮统一；聊天消息与输入区 768px 居中 + 欢迎态/气泡/来源卡打磨；知识库页头/工具栏移动端换行 + 表格横向滚动 + 表头 sticky；设置页统一 `max-w-4xl` 与菜单宽度。lint 0 / typecheck / 126 单测 / build / E2E 5/5 + 浅深色与移动端截图 | 已完成 | 前端 |
 | CODE-1 | 巨型文件拆分 | `document.py` 1679 / `web_search_service.py` 1040 / `chat.py` 1026 / `wiki_compiler.py` 1000 / `stages.py` 783 / `agent_orchestrator.py` 740；前端 `queries/kb.ts` 967 | P1 | 开发 |
 | CODE-2 | 异常分级治理 | 334 处 `except Exception`；缺「可恢复 / 需上报 / 编程错误」分级与统一上下文 | P1 | 开发 |
 | CODE-3 | eslint warning 清零 | ✅ **已修复（2026-10-23）**：43 处非空断言全量清零（生产代码改真值守卫/空值兜底，测试改类型化捕获 + 运行时断言），规则由 `warn` 升 `error` 防回归；eslint 0 warning、vue-tsc 0、109 前端单测通过 | 已完成 | 前端 |
@@ -161,6 +168,57 @@
 **批次 1（体感/观感优先）**：UX-1/UX-2/UX-3/UX-4 + VIS-1/VIS-2 + AGT-2。
 **批次 2（可靠性与代码观感）**：AGT-1（AM-4）+ CODE-1/CODE-2 + OPS-1/OPS-2/OPS-3。
 **批次 3（差异化）**：AGT-4/AGT-5/AGT-6 + OPS-4/OPS-5。
+
+### 安全与多租户加固专项（2026-10-24 对抗性审查）
+
+> 来源：[security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md)（威胁模型、方案、验收、回滚）。
+> 结论：**私有化单租户/LAN 可用；公网多租户需先完成 P1（SEC-1~5）**。审查未发现未授权接管系统的 P0；**P1×5 已完成；P2×10 待办；P3×6（SEC-20/21 已完成、SEC-18 部分完成）**。
+> 审查口径：静态代码审查 + 测试/CI/部署配置核对，未做真实渗透测试；部分结论依赖部署方式。
+
+**执行序（批次 0 · 公网前置）**：SEC-1 学习隔离 → SEC-3 代理限流 → SEC-2 注册/配额 → SEC-4 状态/索引 → SEC-5 Agent 出站。
+
+#### P1（公网多租户前置条件）
+
+| ID | 任务 | 状态 | 依赖 | 核心验收 |
+|---|---|---|---|---|
+| SEC-1 | 学习模块跨用户泄露与写入污染 | ✅ 已完成 | 无 | `strategy_executions.user_id` 迁移；学习分析/写入 admin-only 或 owner 过滤；A 不可见/不可写 B |
+| SEC-2 | 注册默认关闭 + 聊天/上传配额 | ✅ 已完成 | SEC-3.2 | 生产默认不可公开注册；chat/upload 超限 429；批量上传进入 MinIO 前拒绝 |
+| SEC-3 | 代理感知限流 + Redis 统一计数 | ✅ 已完成 | 无 | Nginx 后真实 IP 正确；单 IP 不再全局锁死；多 worker 一致 |
+| SEC-4 | 下架/移动 KB 的向量与缓存一致性 | ✅ 已完成 | 无 | 下架文档检索不到；移动后仅新 KB 可检索；语义缓存不返回旧答案 |
+| SEC-5 | Agent 提示注入与出站治理 | ✅ 已完成 | 无 | 检索/网页上下文隔离；工具域名策略 + URL DLP；注入红队 ≥20 例进 CI |
+
+#### P2（企业级，公网规模化前）
+
+> 执行序：SEC-6 → SEC-8 → SEC-7 → SEC-9 → SEC-10 → SEC-11 → SEC-12 → SEC-13 → SEC-14 → SEC-15。
+> 先收隔离（实验/通知），再定分类标签模型，随后网络/认证（SSRF/JWT），再做缓存/健康与运维/测试。
+
+| ID | 任务与子项 | 状态 | 依赖 | 核心验收 |
+|---|---|---|---|---|
+| SEC-6 | 实验遗留空 owner：① 移除 `_owner_condition` 空 owner 放行；② 迁移回填或标记遗留；③ 遗留实验仅 admin 可见 | 待办 | 无 | 普通用户无法 list/start/stop/delete 空 owner 实验；越权用例 403/404 |
+| SEC-7 | 分类/标签：① 决策全局字典 vs 租户私有（默认全局 + admin 写）；② 写接口 admin-only 或 owner 过滤；③ 前端按权限隐藏写入口；④ 删除外键保护 | 待办 | owner 决策 | 普通用户不能改他人分类/标签；被引用分类删除有明确 409/保护 |
+| SEC-8 | 通知频道：① 默认订阅 `user:{id}`；② `doc:`/`task:` 订阅校验归属；③ `kb:*`/`doc:*` 仅 admin/内部；④ 前端订阅改造 | 待办 | 无 | 用户只收到自身资源事件；伪造 task/doc 频道被拒 |
+| SEC-9 | SSRF 纵深：① DNS 失败 fail-closed；② 解析后固定 IP 连接（防 rebinding）；③ 响应字节/Content-Type/重定向上限；④ IPv6/十进制/重定向回归 | 待办 | 无 | 内网/元数据地址不可达；大响应被截断；绕过样本全部拒绝 |
+| SEC-10 | JWT 吊销：① `jti`/session version + Redis 黑名单；② 登出端点 + refresh 轮换；③ 前端登出调用；④ 旧 token 401 回归 | 待办 | 无 | 登出后旧 token 立即 401；refresh 不能无限续期 |
+| SEC-11 | 语义缓存索引：① `kb_id → scope keys` Redis Set；② 写入/失效双写并兼容存量；③ 压测验证 | 待办 | 无 | 文档变更不再 O(全库) scan；失效条目准确 |
+| SEC-12 | 健康检查：① `/health/live` 浅探活；② `/health/ready` 深探 DB/Redis/Milvus/MinIO；③ compose healthcheck 改 ready | 待办 | 无 | 依赖故障时容器不就绪；恢复后自动 ready |
+| SEC-13 | 运维与供应链：① PG/MinIO/Milvus 备份恢复脚本 + runbook；② 季度恢复演练；③ dependabot/trivy/SBOM；④ 基础镜像 pin digest | 待办 | 无 | 恢复演练通过；CI 供应链扫描告警可阻断 |
+| SEC-14 | 隐私与日志：① 账号删除/导出 API + 级联清理；② 密码 ≥10 + 弱密码库；③ 问题/答案/工具参数日志脱敏与保留期 | 待办 | 无 | 用户可删除/导出自身数据；日志无原始问题/凭据 |
+| SEC-15 | 测试有效性：① 真实后端 E2E 烟测（compose）；② SEC-1~5 + P2 安全回归套件；③ 覆盖率后端 65 / 前端阈值上调 | 待办 | SEC-1~14 | CI 覆盖真实链路；P1/P2 回归常驻；覆盖率达标 |
+
+#### P3（纵深与体验）
+
+> 执行序：SEC-19 → SEC-16 → SEC-17 → SEC-18（SEC-20/21 已完成）。
+
+| ID | 任务与子项 | 状态 | 说明 |
+|---|---|---|---|
+| SEC-16 | CSP/TLS：① `connect-src` 收紧到同源 WS；② 生产 TLS/HSTS 反代示例 | 待办 | 当前 `ws:/wss:` 允许任意 WS 源；生产无 TLS 终止示例 |
+| SEC-17 | 评估 API 配额：① `/api/evaluate/*` 用户级 QPS/日配额；② 批量样本上限 | 待办 | 防任意用户反复触发 embedding/评估 |
+| SEC-18 | API 细节：① 会话列表分页；② 批量操作上限；③ 反馈/坏例列表上限 | **部分完成** | `DocumentUpdate.status` Literal 已在 SEC-4 完成；剩余分页/上限 |
+| SEC-19 | ToolGuard DNS：① 新增 URL 型工具统一走 `validate_url_safe` + 固定 IP；② 工具注册强制声明 URL 参数 | 待办 | 当前域名/DLP 已加，DNS 解析仍依赖各工具自带校验 |
+| SEC-20 | secrets 预检 | ✅ 已完成 | `start-prod` 的 `check_secrets` 已输出缺失清单与 `gen_secrets` 命令；部署文档已补 |
+| SEC-21 | 文档边界诚实化 | ✅ 已完成 | README / architecture / deployment 已明确「单租户/LAN 推荐，公网需完成 SEC P1~5 并关注 P2」 |
+
+**红线**：SEC-1~5 已完成；SEC-6~15（尤其通知/SSRF/JWT/备份）未完成前，公网多租户仍按“受控网络 + 最小权限”运营，不得宣称完整企业级多租户安全。
 
 ---
 
@@ -187,6 +245,7 @@
 
 ## 五、提交与推送状态
 
+- 当前工作区（2026-10-24）：**SEC-1~5 代码 + 设计/台账文档已实施，未提交**；验证记录见 D13 与 [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) §9。
 - 已入库并推送：`12a5f79` → `18b87f3` → `465f927` → `2f6eea5` → `fd6b1ee` → `8decced` → `a4bcdd1` → `c1a4b9e` → `4789f3a` → `996ba6b` → `93e11a9` → `6202ff5` → `eb6cfea` → **`8beffcf`**（origin/main HEAD，2026-10-22；远端 CI run [39750037599](https://github.com/zhuzhu1125mango/langchain_rag_demo/actions/runs/39750037599) 7/7 全绿）
 - 备注：均为**直推 main**——远程分支保护要求 5 项 required status checks，均被 admin 绕过（`Bypassed rule violations`）；后续改动建议走 PR 以触发 CI
 - 工作区：本批次（AM-2 护栏/HITL + `upload-artifact@v6` + 全项目审计文档）已提交推送，工作区干净

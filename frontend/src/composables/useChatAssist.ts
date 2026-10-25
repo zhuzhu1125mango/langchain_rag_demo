@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useChatStore } from '@/stores/chat'
 import { useGetSuggestions, useRewriteQuestion, useClassifyQuestion, useCompareKnowledgeBases } from '@/queries/chat'
 import type { CompareResponse } from '@/queries/chat'
@@ -21,6 +21,7 @@ export function useChatAssist(options: {
 }) {
   const { questionInput, selectedKBs } = options
   const toast = useToast()
+  const chatStore = useChatStore()
 
   const suggestions = ref<string[]>([])
   const isGeneratingSuggestions = ref(false)
@@ -42,6 +43,15 @@ export function useChatAssist(options: {
   let kbRecommendDebounceTimer: ReturnType<typeof setTimeout> | null = null
   let suggestionSeq = 0
   let kbRecommendSeq = 0
+  // 推荐请求真正的取消器：旧请求不取消会在服务端继续占用本地模型，
+  // 即使前端已超时/切题，仍会与主回答串行排队。
+  let suggestionAbortController: AbortController | null = null
+
+  /** 取消在途推荐请求（发送消息或输入变化时调用）。 */
+  function cancelPendingSuggestions(): void {
+    suggestionAbortController?.abort()
+    suggestionAbortController = null
+  }
 
   const getSuggestions = useGetSuggestions()
   const rewriteQuestionMutation = useRewriteQuestion()
@@ -149,38 +159,65 @@ export function useChatAssist(options: {
 
     // 流式回答进行中跳过：推荐与主回答共用本地 LLM 串行推理，
     // 此时发起只会排队超时并挤占正在生成的回答
-    const chatStore = useChatStore()
     if (chatStore.isTyping) {
+      cancelPendingSuggestions()
       return
     }
 
     const question = questionInput.value.trim()
 
     if (question.length < 3) {
+      cancelPendingSuggestions()
       suggestions.value = []
       return
     }
 
     suggestionDebounceTimer = setTimeout(async () => {
       const seq = ++suggestionSeq
+      cancelPendingSuggestions()
+      const controller = new AbortController()
+      suggestionAbortController = controller
       isGeneratingSuggestions.value = true
 
       try {
-        const result = await getSuggestions(question, undefined, selectedKBs.value.length > 0 ? selectedKBs.value : undefined)
+        const result = await getSuggestions(
+          question,
+          undefined,
+          selectedKBs.value.length > 0 ? selectedKBs.value : undefined,
+          controller.signal
+        )
         if (seq !== suggestionSeq) return
         suggestions.value = result
       } catch {
-        // 静默降级：推荐失败不影响主流程，超时/服务繁忙时清空即可
-        if (seq === suggestionSeq) {
+        // 静默降级：推荐失败不影响主流程；主动取消时保留现有推荐
+        if (seq === suggestionSeq && !controller.signal.aborted) {
           suggestions.value = []
         }
       } finally {
+        if (suggestionAbortController === controller) {
+          suggestionAbortController = null
+        }
         if (seq === suggestionSeq) {
           isGeneratingSuggestions.value = false
         }
       }
     }, 500)
   }
+
+  // 用户发送消息时立即取消在途推荐，避免辅助请求与主回答争抢模型队列。
+  watch(
+    () => chatStore.isTyping,
+    (typing) => {
+      if (typing) {
+        if (suggestionDebounceTimer) {
+          clearTimeout(suggestionDebounceTimer)
+          suggestionDebounceTimer = null
+        }
+        cancelPendingSuggestions()
+        isGeneratingSuggestions.value = false
+      }
+    }
+  )
 
   /** 输入框内容变化时清除重写结果并触发推荐。 */
   function onInputChange(): void {

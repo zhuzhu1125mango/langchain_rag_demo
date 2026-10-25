@@ -1,27 +1,36 @@
 <template>
   <div
     ref="messagesContainer"
-    class="flex-1 overflow-y-auto px-3 sm:px-6 py-4 space-y-4"
+    class="flex-1 overflow-y-auto"
     role="log"
     aria-live="polite"
     aria-label="对话消息"
   >
+    <div class="mx-auto flex min-h-full w-full max-w-3xl flex-col gap-6 px-4 py-8 sm:px-6">
     <!-- 空状态 Welcome：无消息时展示引导与示例问题 -->
-    <div v-if="!messages.length" class="h-full min-h-full flex flex-col items-center justify-center text-center -mt-8">
-      <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center mb-4 shadow-lg shadow-primary-500/20">
+    <div v-if="!messages.length" class="flex flex-1 flex-col items-center justify-center text-center pb-6">
+      <div class="w-14 h-14 rounded-2xl bg-primary-500 flex items-center justify-center mb-5 ring-1 ring-black/5 dark:ring-white/10">
         <Bot class="w-7 h-7 text-white" />
       </div>
-      <h2 class="text-lg font-semibold text-content">有什么可以帮您？</h2>
-      <p class="text-sm text-content-muted mt-1.5 mb-6">基于知识库的智能问答，点击下方问题开始对话</p>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-xl">
+      <h2 class="text-2xl sm:text-[28px] font-semibold tracking-tight text-content">今天想了解什么？</h2>
+      <p class="text-sm text-content-muted mt-2 max-w-md leading-6">
+        向知识库提问，或开启联网搜索获取实时信息
+      </p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl mt-8">
         <button
           v-for="question in displayQuestions"
           :key="question"
           @click="emit('send-quick-question', question)"
-          class="px-4 py-3 text-sm text-left text-content-tertiary bg-surface border border-line rounded-xl hover:border-primary-400 dark:hover:border-primary-500 hover:shadow-sm transition-all truncate"
+          class="group flex items-start justify-between gap-3 px-4 py-3.5 text-left bg-surface border border-line rounded-2xl transition-all hover:border-primary-300 dark:hover:border-primary-700 hover:shadow-hover"
         >
-          {{ question }}
+          <span class="text-sm leading-6 text-content-secondary group-hover:text-content line-clamp-2">{{ question }}</span>
+          <ArrowUpRight class="w-4 h-4 mt-0.5 shrink-0 text-content-subtle group-hover:text-primary-500 transition-colors" />
         </button>
+      </div>
+      <div class="mt-6 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-xs text-content-subtle">
+        <span class="inline-flex items-center gap-1.5"><BookOpen class="w-3.5 h-3.5" />知识库检索</span>
+        <span class="inline-flex items-center gap-1.5"><Globe2 class="w-3.5 h-3.5" />联网搜索</span>
+        <span class="inline-flex items-center gap-1.5"><BrainCircuit class="w-3.5 h-3.5" />深度思考</span>
       </div>
     </div>
 
@@ -33,48 +42,54 @@
         message.role === 'user' ? 'justify-end' : 'justify-start'
       ]"
     >
-      <!-- 用户消息：单气泡结构 -->
+      <!-- 用户消息：中性气泡，突出内容本身而非品牌色块 -->
       <div
         v-if="message.role === 'user'"
-        class="max-w-3xl px-4 py-3 rounded-2xl chat-bubble-user text-content rounded-br-md"
+        class="max-w-[85%] sm:max-w-[75%] px-4 py-2.5 rounded-2xl rounded-br-md bg-chat-user text-content text-[15px] leading-7"
       >
         <MarkdownRenderer :content="message.content" />
       </div>
 
-      <!-- 助手消息：推理面板 + 白底卡片 + 气泡外来源卡片 + 操作区，垂直排列 -->
-      <div v-else class="group flex flex-col max-w-3xl gap-1.5 w-full">
-        <!-- 推理/搜索过程折叠面板（豆包/DeepSeek 风格，位于答案卡片上方） -->
+      <!-- 助手消息：无卡片正文流 + 推理面板 + 来源 + 操作区 -->
+      <div v-else class="group flex flex-col max-w-full gap-2 w-full">
+        <!-- 推理/搜索过程折叠面板（豆包/DeepSeek 风格，位于正文上方） -->
         <ReasoningPanel :steps="message.reasoning" />
 
         <!-- 模型深度思考折叠面板（思考流式期间展开，正文开始后折叠） -->
         <ThinkingPanel :thinking="message.thinking" :loading="message.isLoading" />
 
-        <!-- 助手卡片：身份标识 / 正文 / 加载态 -->
-        <div class="px-4 py-3 rounded-2xl rounded-bl-md chat-bubble-assistant text-content">
-          <div class="flex items-center gap-2 mb-2">
-            <span class="w-5 h-5 rounded-md bg-gradient-to-br from-primary-500 to-primary-600 flex items-center justify-center">
-              <Bot class="w-3 h-3 text-white" />
-            </span>
-            <span class="text-xs font-medium text-content-muted">智能助手</span>
-          </div>
+        <div class="flex items-center gap-2">
+          <span class="w-6 h-6 rounded-full bg-primary-500 flex items-center justify-center ring-1 ring-black/5 dark:ring-white/10">
+            <Bot class="w-3.5 h-3.5 text-white" />
+          </span>
+          <span class="text-xs font-medium text-content-tertiary">智能助手</span>
+        </div>
 
+        <div class="chat-bubble-assistant text-[15px] leading-7 text-content">
           <template v-if="message.isLoading">
-            <span class="text-sm text-content-muted">{{ message.thinking ? '正在思考...' : (message.reasoning?.length ? '正在搜索...' : '正在思考...') }}</span>
-            <div class="flex gap-1 inline-flex ml-2">
-              <span class="w-2 h-2 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 0ms"></span>
-              <span class="w-2 h-2 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 150ms"></span>
-              <span class="w-2 h-2 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 300ms"></span>
+            <div class="flex items-center gap-2 text-sm text-content-muted">
+              <span>{{ message.thinking ? '正在思考...' : (message.reasoning?.length ? '正在搜索...' : '正在思考...') }}</span>
+              <span class="flex gap-1">
+                <span class="w-1.5 h-1.5 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 0ms"></span>
+                <span class="w-1.5 h-1.5 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 150ms"></span>
+                <span class="w-1.5 h-1.5 bg-primary-400 rounded-full typing-indicator" style="animation-delay: 300ms"></span>
+              </span>
             </div>
           </template>
           <!-- W6 #41：消息级错误专用卡片（不再把错误文案写进 Markdown 正文） -->
           <template v-else-if="message.error">
-            <div class="flex items-start gap-2 p-2.5 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+            <div class="flex items-start gap-2 p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
               <AlertTriangle class="w-4 h-4 flex-shrink-0 text-red-500 dark:text-red-400 mt-0.5" />
               <div class="min-w-0">
                 <p class="text-sm font-medium text-red-700 dark:text-red-300">回答生成失败</p>
                 <p class="text-xs text-red-600/80 dark:text-red-400/80 mt-0.5 break-words">{{ message.error }}</p>
               </div>
             </div>
+            <!-- 失败前已生成的部分内容继续展示，避免刷新后丢失 -->
+            <div v-if="message.content" class="mt-3">
+              <MarkdownRenderer :content="message.content" :sources="message.sources" @cite-click="onCiteClick(message, $event)" />
+            </div>
+            <p v-if="message.stopped" class="mt-1.5 text-xs text-content-subtle">生成已中断</p>
           </template>
           <template v-else>
             <MarkdownRenderer :content="message.content" :sources="message.sources" @cite-click="onCiteClick(message, $event)" />
@@ -127,7 +142,7 @@
         <!-- 操作区（复制 / 重新生成 / 星级反馈） -->
         <div
           v-if="!message.isLoading"
-          class="flex items-center justify-between px-1 opacity-0 group-hover:opacity-100 hover:opacity-100 focus-within:opacity-100 transition-opacity"
+          class="flex items-center justify-between px-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:opacity-100 focus-within:opacity-100 transition-opacity"
         >
           <div class="flex items-center gap-1">
             <AppButton
@@ -179,6 +194,7 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 </template>
 
@@ -199,7 +215,7 @@
  * @expose scrollToBottom - 仅在接近底部时自动滚动到最新消息，避免打断用户回看历史
  */
 import { ref, computed, nextTick } from 'vue'
-import { Bot, Star, Copy, Check, RefreshCw, AlertTriangle } from '@lucide/vue'
+import { Bot, Star, Copy, Check, RefreshCw, AlertTriangle, ArrowUpRight, BookOpen, Globe2, BrainCircuit } from '@lucide/vue'
 import type { Message, MessageSource } from '@/queries/chat'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import MessageSources from '@/components/chat/MessageSources.vue'

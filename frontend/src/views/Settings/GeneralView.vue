@@ -1,6 +1,6 @@
 <template>
   <div class="flex-1 overflow-auto bg-page p-4 sm:p-6">
-    <div class="max-w-2xl mx-auto space-y-6">
+    <div class="max-w-4xl mx-auto space-y-6">
       <div>
         <h1 class="text-xl font-semibold text-content">常规设置</h1>
         <p class="text-sm text-content-muted mt-1">管理您的偏好设置和系统配置</p>
@@ -10,7 +10,7 @@
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">外观设置</h2>
         </div>
-        
+
         <div class="space-y-4">
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <div>
@@ -41,7 +41,7 @@
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">对话设置</h2>
         </div>
-        
+
         <div class="space-y-4">
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <div>
@@ -50,7 +50,7 @@
             </div>
             <el-switch v-model="localSettings.typingEffect" class="w-12 h-6" />
           </div>
-          
+
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <div>
               <p class="font-medium text-content">自动滚动</p>
@@ -58,7 +58,7 @@
             </div>
             <el-switch v-model="localSettings.autoScroll" class="w-12 h-6" />
           </div>
-          
+
           <div class="p-4 bg-surface-muted rounded-lg">
             <label class="block text-sm font-medium text-content-secondary mb-3">最大输入长度</label>
             <div class="flex items-center gap-4">
@@ -88,7 +88,7 @@
             重置为默认值
           </AppButton>
         </div>
-        
+
         <div class="space-y-4">
           <div class="p-4 bg-surface-muted rounded-lg">
             <label class="block text-sm font-medium text-content-secondary mb-3">文本分片大小</label>
@@ -105,7 +105,7 @@
             </div>
             <p class="text-xs text-content-muted mt-2">影响文档切分后的每块大小，较大的值会保留更多上下文但可能增加检索时间</p>
           </div>
-          
+
           <div class="p-4 bg-surface-muted rounded-lg">
             <label class="block text-sm font-medium text-content-secondary mb-3">重叠字符数</label>
             <div class="flex items-center gap-4">
@@ -121,7 +121,7 @@
             </div>
             <p class="text-xs text-content-muted mt-2">相邻分片之间的重叠部分，用于保持上下文连贯性</p>
           </div>
-          
+
           <div class="p-4 bg-surface-muted rounded-lg">
             <label class="block text-sm font-medium text-content-secondary mb-3">检索数量 (Top-K)</label>
             <div class="flex items-center gap-4">
@@ -144,7 +144,7 @@
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">模型配置</h2>
         </div>
-        
+
         <div class="space-y-4 text-sm">
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <span class="text-content-tertiary">嵌入模型</span>
@@ -161,11 +161,13 @@
         </div>
       </AppCard>
 
+      <FeatureStatusPanel :features="systemFeatures" :loading="isFeaturesLoading" />
+
       <AppCard padding="lg">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-medium text-content">关于</h2>
         </div>
-        
+
         <div class="space-y-4 text-sm">
           <div class="flex items-center justify-between p-4 bg-surface-muted rounded-lg">
             <span class="text-content-tertiary">版本</span>
@@ -209,6 +211,8 @@ import { useAppStore } from '@/stores/app'
 import { Sun, Moon, Save } from '@lucide/vue'
 import { useToast } from '@/composables/useToast'
 import { AppButton, AppCard } from '@/components/ui'
+import FeatureStatusPanel from '@/components/settings/FeatureStatusPanel.vue'
+import { useSystemFeatures } from '@/queries/features'
 import {
   useProcessingConfig,
   useModelConfig,
@@ -222,6 +226,7 @@ const toast = useToast()
 
 const { data: processingConfig, refetch: refetchProcessing } = useProcessingConfig()
 const { data: modelConfig } = useModelConfig()
+const { data: systemFeatures, isLoading: isFeaturesLoading } = useSystemFeatures()
 const updateConfigMutation = useUpdateProcessingConfig()
 const resetMutation = useResetConfig()
 
@@ -263,7 +268,7 @@ onMounted(() => {
       localStorage.removeItem('rag-settings')
     }
   }
-  
+
   if (processingConfig.value) {
     localSettings.value.chunkSize = processingConfig.value.chunk_size
     localSettings.value.chunkOverlap = processingConfig.value.chunk_overlap
@@ -287,7 +292,7 @@ function setTheme(theme: 'light' | 'dark'): void {
 /** 保存设置：本地项写入 localStorage，处理参数变更时同步到服务端。 */
 async function saveSettings(): Promise<void> {
   localStorage.setItem('rag-settings', JSON.stringify(localSettings.value))
-  
+
   const configChanges: Partial<ProcessingConfig> = {}
   if (processingConfig.value) {
     if (localSettings.value.chunkSize !== processingConfig.value.chunk_size) {
