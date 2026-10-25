@@ -151,6 +151,8 @@ class TestAuthEndpoints:
         ip = f"198.51.100.{next(_RATE_LIMIT_IP_COUNTER)}"
         self._rate_limit_ip = ip
         monkeypatch.setattr("src.utils.rate_limit.get_client_ip", lambda request: ip)
+        # 端点单测固定走进程内桶：避免复用集成测试的 Redis 单例（可能绑定已关闭的事件循环）
+        monkeypatch.setattr("src.utils.rate_limit._redis_client", lambda: None)
 
     def _request(self) -> StarletteRequest:
         return StarletteRequest({"type": "http", "client": (self._rate_limit_ip, 123)})

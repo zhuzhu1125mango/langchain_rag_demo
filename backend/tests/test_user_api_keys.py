@@ -175,6 +175,8 @@ def client(monkeypatch):
     # 每个用例独立客户端 IP：Redis 限流 key 不跨用例累计（CI 与本地一致）
     ip = f"198.51.100.{next(_RATE_LIMIT_IP_COUNTER)}"
     monkeypatch.setattr("src.utils.rate_limit.get_client_ip", lambda request: ip)
+    # 端点单测固定走进程内桶：避免复用集成测试的 Redis 单例（可能绑定已关闭的事件循环）
+    monkeypatch.setattr("src.utils.rate_limit._redis_client", lambda: None)
     reset_rate_limits()
     return TestClient(app), db, user
 
