@@ -485,6 +485,27 @@ services:
 | `GUARDRAIL_TOOL_DOMAIN_ALLOWLIST` / `DENYLIST` | 按需 | 工具出站域名策略 |
 | `ADMIN_KEY` | 强随机值 | 学习写入/系统配置/指标重置等管理接口必需 |
 
+### 6.3.2 模型 Provider 注册（P1）
+
+P1 支持通过 `MODEL_REGISTRY_FILE` 配置 Ollama / OpenAI-Compatible Provider 与任务路由：
+
+- 文件不存在：自动按 `OLLAMA_*` 生成 legacy registry，现有部署行为不变。
+- 示例：`backend/configs/model_registry.example.json`
+- 运行时文件建议：`backend/data/model_registry.json`（不要提交到仓库）
+- 外部 Provider 的 Key 使用 `api_key_env` 指向环境变量（如 `OPENAI_API_KEY`），不要写进 JSON。
+- Embedding 维度必须与当前 `EMBEDDING_DIMENSION` 一致；切换 embedding 必须重建索引。
+- 修改文件后，下一次模型获取会按 mtime 自动热加载；坏文件会保留上一版快照。
+- `GET /api/config` 与 `/api/config/model` 仅管理员可读，并返回实际 registry 路由。
+
+P2 管理方式（推荐）：
+
+- 设置 → 模型服务（管理员）维护 Provider/模型/任务路由，点击“校验并应用”热更新。
+- Provider Key 保存在 DB（Fernet 加密），只写不读；建议配置独立的
+  `MODEL_SECRET_ENC_KEY` 并备份。未配置时从 `SECRET_KEY` 派生，换密钥后已存 Key 会失效。
+- 生产环境调用 `/api/admin/models/*` 需要 `X-Admin-Key`。
+- 启动时 DB 有 Provider 配置则优先于 `MODEL_REGISTRY_FILE` / `OLLAMA_*`。
+- 新增表由 Alembic 迁移 `f2b3c4d5e6f7` 创建；生产发布前执行 `alembic upgrade head`。
+
 ### 6.4 核心配置参数对比
 
 | 参数 | 开发环境 (.env.dev) | 生产环境 (.env.prod) | 敏感 |

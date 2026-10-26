@@ -57,7 +57,7 @@ class RetrievalEvaluator:
 
     def _get_embeddings(self) -> Optional[Any]:
         """延迟初始化 embedding 模型（B2 共享单例）。"""
-        current_model = settings.model.EMBEDDING_MODEL_NAME
+        current_model = model_manager.embedding_model_key
         if self.embeddings is None or self._embedding_model_name != current_model:
             try:
                 self.embeddings = model_manager.get_embeddings()

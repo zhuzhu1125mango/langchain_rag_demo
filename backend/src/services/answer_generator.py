@@ -34,15 +34,15 @@ class AnswerGenerator:
         self.numerical_validator = numerical_validator
 
     def _select_llm(self, think: Optional[bool]):
-        """按深度思考开关选择模型实例。
+        """按深度思考开关选择已由 registry 预配置的模型实例。
 
-        True: 思考模型并绑定 reasoning=True；False: 非思考专用模型；
-        None: 思考模型默认行为（模型不支持思考时）。
+        True/None: 主回答模型（是否思考由模型与 registry 决定）；
+        False: answer_direct 路由模型。
+        不再在业务层 ``bind(reasoning=...)``，避免把 Ollama 专有参数透传给
+        OpenAI-Compatible / Anthropic 等 Provider。
         """
         if think is False and self.llm_direct is not None:
             return self.llm_direct
-        if think is not None:
-            return self.llm.bind(reasoning=think)
         return self.llm
 
     def _build_context(

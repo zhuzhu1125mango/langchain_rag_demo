@@ -16,7 +16,6 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from langchain_ollama import ChatOllama
 
 from src.config import settings
 from src.utils.async_singleton import AsyncSingleton
@@ -136,27 +135,28 @@ class RAGChain(
         # 统一检索服务（注入同一 vector_store 实例，保证口径一致）
         self.kb_retrieval_service = KBRetrievalService(self.vector_store)
 
-        answer_model = await model_manager.get_model_for_task("answer")
-        self.llm = ChatOllama(model=answer_model, streaming=True, num_ctx=settings.model.OLLAMA_NUM_CTX)
-        # 深度思考关闭时的非思考专用模型（混合思考模型无法通过提示词真正跳过思考）；
-        # 未配置 OLLAMA_DIRECT_MODEL_NAME 时为 None，调用方回退主模型并绑定 reasoning=False
-        self.llm_direct = None
-        if settings.model.OLLAMA_DIRECT_MODEL_NAME:
-            self.llm_direct = ChatOllama(
-                model=settings.model.OLLAMA_DIRECT_MODEL_NAME, streaming=True, num_ctx=settings.model.OLLAMA_NUM_CTX
-            )
+        # P1：回答/直答模型由 Provider/Model/Route registry 决定，业务层不再
+        # 直接构造 ChatOllama。think=None 表示不强制绑定 reasoning，由模型默认行为；
+        # 直答 route 使用独立模型，避免关闭深度思考时仍落到思考模型。
+        self.llm = await model_manager.get_chat_llm("answer", streaming=True, think=None)
+        self.llm_direct = await model_manager.get_chat_llm(
+            "answer_direct", streaming=True, think=False
+        )
 
         # 辅助任务统一走 fast 模型并关闭思考（B3/C2），避免占用主模型与空烧思考链
         fast_llm = await model_manager.get_chat_llm("fast", think=False)
+        # Agent/搜索决策需要 tools 能力，单独走 agent_decision 路由，避免 fast
+        # 路由模型不支持 tools 时 bind_tools 失败。
+        agent_llm = await model_manager.get_chat_llm("agent_decision", think=False)
 
-        # 初始化联网搜索服务（注入 LLM 和缓存）
+        # 初始化联网搜索服务（注入 Agent 模型和缓存）
         cache_service = None
         try:
             from src.services.cache_service import CacheService
             cache_service = await CacheService.get_instance()
         except Exception as e:
             logger.warning(f"缓存服务初始化失败，联网搜索将不使用缓存: {e}")
-        self.web_search_service = WebSearchService(llm=fast_llm, cache_service=cache_service)
+        self.web_search_service = WebSearchService(llm=agent_llm, cache_service=cache_service)
 
         # 初始化 Phase 3 Agent（按需延迟创建 handler，但先创建 toolkit）
         self.search_toolkit = SearchToolkit(self.web_search_service)
@@ -176,10 +176,9 @@ class RAGChain(
 
         # P2：有界 Agent 循环编排器（AGENT_ORCHESTRATOR_ENABLED 灰度开关控制生效）
         try:
-            decision_llm = await model_manager.get_chat_llm("fast", think=False)
             from .tools.tool_manager import get_tool_manager
             self.agent_orchestrator = AgentOrchestrator(
-                llm=decision_llm,
+                llm=agent_llm,
                 tool_manager=get_tool_manager(),
                 answer_generator=self.answer_generator,
                 metadata_converter=self._web_sources_to_metadata,
@@ -224,6 +223,41 @@ class RAGChain(
         self.document_analyzer = DocumentAnalyzer(self.llm, self)
         self.kb_recommender = KBRecommender(self)
         self.knowledge_graph_generator = KnowledgeGraphGenerator(self.llm, self)
+        # P1：记录建模时的 registry 代次；请求入口发现文件变更时刷新模型引用。
+        self._model_generation = model_manager.registry_generation
+
+    async def _refresh_models_if_needed(self) -> None:
+        """Registry 文件热加载后，刷新 RAGChain 持有的模型引用。"""
+        generation = model_manager.registry_generation
+        # 手工构造的测试链（未走 _async_init）没有代次快照：记录后跳过，
+        # 不覆盖测试注入的 fake model。
+        if not hasattr(self, "_model_generation"):
+            self._model_generation = generation
+            return
+        if generation == self._model_generation:
+            return
+        logger.info("检测到模型注册表变化，刷新 RAGChain 模型引用: %s -> %s", self._model_generation, generation)
+        self.llm = await model_manager.get_chat_llm("answer", streaming=True, think=None)
+        self.llm_direct = await model_manager.get_chat_llm("answer_direct", streaming=True, think=False)
+        if self.answer_generator is not None:
+            self.answer_generator.llm = self.llm
+            self.answer_generator.llm_direct = self.llm_direct
+        fast_llm = await model_manager.get_chat_llm("fast", think=False)
+        agent_llm = await model_manager.get_chat_llm("agent_decision", think=False)
+        if self.context_enhancer is not None:
+            self.context_enhancer.llm = fast_llm
+        if self.answer_verifier is not None:
+            self.answer_verifier.llm = fast_llm
+        if self.question_processor is not None:
+            self.question_processor.llm = fast_llm
+        if self.web_search_service is not None:
+            self.web_search_service.llm = agent_llm
+        if self.agent_orchestrator is not None:
+            self.agent_orchestrator.llm = agent_llm
+        for component in (self.kb_comparator, self.document_analyzer, self.knowledge_graph_generator):
+            if component is not None and hasattr(component, "llm"):
+                component.llm = self.llm
+        self._model_generation = generation
 
     @classmethod
     async def get_instance(cls, vector_store=None, strategy_manager=None) -> "RAGChain":
@@ -253,6 +287,7 @@ class RAGChain(
                 - source_metadata: 来源元信息列表（包含filename、chunk_index等）
                 - answer_type: 回答类型（"knowledge_base"、"llm_direct"、"web_search"、"hybrid_search"、"function_calling"、"agent_search"、"reasoning"或"thinking"）
         """
+        await self._refresh_models_if_needed()
         try:
             async for ev in self._pipeline(
                 question, kb_ids=kb_ids, history=history,
@@ -312,6 +347,7 @@ class RAGChain(
         answer_type = "llm_direct"
         state: Optional[_PipelineState] = None
 
+        await self._refresh_models_if_needed()
         async for ev in self._pipeline(
             question, kb_ids=kb_ids, history=history,
             use_web_search=use_web_search, search_mode=search_mode,

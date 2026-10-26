@@ -113,12 +113,10 @@ class GenerationMixin:
         """
         llm_start = time.time()
         yielded_part = ""
-        # 深度思考关闭时切换到非思考专用模型（think=False），避免混合模型空烧思考 token；
-        # 未配置专用模型时回退主模型并绑定 reasoning=False
+        # 深度思考关闭时使用 answer_direct 路由模型；是否思考由 registry/model
+        # 决定，业务层不再 bind(reasoning=...)，保持 Provider 无关。
         if think is False and self.llm_direct is not None:
             llm = self.llm_direct
-        elif think is not None:
-            llm = self.llm.bind(reasoning=think)
         else:
             llm = self.llm
 
@@ -152,14 +150,22 @@ class GenerationMixin:
                         yielded_part += chunk.content
                         yield chunk.content, source_texts, source_metadata, answer_type
 
-                # 记录 LLM 调用时间（Prometheus）
+                # 记录 LLM 调用时间（Prometheus）；优先使用路由真实模型标识
                 if PROMETHEUS_AVAILABLE:
-                    record_llm_call(settings.model.OLLAMA_MODEL_NAME, time.time() - llm_start)
+                    labels = getattr(llm, "labels", None) or []
+                    metric_model = labels[0].split("/")[-1] if labels else getattr(
+                        llm, "model", settings.model.OLLAMA_MODEL_NAME
+                    )
+                    record_llm_call(metric_model, time.time() - llm_start)
 
                 return
             except Exception as e:
                 if PROMETHEUS_AVAILABLE:
-                    record_llm_call_error(settings.model.OLLAMA_MODEL_NAME)
+                    labels = getattr(llm, "labels", None) or []
+                    metric_model = labels[0].split("/")[-1] if labels else getattr(
+                        llm, "model", settings.model.OLLAMA_MODEL_NAME
+                    )
+                    record_llm_call_error(metric_model)
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1)
                     continue

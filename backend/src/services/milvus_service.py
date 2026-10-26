@@ -16,7 +16,6 @@ from typing import Any, Dict, List, Optional
 
 from pymilvus import AsyncMilvusClient, DataType
 from pymilvus.exceptions import MilvusException
-from langchain_ollama import OllamaEmbeddings
 from aiolimiter import AsyncLimiter
 from src.config import settings, DATA_DIR
 from src.services.model_manager import model_manager
@@ -54,7 +53,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
 
     def __init__(self):
         self.client: AsyncMilvusClient | None = None
-        self.embeddings: OllamaEmbeddings | None = None
+        self.embeddings: Any | None = None
         # 阶段一：BM25 稀疏嵌入模型与开关
         self.bm25_ef: Optional[Any] = None
         self._sparse_enabled: bool = settings.processing.KB_ENABLE_HYBRID_SEARCH and _BM25_AVAILABLE

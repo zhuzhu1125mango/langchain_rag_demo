@@ -55,47 +55,59 @@ class TestMessageRequestDeepThinking:
 
 
 class TestAnswerGeneratorThink:
-    """AnswerGenerator think 参数绑定行为测试。"""
+    """AnswerGenerator 按 think 选择 registry 预配置模型，不再业务层 bind。"""
 
     @staticmethod
     def _make_llm(content: str = "答案"):
-        """构造 Mock LLM；bind 返回独立的绑定对象以便断言。"""
         llm = MagicMock()
         resp = MagicMock()
         resp.content = content
         llm.ainvoke = AsyncMock(return_value=resp)
-        bound = MagicMock()
-        bound.ainvoke = AsyncMock(return_value=resp)
-        llm.bind = MagicMock(return_value=bound)
-        return llm, bound
+        llm.bind = MagicMock(side_effect=AssertionError("业务层不应再 bind(reasoning=...)"))
+        return llm
 
     @pytest.mark.asyncio
-    async def test_think_false_binds_llm(self):
-        """think=False → 应通过 bind 传递且不再直接调用原 llm。"""
-        llm, bound = self._make_llm()
+    async def test_think_false_uses_direct_model(self):
+        """think=False → 使用 answer_direct 路由模型。"""
+        llm = self._make_llm()
+        direct = self._make_llm("直答")
+        generator = AnswerGenerator(llm=llm, llm_direct=direct)
+
+        await generator.generate(question="你好", think=False)
+
+        direct.ainvoke.assert_awaited_once()
+        llm.ainvoke.assert_not_awaited()
+        llm.bind.assert_not_called()
+        direct.bind.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_think_false_without_direct_falls_back_main(self):
+        """未配置 direct route 时回退主模型，仍不 bind。"""
+        llm = self._make_llm()
         generator = AnswerGenerator(llm=llm)
 
         await generator.generate(question="你好", think=False)
 
-        llm.bind.assert_called_once_with(reasoning=False)
-        bound.ainvoke.assert_awaited_once()
-        llm.ainvoke.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_think_none_skips_bind(self):
-        """think=None → 不 bind，保持模型默认行为。"""
-        llm, bound = self._make_llm()
-        generator = AnswerGenerator(llm=llm)
-
-        await generator.generate(question="你好")
-
-        llm.bind.assert_not_called()
         llm.ainvoke.assert_awaited_once()
+        llm.bind.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_generate_stream_think_false_binds(self):
-        """流式路径 think=False → 同样 bind 且 astream 用于绑定对象。"""
-        llm, bound = self._make_llm()
+    async def test_think_none_and_true_use_main_model(self):
+        """think=None/True → 主回答模型，保持模型默认行为。"""
+        for think in (None, True):
+            llm = self._make_llm()
+            generator = AnswerGenerator(llm=llm)
+
+            await generator.generate(question="你好", think=think)
+
+            llm.ainvoke.assert_awaited_once()
+            llm.bind.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_generate_stream_think_false_uses_direct(self):
+        """流式路径 think=False → 使用 direct 模型。"""
+        llm = self._make_llm()
+        direct = self._make_llm()
 
         async def _empty_stream(_prompt):
             chunk = MagicMock()
@@ -104,20 +116,19 @@ class TestAnswerGeneratorThink:
             yield chunk
 
         llm.astream = MagicMock(return_value=_empty_stream(None))
-        bound.astream = MagicMock(return_value=_empty_stream(None))
-        generator = AnswerGenerator(llm=llm)
+        direct.astream = MagicMock(return_value=_empty_stream(None))
+        generator = AnswerGenerator(llm=llm, llm_direct=direct)
 
         chunks = [c async for c, _, _ in generator.generate_stream(question="你好", think=False)]
 
-        llm.bind.assert_called_once_with(reasoning=False)
-        bound.astream.assert_called_once()
+        direct.astream.assert_called_once()
         llm.astream.assert_not_called()
         assert chunks == ["x"]
 
     @pytest.mark.asyncio
     async def test_generate_stream_forwards_thinking(self):
         """流式路径转发思考增量：additional_kwargs['reasoning_content'] 经第三元组返回。"""
-        llm, bound = self._make_llm()
+        llm = self._make_llm()
 
         async def _think_stream(_prompt):
             thinking = MagicMock()
@@ -130,22 +141,22 @@ class TestAnswerGeneratorThink:
             yield content
 
         llm.astream = MagicMock(return_value=_think_stream(None))
-        bound.astream = MagicMock(return_value=_think_stream(None))
         generator = AnswerGenerator(llm=llm)
 
         items = [item async for item in generator.generate_stream(question="你好", think=True)]
 
-        llm.bind.assert_called_once_with(reasoning=True)
+        llm.bind.assert_not_called()
         assert [i[0] for i in items] == ["", "答案"]
         assert [i[2] for i in items] == ["思考中", ""]
 
     @pytest.mark.asyncio
     async def test_generate_with_citation_passes_think(self):
         """generate_with_citation 透传 think 到 generate。"""
-        llm, bound = self._make_llm("今日金价 850 元。")
-        generator = AnswerGenerator(llm=llm)
+        llm = self._make_llm()
+        direct = self._make_llm("今日金价 850 元。")
+        generator = AnswerGenerator(llm=llm, llm_direct=direct)
 
         await generator.generate_with_citation(question="今日金价", think=False)
 
-        llm.bind.assert_called_once_with(reasoning=False)
-        bound.ainvoke.assert_awaited_once()
+        direct.ainvoke.assert_awaited_once()
+        llm.ainvoke.assert_not_awaited()

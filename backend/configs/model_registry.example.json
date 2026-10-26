@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "id": "ollama-local",
+      "type": "ollama",
+      "base_url": "http://host.docker.internal:11434",
+      "api_key_required": false,
+      "external": false,
+      "enabled": true
+    },
+    {
+      "id": "openai",
+      "type": "openai_compatible",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "external": true,
+      "enabled": false
+    },
+    {
+      "id": "local-vllm",
+      "type": "openai_compatible",
+      "base_url": "http://host.docker.internal:8000/v1",
+      "api_key_required": false,
+      "external": false,
+      "enabled": false
+    }
+  ],
+  "models": [
+    {
+      "id": "qwen3-4b",
+      "provider": "ollama-local",
+      "model": "qwen3:4b",
+      "display_name": "本地推理模型",
+      "capabilities": [
+        "chat",
+        "stream",
+        "tools",
+        "reasoning"
+      ],
+      "context_window": 8192
+    },
+    {
+      "id": "qwen25-3b",
+      "provider": "ollama-local",
+      "model": "qwen2.5:3b-instruct",
+      "display_name": "本地直答模型",
+      "capabilities": [
+        "chat",
+        "stream",
+        "tools"
+      ],
+      "context_window": 6144
+    },
+    {
+      "id": "bge-m3",
+      "provider": "ollama-local",
+      "model": "bge-m3:latest",
+      "display_name": "本地向量模型",
+      "capabilities": [
+        "embedding"
+      ],
+      "embedding_dimension": 1024
+    },
+    {
+      "id": "gpt-4.1-mini",
+      "provider": "openai",
+      "model": "gpt-4.1-mini",
+      "display_name": "外部推理模型",
+      "capabilities": [
+        "chat",
+        "stream",
+        "tools",
+        "vision"
+      ],
+      "context_window": 128000,
+      "max_output_tokens": 8192
+    }
+  ],
+  "routes": {
+    "answer": {
+      "primary": "qwen3-4b",
+      "fallbacks": [
+        "gpt-4.1-mini"
+      ],
+      "allow_external_fallback": true
+    },
+    "answer_direct": {
+      "primary": "qwen25-3b",
+      "fallbacks": [
+        "gpt-4.1-mini"
+      ],
+      "allow_external_fallback": true
+    },
+    "fast": {
+      "primary": "qwen25-3b",
+      "fallbacks": []
+    },
+    "intent_router": {
+      "primary": "qwen25-3b"
+    },
+    "title_generation": {
+      "primary": "qwen25-3b"
+    },
+    "query_rewrite": {
+      "primary": "qwen25-3b"
+    },
+    "verifier": {
+      "primary": "qwen25-3b"
+    },
+    "agent_decision": {
+      "primary": "qwen25-3b",
+      "fallbacks": [
+        "qwen3-4b"
+      ],
+      "allow_external_fallback": true
+    },
+    "wiki_compile": {
+      "primary": "qwen25-3b"
+    },
+    "doc_analyze": {
+      "primary": "qwen25-3b"
+    },
+    "embedding": {
+      "primary": "bge-m3"
+    }
+  }
+}

@@ -19,6 +19,7 @@ from .user_api_key import UserApiKey
 from .request_trace import RequestTrace
 from .wiki_page import WikiPage
 from .audit_log import AuditLog
+from .model_registry import ModelProvider, ModelDeployment, ModelRoute
 
 __all__ = [
     "Document",
@@ -40,4 +41,7 @@ __all__ = [
     "User",
     "UserApiKey",
     "WikiPage",
+    "ModelProvider",
+    "ModelDeployment",
+    "ModelRoute",
 ]

@@ -155,6 +155,10 @@ class SecuritySettings(SecretsFirstMixin, BaseSettings):
     UPLOAD_MAX_FILES_PER_BATCH: int = 20
     UPLOAD_MAX_BATCH_MB: int = 200
     UPLOAD_DAILY_MB_PER_USER: int = 500
+    # P2：模型 Provider API Key 的加密密钥（Fernet，独立于 JWT SECRET_KEY）。
+    # 未配置时回退从 SECRET_KEY 派生并告警；生产建议单独配置并妥善备份，
+    # 更换后已存 Provider Key 将无法解密。
+    MODEL_SECRET_ENC_KEY: str = ""
     # 用户级 API Key（E.6，阶段二 MCP 前置）：每用户可发放/吊销自己的 Key，
     # 认证链在全局 API_KEY 未命中时解析出真实 user_id（owner 隔离与 JWT 一致）。
     # 关闭时认证链跳过该分支（零开销）、/auth/api-keys 端点 404。
@@ -219,6 +223,9 @@ class ModelSettings(BaseSettings):
     # Ollama 上下文窗口（num_ctx）。RAG 单次请求 = 检索片段 + 历史对话 + 回答预留，
     # Ollama 默认约 4096 易截断检索内容；4GB 显存 + q8_0 KV cache 下 6144 为稳妥值。
     OLLAMA_NUM_CTX: int = 6144
+    # P1 模型注册文件（Provider/Model/Route）；相对路径以 backend/ 为根。
+    # 文件不存在时自动从上面的 OLLAMA_* 生成 legacy registry，行为不变。
+    MODEL_REGISTRY_FILE: Optional[str] = None
     
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 

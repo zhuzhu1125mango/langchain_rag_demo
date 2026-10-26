@@ -8,8 +8,6 @@ import logging
 import re
 from typing import Any, Optional
 
-from langchain_ollama import ChatOllama
-
 from src.config import settings
 from src.services.model_manager import model_manager
 from src.utils.async_singleton import AsyncSingleton
@@ -24,20 +22,18 @@ class TitleGenerator(AsyncSingleton["TitleGenerator"]):
 
     def __init__(self):
         self._llm = None
+        self._model_generation: Optional[str] = None
 
-    async def _get_llm(self) -> Optional[ChatOllama]:
-        if self._llm is None:
+    async def _get_llm(self) -> Optional[Any]:
+        generation = model_manager.registry_generation
+        if self._llm is None or self._model_generation != generation:
             try:
-                preferred_model = (
-                    settings.title_generation.TITLE_GENERATION_MODEL
-                    or settings.model.FAST_LLM_MODEL_NAME
-                    or settings.model.OLLAMA_MODEL_NAME
-                )
-                model_name = await model_manager.get_model_for_task(
+                self._llm = await model_manager.get_chat_llm(
                     "title_generation",
-                    preferred=preferred_model,
+                    streaming=False,
+                    think=False,
                 )
-                self._llm = ChatOllama(model=model_name, streaming=False, num_ctx=settings.model.OLLAMA_NUM_CTX)
+                self._model_generation = generation
             except Exception as e:
                 logger.warning(f"标题生成 LLM 初始化失败: {e}")
                 self._llm = None

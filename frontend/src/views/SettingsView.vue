@@ -39,7 +39,7 @@
  */
 import { useRoute, useRouter } from 'vue-router'
 import type { Component } from 'vue'
-import { Settings, FolderOpen, Tags, Cpu, BarChart3, FlaskConical, KeyRound } from '@lucide/vue'
+import { Settings, FolderOpen, Tags, Cpu, BarChart3, FlaskConical, KeyRound, Boxes } from '@lucide/vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -57,6 +57,7 @@ const menuItems: MenuItem[] = [
   { name: 'categories', path: '/settings/categories', label: '分类管理', icon: FolderOpen },
   { name: 'tags', path: '/settings/tags', label: '标签管理', icon: Tags },
   { name: 'api-keys', path: '/settings/api-keys', label: 'API 密钥', icon: KeyRound },
+  { name: 'models', path: '/settings/models', label: '模型服务', icon: Boxes },
   { name: 'learning', path: '/settings/learning', label: '学习引擎', icon: Cpu },
   { name: 'experiments', path: '/settings/experiments', label: 'A/B实验', icon: FlaskConical },
   { name: 'feedback', path: '/settings/feedback', label: '反馈统计', icon: BarChart3 }

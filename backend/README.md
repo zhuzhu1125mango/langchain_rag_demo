@@ -21,6 +21,13 @@ uv run pytest -q
 - `scripts/` 手动迁移与排障脚本（见 `scripts/README.md`）
 - `tests/` 单元与集成测试
 
+## 模型配置（P1）
+
+- 默认沿用 `.env` 的 `OLLAMA_*`。
+- 可选：复制 `configs/model_registry.example.json` 到 `data/model_registry.json`，配置 Ollama / OpenAI-Compatible Provider 与任务路由。
+- 外部 API Key 建议通过 `api_key_env` 指向环境变量，不要写入 JSON。
+- 修改 registry 文件后自动按 mtime 热加载；Embedding 维度变化必须重建索引。
+
 ## 文档
 
 - 架构总览：[docs/architecture.md](../docs/architecture.md)

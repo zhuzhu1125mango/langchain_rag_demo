@@ -14,7 +14,7 @@
 | 关系库 | PostgreSQL（会话/知识库元数据/反馈/实验等） |
 | 缓存 | Redis |
 | 联网搜索 | Tavily（在线 API，默认 provider） |
-| 模型 | Ollama 本地模型，**模型名一律由 `.env` 提供、代码无内置默认**（A2 去硬编码），启动时经 `/api/tags` 校验存在性。开发栈当前取值：`qwen3:4b`（主模型，深度思考专用）、`qwen2.5:3b-instruct`（快模型：关闭深度思考时的直答 + 意图路由/标题/改写等辅助任务）、`bge-m3`（embedding，1024 维）、`bge-reranker-base`（重排，经 sentence-transformers 或 Ollama） |
+| 模型 | P1 起支持 Provider/Model/Route registry（`MODEL_REGISTRY_FILE`）：Ollama 原生 + OpenAI-Compatible，按任务路由并支持 fallback；未配置文件时自动按 `.env` 的 `OLLAMA_*` 生成 legacy 路由。开发栈当前取值：`qwen3:4b`（主模型，深度思考专用）、`qwen2.5:3b-instruct`（快模型：关闭深度思考时的直答 + 意图路由/标题/改写等辅助任务）、`bge-m3`（embedding，1024 维）、`bge-reranker-base`（重排，经 sentence-transformers 或 Ollama）。详见 [model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) |
 | 监控 | Prometheus + Grafana + Alertmanager + postgres-exporter |
 
 ## 2. 服务拓扑（docker-compose）

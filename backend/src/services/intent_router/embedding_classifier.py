@@ -66,7 +66,7 @@ class EmbeddingIntentClassifier:
         # 外部注入的实例（如测试 mock）直接复用，不被默认模型覆盖
         if self.embeddings is not None and self._model_name is None:
             return self.embeddings
-        current_model = settings.model.EMBEDDING_MODEL_NAME
+        current_model = model_manager.embedding_model_key
         if self.embeddings is None or self._model_name != current_model:
             try:
                 logger.info(f"初始化意图分类 Embedding 模型: {current_model}")

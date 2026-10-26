@@ -96,7 +96,6 @@ class QueryRewriter:
             return await model_manager.get_chat_llm(
                 "query_rewrite",
                 think=False,
-                preferred=settings.search.QUERY_REWRITE_MODEL or None,
             )
         except Exception as e:
             logger.warning(f"QueryRewriter 默认 LLM 初始化失败: {e}")

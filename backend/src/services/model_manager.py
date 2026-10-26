@@ -1,15 +1,28 @@
-"""模型分工管理器。
+"""模型注册与任务路由管理器。
 
-负责任务级别模型选择、可用性检查与自动降级，
-确保各任务（回答生成、快速推理、Embedding、意图路由等）使用合适的本地模型。
+P1 起，模型选择由 Provider/Model/Route registry 决定：
+- 有 ``MODEL_REGISTRY_FILE`` / ``backend/data/model_registry.json`` 时按文件路由
+- 否则从现有 ``OLLAMA_*`` 自动生成 legacy registry（行为不变）
+- 业务层只调用本模块，不直接 new ChatOllama / OpenAIEmbeddings
+
+旧的 ``check_availability`` / ``get_model_for_task`` 保留为兼容入口。
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from src.config import settings
+from src.services.model_adapters import build_embeddings, build_route_models
+from src.services.model_registry import (
+    DEFAULT_REGISTRY_PATH,
+    ModelRegistry,
+    ResolvedRoute,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,15 +38,11 @@ class ModelInfo:
 
 
 class ModelManager:
-    """本地模型管理器。
+    """模型注册表 + 任务路由 + 适配器工厂。"""
 
-    维护任务到模型名称的映射，并提供可用性检查与自动降级。
-    当首选模型不可用时，按 fallback 链顺序返回第一个可用模型。
-    """
-
-    # 默认任务角色映射（可通过配置覆盖）
     DEFAULT_TASK_ROLES: Dict[str, str] = {
         "answer": "OLLAMA_MODEL_NAME",
+        "answer_direct": "OLLAMA_DIRECT_MODEL_NAME",
         "fast": "FAST_LLM_MODEL_NAME",
         "embedding": "EMBEDDING_MODEL_NAME",
         "intent_router": "FAST_LLM_MODEL_NAME",
@@ -41,10 +50,10 @@ class ModelManager:
         "query_rewrite": "FAST_LLM_MODEL_NAME",
     }
 
-    # 各任务的降级链：当前模型不可用时依次尝试
     DEFAULT_FALLBACK_CHAINS: Dict[str, List[str]] = {
         "answer": ["OLLAMA_MODEL_NAME", "FAST_LLM_MODEL_NAME"],
-        "fast": ["FAST_LLM_MODEL_NAME", "OLLAMA_MODEL_NAME"],
+        "answer_direct": ["OLLAMA_DIRECT_MODEL_NAME", "FAST_LLM_MODEL_NAME"],
+        "fast": ["FAST_LLM_MODEL_NAME", "OLLAMA_DIRECT_MODEL_NAME", "OLLAMA_MODEL_NAME"],
         "embedding": ["EMBEDDING_MODEL_NAME"],
         "intent_router": ["FAST_LLM_MODEL_NAME", "OLLAMA_MODEL_NAME"],
         "title_generation": ["FAST_LLM_MODEL_NAME", "OLLAMA_MODEL_NAME"],
@@ -57,219 +66,256 @@ class ModelManager:
         fallback_chains: Optional[Dict[str, List[str]]] = None,
         ollama_host: Optional[str] = None,
     ):
-        self.task_roles = task_roles or self._load_task_roles_from_settings()
+        self.task_roles = task_roles or dict(self.DEFAULT_TASK_ROLES)
         self.fallback_chains = fallback_chains or self.DEFAULT_FALLBACK_CHAINS
         self.ollama_host = ollama_host or settings.model.OLLAMA_HOST
         self._availability_cache: Dict[str, bool] = {}
         self._cache_lock = asyncio.Lock()
-        # 共享 OllamaEmbeddings 单例缓存（键为模型名，B2）
-        self._embeddings_cache: Dict[str, object] = {}
+        self._embeddings_cache: Dict[str, Any] = {}
+        self._registry: Optional[ModelRegistry] = None
+        self._registry_mtime: Optional[float] = None
+        self._registry_path: Optional[Path] = None
+        self._db_registry_active = False
+        self._registry_revision = 0
 
-    @classmethod
-    def _load_task_roles_from_settings(cls) -> Dict[str, str]:
-        """从 settings 中加载任务角色配置（若存在）。"""
-        configured = getattr(settings, "model_task_roles", None)
-        if isinstance(configured, dict):
-            return {k: v for k, v in configured.items()}
-        return dict(cls.DEFAULT_TASK_ROLES)
+    # ------------------------------------------------------------------
+    # Registry lifecycle
+    # ------------------------------------------------------------------
+    def _resolved_registry_path(self) -> Path:
+        raw = settings.model.MODEL_REGISTRY_FILE or DEFAULT_REGISTRY_PATH
+        path = Path(raw)
+        if not path.is_absolute():
+            # 相对路径以 backend/ 为根（容器内 /app，挂载 backend/data）
+            path = Path(__file__).resolve().parents[2] / path
+        return path
 
+    def _load_registry(self, path: Path) -> None:
+        try:
+            registry = ModelRegistry.load(str(path))
+        except Exception:
+            # 热加载失败时保留旧快照，避免一个坏文件把在线服务打挂
+            if self._registry is not None:
+                logger.exception("模型注册表重载失败，继续使用上一版配置: %s", path)
+                return
+            raise
+        self._registry = registry
+        self._db_registry_active = False
+        self._registry_revision += 1
+        self._registry_path = path
+        self._registry_mtime = path.stat().st_mtime if path.exists() else None
+        logger.info("模型注册表已加载: source=%s, providers=%d, models=%d, routes=%d",
+                    registry.source, len(registry.providers), len(registry.models), len(registry.routes))
+
+    def _get_registry(self) -> ModelRegistry:
+        if self._db_registry_active and self._registry is not None:
+            return self._registry
+        path = self._resolved_registry_path()
+        current_mtime = path.stat().st_mtime if path.exists() else None
+        if (
+            self._registry is None
+            or self._registry_path != path
+            or current_mtime != self._registry_mtime
+        ):
+            self._load_registry(path)
+        assert self._registry is not None
+        return self._registry
+
+    def reload_registry(self) -> ModelRegistry:
+        """强制重载文件注册表（P1 兼容；DB registry 请用 reload_from_db）。"""
+        self._db_registry_active = False
+        self._registry = None
+        self._registry_mtime = None
+        return self._get_registry()
+
+    def apply_registry_config(self, config: Any, source: str = "database") -> ModelRegistry:
+        """用已校验的配置替换在线 registry（P2 管理 API 写入后调用）。"""
+        registry = ModelRegistry(config, source=source)
+        self._registry = registry
+        self._db_registry_active = True
+        self._registry_path = None
+        self._registry_mtime = None
+        self._registry_revision += 1
+        self._embeddings_cache.clear()
+        logger.info(
+            "模型 registry 已应用: source=%s, providers=%d, models=%d, routes=%d, revision=%d",
+            source, len(registry.providers), len(registry.models), len(registry.routes), self._registry_revision,
+        )
+        return registry
+
+    async def load_from_db(self) -> bool:
+        """启动时加载 DB registry；DB 为空/未配置时返回 False（回退文件/env）。"""
+        try:
+            from src.database import async_session
+            from src.services.model_config_service import load_registry_config_from_db
+
+            async with async_session() as db:
+                config = await load_registry_config_from_db(db)
+            if config is None:
+                return False
+            self.apply_registry_config(config, source="database")
+            return True
+        except Exception as exc:
+            logger.warning("DB 模型 registry 加载失败，回退文件/env 配置: %s", exc)
+            return False
+
+    @property
+    def registry(self) -> ModelRegistry:
+        """当前注册表快照（DB 优先；否则文件 mtime 热加载）。"""
+        return self._get_registry()
+
+    @property
+    def registry_generation(self) -> str:
+        """配置代次：路由/模型热切换时用于缓存失效。"""
+        registry = self._get_registry()
+        return f"{registry.source}:{self._registry_revision}:{registry.config.version}"
+
+    # ------------------------------------------------------------------
+    # 兼容方法
+    # ------------------------------------------------------------------
     def _resolve_model_name(self, model_ref: str) -> str:
-        """将模型引用（如 OLLAMA_MODEL_NAME）解析为实际模型名。"""
         if hasattr(settings.model, model_ref):
-            return getattr(settings.model, model_ref)
+            return getattr(settings.model, model_ref) or ""
         return model_ref
 
     async def check_availability(self, model_name: str) -> bool:
-        """异步检查指定模型是否已在本地 Ollama 中可用。
-
-        使用 ollama.list() 获取本地模型列表，结果缓存避免重复调用。
-        若 ollama 不可用，返回 True（不阻塞主流程，由调用方处理实际错误）。
-        """
+        """Ollama 模型可用性检查（旧接口，保留给运维/兼容代码）。"""
         if model_name in self._availability_cache:
             return self._availability_cache[model_name]
-
         try:
             import ollama
 
             async with self._cache_lock:
                 if model_name in self._availability_cache:
                     return self._availability_cache[model_name]
-
                 client = ollama.Client(host=self.ollama_host) if self.ollama_host else ollama.Client()
-                # ollama.list() 是同步 HTTP 调用，使用 to_thread 避免阻塞
                 response = await asyncio.to_thread(client.list)
                 models = response.get("models", [])
-                available_names = {m.get("name", "") for m in models}
-                # 兼容不同 ollama 版本返回的字段
-                available_names.update(m.get("model", "") for m in models)
-
-                is_available = model_name in available_names
-                self._availability_cache[model_name] = is_available
-                if not is_available:
-                    logger.warning(f"模型 {model_name} 未在本地 Ollama 中找到")
-                return is_available
-        except Exception as e:
-            logger.warning(f"检查模型可用性失败: {e}")
-            # 无法连接 ollama 时不阻塞，假设可用
+                names = {m.get("name", "") for m in models}
+                names.update(m.get("model", "") for m in models)
+                available = model_name in names
+                self._availability_cache[model_name] = available
+                if not available:
+                    logger.warning("模型 %s 未在本地 Ollama 中找到", model_name)
+                return available
+        except Exception as exc:
+            logger.warning("检查模型可用性失败: %s", exc)
             return True
 
     def clear_availability_cache(self) -> None:
-        """清空可用性缓存。"""
         self._availability_cache.clear()
 
-    async def get_model_for_task(
-        self,
-        task: str,
-        preferred: Optional[str] = None,
-    ) -> str:
-        """获取指定任务应使用的模型名称。
-
-        流程：
-        1. 若传入 preferred，优先尝试。
-        2. 按任务 fallback 链依次检查可用性。
-        3. 全部不可用时返回链中第一个模型名（调用方自行处理错误）。
-
-        Args:
-            task: 任务名称，如 answer/fast/intent_router 等。
-            preferred: 优先使用的模型名（可选）。
-
-        Returns:
-            可用的模型名称。
-        """
-        candidates: List[str] = []
+    async def get_model_for_task(self, task: str, preferred: Optional[str] = None) -> str:
+        """返回任务主模型名（兼容旧调用；不再决定 Provider/Endpoint）。"""
         if preferred:
-            candidates.append(preferred)
-
+            return preferred
+        registry = self._get_registry()
+        name = registry.get_model_name(task)
+        if name is not None:
+            return name
         chain = self.fallback_chains.get(task, [])
         for ref in chain:
-            candidates.append(self._resolve_model_name(ref))
-
-        if not candidates:
-            # 无配置时回退到主模型
-            return settings.model.OLLAMA_MODEL_NAME
-
-        # 去重并保持顺序
-        seen = set()
-        unique_candidates = []
-        for name in candidates:
-            if name and name not in seen:
-                seen.add(name)
-                unique_candidates.append(name)
-
-        if not unique_candidates:
-            # 候选全为空值（如环境缺省导致解析出的模型名为空）时，
-            # 与上方 `not candidates` 分支同口径回退主模型，避免 [0] 越界
-            return settings.model.OLLAMA_MODEL_NAME
-
-        for name in unique_candidates:
-            try:
-                if await self.check_availability(name):
-                    if name != unique_candidates[0]:
-                        logger.info(f"任务 {task} 首选模型不可用，降级为 {name}")
-                    return name
-            except Exception as e:
-                logger.warning(f"检查模型 {name} 可用性失败: {e}")
-                continue
-
-        # 全部不可用，返回第一个候选，由调用方报错
-        fallback_name = unique_candidates[0]
-        logger.warning(f"任务 {task} 所有候选模型均不可用，返回 {fallback_name}")
-        return fallback_name
+            candidate = self._resolve_model_name(ref)
+            if candidate:
+                return candidate
+        return settings.model.OLLAMA_MODEL_NAME or ""
 
     async def get_available_models(self) -> List[ModelInfo]:
-        """获取所有任务角色的模型可用性列表。"""
-        result = []
-        for task, model_ref in self.task_roles.items():
-            model_name = self._resolve_model_name(model_ref)
-            try:
-                available = await self.check_availability(model_name)
-                result.append(ModelInfo(name=model_name, task=task, available=available))
-            except Exception as e:
-                result.append(ModelInfo(name=model_name, task=task, available=False, error=str(e)))
+        """按已配置路由列出模型及启用状态。"""
+        registry = self._get_registry()
+        result: List[ModelInfo] = []
+        for task, route in registry.routes.items():
+            model = registry.get_model(route.primary)
+            result.append(
+                ModelInfo(
+                    name=model.model.model,
+                    task=task,
+                    available=model.provider.enabled,
+                    error=None if model.provider.enabled else "provider disabled",
+                )
+            )
         return result
 
+    # ------------------------------------------------------------------
+    # 工厂入口
+    # ------------------------------------------------------------------
     async def get_chat_llm(
         self,
         task: str,
         *,
         streaming: bool = False,
-        think: bool = False,
+        think: Optional[bool] = False,
         num_ctx: Optional[int] = None,
         temperature: Optional[float] = None,
         timeout: Optional[float] = None,
         preferred: Optional[str] = None,
-    ):
-        """按任务角色构造 ChatOllama 实例（B1 统一模型工厂）。
+        max_output_tokens: Optional[int] = None,
+    ) -> Any:
+        """按路由构造聊天模型（含 fallback 组）。
 
-        模型名走现有 task role + fallback 链解析；统一注入 num_ctx；
-        think 显式绑定 reasoning（与主回答链写法一致）——OLLAMA_SUPPORTS_THINKING=true
-        时按 think 值绑定，避免混合思考模型在结构化小任务上空烧思考链；
-        辅助任务一律 think=False，主回答任务由 should_think() 结果传入。
-
-        Args:
-            task: 任务名称（answer/fast/intent_router/title_generation/query_rewrite 等）。
-            streaming: 是否流式。
-            think: 是否绑定 reasoning=think（None 表示不干预，用模型默认行为）。
-            num_ctx: 上下文窗口，None 时使用 OLLAMA_NUM_CTX。
-            temperature: 采样温度，None 时使用 ChatOllama 默认值。
-            timeout: 请求超时（秒），None 时不设置。
-            preferred: 优先使用的模型名（可选，优先于任务 fallback 链）。
-
-        Returns:
-            ChatOllama（或绑定 reasoning 后的 Runnable）实例。
+        ``think`` 只对声明支持 reasoning 的模型生效；不支持时忽略，不伪造思考。
+        ``preferred`` 仅为旧 API 兼容保留，注册表 route 才是唯一事实来源。
         """
-        from langchain_ollama import ChatOllama
+        if preferred:
+            logger.warning("get_chat_llm.preferred 已弃用，模型路由请配置 registry: task=%s", task)
+        registry = self._get_registry()
+        route: ResolvedRoute = registry.resolve(
+            task,
+            require_tools=(task == "agent_decision"),
+        )
+        return build_route_models(
+            route,
+            streaming=streaming,
+            think=think,
+            temperature=temperature,
+            num_ctx=num_ctx,
+            max_output_tokens=max_output_tokens,
+            timeout=timeout,
+        )
 
-        model_name = await self.get_model_for_task(task, preferred=preferred)
-        # think=False 且配置了非思考专用模型时切换到该模型（与主回答链
-        # _stream_with_retry 的 deep_thinking=off 行为一致）：
-        # 混合思考模型（如 qwen3:4b）无法真正跳过思考，长思考链会拖垮
-        # 意图路由/标题生成等辅助任务的延迟预算；deep_thinking=off（默认）
-        # 时 direct 模型常驻 VRAM，辅助任务复用同模型零切换。
-        if (
-            think is False
-            and settings.model.OLLAMA_DIRECT_MODEL_NAME
-            and model_name != settings.model.OLLAMA_DIRECT_MODEL_NAME
-        ):
-            model_name = settings.model.OLLAMA_DIRECT_MODEL_NAME
-        kwargs = {
-            "model": model_name,
-            "streaming": streaming,
-            "num_ctx": num_ctx if num_ctx is not None else settings.model.OLLAMA_NUM_CTX,
-        }
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-        if timeout is not None:
-            kwargs["timeout"] = timeout
-        llm = ChatOllama(**kwargs)
-        # 切换到 direct 模型时不绑定 reasoning（与主回答链对 llm_direct 的
-        # 用法一致：2507-instruct 类非思考模型从不生成思考块，无需该参数）
-        switched_to_direct = model_name == settings.model.OLLAMA_DIRECT_MODEL_NAME
-        if (
-            think is not None
-            and settings.model.OLLAMA_SUPPORTS_THINKING
-            and not switched_to_direct
-        ):
-            return llm.bind(reasoning=think)
-        return llm
+    @property
+    def embedding_model_key(self) -> str:
+        """当前 embedding 路由的稳定标识（用于缓存失效）。"""
+        resolved = self._get_registry().get_embedding_model()
+        return f"{resolved.provider.id}:{resolved.model.id}:{resolved.model.model}"
 
     def get_embeddings(self):
-        """获取共享 OllamaEmbeddings 单例（B2，按模型名缓存，模型名变化时重建）。
+        """按 embedding route 返回共享 Embedding 实例（按 provider/model 缓存）。"""
+        registry = self._get_registry()
+        resolved = registry.get_embedding_model()
+        cache_key = f"{resolved.provider.id}:{resolved.model.id}:{resolved.model.model}"
+        if cache_key not in self._embeddings_cache:
+            self._embeddings_cache[cache_key] = build_embeddings(resolved)
+        return self._embeddings_cache[cache_key]
 
-        Embedding 任务在 fallback 链中只有单一模型（启动校验强制其存在），
-        因此同步构造即可；业务侧避免各自重复创建实例。
-        """
-        from langchain_ollama import OllamaEmbeddings
+    async def describe_route(self, task: str) -> Dict[str, Any]:
+        """返回任务路由的可展示信息（管理 UI / 诊断用）。"""
+        registry = self._get_registry()
+        route = registry.resolve(task)
+        return {
+            "task": task,
+            "source": route.source,
+            "primary": {
+                "id": route.primary.model.id,
+                "display_name": route.primary.model.display_name,
+                "provider": route.primary.provider.id,
+                "provider_type": route.primary.provider.type,
+                "model": route.primary.model.model,
+                "capabilities": route.primary.model.capabilities,
+                "external": route.primary.provider.is_external(),
+            },
+            "fallbacks": [
+                {
+                    "id": item.model.id,
+                    "provider": item.provider.id,
+                    "model": item.model.model,
+                }
+                for item in route.fallbacks
+            ],
+        }
 
-        model_ref = self.task_roles.get("embedding", "EMBEDDING_MODEL_NAME")
-        model_name = self._resolve_model_name(model_ref)
-        if model_name not in self._embeddings_cache:
-            # D 显存防抖：bge-m3 强制常驻 CPU（num_gpu=0）。4GB 显存下 embedding
-            # 与 qwen3:4b 互挤，每次 embed↔LLM 切换都要换入换出（间歇 2~10s 卡顿）。
-            # num_gpu=0 让 embedding 不再占用显存；同一模型同一权重，向量口径不变，
-            # Milvus 索引无需重建。
-            self._embeddings_cache[model_name] = OllamaEmbeddings(model=model_name, num_gpu=0)
-        return self._embeddings_cache[model_name]
+    def assert_configured(self) -> None:
+        """启动/管理校验入口：加载并验证注册表。"""
+        self._get_registry()
 
 
 # 全局默认模型管理器

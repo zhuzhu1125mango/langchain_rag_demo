@@ -52,6 +52,7 @@ from src.api import (
     auth_router,
     trace_router,
     audit_router,
+    admin_models_router,
 )
 from src.middleware.metrics import MetricsMiddleware, get_metrics, reset_metrics
 
@@ -185,6 +186,22 @@ async def _validate_model_config() -> None:
     """
     import ollama
 
+    from src.services.model_manager import model_manager
+
+    # P1：有 model_registry.json 时以注册表为准，不再强制要求 OLLAMA_* 三项；
+    # 外部 API-only 部署也能启动。legacy（无文件）仍走原有 Ollama 校验。
+    model_manager.assert_configured()
+    registry = model_manager.registry
+    if registry.source != "legacy-env":
+        logger.info(
+            "模型注册表校验通过: source=%s, providers=%d, models=%d, routes=%d",
+            registry.source,
+            len(registry.providers),
+            len(registry.models),
+            len(registry.routes),
+        )
+        return
+
     m = settings.model
     required = {
         "OLLAMA_MODEL_NAME": m.OLLAMA_MODEL_NAME,
@@ -306,9 +323,6 @@ async def lifespan(app: FastAPI):
                 "生产部署必须设置强密钥或 APP_ENV=prod"
             )
 
-    # 模型配置校验（A2）：模型名必填且存在于本地 Ollama，缺失即启动失败
-    await _validate_model_config()
-
     if settings.IS_PRODUCTION:
         # 生产 schema 由 alembic 统一管理（scripts/start-prod.sh：upgrade head /
         # stamp head 对齐）。此处 create_all 会与迁移竞争：全新库上 create_all
@@ -323,6 +337,12 @@ async def lifespan(app: FastAPI):
     # backend/data/runtime_config.json，重启不丢失）
     from src.services.runtime_config_service import load_runtime_overrides
     load_runtime_overrides()
+
+    # P2：DB 有 Provider/Route 配置时优先于文件/env；没有则回退 P1 文件/legacy。
+    from src.services.model_manager import model_manager
+    await model_manager.load_from_db()
+    # 模型配置校验（A2）：legacy 仍校验 Ollama；DB/file registry 走注册表校验。
+    await _validate_model_config()
 
     # 预热核心异步服务，避免首次请求阻塞事件循环
     try:
@@ -523,6 +543,8 @@ app.include_router(document_router, prefix="/api", dependencies=[Depends(get_cur
 app.include_router(auth_router, prefix="/api")
 app.include_router(trace_router, prefix="/api", dependencies=[Depends(get_current_user)])
 app.include_router(audit_router, prefix="/api", dependencies=[Depends(get_current_user)])
+# 模型 Provider/Model/Route 管理：路由内已挂 require_admin，不叠加全局登录依赖
+app.include_router(admin_models_router, prefix="/api")
 # document_ws_router 仅包含 WebSocket 端点，认证在端点内通过 get_current_user_for_ws 处理，
 # 原因同 notification_router：router 级 HTTP 依赖在 WebSocket 上下文中缺少 request 对象会失败。
 app.include_router(document_ws_router, prefix="/api")

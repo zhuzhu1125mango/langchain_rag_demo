@@ -44,7 +44,7 @@ class DocumentAnalyzer:
             from src.services.model_manager import model_manager
 
             self._aux_llm = await model_manager.get_chat_llm(
-                "fast", think=False, temperature=0.0
+                "doc_analyze", think=False, temperature=0.0
             )
         return self._aux_llm
 

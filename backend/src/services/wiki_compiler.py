@@ -74,31 +74,34 @@ class WikiCompiler:
     def __init__(self):
         self._llm = None
         self._embeddings = None
+        self._model_generation: Optional[str] = None
 
     # ------------------------------------------------------------------
     # 模型懒加载
     # ------------------------------------------------------------------
-    def _get_llm(self):
-        if self._llm is None:
-            from langchain_ollama import ChatOllama
+    async def _get_llm(self):
+        from src.services.model_manager import model_manager
 
-            # 辅助任务红线：编译必须走 fast llm（3B）。OLLAMA_MODEL_NAME（4B）仅供
-            # deep_thinking 主回答；4GB 显存下两者互斥，且 4B 编译偶发无终止生成会
-            # 独占 Ollama 单槽，导致所有并发请求排队超时。
-            model_name = (
-                settings.wiki_compile.WIKI_COMPILE_MODEL
-                or settings.model.FAST_LLM_MODEL_NAME
-                or settings.model.OLLAMA_MODEL_NAME
-            )
-            llm = ChatOllama(
-                model=model_name,
+        generation = model_manager.registry_generation
+        if self._llm is None or self._model_generation != generation:
+            # 编译走 registry 的 wiki_compile 路由；legacy 默认仍为 fast 模型。
+            self._llm = await model_manager.get_chat_llm(
+                "wiki_compile",
                 streaming=False,
-                num_ctx=settings.model.OLLAMA_NUM_CTX,
+                think=False,
                 temperature=0,
-                num_predict=COMPILE_MAX_OUTPUT_TOKENS,
+                max_output_tokens=COMPILE_MAX_OUTPUT_TOKENS,
             )
-            self._llm = llm.bind(reasoning=False)
+            self._model_generation = generation
         return self._llm
+
+    async def _ainvoke(self, prompt: str):
+        import inspect
+
+        llm = self._get_llm()
+        if inspect.isawaitable(llm):
+            llm = await llm
+        return await llm.ainvoke(prompt)
 
     def _get_embeddings(self):
         # 复用 model_manager 共享 OllamaEmbeddings 单例（B2，与检索链路同源连接），
@@ -244,7 +247,7 @@ class WikiCompiler:
             # LLM JSON 输出偶发畸变（截断/未转义引号），失败重试一次；
             # 仍失败才放弃（该文档零页面，仅损失编译覆盖，不阻断上传管线）
             try:
-                resp = await self._get_llm().ainvoke(prompt)
+                resp = await self._ainvoke(prompt)
                 pages = _parse_json_dict(_strip_think(resp.content)).get("pages", [])
                 break
             except Exception as e:
@@ -365,7 +368,7 @@ class WikiCompiler:
                 f"关键事实：\n{facts}\n\n"
                 f"来源材料（节选）：\n{material}\n"
             )
-        resp = await self._get_llm().ainvoke(prompt)
+        resp = await self._ainvoke(prompt)
         content = _strip_think(resp.content).strip()
         return content or f"# {title}\n\n（内容生成失败）"
 
@@ -399,7 +402,7 @@ class WikiCompiler:
                 f"既有页面标题（可用于 [[链接]]）：{existing}\n\n"
                 + "\n\n".join(material_parts)
             )
-            resp = await self._get_llm().ainvoke(prompt)
+            resp = await self._ainvoke(prompt)
             content = _strip_think(resp.content).strip()
             if not content:
                 return None
@@ -682,7 +685,7 @@ class WikiCompiler:
             f"当前页面内容：\n{page.content}\n\n"
             f"缺失的关键事实（须补充）：\n{facts}\n"
         )
-        resp = await self._get_llm().ainvoke(prompt)
+        resp = await self._ainvoke(prompt)
         content = _strip_think(resp.content).strip()
         if not content:
             raise ValueError("精炼输出为空")
@@ -706,7 +709,7 @@ class WikiCompiler:
             f"页面标题：{title}\n\n"
             f"剩余来源材料（节选）：\n{material}\n"
         )
-        resp = await self._get_llm().ainvoke(prompt)
+        resp = await self._ainvoke(prompt)
         content = _strip_think(resp.content).strip()
         if not content:
             raise ValueError("重写输出为空")
@@ -738,7 +741,7 @@ class WikiCompiler:
                 f"新增材料（供参考判断，不要输出修改建议）：\n{material}\n"
             )
             try:
-                resp = await self._get_llm().ainvoke(prompt)
+                resp = await self._ainvoke(prompt)
                 data = _parse_json_dict(_strip_think(resp.content))
                 contradictions = [
                     str(c).strip()

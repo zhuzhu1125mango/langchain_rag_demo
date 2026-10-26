@@ -66,6 +66,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '标签管理' }
       },
       {
+        path: 'models',
+        name: 'SettingsModels',
+        component: () => import('@/views/Settings/ModelServicesView.vue'),
+        meta: { title: '模型服务' }
+      },
+      {
         path: 'learning',
         name: 'SettingsLearning',
         component: () => import('@/views/Settings/LearningView.vue'),

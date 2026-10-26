@@ -951,11 +951,20 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
     "embedding_dimension": 1024,
     "ollama_model_name": "qwen3:4b",
     "ollama_direct_model_name": "qwen2.5:3b-instruct",
-    "fast_llm_model_name": "qwen2.5:3b-instruct"
+    "fast_llm_model_name": "qwen2.5:3b-instruct",
+    "registry_source": "legacy-env",
+    "route_models": {
+      "answer": "qwen3:4b",
+      "answer_direct": "qwen2.5:3b-instruct",
+      "fast": "qwen2.5:3b-instruct",
+      "embedding": "bge-m3:latest"
+    }
   },
   "supported_extensions": [".txt", ".pdf", ".docx", ...]
 }
 ```
+
+`registry_source` / `route_models` 反映 P1 Provider/Model/Route registry 的实际路由；未配置文件时为 `legacy-env`，与 `.env` 行为一致。
 
 ### 10.2 获取文档处理配置
 
@@ -1322,6 +1331,28 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 
 ---
 
+## 18. 模型服务管理接口（P2，管理员）
+
+所有 `/api/admin/models/*` 接口需要 `X-Admin-Key`（或开发模式）。Provider API Key 只写不读：
+GET 响应仅返回 `has_api_key` / `api_key_hint`。
+
+| 方法 | 端点 | 说明 |
+|---|---|---|
+| GET | `/api/admin/models/snapshot` | 安全快照（Provider / Model / Route，无明文 Key） |
+| GET/POST | `/api/admin/models/providers` | Provider 列表 / 新增 |
+| PATCH/DELETE | `/api/admin/models/providers/{id}` | 更新 / 删除 Provider |
+| POST | `/api/admin/models/providers/test` | 测试未保存的 Provider 配置 |
+| POST | `/api/admin/models/providers/{id}/test` | 测试已保存 Provider |
+| GET | `/api/admin/models/providers/{id}/models` | 模型发现 |
+| GET/POST | `/api/admin/models/deployments` | 模型列表 / 新增 |
+| PATCH/DELETE | `/api/admin/models/deployments/{id}` | 更新 / 删除模型 |
+| GET/PUT | `/api/admin/models/routes` | 读取 / 全量保存任务路由 |
+| POST | `/api/admin/models/apply` | 校验 DB 配置并热应用到在线 registry |
+
+保存 Provider/Model/Route 只写入 DB；点击“校验并应用”后才会替换在线模型。
+
+---
+
 ## 附录：API 端点汇总
 
 > 与代码核对至 2026-10-15（`backend/src/api/` 共 17 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 115 条路由）。
@@ -1422,6 +1453,10 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 配置 | GET | `/api/config/model` | 获取模型配置 |
 | 配置 | POST | `/api/config/reset` | 重置配置为默认值 |
 | 配置 | GET | `/api/config/info` | 获取系统信息 |
+| 模型服务 | GET/POST/PATCH/DELETE | `/api/admin/models/providers*` | Provider 管理（管理员） |
+| 模型服务 | GET/POST/PATCH/DELETE | `/api/admin/models/deployments*` | 模型管理（管理员） |
+| 模型服务 | GET/PUT | `/api/admin/models/routes` | 任务路由（管理员） |
+| 模型服务 | POST | `/api/admin/models/apply` | 校验并应用模型配置（管理员） |
 | 坏例 | POST | `/api/badcases` | 提交坏例反馈 |
 | 坏例 | GET | `/api/badcases` | 获取坏例列表 |
 | 坏例 | GET | `/api/badcases/stats` | 获取坏例统计 |

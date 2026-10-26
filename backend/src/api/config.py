@@ -9,7 +9,7 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from src.config import settings
 from src.auth import get_current_user, require_admin, CurrentUser
@@ -26,13 +26,35 @@ class ProcessingConfig(BaseModel):
 
 
 class ModelConfig(BaseModel):
-    """模型配置数据模型（值始终由 settings 填充，无内置默认）"""
+    """模型配置数据模型（值始终由 settings/registry 填充，无内置默认）"""
     embedding_model_name: str = ""
     embedding_dimension: int = 0
     ollama_model_name: str = ""
     # 深度思考关闭时使用的非思考直答模型；未配置时为空串（回退主模型 + reasoning=False）
     ollama_direct_model_name: str = ""
     fast_llm_model_name: str = ""
+    # P1：实际生效的 registry 来源与任务路由（管理接口；不含 API Key）
+    registry_source: str = ""
+    route_models: Dict[str, str] = Field(default_factory=dict)
+
+
+def _model_config() -> ModelConfig:
+    """从 registry 读取实际路由，避免管理接口显示过时的 .env 模型名。"""
+    from src.services.model_manager import model_manager
+
+    registry = model_manager.registry
+    return ModelConfig(
+        embedding_model_name=registry.get_model_name("embedding") or (settings.model.EMBEDDING_MODEL_NAME or ""),
+        embedding_dimension=settings.model.EMBEDDING_DIMENSION,
+        ollama_model_name=registry.get_model_name("answer") or (settings.model.OLLAMA_MODEL_NAME or ""),
+        ollama_direct_model_name=registry.get_model_name("answer_direct") or "",
+        fast_llm_model_name=registry.get_model_name("fast") or (settings.model.FAST_LLM_MODEL_NAME or ""),
+        registry_source=registry.source,
+        route_models={
+            task: registry.get_model_name(task) or ""
+            for task in registry.routes
+        },
+    )
 
 
 class SystemConfigResponse(BaseModel):
@@ -144,13 +166,7 @@ async def get_system_config(current_user: CurrentUser = Depends(require_admin)):
             chunk_overlap=settings.processing.CHUNK_OVERLAP,
             top_k=settings.processing.TOP_K
         ),
-        model=ModelConfig(
-            embedding_model_name=settings.model.EMBEDDING_MODEL_NAME,
-            embedding_dimension=settings.model.EMBEDDING_DIMENSION,
-            ollama_model_name=settings.model.OLLAMA_MODEL_NAME,
-            ollama_direct_model_name=settings.model.OLLAMA_DIRECT_MODEL_NAME or "",
-            fast_llm_model_name=settings.model.FAST_LLM_MODEL_NAME,
-        ),
+        model=_model_config(),
         supported_extensions=SUPPORTED_EXTENSIONS
     )
 
@@ -243,13 +259,7 @@ async def get_model_config(current_user: CurrentUser = Depends(require_admin)):
 
     原始模型名会暴露底层模型/厂商，仅管理员可读。
     """
-    return ModelConfig(
-        embedding_model_name=settings.model.EMBEDDING_MODEL_NAME,
-        embedding_dimension=settings.model.EMBEDDING_DIMENSION,
-        ollama_model_name=settings.model.OLLAMA_MODEL_NAME,
-        ollama_direct_model_name=settings.model.OLLAMA_DIRECT_MODEL_NAME or "",
-        fast_llm_model_name=settings.model.FAST_LLM_MODEL_NAME,
-    )
+    return _model_config()
 
 
 @router.post("/reset")
