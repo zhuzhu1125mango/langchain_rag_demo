@@ -49,7 +49,7 @@ dependencies = [
     # 仍用 python-magic（系统 libmagic），行为不变。
     "python-magic-bin>=0.4.14 ; sys_platform == 'win32'",
     "ollama==0.6.2",
-    "sentence-transformers==5.6.0",
+    "sentence-transformers==6.2.0",
     # torch 原为 sentence-transformers 的传递依赖；提升为直接依赖是因为
     # uv 对「按平台切换 index」(tool.uv.sources + marker) 仅对直接依赖生效：
     # 声明后 Linux 容器走 pytorch-cpu 源（避免拉取 ~2.5GB CUDA 依赖），
