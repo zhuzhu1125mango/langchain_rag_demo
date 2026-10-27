@@ -1,6 +1,6 @@
 # 知澜 · 企业知识问答系统
 
-**知澜**是基于 **LangChain + Ollama + Milvus** 构建的企业级私有文档 RAG（Retrieval-Augmented Generation）知识问答平台，支持完全离线运行，数据安全可控。
+**知澜**是基于 **LangChain + Ollama + Milvus** 构建的企业级私有文档 RAG（Retrieval-Augmented Generation）知识问答平台，默认完全离线运行，数据安全可控；外部模型服务为可选能力（默认关闭）。
 
 ---
 
@@ -18,7 +18,7 @@
 | 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
 | 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启，多工具/多步推理）＋原生 Function Calling / ReAct 作为回退路径 | ✅ |
 | 🛡️ **Agent 安全护栏** | 输入（提示注入/越权/超长）拦截、工具参数与 URL 安全校验、输出凭证/系统提示脱敏；高危工具可开启人工审批（SSE 审批卡片 + 回执 API，`AGENT_APPROVAL_MODE` 默认 off）；SEC-5：检索/网页内容按不可信上下文隔离、工具域名/DLP 策略、`fetch_webpage` 默认关闭 | ✅ |
-| 🔐 **多租户安全与配额** | SEC-1~5：学习样本按 owner 隔离；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致 | ✅ |
+| 🔐 **多租户安全与配额** | SEC-1~5：学习样本按 owner 隔离；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致。SEC P2：实验/通知隔离、分类标签 admin 写、SSRF fail-closed、JWT 登出吊销、语义缓存按 KB 索引失效、live/ready 探针、账号导出/注销与日志脱敏 | ◐ 9/14/15 部分 |
 | 📊 **Agent 评测** | 轨迹级四维确定性评测 + 答案级判分器 + A/B 门槛与离线 harness（`AGENT_TRAJ_EVAL_ENABLED` 默认关；在线抽样待办） | ✅ |
 | 💬 **流式输出** | 实时打字效果，提升用户体验 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
@@ -26,7 +26,7 @@
 | 🧭 **产品身份口径** | “你是谁 / 你是什么模型 / 谁开发了你”等身份问题统一以知澜回答，避免底层模型自曝 Qwen/阿里云 | ✅ |
 | 🔄 **多模型 Provider** | 支持 Ollama 原生 + OpenAI-Compatible（OpenAI/DeepSeek/通义兼容/Kimi/vLLM/LM Studio 等），按任务路由、能力校验、fallback 与热切换；P2 提供 DB 配置、加密 Key、管理 API 与设置页「模型服务」；现有 `OLLAMA_*` 配置自动兼容 | ✅ |
 | 🔗 **来源展示** | 前端同时展示知识库片段与网页搜索来源（标题/URL） | ✅ |
-| 🔒 **完全离线（模型侧）** | 使用本地 Ollama 模型，无需付费 API；联网搜索默认走 Tavily 在线 API（可选，`SEARCH_PROVIDER` 可切换） | ✅ |
+| 🔒 **完全离线（默认）** | 使用本地 Ollama 模型，无需付费 API；外部 OpenAI-Compatible Provider 为可选能力，需管理员显式启用，本地→外部降级默认禁止；联网搜索默认走 Tavily 在线 API（可选，`SEARCH_PROVIDER` 可切换） | ✅ |
 | 🖥️ **界面支持** | Vue3 + Tailwind/Element Plus 设计系统：语义 token、组件 primitive、三态组件、响应式布局与暗色模式 | ✅ |
 | 🧭 **系统能力状态** | 设置页只读展示默认关闭/需运维开启的能力（Wiki 编译、网页抓取、高危审批、A-B 聊天分流、学习权重回载、轨迹评测）及风险与开启方式 | ✅ |
 | 📊 **实验框架** | A/B 实验管理 API（创建/分流/度量）；**已接入 chat 链路**（变体白名单覆盖 decision/检索参数 + response_time 指标回收），灰度开关 `AB_EXPERIMENT_CHAT_ENABLED` 默认关 | ✅ |
@@ -88,8 +88,9 @@
 
 系统在 Ollama 本地部署多个模型，按任务特点分工协作，降低主模型负载并提升响应速度。
 
-> ⚠️ **模型名没有内置默认值**（A2 去硬编码），必须由 `.env` 提供；启动时会经 `/api/tags`
-> 校验存在性，缺失或未 pull 则**拒绝启动**。下表为**开发栈当前取值**，供参考而非固定值：
+> ⚠️ **legacy 模式**下模型名没有内置默认值（A2 去硬编码），必须由 `.env` 提供；启动时会经 `/api/tags`
+> 校验存在性，缺失或未 pull 则**拒绝启动**。下表为**开发栈 legacy 取值**，供参考而非固定值；使用
+> 文件/DB registry 后以 registry 的任务路由为准（见下节「模型自由切换」）：
 
 | 任务 | 配置项 | 开发栈取值 | 说明 |
 |------|--------|-----------|------|
@@ -116,6 +117,22 @@ SEARCH_RERANK_MODEL=BAAI/bge-reranker-base
 ```
 
 > ⚠️ **Embedding 维度变更注意**：默认 Embedding 从 `nomic-embed-text`（768 维）切换为 `bge-m3`（1024 维）。现有 Milvus 集合会在服务启动时自动检测维度不一致并重建，旧知识库数据将丢失。请在启动前运行 `cd backend && uv run python scripts/migrate_embedding_model.py --backup` 备份并重新上传文档。
+
+### 🔄 模型自由切换（P1/P2）
+
+聊天模型可按任务自由切换，**无需重启**；配置按以下优先级生效：
+
+1. **PostgreSQL**（设置 → 模型服务，管理员保存后点「校验并应用」）——最高优先级，启动时自动加载
+2. **`MODEL_REGISTRY_FILE`**（或默认 `backend/data/model_registry.json`）——JSON registry，按 mtime 热加载
+3. **`.env` 的 `OLLAMA_*`**——legacy 兜底，现有部署零改动
+
+- **管理入口**：`设置 → 模型服务`（`/settings/models`）。生产环境需 `ADMIN_KEY`（`X-Admin-Key`）；Provider Key 在 DB 中 Fernet 加密、只写不读（仅回显末四位）。
+- **供应商**：Ollama 原生 + 任意 OpenAI-Compatible（OpenAI、DeepSeek、通义兼容、Kimi、vLLM、LM Studio 等）；外部 Provider 标记 `external`，本地主模型降级到外部需显式开启 `allow_external_fallback`（默认关闭，避免数据出域）。
+- **路由与能力**：`answer` / `fast` / `embedding` 为必需路由；`agent_decision` 必须选声明 `tools` 的模型；每条路由可配 fallbacks。
+- **故障隔离与成本（P2.1）**：同一 Provider 连续失败 3 次自动熔断 60s，期间直接走 fallback，冷却后自动半开探测；模型可配置每 1K tokens 输入/输出单价与币种，设置页「模型服务」直接查看最近 7/30/90 天调用数、失败、Token、平均延迟、估算成本与未定价次数；用量按天落库到 `model_usage_daily`，重启不丢已落库数据。管理员也可调用 `GET /api/admin/models/usage?days=7`。
+- **Embedding 迁移（P3）**：Embedding 模型/维度以 registry 为权威；切换后在设置页「向量索引 / Embedding」重建，系统会用新模型重新向量化全部切片、原子切换并保留旧索引备份，失败自动保留线上索引，可一键回滚；重建完成自动应用新配置并失效语义缓存。可选 `rerank` 路由支持 Ollama 托管重排序模型热切换。
+- **Embedding 不能热切**：切换模型/维度必须重建 Milvus 索引（设置页已提供重建与回滚）；重建完成前历史向量与新查询不可比。
+- 完整配置格式、API 与回滚见 [design/model-provider-registry-2026-10.md](docs/design/model-provider-registry-2026-10.md) 与 [deployment.md §6.3.2](docs/guide/deployment.md)。
 
 ---
 
@@ -760,6 +777,11 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `TITLE_MAX_LENGTH` | 生成标题的最大长度 | `30` | - |
 | `TITLE_FALLBACK_LENGTH` | 生成失败时截取问题前 N 字 | `30` | - |
 | `TITLE_GENERATION_MODEL` | 指定标题生成模型 | - | 留空则使用 `FAST_LLM_MODEL_NAME` |
+| `MODEL_REGISTRY_FILE` | 可选：JSON registry 路径 | - | 相对路径以 `backend/` 为根；配置后优先于 legacy `OLLAMA_*`，见「模型自由切换」 |
+| `MODEL_USAGE_FLUSH_INTERVAL_S` | 可选：用量增量落库间隔（秒） | `60` | `0` 关闭周期落库，查询仍叠加进程内增量 |
+| `MODEL_SECRET_ENC_KEY` | Provider API Key 加密密钥 | - | 未设置时从 `SECRET_KEY` 派生；轮换后已存 Key 需重录 |
+
+> 模型相关 `OLLAMA_*` / `FAST_LLM_MODEL_NAME` / `TITLE_GENERATION_MODEL` 仅在 legacy 模式下生效；DB 或 `MODEL_REGISTRY_FILE` 存在时以 registry 的任务路由为准。
 
 ### Docker 服务端口
 
@@ -904,7 +926,7 @@ pnpm test:e2e
 
 ```bash
 # 检查后端服务
-curl http://localhost:8000/health
+curl http://localhost:8000/health/ready   # 依赖就绪；/health/live 仅进程探活
 
 # 检查数据库连接（开发环境）
 docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
@@ -972,7 +994,7 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8080, 9002, 9003, 19531, 9092, 3001, 9094, 9095；前端 8080 绑定 0.0.0.0，其余均仅绑定回环地址。前端容器内监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
 10. **联网搜索稳定性**: 联网搜索默认走 Tavily 在线 API，需在 `SEARCH_API_KEY` 配置有效的 Key；如遇网络或配额限制可切换其它 provider
-11. **公网多租户边界**: SEC-1~5 已完成（学习隔离/注册配额/代理限流/状态索引/Agent 出站），但 SEC-6~15（通知频道、SSRF 纵深、JWT 吊销、备份/供应链等）仍未完成；公网多租户请按受控网络 + 最小权限运营，详见 [安全与多租户加固](docs/design/security-multitenancy-hardening-2026-10.md)
+11. **公网多租户边界**: SEC-1~5 已完成；SEC P2 主体已完成（实验/通知隔离、SSRF fail-closed、JWT 吊销、缓存索引、live/ready、账号导出/注销与日志脱敏），但 SEC-9 传输层 IP 固定、SEC-13 镜像 digest、SEC-14 日志保留期、SEC-15 覆盖率 65 仍待补；公网多租户请按受控网络 + 最小权限运营，详见 [安全与多租户加固](docs/design/security-multitenancy-hardening-2026-10.md)
 
 ### 环境启停
 

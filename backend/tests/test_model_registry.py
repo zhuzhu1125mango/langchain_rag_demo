@@ -123,13 +123,15 @@ def test_agent_decision_requires_tool_capability(tmp_path):
         ModelRegistry.load(str(path))
 
 
-def test_embedding_dimension_mismatch_is_blocked(tmp_path, monkeypatch):
+def test_embedding_dimension_mismatch_requires_rebuild_but_loads(tmp_path, monkeypatch):
+    """P3：维度以 registry 为权威；允许保存不同维度配置，由 apply 闸门要求先重建。"""
     monkeypatch.setattr(settings.model, "EMBEDDING_DIMENSION", 1024)
     path = tmp_path / "model_registry.json"
     _write_registry(path, embedding_dimension=768)
 
-    with pytest.raises(ModelRegistryError, match="重建索引"):
-        ModelRegistry.load(str(path))
+    registry = ModelRegistry.load(str(path))
+
+    assert registry.get_embedding_model().model.embedding_dimension == 768
 
 
 @pytest.mark.asyncio

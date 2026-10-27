@@ -3,7 +3,8 @@
 # 阶段二运行：基于 nginxinc/nginx-unprivileged:alpine（W6 #60 非 root 运行，监听 8080），
 # 将 build 阶段的 dist 拷贝到 nginx html 目录，覆盖 nginx.conf 后以非 daemon 模式运行；
 # HEALTHCHECK 探测本机静态首页，异常容器由编排层重启策略接管。
-FROM node:20-alpine AS build
+# SEC-13：基础镜像按 digest 固定（tag + digest），避免上游 tag 重打导致构建不可复现
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS build
 
 WORKDIR /app
 
@@ -15,7 +16,7 @@ RUN pnpm install
 COPY . .
 RUN pnpm run build
 
-FROM nginxinc/nginx-unprivileged:alpine
+FROM nginxinc/nginx-unprivileged:alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
 
 COPY --from=build /app/dist /usr/share/nginx/html
 

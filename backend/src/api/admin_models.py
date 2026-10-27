@@ -9,12 +9,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth import CurrentUser, require_admin
+from src.config import settings
 from src.database import get_db
 from src.models.model_registry import ModelDeployment, ModelProvider
 from src.services.audit_service import record_audit
@@ -35,7 +36,9 @@ from src.services.model_config_service import (
     update_provider,
     upsert_routes,
 )
+from src.services.model_health import provider_health
 from src.services.model_registry import ProviderConfig
+from src.services.model_usage import model_usage
 
 logger = logging.getLogger("rag_system")
 
@@ -68,6 +71,9 @@ class ModelUpsert(BaseModel):
     max_output_tokens: Optional[int] = None
     embedding_dimension: Optional[int] = None
     temperature: Optional[float] = None
+    input_cost_per_1k: Optional[float] = None
+    output_cost_per_1k: Optional[float] = None
+    price_currency: Optional[str] = None
     enabled: Optional[bool] = None
 
 
@@ -106,6 +112,83 @@ async def get_snapshot(db: AsyncSession = Depends(get_db)):
         return await registry_snapshot(db)
     except Exception as exc:
         raise _http_error(exc)
+
+
+@router.get("/usage")
+async def get_model_usage(days: int = Query(7, ge=1, le=90), db: AsyncSession = Depends(get_db)):
+    """模型用量（持久化聚合 + 进程内未落库增量）与 Provider 健康（MODEL-P2.1）。"""
+    from src.services.model_usage_store import merge_usage_rows, query_usage_totals
+
+    persisted: List[dict] = []
+    try:
+        persisted = await query_usage_totals(db, days=days)
+    except Exception as exc:
+        logger.warning("读取模型用量聚合失败，仅返回进程内增量: %s", exc)
+    return {
+        "usage": merge_usage_rows(persisted, model_usage.pending_snapshot()),
+        "health": provider_health.snapshot(),
+        "days": days,
+    }
+
+
+@router.get("/index/status")
+async def get_embedding_index_status(db: AsyncSession = Depends(get_db)):
+    """Embedding 索引画像：当前索引 vs 待应用配置、是否需重建、可否回滚（MODEL-P3）。"""
+    from src.services.embedding_migration import get_index_status
+
+    try:
+        return await get_index_status(db)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"读取索引状态失败: {exc}")
+
+
+@router.post("/index/rebuild")
+async def rebuild_embedding_index(
+    force: bool = Query(False),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """按 DB 待应用 Embedding 配置重建索引（后台任务，前端轮询状态）。"""
+    from src.services.embedding_migration import EmbeddingMigrationConflict, schedule_rebuild
+
+    try:
+        schedule_rebuild(force=force)
+    except EmbeddingMigrationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    await _audit(
+        "model.index.rebuild",
+        settings.milvus.MILVUS_COLLECTION_NAME,
+        {"force": force},
+        current_user,
+    )
+    return {"status": "accepted", "force": force}
+
+
+@router.post("/index/rollback")
+async def rollback_embedding_index(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """把上一次重建前的备份集合换回，并恢复旧 Embedding 路由。"""
+    from src.services.embedding_migration import (
+        EmbeddingMigrationConflict,
+        EmbeddingMigrationError,
+        rollback_index,
+    )
+
+    try:
+        result = await rollback_index(db)
+    except EmbeddingMigrationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except EmbeddingMigrationError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    await _audit(
+        "model.index.rollback",
+        settings.milvus.MILVUS_COLLECTION_NAME,
+        {"profile_id": result.get("indexed", {}).get("profile_id", "")},
+        current_user,
+    )
+    return result
 
 
 @router.get("/providers")
@@ -277,6 +360,12 @@ async def apply_registry(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(require_admin),
 ):
+    from src.services.embedding_migration import EmbeddingMigrationConflict, assert_apply_allowed
+
+    try:
+        await assert_apply_allowed(db)
+    except EmbeddingMigrationConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     try:
         registry = await apply_registry_from_db(db)
     except Exception as exc:

@@ -12,9 +12,12 @@ from src.database import async_session
 from src.models.experiment import Experiment, ExperimentVariant, TrafficAllocation, ExperimentMetric, ExperimentResult
 
 
-def _owner_condition(owner_id: str):
-    """归属过滤：本人实验或 owner 为空的遗留数据（与 require_owner 约定一致）。"""
-    return or_(Experiment.owner_id == owner_id, Experiment.owner_id == "")
+def _owner_condition(owner_id: str, include_legacy: bool = False):
+    """归属过滤（SEC-6）：默认只匹配本人；遗留空 owner 仅管理员显式开启时可见。"""
+    condition = Experiment.owner_id == owner_id
+    if include_legacy:
+        return or_(condition, Experiment.owner_id == "")
+    return condition
 
 
 class ExperimentManager:
@@ -71,7 +74,7 @@ class ExperimentManager:
             
             return str(experiment.id)
     
-    async def start_experiment(self, experiment_id: str, owner_id: str = "") -> bool:
+    async def start_experiment(self, experiment_id: str, owner_id: str = "", include_legacy: bool = False) -> bool:
         """
         启动实验
         
@@ -84,7 +87,10 @@ class ExperimentManager:
         """
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id == experiment_id, _owner_condition(owner_id))
+                select(Experiment).where(
+                    Experiment.id == experiment_id,
+                    _owner_condition(owner_id, include_legacy),
+                )
             )
             experiment = result.scalar_one_or_none()
             
@@ -98,7 +104,7 @@ class ExperimentManager:
             
             return False
     
-    async def stop_experiment(self, experiment_id: str, owner_id: str = "") -> bool:
+    async def stop_experiment(self, experiment_id: str, owner_id: str = "", include_legacy: bool = False) -> bool:
         """
         停止实验
         
@@ -111,7 +117,10 @@ class ExperimentManager:
         """
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id == experiment_id, _owner_condition(owner_id))
+                select(Experiment).where(
+                    Experiment.id == experiment_id,
+                    _owner_condition(owner_id, include_legacy),
+                )
             )
             experiment = result.scalar_one_or_none()
             
@@ -127,7 +136,7 @@ class ExperimentManager:
             
             return False
     
-    async def get_experiment(self, experiment_id: str, owner_id: str = "") -> Optional[Dict[str, Any]]:
+    async def get_experiment(self, experiment_id: str, owner_id: str = "", include_legacy: bool = False) -> Optional[Dict[str, Any]]:
         """
         获取实验详情
         
@@ -140,7 +149,10 @@ class ExperimentManager:
         """
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id == experiment_id, _owner_condition(owner_id))
+                select(Experiment).where(
+                    Experiment.id == experiment_id,
+                    _owner_condition(owner_id, include_legacy),
+                )
             )
             experiment = result.scalar_one_or_none()
             
@@ -160,7 +172,12 @@ class ExperimentManager:
             
             return None
     
-    async def list_experiments(self, status: str = None, owner_id: str = "") -> List[Dict[str, Any]]:
+    async def list_experiments(
+        self,
+        status: str = None,
+        owner_id: str = "",
+        include_legacy: bool = False,
+    ) -> List[Dict[str, Any]]:
         """
         获取实验列表
         
@@ -172,7 +189,7 @@ class ExperimentManager:
             List[Dict[str, Any]]: 实验列表
         """
         async with async_session() as session:
-            query = select(Experiment).where(_owner_condition(owner_id))
+            query = select(Experiment).where(_owner_condition(owner_id, include_legacy))
             if status:
                 query = query.where(Experiment.status == status)
             
@@ -189,7 +206,12 @@ class ExperimentManager:
                 for e in experiments
             ]
     
-    async def delete_experiments(self, experiment_ids: List[str], owner_id: str = "") -> Dict[str, Any]:
+    async def delete_experiments(
+        self,
+        experiment_ids: List[str],
+        owner_id: str = "",
+        include_legacy: bool = False,
+    ) -> Dict[str, Any]:
         """
         批量删除实验及其关联数据
         
@@ -222,7 +244,7 @@ class ExperimentManager:
         
         async with async_session() as session:
             result = await session.execute(
-                select(Experiment).where(Experiment.id.in_(valid_ids), _owner_condition(owner_id))
+                select(Experiment).where(Experiment.id.in_(valid_ids), _owner_condition(owner_id, include_legacy))
             )
             experiments = result.scalars().all()
             found_ids = {str(e.id) for e in experiments}

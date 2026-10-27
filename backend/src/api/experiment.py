@@ -9,7 +9,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
-from src.auth import get_current_user, CurrentUser
+from src.auth import get_current_user, require_admin, CurrentUser
 from src.services.experiment_manager import experiment_manager
 
 router = APIRouter(prefix="/experiments", tags=["experiments"])
@@ -76,6 +76,18 @@ async def batch_delete_experiments(
     except Exception as e:
         logger.error("实验操作失败", exc_info=True)
         raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
+
+
+@router.get("/admin/legacy", summary="管理员查看遗留空 owner 实验")
+async def list_legacy_experiments(
+    status: Optional[str] = None,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """SEC-6：普通用户不可见遗留空 owner 实验；管理员可显式查看并处理。"""
+    experiments = await experiment_manager.list_experiments(
+        status=status, owner_id=current_user.user_id, include_legacy=True
+    )
+    return {"success": True, "data": experiments}
 
 
 @router.get("/{experiment_id}", summary="获取实验详情")

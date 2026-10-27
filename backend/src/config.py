@@ -167,6 +167,18 @@ class SecuritySettings(SecretsFirstMixin, BaseSettings):
     USER_API_KEYS_MAX_PER_USER: int = 5
     # /auth/api-keys 发放端点限流（次/分/IP），沿用自研滑动窗口；0 = 不限流
     AUTH_RATE_LIMIT_API_KEY_CREATE: int = 5
+    # SEC-17：评估 API 配额（按 user_id 计数；0 = 不限）
+    EVAL_RATE_LIMIT_PER_MINUTE: int = 10
+    EVAL_DAILY_QUOTA: int = 200
+    EVAL_BATCH_MAX_SAMPLES: int = 100
+    # SEC-18：会话/文档批量删除单次 ID 上限（防超大批量请求拖垮 DB/后台任务）
+    BATCH_DELETE_MAX_IDS: int = 200
+    # SEC-14：应用文件日志保留天数（开发文件轮转）；生产 stdout 由平台保留策略控制
+    LOG_RETENTION_DAYS: int = 30
+    # 请求 trace / 审计日志的数据库保留期（天）与清扫间隔（秒）
+    TRACE_RETENTION_DAYS: int = 30
+    AUDIT_RETENTION_DAYS: int = 365
+    RETENTION_SWEEP_INTERVAL_S: int = 86400
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
@@ -226,6 +238,8 @@ class ModelSettings(BaseSettings):
     # P1 模型注册文件（Provider/Model/Route）；相对路径以 backend/ 为根。
     # 文件不存在时自动从上面的 OLLAMA_* 生成 legacy registry，行为不变。
     MODEL_REGISTRY_FILE: Optional[str] = None
+    # 模型用量增量落库间隔（秒）；0 表示关闭周期落库（查询仍会叠加进程内增量）
+    MODEL_USAGE_FLUSH_INTERVAL_S: float = 60.0
     
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
@@ -381,6 +395,10 @@ class SearchSettings(BaseSettings):
     SEARXNG_BASE_URL: Optional[str] = None
     SEARXNG_TIMEOUT: int = 10
     SEARCH_FETCH_TIMEOUT: int = 10
+    # SEC-9：网页抓取响应上限与内容类型白名单，防大响应/二进制内容拖垮服务
+    SEARCH_FETCH_MAX_BYTES: int = 2_000_000
+    SEARCH_FETCH_MAX_REDIRECTS: int = 5
+    SEARCH_FETCH_ALLOWED_CONTENT_TYPES: str = "text/html,text/plain,application/xhtml+xml"
     SEARCH_MAX_FETCH: int = 5
     SEARCH_MIN_CONTENT_LENGTH: int = 100
     SEARCH_ENABLE_MULTI_QUERY: bool = True
@@ -501,6 +519,8 @@ class GuardrailSettings(BaseSettings):
     GUARDRAIL_OUTPUT_ENABLED: bool = True
     # 工具护栏：参数长度/URL/路径穿越 → 拒绝执行
     GUARDRAIL_TOOL_ENABLED: bool = True
+    # SEC-19：URL 参数域名解析校验（DNS fail-closed，防解析到内网/解析失败放行）
+    GUARDRAIL_TOOL_DNS_CHECK_ENABLED: bool = True
     # 输入长度上限（字符）
     GUARDRAIL_INPUT_MAX_CHARS: int = 4000
     # 工具护栏：参数 JSON 长度上限（字符）

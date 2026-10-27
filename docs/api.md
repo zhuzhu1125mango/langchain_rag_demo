@@ -4,13 +4,13 @@
 
 - **API 地址**: `http://localhost:8000/api`
 - **文档地址**: `http://localhost:8000/docs` (Swagger UI)
-- **健康检查**: `GET /health`
+- **健康检查**: `GET /health/live`（浅探活）、`GET /health/ready`（依赖就绪，503 表示未就绪）、`GET /health`（兼容旧探针）、`GET /health/detail`（管理员）
 - **版本**: v1.0
 - **依赖管理**: uv（uv.lock 锁定版本）
 
 ### 鉴权
 
-除 `/api/auth/register`、`/api/auth/login`、`/api/auth/refresh`、`/health`、`/health/detail`、`/metrics`、`/` 外，
+除 `/api/auth/register`、`/api/auth/login`、`/api/auth/refresh`、`/health`、`/health/live`、`/health/ready`、`/health/detail`、`/metrics`、`/` 外，
 全部接口都需要认证。支持两种凭据，按以下顺序判定：
 
 | 方式 | 携带位置 | 说明 |
@@ -165,10 +165,23 @@ curl -X POST http://localhost:8000/api/documents/upload \
 - 首签（`orig_iat`）后 7 天内（`ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS`，0 = 关闭）可凭
   签名有效的 token 换发新 token（允许原 token 已过期，`orig_iat` 保留并顺延有效期）；
 - 超过窗口或签名无效返回 401（需重新登录）。
+- **refresh 轮换（SEC-10）**：换发成功即吊销旧 token 的 `jti`，同一 token 不能反复续期。
+
+**POST** `/api/auth/logout` → 204
+
+携带 `Authorization: Bearer <access_token>`；把当前 token 的 `jti` 写入吊销名单（进程内 + Redis，TTL 到过期），旧 token 立即 401。
 
 ### 0.4 获取当前用户
 
 **GET** `/api/auth/me` → `{ "user_id": "...", "username": "..." }`
+
+### 0.5 账号导出与注销（SEC-14）
+
+**GET** `/api/auth/account/export` → 下载 JSON（知识库/文档/会话/反馈/实验/API Key 元数据；不含密码哈希与 Key 明文）。
+
+**DELETE** `/api/auth/account`（body `{"password": "..."}`）→ 204
+
+校验密码后级联删除用户资源、尽力清理向量与原文件、吊销当前 token。密码策略：≥10 位，禁止常见弱密码与用户名同名。
 
 ---
 
@@ -528,9 +541,9 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 ```
 
 > ⚠️ **本接口不分页，全量返回**（含 `joinedload` 关联），文档量大时响应体可能很大。
-> 同类的 `/api/sessions` 亦不分页。这与 `/api/knowledge_bases`（`page`/`page_size`）、
-> `/api/feedback`（`skip`/`limit`）、`/api/traces`（`limit`/`offset`）等接口的分页风格并存，
-> 属已知的接口规范不统一问题（见 `docs/archive/code-review-2026-09.md` P1-C2）。
+> `/api/sessions` 已支持 `skip`/`limit` 分页（SEC-18），与 `/api/knowledge_bases`（`page`/`page_size`）、
+> `/api/feedback`（`skip`/`limit`）、`/api/traces`（`limit`/`offset`）风格一致；
+> 文档列表分页仍属已知的接口规范不统一问题（见 `docs/archive/code-review-2026-09.md` P1-C2）。
 
 ### 3.3 获取文档详情
 
@@ -601,6 +614,13 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 ### 4.1 获取会话列表
 
 **GET** `/api/sessions`
+
+**查询参数**（SEC-18）：
+
+| 参数 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `skip` | int | 0 | 跳过数量（≥0） |
+| `limit` | int | 100 | 每页数量（1~500） |
 
 **成功响应** (200):
 ```json
@@ -819,6 +839,8 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 
 ## 9. A/B测试接口
 
+> SEC-6：普通用户只能访问本人实验；`owner_id=""` 的遗留实验仅管理员可通过 `GET /api/experiments/admin/legacy` 查看。
+
 ### 9.1 创建实验
 
 **POST** `/api/experiments`
@@ -957,6 +979,13 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
       "answer": "qwen3:4b",
       "answer_direct": "qwen2.5:3b-instruct",
       "fast": "qwen2.5:3b-instruct",
+      "intent_router": "qwen2.5:3b-instruct",
+      "title_generation": "qwen2.5:3b-instruct",
+      "query_rewrite": "qwen2.5:3b-instruct",
+      "verifier": "qwen2.5:3b-instruct",
+      "agent_decision": "qwen2.5:3b-instruct",
+      "wiki_compile": "qwen2.5:3b-instruct",
+      "doc_analyze": "qwen2.5:3b-instruct",
       "embedding": "bge-m3:latest"
     }
   },
@@ -964,7 +993,13 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 }
 ```
 
-`registry_source` / `route_models` 反映 P1 Provider/Model/Route registry 的实际路由；未配置文件时为 `legacy-env`，与 `.env` 行为一致。
+`registry_source` / `route_models` 反映实际生效的 Provider/Model/Route registry 路由：
+
+| `registry_source` | 含义 |
+|---|---|
+| `database` | 使用 P2 管理 API/设置页写入 DB 并已「校验并应用」的配置（最高优先级） |
+| `<绝对或相对路径>` | 使用 `MODEL_REGISTRY_FILE` 或默认 `backend/data/model_registry.json` |
+| `legacy-env` | 无 DB/文件配置，按 `.env` 的 `OLLAMA_*` 自动生成 legacy 路由，行为与旧版本一致 |
 
 ### 10.2 获取文档处理配置
 
@@ -1238,6 +1273,13 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 }
 ```
 
+**配额与上限（SEC-17）**：
+
+- 按用户限流：`EVAL_RATE_LIMIT_PER_MINUTE`（默认 10 次/分）超限返回 `429`；
+- 按用户日额度：`EVAL_DAILY_QUOTA`（默认 200 样本单元/天，单条计 1、批量按样本数）超限返回 `429`；
+- 批量样本上限：`EVAL_BATCH_MAX_SAMPLES`（默认 100），超限返回 `400`；
+- 关闭配额：`QUOTA_ENFORCEMENT_ENABLED=false`（全局）或把对应阈值设为 `0`。
+
 ---
 
 ## 15. Wiki 编译层接口
@@ -1347,21 +1389,116 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | GET/POST | `/api/admin/models/deployments` | 模型列表 / 新增 |
 | PATCH/DELETE | `/api/admin/models/deployments/{id}` | 更新 / 删除模型 |
 | GET/PUT | `/api/admin/models/routes` | 读取 / 全量保存任务路由 |
+| GET | `/api/admin/models/usage?days=7` | 用量统计（持久化聚合 + 未落库增量）与 Provider 熔断状态（P2.1，`days` 1~90） |
+| GET | `/api/admin/models/index/status` | Embedding 索引画像：当前索引 / 待应用配置、维度、切片数、是否需重建、可否回滚（P3） |
+| POST | `/api/admin/models/index/rebuild?force=false` | 按 DB 待应用 Embedding 配置后台重建索引（P3；`force=true` 可强制重跑） |
+| POST | `/api/admin/models/index/rollback` | 把上一次重建前的备份集合与旧 Embedding 路由回滚（P3） |
 | POST | `/api/admin/models/apply` | 校验 DB 配置并热应用到在线 registry |
 
-保存 Provider/Model/Route 只写入 DB；点击“校验并应用”后才会替换在线模型。
+保存 Provider/Model/Route 只写入 DB；点击“校验并应用”（或调用 `apply`）后才会替换在线模型，新请求立即使用新配置，在途请求继续使用旧实例。
+
+**Embedding 迁移（P3）**：Embedding 维度/模型以 registry 为权威。保存新的 Embedding 路由后，调用 `apply` 会因索引画像不一致返回 409；必须先调用 `index/rebuild`。重建会把现有切片重新向量化写入影子集合，成功后原子换名并自动应用新配置，失败保留旧索引；`index/rollback` 可换回上一次重建前的备份集合与旧路由。重建期间旧索引继续服务。
+
+**`GET /api/admin/models/index/status` 响应示例**：
+
+```json
+{
+  "collection": "documents",
+  "indexed": {
+    "profile_id": "local:local-embedding:bge-m3:1024",
+    "provider_id": "local",
+    "model_id": "local-embedding",
+    "model_name": "bge-m3",
+    "dimension": 1024
+  },
+  "target": {
+    "profile_id": "openai:emb-new:text-embedding-3-small:1536",
+    "provider_id": "openai",
+    "model_id": "emb-new",
+    "model_name": "text-embedding-3-small",
+    "display_name": "外部向量模型",
+    "dimension": 1536
+  },
+  "in_sync": false,
+  "needs_rebuild": true,
+  "can_rollback": true,
+  "status": "ready",
+  "chunk_count": 12840,
+  "backup_collection": "documents__backup_1761440000_ab12",
+  "last_error": ""
+}
+```
+
+**错误语义**：
+
+| 状态码 | 场景 |
+|---|---|
+| 400 | 配置校验失败（缺必需路由 / 模型引用不存在 / 能力不满足 / URL 非法 / 缺少 API Key） |
+| 403 | 未携带有效 `X-Admin-Key`（生产环境未配置 `ADMIN_KEY` 时一律 403） |
+| 404 | Provider / 模型不存在 |
+| 409 | 名称重复、Provider 下仍有模型、模型仍被任务路由引用、Embedding 画像不一致需先重建、已有重建任务运行中 |
+
+所有写操作（新增/更新/删除/保存路由/应用）都会写入审计日志，`resource_type="model_config"`，动作前缀 `model.*`。Provider API Key 加密存储，GET 仅返回 `has_api_key` / `api_key_hint`（末四位），明文永不回显。
+
+**`GET /api/admin/models/usage?days=7` 响应示例**（最近 N 天持久化聚合 + 当前进程未落库增量）：
+
+```json
+{
+  "usage": [
+    {
+      "provider_id": "local",
+      "model_id": "local-chat",
+      "model_name": "qwen3:4b",
+      "task": "answer",
+      "currency": "USD",
+      "calls": 12,
+      "errors": 1,
+      "input_tokens": 3210,
+      "output_tokens": 1870,
+      "avg_latency_ms": 1845.3,
+      "priced_calls": 12,
+      "unpriced_calls": 0,
+      "estimated_cost": 0.0231,
+      "last_error": "TimeoutError: request timed out"
+    }
+  ],
+  "health": [
+    {
+      "provider_id": "local",
+      "state": "closed",
+      "consecutive_failures": 0,
+      "total_calls": 13,
+      "total_failures": 1,
+      "total_skipped": 0,
+      "opened_at": null,
+      "last_failure_at": 1761440000.0,
+      "last_error": ""
+    }
+  ],
+  "days": 7
+}
+```
+
+用量增量由后台任务每 `MODEL_USAGE_FLUSH_INTERVAL_S`（默认 60s）写入 `model_usage_daily`，应用关闭时最后 flush；查询时把未落库增量叠加到持久化聚合上。`estimated_cost` 仅在模型配置了 `input_cost_per_1k` / `output_cost_per_1k` 时估算，否则为 0 并计入 `unpriced_calls`。
+
+模型新增/更新（`POST/PATCH /api/admin/models/deployments*`）支持 `input_cost_per_1k`、`output_cost_per_1k`（每 1K tokens 单价，非负）与 `price_currency`（默认 `USD`）。
+
+`state` 为 `closed` / `open` / `half_open`；连续失败 3 次打开 60s 熔断，冷却后只放行一次探测。
 
 ---
 
 ## 附录：API 端点汇总
 
-> 与代码核对至 2026-10-15（`backend/src/api/` 共 17 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 115 条路由）。
+> 与代码核对至 2026-10-26（`backend/src/api/` 共 18 个路由模块，另有 `main.py` 的健康检查与指标端点，合计 132 条路由）。
 
 | 模块 | 方法 | 端点 | 说明 |
 |------|------|------|------|
 | 认证 | POST | `/api/auth/register` | 注册（201；受 `AUTH_ALLOW_REGISTRATION` 控制；限流 3 次/分/IP） |
 | 认证 | POST | `/api/auth/login` | 登录换取 JWT（限流 5 次/分/IP） |
 | 认证 | POST | `/api/auth/refresh` | 滑动窗口续期：凭签名有效 token 换发（orig_iat+7d 硬上限） |
+| 认证 | POST | `/api/auth/logout` | 登出：吊销当前 token（jti Redis 黑名单） |
+| 认证 | GET | `/api/auth/account/export` | 导出当前用户数据（JSON） |
+| 认证 | DELETE | `/api/auth/account` | 注销账号并级联清理（需密码确认） |
 | 认证 | GET | `/api/auth/me` | 获取当前用户信息 |
 | 认证 | POST | `/api/auth/api-keys` | 签发用户级 API Key（JWT 必须；201 一次性返回明文；限流 5 次/分/IP；`USER_API_KEYS_ENABLED=false` 时 404） |
 | 认证 | GET | `/api/auth/api-keys` | 列出当前用户 Key 元数据（永不返回明文） |
@@ -1438,6 +1575,7 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | 学习 | POST | `/api/learning/disable` | 禁用学习引擎 |
 | 实验 | POST | `/api/experiments` | 创建实验 |
 | 实验 | GET | `/api/experiments` | 获取实验列表 |
+| 实验 | GET | `/api/experiments/admin/legacy` | 管理员查看遗留空 owner 实验 |
 | 实验 | GET | `/api/experiments/{experiment_id}` | 获取实验详情 |
 | 实验 | POST | `/api/experiments/{experiment_id}/start` | 启动实验 |
 | 实验 | POST | `/api/experiments/{experiment_id}/stop` | 停止实验 |
@@ -1453,7 +1591,14 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | 配置 | GET | `/api/config/model` | 获取模型配置 |
 | 配置 | POST | `/api/config/reset` | 重置配置为默认值 |
 | 配置 | GET | `/api/config/info` | 获取系统信息 |
+| 模型服务 | GET | `/api/admin/models/snapshot` | 当前生效 registry 快照（含来源，管理员） |
+| 模型服务 | GET | `/api/admin/models/usage` | 用量/Token/延迟/成本与熔断状态（持久化 + 进程内增量，管理员） |
+| 模型服务 | GET | `/api/admin/models/index/status` | Embedding 索引画像与重建/回滚状态（管理员） |
+| 模型服务 | POST | `/api/admin/models/index/rebuild` | 后台重建向量索引并自动应用新 Embedding 配置（管理员） |
+| 模型服务 | POST | `/api/admin/models/index/rollback` | 回滚索引与 Embedding 路由到重建前版本（管理员） |
 | 模型服务 | GET/POST/PATCH/DELETE | `/api/admin/models/providers*` | Provider 管理（管理员） |
+| 模型服务 | POST | `/api/admin/models/providers/test` | 未保存 Provider 的连接测试（管理员） |
+| 模型服务 | POST/GET | `/api/admin/models/providers/{id}/test`、`.../models` | 已存 Provider 连接测试 / 远端模型发现（管理员） |
 | 模型服务 | GET/POST/PATCH/DELETE | `/api/admin/models/deployments*` | 模型管理（管理员） |
 | 模型服务 | GET/PUT | `/api/admin/models/routes` | 任务路由（管理员） |
 | 模型服务 | POST | `/api/admin/models/apply` | 校验并应用模型配置（管理员） |
@@ -1471,9 +1616,15 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | 通知 | WS | `/api/ws/docs/{kb_id}` | 文档变更通知 |
 | 文档 | WS | `/api/documents/upload/progress/ws/{upload_id}` | 上传进度实时通知 |
 | 健康检查 | GET | `/` | 根路径信息 |
-| 健康检查 | GET | `/health` | 健康检查 |
-| 健康检查 | GET | `/health/detail` | 详细健康检查（含数据库、Redis） |
+| 健康检查 | GET | `/health/live` | 浅探活（进程可响应） |
+| 健康检查 | GET | `/health/ready` | 就绪探针（DB/Redis/Milvus/MinIO，503 表示未就绪） |
+| 健康检查 | GET | `/health` | 兼容旧探针（等同 live） |
+| 健康检查 | GET | `/health/detail` | 详细健康检查（管理员，含 Ollama 与错误信息） |
 | 监控 | GET | `/metrics` | 获取 Prometheus 监控指标 |
 | 监控 | POST | `/metrics/reset` | 重置监控指标（需 `X-Admin-Key`） |
 | 追踪 | GET | `/api/traces` | 获取请求追踪列表 |
 | 追踪 | GET | `/api/traces/{trace_id}` | 获取单条追踪详情 |
+
+> **批量与分页上限（SEC-18）**：会话列表 `limit` 上限 500；会话/文档批量删除单次 ID 上限
+> `BATCH_DELETE_MAX_IDS`（默认 200，超限 400）；知识库批量删除上限 1000；
+> 反馈/坏例列表 `limit` 上限 200；评估批量样本上限见 §14（`EVAL_BATCH_MAX_SAMPLES`）。

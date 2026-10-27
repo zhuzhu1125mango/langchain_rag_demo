@@ -4,6 +4,7 @@
 都先过此校验；命中返回失败 ToolResult，不实际执行工具。
 """
 
+import asyncio
 import ipaddress
 import json
 import logging
@@ -12,6 +13,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import parse_qsl, unquote, urlsplit
 
 from src.config import settings
+from src.utils.security import UnsafeUrlError, validate_url_safe
 
 from .base import GuardrailHit
 
@@ -43,6 +45,16 @@ _METADATA_IPS = {"169.254.169.254", "100.100.100.200", "fd00:ec2::254"}
 def _is_url_key(key: str) -> bool:
     k = (key or "").lower()
     return k in _URL_KEYS or k.endswith("_url")
+
+
+def _declared_url_keys(tool: Any) -> set:
+    """工具声明为 URL 的参数名（SEC-19，注册时已强制声明）。"""
+    return {str(key).lower() for key in (getattr(tool, "url_params", ()) or ())}
+
+
+def _is_url_param(key: str, declared: set) -> bool:
+    """是否按 URL 校验：显式声明的参数优先，回退到命名启发式（兼容第三方工具）。"""
+    return (key or "").lower() in declared or _is_url_key(key)
 
 
 def _is_path_key(key: str) -> bool:
@@ -132,6 +144,19 @@ def _check_url(url: str) -> Optional[str]:
     return None
 
 
+def _check_url_dns(url: str) -> Optional[str]:
+    """SEC-19：URL 域名解析层校验（DNS fail-closed，防解析到内网）。
+
+    在 ``_check_url`` 的静态规则之后执行，复用 SEC-9 的 ``validate_url_safe``；
+    解析失败同样按不安全处理，避免“校验放行、工具自行解析”的绕过。
+    """
+    try:
+        validate_url_safe(url)
+    except UnsafeUrlError:
+        return "dns_unresolved_or_private"
+    return None
+
+
 class ToolGuard:
     """工具侧护栏（无状态）。"""
 
@@ -149,6 +174,7 @@ class ToolGuard:
 
         tool_name = getattr(tool, "name", "") or "<unknown>"
         payload = args or {}
+        declared_url_keys = _declared_url_keys(tool)
 
         try:
             serialized = json.dumps(payload, ensure_ascii=False, default=str)
@@ -165,7 +191,7 @@ class ToolGuard:
             if not isinstance(value, str):
                 continue
             # URL 参数先做完整校验（域名/DLP/私网）；命中信息更具体。
-            if _is_url_key(key):
+            if _is_url_param(key, declared_url_keys):
                 rule = _check_url(value)
                 if rule:
                     return GuardrailHit(
@@ -202,6 +228,37 @@ class ToolGuard:
                     detail=f"{tool_name} 的路径参数含 ../",
                 )
 
+        return None
+
+    async def check_async(self, tool: Any, args: Dict[str, Any]) -> Optional[GuardrailHit]:
+        """同步静态规则 + URL 域名解析校验（SEC-19）。
+
+        DNS 解析在线程池执行，避免阻塞事件循环；解析层校验仅对 URL 参数生效，
+        开关 ``GUARDRAIL_TOOL_DNS_CHECK_ENABLED`` 关闭时退化为纯静态规则。
+        """
+        if not settings.guardrail.GUARDRAIL_ENABLED:
+            return None
+        if not settings.guardrail.GUARDRAIL_TOOL_ENABLED:
+            return None
+
+        hit = self.check(tool, args)
+        if hit is not None:
+            return hit
+        if not getattr(settings.guardrail, "GUARDRAIL_TOOL_DNS_CHECK_ENABLED", True):
+            return None
+
+        tool_name = getattr(tool, "name", "") or "<unknown>"
+        declared_url_keys = _declared_url_keys(tool)
+        for key, value in (args or {}).items():
+            if not isinstance(value, str) or not _is_url_param(key, declared_url_keys):
+                continue
+            rule = await asyncio.to_thread(_check_url_dns, value)
+            if rule:
+                return GuardrailHit(
+                    kind="tool_argument",
+                    rule=rule,
+                    detail=f"{tool_name} 的 URL 域名解析失败或指向受限地址",
+                )
         return None
 
 

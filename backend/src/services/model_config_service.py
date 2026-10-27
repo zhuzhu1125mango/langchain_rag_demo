@@ -76,6 +76,9 @@ def _model_config(row: ModelDeployment) -> ModelConfig:
         max_output_tokens=int(row.max_output_tokens or 0),
         embedding_dimension=int(row.embedding_dimension or 0),
         temperature=row.temperature,
+        input_cost_per_1k=row.input_cost_per_1k,
+        output_cost_per_1k=row.output_cost_per_1k,
+        price_currency=row.price_currency or "USD",
     )
 
 
@@ -159,6 +162,9 @@ def safe_model(row: ModelDeployment) -> Dict[str, Any]:
         "max_output_tokens": row.max_output_tokens,
         "embedding_dimension": row.embedding_dimension,
         "temperature": row.temperature,
+        "input_cost_per_1k": row.input_cost_per_1k,
+        "output_cost_per_1k": row.output_cost_per_1k,
+        "price_currency": row.price_currency or "USD",
         "enabled": bool(row.enabled),
     }
 
@@ -262,6 +268,23 @@ async def delete_provider(db: AsyncSession, provider_id: str) -> None:
     await db.commit()
 
 
+def _price_value(field: str, value: Any) -> Optional[float]:
+    """校验成本单价：空值表示未配置，负数/非数字返回 400。"""
+    if value is None or value == "":
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ModelConfigError(f"{field} 必须是数字") from exc
+    if price < 0:
+        raise ModelConfigError(f"{field} 不能为负数")
+    return price
+
+
+def _currency_value(value: Any) -> str:
+    return (str(value or "USD").strip().upper() or "USD")[:8]
+
+
 async def create_model(db: AsyncSession, payload: Dict[str, Any]) -> ModelDeployment:
     provider_id = payload.get("provider_id")
     if not provider_id or await db.get(ModelProvider, provider_id) is None:
@@ -275,6 +298,9 @@ async def create_model(db: AsyncSession, payload: Dict[str, Any]) -> ModelDeploy
         max_output_tokens=int(payload.get("max_output_tokens") or 0),
         embedding_dimension=int(payload.get("embedding_dimension") or 0),
         temperature=payload.get("temperature"),
+        input_cost_per_1k=_price_value("input_cost_per_1k", payload.get("input_cost_per_1k")),
+        output_cost_per_1k=_price_value("output_cost_per_1k", payload.get("output_cost_per_1k")),
+        price_currency=_currency_value(payload.get("price_currency")),
         enabled=bool(payload.get("enabled", True)),
     )
     if not model.model_name:
@@ -299,6 +325,11 @@ async def update_model(db: AsyncSession, model_id: str, payload: Dict[str, Any])
             setattr(model, field, int(payload[field] or 0))
     if "temperature" in payload:
         model.temperature = payload["temperature"]
+    for field in ("input_cost_per_1k", "output_cost_per_1k"):
+        if field in payload:
+            setattr(model, field, _price_value(field, payload[field]))
+    if "price_currency" in payload:
+        model.price_currency = _currency_value(payload["price_currency"])
     if "enabled" in payload:
         model.enabled = bool(payload["enabled"])
     await db.commit()

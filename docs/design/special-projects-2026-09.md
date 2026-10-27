@@ -183,6 +183,7 @@
 - **D1 ✅**：CI 前端 job 改为 `pnpm exec vitest run --coverage`——此前阈值虽已在 `vitest.config.ts` 配置，但 CI 从未带 `--coverage`，属「配置存在但从未生效」；已补双向验证（人为调高必红 / 正常值全绿）。
 - **D2 ✅**：`fail_under` 自 `ci.yml` 收敛至 `backend/pyproject.toml` `[tool.coverage.report]`（单一事实来源，CI 只写 `--cov`）；58 → **60**（实测 60.95%；D4 补测后 61.11%，距 62 尚差 0.89 点 → 维持 60，待补测回到 61+ 再评估）。
 - **D3 ✅（超额）**：前端 thresholds 6/5/7/6 → 10/8/12/10 → **32/35/24/31**（D4 补测后实测 35/38.01/27.1/34.31，按「新基线-3 点」设定）；**per-module thresholds 仍未设置**，留后续补测批次。
+- **D2/D3 后续上调（SEC-15，2026-10-27）**：后端补测 82 例（辅助 LLM/基础设施/实验与样本存储）后实测 67.02%，`fail_under` 60 → **65**；前端实测 36.17/41.2/25.96/35.11，thresholds 32/35/24/31 → **35/40/25/34**（「实测-1 点」缓冲）。
 - **D4 ✅**：后端 +19 用例（`api/chat.py` / `api/document.py` 行为守卫，为专项 A 拆分提供行为等价守卫）；前端 +32 用例（`useChatStream` / `useNotifications` / `queries/trace.ts`，与 C1 重叠、一次投入双收益）。
 - 提交：`59140bc`（D1/D2/D3）、`287fea2`（D4）。
 

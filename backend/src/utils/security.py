@@ -3,11 +3,26 @@
 提供密钥强度校验、弱密钥检测、URL 安全校验等通用安全能力。
 """
 
+import hashlib
 import ipaddress
 import re
 import socket
 from typing import Optional, Set
 from urllib.parse import urlparse
+
+
+def redact_for_log(text: object, *, max_preview: int = 0) -> str:
+    """把用户问题/答案等敏感文本替换为不可逆摘要（SEC-14）。
+
+    默认不保留任何原文；``max_preview`` 仅供本地调试显式开启。
+    """
+    raw = str(text or "")
+    if not raw:
+        return ""
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    if max_preview > 0:
+        return f"{raw[:max_preview]}…<redacted:{digest}:len={len(raw)}>"
+    return f"<redacted:{digest}:len={len(raw)}>"
 
 
 # 常见弱密钥黑名单（大小写不敏感）
@@ -143,6 +158,49 @@ class UnsafeUrlError(ValueError):
     pass
 
 
+# SEC-14：常见弱密码（精确匹配，小写）；不引入重量级依赖，覆盖高频弱口令
+_WEAK_PASSWORDS: Set[str] = {
+    "1234567890",
+    "123456789",
+    "12345678",
+    "12345678901",
+    "password",
+    "password1",
+    "password123",
+    "qwerty123",
+    "qwertyuiop",
+    "1111111111",
+    "0000000000",
+    "abc123456",
+    "admin12345",
+    "administrator",
+    "iloveyou123",
+    "welcome123",
+    "letmein123",
+    "changeme123",
+    "passw0rd123",
+}
+
+
+class WeakPasswordError(ValueError):
+    """密码强度不足。"""
+
+    pass
+
+
+def validate_password_strength(password: str, username: str = "") -> None:
+    """校验用户密码强度（SEC-14）：长度 >= 10 且不在弱密码库/不等于用户名。"""
+    if not isinstance(password, str) or len(password) < 10:
+        raise WeakPasswordError("密码长度必须不少于 10 位")
+    if len(password) > 128:
+        raise WeakPasswordError("密码长度不能超过 128 位")
+    normalized = password.strip().lower()
+    if normalized in _WEAK_PASSWORDS:
+        raise WeakPasswordError("密码过于常见，请更换更强的密码")
+    if username and normalized == username.strip().lower():
+        raise WeakPasswordError("密码不能与用户名相同")
+
+
 # 云厂商元数据地址黑名单（大小写不敏感）
 _METADATA_HOSTS: Set[str] = {
     "169.254.169.254",
@@ -157,6 +215,27 @@ _METADATA_HOSTS: Set[str] = {
 _RESERVED_HOST_SUFFIXES: tuple = (".localhost", ".local", ".internal", ".localdomain")
 
 
+def _is_restricted_ip(addr: str) -> bool:
+    """判断解析/连接到的地址是否属于受限网段。"""
+    try:
+        resolved = ipaddress.ip_address(addr)
+    except ValueError:
+        return False
+    return (
+        resolved.is_private
+        or resolved.is_loopback
+        or resolved.is_link_local
+        or resolved.is_multicast
+        or resolved.is_reserved
+        or resolved.is_unspecified
+    )
+
+
+def is_public_ip(addr: str) -> bool:
+    """公开的地址判定（供连接后 peer IP 复核，SEC-9）。"""
+    return not _is_restricted_ip(addr)
+
+
 def validate_url_safe(url: str) -> None:
     """校验 URL 是否安全，防止 SSRF。
 
@@ -165,17 +244,18 @@ def validate_url_safe(url: str) -> None:
     2. 禁止空主机；
     3. 禁止云厂商元数据地址与 localhost/保留后缀域名；
     4. 禁止私有 IP、回环地址、链路本地地址（含域名解析出的全部地址，
-       防止攻击者域名解析到内网 IP 的 DNS 重绑定绕过）。
+       防止攻击者域名解析到内网 IP 的 DNS 重绑定绕过）；
+    5. DNS 解析失败按 fail-closed 拒绝（SEC-9），避免“校验放行、连接另行解析”
+       的绕过窗口。
 
-    注意：校验时刻解析与实际连接时刻存在 TOCTOU 窗口（攻击者可在两次
-    解析间切换 DNS 记录）；彻底封死需将校验时解析的 IP 钉入连接层，
-    当前按"解析-校验"闭环提供纵深防御。
+    Note: 校验与连接之间仍存在 DNS TOCTOU 窗口；调用方应结合连接后 peer IP
+    复核（见 web_search_service._fetch_html）提供纵深防御。
 
     Args:
         url: 待校验的 URL。
 
     Raises:
-        UnsafeUrlError: URL 存在 SSRF 风险时抛出。
+        UnsafeUrlError: URL 存在 SSRF 风险或域名无法解析时抛出。
     """
     if not url or not isinstance(url, str):
         raise UnsafeUrlError("URL 不能为空")
@@ -200,29 +280,19 @@ def validate_url_safe(url: str) -> None:
         ip = ipaddress.ip_address(hostname)
     except ValueError:
         # 主机名不是 IP 字面量：DNS 解析后逐一校验结果地址。
-        # 解析失败（gaierror）时放行——此时后续真实连接同样无法建立，
-        # 不损失可用性；解析成功则任意一个受限地址即拒绝。
         try:
             addrinfos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
-        except (socket.gaierror, OSError):
-            return
+        except (socket.gaierror, OSError) as exc:
+            raise UnsafeUrlError(f"URL 域名解析失败: {hostname}") from exc
+        if not addrinfos:
+            raise UnsafeUrlError(f"URL 域名无可用地址: {hostname}")
         for info in addrinfos:
             addr = info[4][0]
-            try:
-                resolved = ipaddress.ip_address(addr)
-            except ValueError:
-                continue
-            if (
-                resolved.is_private
-                or resolved.is_loopback
-                or resolved.is_link_local
-                or resolved.is_multicast
-                or resolved.is_reserved
-            ):
-                raise UnsafeUrlError(f"URL 解析到受限地址: {resolved}")
+            if _is_restricted_ip(addr):
+                raise UnsafeUrlError(f"URL 解析到受限地址: {addr}")
         return
 
-    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved:
+    if _is_restricted_ip(str(ip)):
         raise UnsafeUrlError(f"URL 指向受限地址: {ip}")
 
 

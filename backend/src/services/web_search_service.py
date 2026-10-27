@@ -33,7 +33,8 @@ from bs4 import BeautifulSoup
 
 from src.config import settings
 from src.services.model_manager import model_manager
-from src.utils.security import UnsafeUrlError, validate_url_safe
+from src.utils.security import UnsafeUrlError, is_public_ip, validate_url_safe
+from src.utils.safe_http import create_safe_async_client
 from .search_postprocessor import SearchPostprocessor
 from .search_types import SearchResult
 
@@ -340,12 +341,17 @@ class WebReranker:
 
     def _load_embeddings_fallback(self):
         """加载 OllamaEmbeddings 作为 rerank 兜底（增强4：嵌入兜底）"""
-        if self._fallback_loaded:
+        try:
+            current_key = model_manager.embedding_model_key
+        except Exception:
+            current_key = ""
+        if self._fallback_loaded and current_key == getattr(self, "_embeddings_key", ""):
             return
         self._fallback_loaded = True
         try:
             # B2：走 model_manager 共享 OllamaEmbeddings 单例
             self._embeddings = model_manager.get_embeddings()
+            self._embeddings_key = current_key
             logger.info("rerank 嵌入兜底已加载")
         except Exception as e:
             logger.warning(f"rerank 嵌入兜底加载失败: {e}")
@@ -449,8 +455,21 @@ class WebSearchService:
             follow_redirects=False,
             headers={"User-Agent": "Mozilla/5.0 (compatible; RAG-Bot/1.0)"},
         )
+        # SEC-9：外部网页抓取使用 IP 固定 transport，避免 DNS rebinding；
+        # SearXNG 等内部/受信服务继续走普通客户端。
+        self._safe_http = create_safe_async_client(
+            timeout=httpx.Timeout(self.fetch_timeout),
+            follow_redirects=False,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; RAG-Bot/1.0)"},
+        )
         # 重定向逐跳校验的跳数上限
-        self.max_redirect_hops = 5
+        self.max_redirect_hops = max(1, int(settings.search.SEARCH_FETCH_MAX_REDIRECTS or 5))
+        self.max_response_bytes = max(1024, int(settings.search.SEARCH_FETCH_MAX_BYTES or 2_000_000))
+        self.allowed_content_types = {
+            item.strip().lower()
+            for item in (settings.search.SEARCH_FETCH_ALLOWED_CONTENT_TYPES or "").split(",")
+            if item.strip()
+        }
 
     def _cache_key(self, prefix: str, text: str) -> str:
         hash_value = hashlib.md5(text.encode("utf-8")).hexdigest()
@@ -678,28 +697,64 @@ class WebSearchService:
     async def _fetch_html(self, url: str) -> str:
         """GET 页面 HTML，重定向不自动跟随，逐跳重新做 SSRF 校验（安全 W1-5）。
 
-        初始 URL 校验通过不代表安全：302 可指向 169.254.169.254 等内网地址。
-        每一跳都重新 validate_url_safe，超限抛 UnsafeUrlError。
+        SEC-9 纵深：
+        - 每一跳重新 validate_url_safe（DNS 失败即拒绝）；
+        - 连接后复核 peer IP，防止校验与连接之间的 DNS rebinding；
+        - 限制响应字节数、重定向跳数与 Content-Type。
 
         Raises:
-            UnsafeUrlError: 任一跳的 URL 不安全，或重定向次数超限/缺 Location。
+            UnsafeUrlError: 任一跳不安全、重定向/响应超限或内容类型不允许。
             httpx.HTTPError: 网络请求失败。
         """
         current = url
         for _ in range(self.max_redirect_hops):
             validate_url_safe(current)
-            # follow_redirects=False 由共享客户端全局保证；此处显式传参双保险
-            response = await self._http.get(current, follow_redirects=False)
-            if response.is_redirect:
-                location = response.headers.get("location", "")
-                if not location:
-                    break
-                # 相对重定向（Location: /path 或 //host/path）按 RFC 3986 基于当前 URL 解析
-                current = str(response.url.join(location))
-                continue
-            response.raise_for_status()
-            return response.text
+            next_url = None
+            async with self._safe_http.stream("GET", current, follow_redirects=False) as response:
+                self._assert_public_peer(response)
+                if response.is_redirect:
+                    location = response.headers.get("location", "")
+                    if not location:
+                        raise UnsafeUrlError("重定向响应缺少 Location")
+                    next_url = str(response.url.join(location))
+                else:
+                    response.raise_for_status()
+                    content_type = (response.headers.get("content-type") or "").split(";")[0].strip().lower()
+                    if content_type and self.allowed_content_types and content_type not in self.allowed_content_types:
+                        raise UnsafeUrlError(f"不允许的响应 Content-Type: {content_type}")
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > self.max_response_bytes:
+                            raise UnsafeUrlError(
+                                f"响应体超过上限 {self.max_response_bytes} 字节"
+                            )
+                    return body.decode(response.encoding or "utf-8", errors="replace")
+            if next_url is None:
+                break
+            current = next_url
         raise UnsafeUrlError("重定向跳数超限或响应缺少 Location")
+
+    @staticmethod
+    def _assert_public_peer(response: httpx.Response) -> None:
+        """连接建立后复核对端 IP，阻断 DNS rebinding 导致的私网访问（SEC-9）。"""
+        stream = response.extensions.get("network_stream")
+        if stream is None:
+            return
+        try:
+            peer = stream.get_extra_info("server_addr")
+        except Exception:
+            return
+        if not peer:
+            return
+        addr = peer[0] if isinstance(peer, (tuple, list)) else peer
+        if not is_public_ip(str(addr)):
+            raise UnsafeUrlError(f"连接落到受限地址: {addr}")
+
+    async def close(self) -> None:
+        """释放两个 HTTP 连接池（应用关闭或测试清理时调用）。"""
+        await self._http.aclose()
+        await self._safe_http.aclose()
 
     async def fetch_content(self, url: str, title: str, snippet: str) -> Optional[WebContent]:
         # SSRF 防护（与 tools/plugins/fetch_webpage_tool.py 一致）：拒绝抓取内网/回环/云元数据地址，

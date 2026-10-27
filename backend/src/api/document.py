@@ -527,7 +527,9 @@ async def process_document_async(
             })
 
             # 通知文档列表已更新
-            await notify_doc_list_changed(kb_id, doc_id, "created")
+            await notify_doc_list_changed(
+                kb_id, doc_id, "created", owner_id=getattr(doc, "owner_id", None)
+            )
 
             # P2-4 审计：文档上传完成（best-effort，后台任务用 owner_id 作操作者；
             # getattr 兼容测试桩/遗留数据缺该字段）
@@ -620,7 +622,7 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
             })
 
             # 通知文档列表已更新
-            await notify_doc_list_changed(kb_id, doc_id, "deleted")
+            await notify_doc_list_changed(kb_id, doc_id, "deleted", owner_id=owner_id)
 
             # 使知识库列表缓存失效，确保文档数量实时更新
             if owner_id:
@@ -748,7 +750,9 @@ async def upload_document(
         )
 
         # 通知文档列表即将更新
-        await notify_doc_list_changed(str(kb_uuid), str(doc_id), "created")
+        await notify_doc_list_changed(
+            str(kb_uuid), str(doc_id), "created", owner_id=current_user.user_id
+        )
 
         # 使知识库列表缓存失效，确保文档数量实时更新
         try:
@@ -1342,7 +1346,9 @@ async def reprocess_document(
         )
         
         # 通知文档列表即将更新
-        await notify_doc_list_changed(kb_id, doc_id, "updated")
+        await notify_doc_list_changed(
+            kb_id, doc_id, "updated", owner_id=getattr(doc, "owner_id", None)
+        )
         
         return {
             "id": doc_id,
@@ -1599,7 +1605,9 @@ async def delete_document(
         )
 
         # 通知文档列表即将更新
-        await notify_doc_list_changed(kb_id, doc_id, "deleting")
+        await notify_doc_list_changed(
+            kb_id, doc_id, "deleting", owner_id=getattr(doc, "owner_id", None)
+        )
 
         # P2-4 审计：文档删除请求（best-effort）
         from src.services.audit_service import record_audit
@@ -1637,6 +1645,12 @@ async def batch_delete(
     3. 通过WebSocket实时推送删除进度
     """
     ids = body.ids
+    max_ids = int(settings.security.BATCH_DELETE_MAX_IDS)
+    if max_ids and len(ids) > max_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单次批量删除最多允许 {max_ids} 个文档，当前 {len(ids)} 个",
+        )
     deleted_docs = []
     deleted_count = 0
     task_ids = []
@@ -1668,7 +1682,9 @@ async def batch_delete(
                 deleted_count += 1
 
                 # 通知文档列表即将更新
-                await notify_doc_list_changed(kb_id, doc_id, "deleting")
+                await notify_doc_list_changed(
+                    kb_id, doc_id, "deleting", owner_id=current_user.user_id
+                )
 
         except ValueError:
             continue

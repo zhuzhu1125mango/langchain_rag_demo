@@ -73,6 +73,29 @@ LLM_CALL_ERRORS = Counter(
     registry=registry
 )
 
+# Provider / 任务维度的模型调用与 Token（MODEL-P2.1）
+
+MODEL_PROVIDER_CALLS = Counter(
+    "rag_model_provider_calls_total",
+    "Model calls grouped by provider, model and task",
+    ["provider_id", "model_name", "task", "result"],
+    registry=registry
+)
+
+MODEL_TOKENS = Counter(
+    "rag_model_tokens_total",
+    "Token usage grouped by provider, model and direction",
+    ["provider_id", "model_name", "direction"],
+    registry=registry
+)
+
+MODEL_CIRCUIT_STATE = Gauge(
+    "rag_model_circuit_state",
+    "Provider circuit breaker state (1=open, 0.5=half_open, 0=closed)",
+    ["provider_id"],
+    registry=registry
+)
+
 # ==================== 向量检索指标 ====================
 
 VECTOR_SEARCH_TIME = Histogram(
@@ -254,6 +277,33 @@ def record_llm_call_error(model_name):
         model_name: 模型名称
     """
     LLM_CALL_ERRORS.labels(model_name=model_name).inc()
+
+
+def record_model_usage(
+    provider_id: str,
+    model_name: str,
+    task: str,
+    success: bool,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+):
+    """记录 Provider/模型/任务维度的调用与 Token（MODEL-P2.1）。"""
+    MODEL_PROVIDER_CALLS.labels(
+        provider_id=provider_id,
+        model_name=model_name,
+        task=task,
+        result="success" if success else "error",
+    ).inc()
+    if input_tokens:
+        MODEL_TOKENS.labels(provider_id=provider_id, model_name=model_name, direction="input").inc(input_tokens)
+    if output_tokens:
+        MODEL_TOKENS.labels(provider_id=provider_id, model_name=model_name, direction="output").inc(output_tokens)
+
+
+def set_model_circuit_state(provider_id: str, state: str):
+    """更新 Provider 熔断状态指标：closed=0 / half_open=0.5 / open=1。"""
+    value = {"closed": 0.0, "half_open": 0.5, "open": 1.0}.get(state, 0.0)
+    MODEL_CIRCUIT_STATE.labels(provider_id=provider_id).set(value)
 
 
 def record_vector_search(duration):

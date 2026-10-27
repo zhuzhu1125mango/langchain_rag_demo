@@ -1,7 +1,7 @@
 # 开发与测试指南
 
 > 定位：本地开发、测试执行、CI 说明与已知踩坑。部署见 [deployment.md](deployment.md)。
-> 更新时间：2026-09-24
+> 更新时间：2026-10-26
 
 ## 1. 环境准备
 
@@ -27,13 +27,21 @@ cd backend
 uv run pytest -q            # 全量
 uv run pytest tests/test_rag_chain.py -q   # 单文件
 
+# 模型 Provider/Route registry（P1/P2/P2.1/P3）
+uv run pytest tests/test_model_registry.py tests/test_model_config_service.py \
+  tests/test_model_health.py tests/test_model_usage_pricing.py \
+  tests/test_embedding_migration.py tests/test_milvus_embedding_migration.py -q
+
 # SEC-1~5 专项回归（学习隔离 / 配额 / 文档状态 / Agent 出站 / 限流）
 uv run pytest tests/test_learning_isolation.py tests/test_quota.py \
   tests/test_document_state_consistency.py tests/test_agent_security.py \
   tests/test_security_hardening.py -q
+# SEC P2 安全回归（实验/通知/SSRF/JWT/缓存索引/健康/密码日志）
+uv run pytest tests/test_security_p2.py tests/test_jwt_auth.py \
+  tests/test_security_utils.py tests/test_experiment.py -q
 ```
 
-基线：本机（Windows，排除 5 个已知 `python-magic` 崩溃模块）**1073 passed / 105 skipped**（2026-10-24）；Linux CI 跑全量。
+基线：本机（Windows）`uv run pytest -q` **1316 passed / 105 skipped**（2026-10-27，含模型 registry P1/P2、P2.1、P3 与 SEC P1~P3）；Linux CI 跑全量。
 单测默认在 `tests/conftest.py` 设置 `QUOTA_ENFORCEMENT_ENABLED=false`，避免跨用例累计触发 429；配额逻辑由 `test_quota.py` 直接覆盖。
 
 ### 2.2 集成测试（需容器）
@@ -101,10 +109,10 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 | env-consistency | 用 `.env.example` 生成占位 env 校验键集合一致 | `.env.dev/.env.prod` 被 gitignore 不入库；脚本对缺失文件容错跳过 |
 | lint | backend ruff（`uvx ruff --select E9,F63,F7,F82`）+ 前端 eslint / typecheck | 真错误级规则集，零风格噪音；runner 无预装 uvx，须先 setup-uv |
 | secrets-scan | gitleaks `detect --no-git --redact` | 只扫工作树不扫历史；误报按 fingerprint 登记到 `.gitleaksignore` 并注明原因 |
-| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | 阈值已收敛至 `backend/pyproject.toml` `[tool.coverage.report]` `fail_under=60`（实测 61.11%），CI 命令仅 `--cov=src`；干净安装暴露隐性依赖缺失 |
+| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | 阈值已收敛至 `backend/pyproject.toml` `[tool.coverage.report]` `fail_under=65`（实测 67.02%），CI 命令仅 `--cov=src`；干净安装暴露隐性依赖缺失 |
 | backend-integration | docker run 启动 MinIO(pgsty fork)/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码；pytest-timeout 120s 防挂死 + step timeout-minutes 40 |
 | rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json；另有信息性多查询 A/B 步骤（continue-on-error，非卡点） |
-| frontend | `vitest run --coverage`（阈值 32/35/24/31 卡点）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
+| frontend | `vitest run --coverage`（阈值 35/40/25/34 卡点）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
 
 全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限。
 
@@ -125,6 +133,11 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 13. **宿主端口占用静默失效**：本地已有 redis（如 WSL 内实例）占 6379 时，docker compose 的端口发布可能静默不生效（容器正常跑但 `docker port` 为空、宿主连到的是另一个无密码实例）；排查用 `docker port <容器>` 与 `netstat` 对照，勿假设 compose ports 必然生效
 14. **GHA runner 无预装 uv/uvx**：CI 里用 `uvx ruff` 等必须先 `astral-sh/setup-uv`；PowerShell 不支持 bash heredoc，Windows 本地写多行 commit message 用 `git commit -F <文件>`
 15. **Windows python-magic 挂死**：本机 `.venv` 若残留 `python-magic`（与 `python-magic-bin` 冲突），全量测试会卡在 document loader/OCR 的 `magic/compat.py` 并以 access violation 退出；先用 `uv sync --frozen` 重建环境。临时跑其余全量可排除 `test_document_loaders.py`、`test_ocr_parsing.py`、`test_document_processor.py`、`test_structured_chunking.py`、`evaluation/test_structured_vs_recursive.py`；Linux CI 不受影响
+16. **模型 registry 三层优先级**：DB（设置页/管理 API 保存并应用）> `MODEL_REGISTRY_FILE`/`backend/data/model_registry.json` > `.env` 的 `OLLAMA_*` legacy。只要设置页保存过 Provider，改 `.env` 或文件都不再生效；排查“模型没换”先看 `GET /api/config` 的 `registry_source`，必要时清空 `model_providers`/`model_deployments`/`model_routes` 后重启
+17. **`MODEL_SECRET_ENC_KEY` 轮换代价**：Provider Key 用该密钥 Fernet 加密；未配置时从 `SECRET_KEY` 派生。换 `SECRET_KEY`/`MODEL_SECRET_ENC_KEY` 会导致已存 Key 无法解密（API 返回需重录），生产请单独备份该密钥。测试用临时密钥，不依赖真实 Provider
+18. **新增外部 Provider 依赖**：P1 引入 `langchain-openai`（OpenAI-Compatible 适配），拉代码后必须 `uv sync --frozen`；registry 单测全部 mock，不联网。`agent_decision` 主模型未声明 `tools` 会 apply 校验 400；`route.reasoning=native` 而主模型未声明 `reasoning` 仅告警，不阻断应用
+19. **熔断/用量是进程内状态**：Provider 连续失败 3 次会熔断 60s，跳过后自动走 fallback；断言“模型不可用”类测试记得重置 `provider_health`（`tests/test_model_health.py` 已用 autouse fixture）。`GET /api/admin/models/usage` 的用量和熔断状态在应用 registry/重启后清零，不做持久化；调试时先看 `health` 再判断是否为网络问题
+20. **流式 Token 可能为 0**：非流式调用可从 `usage_metadata` / Ollama `prompt_eval_count` 取值；流式调用只有 Provider 在末尾分片返回用量时才有值，ChatOpenAI 未开启 `stream_usage` 时可能缺失，不应据此判断计费
 
 ## 5. 代码约定
 

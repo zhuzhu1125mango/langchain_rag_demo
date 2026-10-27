@@ -38,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 # 缓存 key 前缀：rag:semcache:{user_id}:{kb_scope}
 KEY_PREFIX = "rag:semcache"
+# SEC-11：kb_id → scope keys 反向索引（Redis Set），避免失效时全库 SCAN
+INDEX_PREFIX = "rag:semcache:index"
+INDEX_ALL = f"{INDEX_PREFIX}:all"
 
 # Redis 操作兜底超时（秒），与 CacheService 的操作超时保持一致量级
 REDIS_OPERATION_TIMEOUT = 3.0
@@ -376,6 +379,7 @@ class SemanticCacheService:
             field_id = self.exact_field_id(question)
             await self._execute(cache, cache.client.hset(key, field_id, _encode_entry(entry)))
             await self._execute(cache, cache.client.expire(key, settings.semantic_cache.SEMANTIC_CACHE_TTL_HOURS * 3600 + 3600))
+            await self._index_scope(cache, key, kb_ids)
             await self._trim(cache, key)
             if _METRICS_AVAILABLE:
                 record_semantic_cache_store("success")
@@ -415,14 +419,39 @@ class SemanticCacheService:
         if expired:
             await self._execute(cache, cache.client.hdel(key, *expired))
 
+    async def _index_scope(self, cache, scope_key: str, kb_ids: Optional[List[str]]) -> None:
+        """维护 kb_id → scope keys 索引（SEC-11）；失败不影响缓存读写。"""
+        try:
+            ttl = settings.semantic_cache.SEMANTIC_CACHE_TTL_HOURS * 3600 + 3600
+            if kb_ids:
+                for kb_id in kb_ids:
+                    index_key = f"{INDEX_PREFIX}:kb:{kb_id}"
+                    await self._execute(cache, cache.client.sadd(index_key, scope_key))
+                    await self._execute(cache, cache.client.expire(index_key, ttl))
+            else:
+                await self._execute(cache, cache.client.sadd(INDEX_ALL, scope_key))
+                await self._execute(cache, cache.client.expire(INDEX_ALL, ttl))
+        except Exception as exc:
+            logger.warning(f"语义缓存索引写入失败（fail-open）: {exc}")
+
+    async def _candidate_scopes(self, cache, kb_id: str) -> List[str]:
+        scopes: set[str] = set()
+        for index_key in (f"{INDEX_PREFIX}:kb:{kb_id}", INDEX_ALL):
+            try:
+                members = await self._execute(cache, cache.client.smembers(index_key))
+                scopes.update(members or [])
+            except Exception:
+                continue
+        return sorted(scopes)
+
     # ------------------------------------------------------------------
     # 失效
     # ------------------------------------------------------------------
     async def invalidate_kb(self, kb_id: str) -> int:
         """知识库内容变更后失效相关条目。
 
-        匹配规则：条目 kb_ids 包含该 kb_id，或为 all（全域查询可能引用该库）。
-        返回删除条目数；任何失败静默返回 0。
+        SEC-11：优先按 kb_id 反向索引只处理相关 scope；索引缺失（存量数据）时
+        回退到全库 SCAN。匹配规则：条目 kb_ids 包含该 kb_id，或为 all。
         """
         try:
             cache = await self._get_cache()
@@ -430,8 +459,15 @@ class SemanticCacheService:
                 return 0
 
             deleted = 0
-            # scan_iter 返回异步迭代器，不能用 wait_for 包裹（非协程）
-            async for key in cache.client.scan_iter(match=f"{KEY_PREFIX}:*"):
+            candidate = await self._candidate_scopes(cache, kb_id)
+            if candidate:
+                keys = candidate
+            else:
+                keys = []
+                async for key in cache.client.scan_iter(match=f"{KEY_PREFIX}:*"):
+                    if not key.startswith(INDEX_PREFIX):
+                        keys.append(key)
+            for key in keys:
                 raw = await self._execute(cache, cache.client.hgetall(key))
                 if not raw:
                     continue
@@ -454,6 +490,33 @@ class SemanticCacheService:
             return 0
 
 
+    async def invalidate_all(self) -> int:
+        """Embedding 模型切换/索引重建后全量失效（旧向量与新查询不可比）。
+
+        返回删除的 scope 数；任何失败静默返回 0（fail-open）。
+        """
+        try:
+            cache = await self._get_cache()
+            if not cache.available:
+                return 0
+            deleted = 0
+            index_keys: List[str] = []
+            async for key in cache.client.scan_iter(match=f"{KEY_PREFIX}:*"):
+                if key.startswith(INDEX_PREFIX):
+                    index_keys.append(key)
+                    continue
+                await self._execute(cache, cache.client.delete(key))
+                deleted += 1
+            for key in index_keys:
+                await self._execute(cache, cache.client.delete(key))
+            if deleted:
+                logger.info("语义缓存全量失效: 删除 %d 个 scope", deleted)
+            return deleted
+        except Exception as exc:
+            logger.warning(f"语义缓存全量失效失败（fail-open）: {exc}")
+            return 0
+
+
 # 后台失效任务引用集，防止 fire-and-forget 任务被垃圾回收
 _invalidation_tasks: set = set()
 
@@ -468,6 +531,19 @@ def schedule_invalidation(kb_id: str) -> None:
             await SemanticCacheService().invalidate_kb(kb_id)
         except Exception as exc:
             logger.warning(f"语义缓存失效失败 [kb_id={kb_id}]: {exc}")
+
+    task = asyncio.create_task(_invalidate())
+    _invalidation_tasks.add(task)
+    task.add_done_callback(_invalidation_tasks.discard)
+
+
+def schedule_global_invalidation() -> None:
+    """Embedding 模型/索引变更后全量失效语义缓存（fire-and-forget）。"""
+    async def _invalidate():
+        try:
+            await SemanticCacheService().invalidate_all()
+        except Exception as exc:
+            logger.warning(f"语义缓存全量失效失败: {exc}")
 
     task = asyncio.create_task(_invalidate())
     _invalidation_tasks.add(task)

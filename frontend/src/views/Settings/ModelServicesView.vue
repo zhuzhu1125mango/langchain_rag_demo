@@ -109,6 +109,7 @@
                 <div class="flex flex-wrap gap-1 mt-1">
                   <AppBadge v-for="cap in m.capabilities" :key="cap" variant="info">{{ cap }}</AppBadge>
                   <span class="text-xs text-content-subtle">ctx {{ m.context_window || '-' }}</span>
+                  <span class="text-xs text-content-subtle">{{ priceSummary(m) }}</span>
                 </div>
               </div>
               <div class="flex items-center gap-1 shrink-0">
@@ -122,6 +123,165 @@
             </div>
           </div>
           <AppStateView v-else state="empty" title="暂无模型" description="先新增 Provider，再添加模型" padding="sm" />
+        </AppCard>
+
+        <AppCard padding="lg">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div>
+              <h2 class="font-medium text-content">向量索引 / Embedding</h2>
+              <p class="text-sm text-content-muted mt-1">
+                切换 Embedding 模型或维度后必须先重建索引；重建完成才会应用新配置，旧索引保留用于回滚。
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <AppButton variant="secondary" size="sm" :loading="indexLoading" @click="refetchIndex()">
+                <RefreshCw class="w-4 h-4" />
+                刷新
+              </AppButton>
+              <AppButton
+                variant="secondary"
+                size="sm"
+                :disabled="!indexStatus?.can_rollback"
+                :loading="rollbackIndexMutation.isPending.value"
+                @click="rollbackEmbeddingIndex"
+              >
+                回滚
+              </AppButton>
+              <AppButton
+                variant="primary"
+                size="sm"
+                :loading="rebuildIndexMutation.isPending.value || indexStatus?.status === 'rebuilding'"
+                @click="rebuildEmbeddingIndex"
+              >
+                重建索引
+              </AppButton>
+            </div>
+          </div>
+          <AppStateView v-if="indexLoading && !indexStatus" state="loading" padding="sm" />
+          <AppStateView
+            v-else-if="indexError && !indexStatus"
+            state="error"
+            title="加载索引状态失败"
+            :description="indexError"
+            padding="sm"
+            @retry="refetchIndex()"
+          />
+          <template v-else-if="indexStatus">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div class="rounded-xl border border-line bg-surface-subtle p-4">
+                <p class="text-xs text-content-muted">当前索引</p>
+                <p class="font-medium text-content mt-1">
+                  {{ indexStatus.indexed?.display_name || indexStatus.indexed?.model_name || '未知模型' }}
+                </p>
+                <p class="text-xs text-content-subtle mt-1">
+                  维度 {{ indexStatus.indexed?.dimension || '-' }} · {{ indexStatus.chunk_count }} 切片
+                </p>
+              </div>
+              <div class="rounded-xl border border-line bg-surface-subtle p-4">
+                <p class="text-xs text-content-muted">待应用配置</p>
+                <p class="font-medium text-content mt-1">
+                  {{ indexStatus.target.display_name || indexStatus.target.model_name }}
+                </p>
+                <p class="text-xs text-content-subtle mt-1">维度 {{ indexStatus.target.dimension }}</p>
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <AppBadge :variant="indexStatus.in_sync ? 'success' : 'warning'">
+                {{ indexStatus.in_sync ? '已同步' : '需重建' }}
+              </AppBadge>
+              <AppBadge v-if="indexStatus.status === 'rebuilding'" variant="warning">重建中</AppBadge>
+              <AppBadge v-else-if="indexStatus.status === 'failed'" variant="danger">最近一次重建失败</AppBadge>
+              <AppBadge v-else-if="indexStatus.status === 'rolled_back'" variant="info">已回滚</AppBadge>
+              <span v-if="indexStatus.can_rollback" class="text-xs text-content-subtle">存在可回滚备份</span>
+            </div>
+            <p v-if="indexStatus.last_error" class="text-xs text-red-500 mt-2 break-all">{{ indexStatus.last_error }}</p>
+            <p v-if="indexStatus.needs_rebuild" class="text-xs text-amber-600 dark:text-amber-400 mt-2">
+              保存 Embedding 路由后点击「重建索引」；重建会重新向量化全部切片并原子切换。
+            </p>
+          </template>
+        </AppCard>
+
+        <AppCard padding="lg">
+          <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+            <div>
+              <h2 class="font-medium text-content">用量与成本</h2>
+              <p class="text-sm text-content-muted mt-1">
+                最近 {{ usageDays }} 天的持久化聚合 + 当前进程增量；成本按模型配置的每 1K tokens 单价估算。
+              </p>
+            </div>
+            <div class="flex items-center gap-2">
+              <AppSelect
+                :model-value="usageDays"
+                size="sm"
+                class="w-32"
+                @update:model-value="usageDays = Number($event)"
+              >
+                <option :value="7">最近 7 天</option>
+                <option :value="30">最近 30 天</option>
+                <option :value="90">最近 90 天</option>
+              </AppSelect>
+              <AppButton variant="secondary" size="sm" :loading="usageLoading" @click="refetchUsage()">
+                <RefreshCw class="w-4 h-4" />
+                刷新
+              </AppButton>
+            </div>
+          </div>
+          <p v-if="!hasPricingConfigured" class="text-xs text-amber-600 dark:text-amber-400 mb-3">
+            当前没有模型配置单价，调用会计入「未定价」。可在模型编辑中填写每 1K tokens 的输入/输出价格。
+          </p>
+          <AppStateView v-if="usageLoading" state="loading" padding="sm" />
+          <AppStateView
+            v-else-if="usageError && !usageRows.length"
+            state="error"
+            title="加载用量失败"
+            :description="usageError"
+            padding="sm"
+            @retry="refetchUsage()"
+          />
+          <div v-else-if="usageRows.length" class="overflow-x-auto">
+            <table class="w-full">
+              <thead>
+                <tr class="border-b border-line">
+                  <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">模型</th>
+                  <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">任务</th>
+                  <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">调用 / 失败</th>
+                  <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">Tokens（入 / 出）</th>
+                  <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">平均延迟</th>
+                  <th class="text-left py-3 px-4 text-sm font-medium text-content-muted">估算成本</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="row in usageRows"
+                  :key="usageKey(row)"
+                  class="border-b border-line-subtle hover:bg-gray-50 dark:hover:bg-dark-700/50"
+                >
+                  <td class="py-3 px-4">
+                    <div class="text-sm text-content">{{ modelLabel(row) }}</div>
+                    <div class="text-xs text-content-subtle">{{ providerName(row.provider_id) }}</div>
+                  </td>
+                  <td class="py-3 px-4">
+                    <code class="text-xs text-content-muted">{{ row.task }}</code>
+                  </td>
+                  <td class="py-3 px-4 text-sm text-content whitespace-nowrap">
+                    {{ row.calls }}
+                    <span v-if="row.errors" class="text-red-500"> / 失败 {{ row.errors }}</span>
+                  </td>
+                  <td class="py-3 px-4 text-sm text-content-muted whitespace-nowrap">
+                    {{ row.input_tokens }} / {{ row.output_tokens }}
+                  </td>
+                  <td class="py-3 px-4 text-sm text-content-muted whitespace-nowrap">{{ formatLatency(row.avg_latency_ms) }}</td>
+                  <td class="py-3 px-4 text-sm text-content whitespace-nowrap">
+                    {{ formatCost(row) }}
+                    <span v-if="row.unpriced_calls" class="block text-xs text-amber-600 dark:text-amber-400">
+                      {{ row.unpriced_calls }} 次未定价
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <AppStateView v-else state="empty" title="暂无用量" description="产生模型调用后，这里会显示调用数、Token、延迟与成本" padding="sm" />
         </AppCard>
 
         <AppCard padding="lg">
@@ -269,6 +429,41 @@
             <AppInput v-model.number="modelForm.embedding_dimension" type="number" />
           </div>
         </div>
+        <div>
+          <label class="block text-sm text-content-secondary mb-2">成本单价（每 1K tokens，留空表示未配置）</label>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs text-content-muted mb-1">输入</label>
+              <AppInput
+                :model-value="modelForm.input_cost_per_1k ?? ''"
+                type="number"
+                min="0"
+                step="0.000001"
+                placeholder="如 0.001"
+                @update:model-value="value => (modelForm.input_cost_per_1k = value === '' ? null : Number(value))"
+              />
+            </div>
+            <div>
+              <label class="block text-xs text-content-muted mb-1">输出</label>
+              <AppInput
+                :model-value="modelForm.output_cost_per_1k ?? ''"
+                type="number"
+                min="0"
+                step="0.000001"
+                placeholder="如 0.002"
+                @update:model-value="value => (modelForm.output_cost_per_1k = value === '' ? null : Number(value))"
+              />
+            </div>
+            <div>
+              <label class="block text-xs text-content-muted mb-1">币种</label>
+              <AppSelect v-model="modelForm.price_currency">
+                <option value="USD">USD</option>
+                <option value="CNY">CNY</option>
+                <option value="EUR">EUR</option>
+              </AppSelect>
+            </div>
+          </div>
+        </div>
       </div>
       <template #footer>
         <AppButton variant="secondary" size="sm" @click="modelDialog = false">取消</AppButton>
@@ -302,6 +497,10 @@ import {
   useCreateProvider,
   useDeleteModel,
   useDeleteProvider,
+  useIndexStatus,
+  useModelUsage,
+  useRebuildIndex,
+  useRollbackIndex,
   useSaveRoutes,
   useTestProvider,
   useTestSavedProvider,
@@ -312,6 +511,7 @@ import {
   type AdminRoute,
   type ConnectionTestResult,
   type ModelPayload,
+  type ModelUsageRow,
   type ProviderPayload,
   type RoutePayload
 } from '@/queries/adminModels'
@@ -324,6 +524,37 @@ const snapshotError = computed(() => {
   if (!err) return ''
   return err.response?.data?.detail || (err.response?.status ? `请求失败 (${err.response.status})` : '加载失败')
 })
+
+const usageDays = ref(7)
+const {
+  data: usageData,
+  isLoading: usageLoading,
+  error: usageQueryError,
+  refetch: refetchUsage
+} = useModelUsage(usageDays)
+const usageRows = computed(() => usageData.value?.usage || [])
+const usageError = computed(() => {
+  const err = usageQueryError.value as { response?: { status?: number; data?: { detail?: string } } } | null
+  if (!err) return ''
+  return err.response?.data?.detail || (err.response?.status ? `请求失败 (${err.response.status})` : '加载失败')
+})
+const hasPricingConfigured = computed(
+  () => snapshot.value?.models.some(m => m.input_cost_per_1k != null || m.output_cost_per_1k != null) ?? false
+)
+
+const {
+  data: indexStatus,
+  isLoading: indexLoading,
+  error: indexQueryError,
+  refetch: refetchIndex
+} = useIndexStatus()
+const indexError = computed(() => {
+  const err = indexQueryError.value as { response?: { status?: number; data?: { detail?: string } } } | null
+  if (!err) return ''
+  return err.response?.data?.detail || (err.response?.status ? `请求失败 (${err.response.status})` : '加载失败')
+})
+const rebuildIndexMutation = useRebuildIndex()
+const rollbackIndexMutation = useRollbackIndex()
 
 const createProviderMutation = useCreateProvider()
 const updateProviderMutation = useUpdateProvider()
@@ -339,6 +570,50 @@ const applyRegistryMutation = useApplyRegistry()
 function saveAdminKey(): void {
   persistAdminKey(adminKeyInput.value.trim())
   refetch()
+  refetchUsage()
+  refetchIndex()
+}
+
+async function rebuildEmbeddingIndex(): Promise<void> {
+  const force = Boolean(indexStatus.value?.in_sync)
+  try {
+    await ElMessageBox.confirm(
+      force
+        ? '当前索引已与配置同步，将强制重新向量化全部切片并重建索引？'
+        : '将重新向量化全部切片并切换到新索引，重建期间旧索引继续服务。继续？',
+      '重建向量索引',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await rebuildIndexMutation.mutateAsync(force)
+    toast.success('重建任务已提交', '完成后会自动应用新的 Embedding 配置')
+    refetchIndex()
+  } catch (err) {
+    handleMutationError(err, '提交索引重建失败')
+  }
+}
+
+async function rollbackEmbeddingIndex(): Promise<void> {
+  try {
+    await ElMessageBox.confirm(
+      '将把向量索引与 Embedding 路由回滚到上一次重建前的版本？',
+      '回滚索引',
+      { type: 'warning' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await rollbackIndexMutation.mutateAsync()
+    toast.success('索引已回滚')
+    refetch()
+    refetchIndex()
+  } catch (err) {
+    handleMutationError(err, '回滚索引失败')
+  }
 }
 
 const providerDialog = ref(false)
@@ -433,9 +708,12 @@ const modelForm = reactive<ModelPayload>({
   context_window: 0,
   max_output_tokens: 0,
   embedding_dimension: 0,
+  input_cost_per_1k: null,
+  output_cost_per_1k: null,
+  price_currency: 'USD',
   enabled: true
 })
-const capabilityOptions = ['chat', 'stream', 'tools', 'reasoning', 'vision', 'embedding']
+const capabilityOptions = ['chat', 'stream', 'tools', 'reasoning', 'vision', 'embedding', 'rerank']
 const saveModelPending = computed(() =>
   createModelMutation.isPending.value || updateModelMutation.isPending.value
 )
@@ -450,6 +728,9 @@ function openModel(model?: AdminModel): void {
     context_window: model?.context_window || 0,
     max_output_tokens: model?.max_output_tokens || 0,
     embedding_dimension: model?.embedding_dimension || 0,
+    input_cost_per_1k: model?.input_cost_per_1k ?? null,
+    output_cost_per_1k: model?.output_cost_per_1k ?? null,
+    price_currency: model?.price_currency || 'USD',
     enabled: model?.enabled ?? true
   })
   modelDialog.value = true
@@ -494,7 +775,8 @@ const allTasks = [
   'agent_decision',
   'wiki_compile',
   'doc_analyze',
-  'embedding'
+  'embedding',
+  'rerank'
 ]
 type RouteDraft = AdminRoute
 const routeDrafts = ref<RouteDraft[]>([])
@@ -522,6 +804,41 @@ watch(snapshot, value => {
 
 function providerName(id: string): string {
   return snapshot.value?.providers.find(p => p.id === id)?.name || id
+}
+
+const CURRENCY_SYMBOLS: Record<string, string> = { USD: '$', CNY: '¥', EUR: '€', JPY: '¥' }
+
+function currencySymbol(currency?: string): string {
+  const code = (currency || 'USD').toUpperCase()
+  return CURRENCY_SYMBOLS[code] || `${code} `
+}
+
+function priceSummary(model: AdminModel): string {
+  const symbol = currencySymbol(model.price_currency)
+  const parts: string[] = []
+  if (model.input_cost_per_1k != null) parts.push(`入 ${symbol}${model.input_cost_per_1k}`)
+  if (model.output_cost_per_1k != null) parts.push(`出 ${symbol}${model.output_cost_per_1k}`)
+  return parts.length ? `价格 ${parts.join(' / ')} 每 1K` : '未定价'
+}
+
+function usageKey(row: ModelUsageRow): string {
+  return `${row.provider_id}:${row.model_id}:${row.task}:${row.currency}`
+}
+
+function modelLabel(row: ModelUsageRow): string {
+  const model = snapshot.value?.models.find(m => m.id === row.model_id)
+  return model?.display_name || model?.model_name || row.model_name
+}
+
+function formatLatency(ms: number): string {
+  return `${Math.round(ms || 0).toLocaleString()} ms`
+}
+
+function formatCost(row: ModelUsageRow): string {
+  if (!row.priced_calls) return '—'
+  const amount = row.estimated_cost || 0
+  const digits = amount > 0 && amount < 0.01 ? 6 : 4
+  return `${currencySymbol(row.currency)}${amount.toFixed(digits)}`
 }
 
 async function saveRoutes(): Promise<void> {

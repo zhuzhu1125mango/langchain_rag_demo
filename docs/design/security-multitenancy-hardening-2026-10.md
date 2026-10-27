@@ -184,31 +184,31 @@
 
 ## 4. P2 方案摘要（公网企业级前完成）
 
-> 详细子任务、依赖、执行序与状态以 [project-status.md](../project-status.md)「安全与多租户加固专项」为准（SEC-6~15 均为待办）。
+> 详细子任务、依赖、执行序与状态以 [project-status.md](../project-status.md)「安全与多租户加固专项」为准（SEC-6~15 全部已完成）。
 
 | ID | 问题 | 方案要点 | 验收 |
 |---|---|---|---|
-| SEC-6 | 实验遗留空 owner 对所有用户可见/可控 | 移除 `owner_id == ""` 放行；迁移回填或仅 admin 可见遗留实验 | 普通用户无法列出/操作空 owner 实验 |
-| SEC-7 | 分类/标签为全局资源 | 二选一：加 `owner_id` 做租户隔离；或明确为全局字典并仅 admin 可写 | 普通用户不能改他人分类/标签 |
-| SEC-8 | 通知全局频道泄露活动元数据 | 默认订阅 `user:{id}`；`doc:`/`task:` 订阅校验归属；`kb:*`/`doc:*` 仅 admin/内部 | 用户只收到自身资源事件 |
-| SEC-9 | SSRF DNS 失败放行 / TOCTOU / 响应体无上限 | DNS 失败 fail-closed；解析后固定 IP 连接；限制重定向跳数/响应字节/Content-Type | 内网/元数据地址不可达；大响应被截断 |
-| SEC-10 | JWT 无吊销 | 增加 `jti`/session version + Redis 黑名单；登出使 token 失效；缩短 access TTL、refresh 轮换 | 登出后旧 token 立即 401 |
-| SEC-11 | 语义缓存失效全库扫描 | 维护 `kb_id → scope keys` 索引（Redis Set），按 KB 精准失效 | 文档变更不再 O(全库) 扫描 |
-| SEC-12 | 健康检查浅、Redis 硬依赖 | `/health/live` 浅探活；`/health/ready` 深探 DB/Redis/Milvus/MinIO；compose 用 ready | 依赖故障时容器不就绪 |
-| SEC-13 | 无备份/扫描/SBOM、镜像浮动 | 备份恢复演练；dependabot/trivy/SBOM；基础镜像 pin digest | 季度恢复演练通过；CI 供应链扫描 |
-| SEC-14 | 无账号删除/导出、弱密码、日志含问题 | 账号删除/导出 API；密码 ≥10 + 弱密码库；问题日志脱敏/分级 | 用户可删除/导出自身数据；日志无原始问题 |
-| SEC-15 | 测试有效性不足 | 真实后端 E2E 烟测；安全回归套件；覆盖率提升（后端 65、前端阈值上调） | CI 覆盖真实链路；P1 回归用例常驻 |
+| SEC-6 | 实验遗留空 owner 对所有用户可见/可控 | 移除 `owner_id == ""` 放行；迁移回填或仅 admin 可见遗留实验 | ✅ 普通用户无法列出/操作空 owner 实验；新增管理员 `/experiments/admin/legacy` |
+| SEC-7 | 分类/标签为全局资源 | 二选一：加 `owner_id` 做租户隔离；或明确为全局字典并仅 admin 可写 | ✅ 决策为全局字典 + admin 写；删除分类前校验文档引用（409） |
+| SEC-8 | 通知全局频道泄露活动元数据 | 默认订阅 `user:{id}`；`doc:`/`task:` 订阅校验归属；`kb:*`/`doc:*` 仅 admin/内部 | ✅ 默认 user 频道；全局频道仅内部；doc/task 越权拒绝 |
+| SEC-9 | SSRF DNS 失败放行 / TOCTOU / 响应体无上限 | DNS 失败 fail-closed；解析后固定 IP 连接；限制重定向跳数/响应字节/Content-Type | ✅ DNS fail-closed + 连接后 peer IP 复核 + 2MB/内容类型/跳数限制；外部抓取走 `utils/safe_http.py` 的 httpcore 固定 IP 后端（TLS 仍按原 host 校验证书），消除解析-连接 TOCTOU |
+| SEC-10 | JWT 无吊销 | 增加 `jti`/session version + Redis 黑名单；登出使 token 失效；缩短 access TTL、refresh 轮换 | ✅ jti + 本地/Redis 黑名单、`POST /auth/logout`、refresh 轮换旧 token |
+| SEC-11 | 语义缓存失效全库扫描 | 维护 `kb_id → scope keys` 索引（Redis Set），按 KB 精准失效 | ✅ `rag:semcache:index:*` 反向索引；存量无索引时回退 SCAN |
+| SEC-12 | 健康检查浅、Redis 硬依赖 | `/health/live` 浅探活；`/health/ready` 深探 DB/Redis/Milvus/MinIO；compose 用 ready | ✅ live/ready/detail 拆分；compose healthcheck 改 ready |
+| SEC-13 | 无备份/扫描/SBOM、镜像浮动 | 备份恢复演练；dependabot/trivy/SBOM；基础镜像 pin digest | ✅ 备份/恢复脚本 + runbook、dependabot、Trivy+SBOM CI；Dockerfile 基础镜像与 uv 镜像均 `tag@sha256` 固定 |
+| SEC-14 | 无账号删除/导出、弱密码、日志含问题 | 账号删除/导出 API；密码 ≥10 + 弱密码库；问题日志脱敏/分级 | ✅ 导出/注销 API、密码 ≥10 + 弱密码库、问题/答案/工具参数日志摘要化；trace 30 天、审计 365 天定期清扫（`retention_service`），应用日志按 `LOG_RETENTION_DAYS` 轮转 |
+| SEC-15 | 测试有效性不足 | 真实后端 E2E 烟测；安全回归套件；覆盖率提升（后端 65、前端阈值上调） | ✅ `scripts/smoke_e2e.py` 与 SEC P2 回归套件；补测后后端 67.02%（`fail_under` 60→65），前端阈值 32/35/24/31→35/40/25/34 |
 
 ## 5. P3 方案摘要
 
-> SEC-20（secrets 预检）与 SEC-21（文档边界）已完成；SEC-18 中 `DocumentUpdate.status` Literal 已完成，剩余分页/上限。详细状态见台账。
+> SEC-16~21 全部已完成；详细状态见台账。
 
 | ID | 问题 | 方案 | 状态 |
 |---|---|---|---|
-| SEC-16 | CSP `connect-src ws:/wss:` 过宽、无 HSTS/TLS | 收紧到同源 WS；生产 TLS/HSTS 由反向代理统一提供 | 待办 |
-| SEC-17 | `/api/evaluate/*` 无配额 | 加登录用户 QPS/日配额；批量样本上限 | 待办 |
-| SEC-18 | 会话列表无分页、`DocumentUpdate.status` 未校验 | 会话分页；状态字段 Literal；批量操作上限 | 部分完成（Literal 已完成） |
-| SEC-19 | ToolGuard 不解析 DNS | 统一走 `validate_url_safe` + 固定 IP 连接；新增 URL 型工具必须声明 | 待办 |
+| SEC-16 | CSP `connect-src ws:/wss:` 过宽、无 HSTS/TLS | 收紧到同源 WS；生产 TLS/HSTS 由反向代理统一提供 | ✅ `connect-src 'self'`；HSTS 按 `X-Forwarded-Proto` 下发；部署指南补 TLS 反代片段 |
+| SEC-17 | `/api/evaluate/*` 无配额 | 加登录用户 QPS/日配额；批量样本上限 | ✅ `consume_eval_quota`（RPM + 日样本单元）；`EVAL_BATCH_MAX_SAMPLES` 超限 400 |
+| SEC-18 | 会话列表无分页、`DocumentUpdate.status` 未校验 | 会话分页；状态字段 Literal；批量操作上限 | ✅ 会话 `skip/limit`；会话/文档批量删除 ≤200；反馈/坏例 `limit≤200`（Literal 已于 SEC-4 完成） |
+| SEC-19 | ToolGuard 不解析 DNS | 统一走 `validate_url_safe` + 固定 IP 连接；新增 URL 型工具必须声明 | ✅ 注册时强校验 `url_params`；`check_async` 线程池 DNS fail-closed |
 | SEC-20 | 本地 secrets 不完整导致 start-prod 预检失败 | 文档明确 `gen_secrets` 流程；预检输出缺失清单与生成命令 | ✅ 已完成 |
 | SEC-21 | 文档边界表述偏乐观 | README/部署指南明确「单租户/LAN 推荐，公网需完成 SEC P1」 | ✅ 已完成 |
 
@@ -268,16 +268,16 @@
 
 | ID | 任务 | 状态 | 依赖 | 验收 |
 |---|---|---|---|---|
-| SEC-6 | 实验 owner 条件收口 | 待办 | 无 | 空 owner 实验仅 admin |
-| SEC-7 | 分类/标签归属或 admin-only | 待办 | owner 决策 | 普通用户不可跨租户改 |
-| SEC-8 | 通知频道按用户隔离 | 待办 | 无 | 只收自身事件；伪造频道被拒 |
-| SEC-9 | SSRF fail-closed + IP 固定 + 响应上限 | 待办 | 无 | 内网不可达；大响应截断 |
-| SEC-10 | JWT 吊销/登出/refresh 轮换 | 待办 | 无 | 登出后旧 token 401 |
-| SEC-11 | 语义缓存按 KB 索引失效 | 待办 | 无 | 不再全库扫描 |
-| SEC-12 | live/ready 健康检查 | 待办 | 无 | 依赖故障不就绪 |
-| SEC-13 | 备份恢复 + 供应链扫描 + 镜像 pin | 待办 | 无 | 恢复演练/CI 扫描通过 |
-| SEC-14 | 账号删除/导出、密码策略、日志脱敏 | 待办 | 无 | 隐私操作可用；日志无原文 |
-| SEC-15 | 真实后端 E2E + 安全回归 + 覆盖率 | 待办 | SEC-1~14 | CI 覆盖真实链路 |
+| SEC-6 | 实验 owner 条件收口 | ✅ 已完成 | 无 | 空 owner 实验仅 admin |
+| SEC-7 | 分类/标签归属或 admin-only | ✅ 已完成（全局字典 + admin 写） | owner 决策 | 普通用户不可跨租户改 |
+| SEC-8 | 通知频道按用户隔离 | ✅ 已完成 | 无 | 只收自身事件；伪造频道被拒 |
+| SEC-9 | SSRF fail-closed + IP 固定 + 响应上限 | ✅ 已完成 | 无 | 内网不可达；大响应截断；解析后按固定 IP 建连 |
+| SEC-10 | JWT 吊销/登出/refresh 轮换 | ✅ 已完成 | 无 | 登出后旧 token 401 |
+| SEC-11 | 语义缓存按 KB 索引失效 | ✅ 已完成 | 无 | 不再全库扫描 |
+| SEC-12 | live/ready 健康检查 | ✅ 已完成 | 无 | 依赖故障不就绪 |
+| SEC-13 | 备份恢复 + 供应链扫描 + 镜像 pin | ✅ 已完成 | 无 | 备份/恢复脚本与 runbook；Trivy/SBOM CI；基础镜像 digest pin |
+| SEC-14 | 账号删除/导出、密码策略、日志脱敏 | ✅ 已完成 | 无 | 隐私操作可用；日志无原文；trace/审计按保留期清扫 |
+| SEC-15 | 真实后端 E2E + 安全回归 + 覆盖率 | ✅ 已完成 | SEC-1~14 | 烟测脚本/回归套件；后端 67.02%、前端阈值上调 |
 
 ### P3（纵深与体验）
 
@@ -323,3 +323,26 @@
 - **SEC-5 边界**：提示注入无法被规则完全消灭；当前为“不可信包裹 + 工具出站策略 + 审批 + 红队回归”的纵深防御，仍需持续扩充红队样本。
 - **SEC-4 选型**：本轮采用“下架删向量/上架重建”MVP；Milvus `doc_status` 字段与全量 reindex 留作 P2 优化。
 - **部署提醒**：生产 `.env.prod` 需设置 `AUTH_ALLOW_REGISTRATION=false`（本地已补充，其他机器需同步）；Docker 下 `TRUSTED_PROXY_CIDRS` 已由 compose 覆盖为 `172.16.0.0/12`，若后端端口直接暴露给宿主/局域网，应改为精确的 Nginx 容器 IP 或专用代理网段，避免 XFF 伪造。
+
+## 10. 实施记录（P2，2026-10-27）
+
+- **SEC-6**：`ExperimentManager._owner_condition` 默认严格（不再放行空 owner），所有查询/写入方法透传 `include_legacy`；新增管理员只读端点 `GET /experiments/admin/legacy`。单测 `test_experiment_manager_units.py` 覆盖归属过滤与生命周期。
+- **SEC-7**：分类/标签写接口收敛为 `require_admin`；分类删除前统计引用文档数，被引用返回 409。
+- **SEC-8**：通知默认频道改为 `user:{user_id}`；`kb:*`/`doc:*` 全局频道仅内部用户可用，`doc:`/`kb:`/`task:` 订阅校验归属；前端订阅不再带 `channels` 参数。
+- **SEC-9**：`validate_url_safe` DNS 失败 fail-closed；外部网页抓取改走 `utils/safe_http.py`——httpcore 自定义 network backend 在连接前解析并按公开 IP 建连（TLS 仍按原 host 校验证书），彻底消除 DNS 重绑定 TOCTOU；保留响应字节/Content-Type/重定向跳数上限与连接后 peer IP 复核；SearXNG 等内部请求仍走普通客户端。
+- **SEC-10**：JWT 增加 `jti`，登出/刷新轮换时写入本地 + Redis 吊销表（Redis 故障 30s 冷却）；`POST /auth/logout`、前端登出 best-effort 调用。
+- **SEC-11**：语义缓存新增 `rag:semcache:index:*` 反向索引，`invalidate_kb` 精准失效（无索引时回退 SCAN），`invalidate_all` 同步清索引。
+- **SEC-12**：`/health/live`（浅）、`/health/ready`（DB/Redis/Milvus/MinIO，失败 503）、`/health/detail`（管理员）；compose healthcheck 使用 ready。
+- **SEC-13**：新增 `scripts/backup.sh`/`restore.sh` 与 [backup-restore.md](../guide/backup-restore.md)；`.github/dependabot.yml`、Trivy + SBOM CI；Dockerfile 基础镜像与 `ghcr.io/astral-sh/uv` 均以 `tag@sha256` 固定。
+- **SEC-14**：账号导出/注销 API（密码确认 + 审计 + token 吊销 + 级联清理）；密码 ≥10 + 弱密码库 + 不得等于用户名；问题/答案/工具参数日志摘要化；新增 `retention_service` 每日清扫 trace(30d)/审计(365d)，应用日志改 `TimedRotatingFileHandler` 按 `LOG_RETENTION_DAYS` 轮转。
+- **SEC-15**：`backend/scripts/smoke_e2e.py` 与 SEC P2 回归套件；本轮补测 82 例（辅助 LLM 服务、Cache/MinIO/Reranker/VectorStore、ExperimentManager、SampleStore），后端 1298 passed，覆盖率 67.02%，`fail_under` 60→65；前端 131 passed，阈值 32/35/24/31→35/40/25/34。
+- **验证**：`uvx ruff check --select E9,F63,F7,F82 backend` 通过。
+- **残留**：季度恢复演练需按 runbook 在真实环境执行并留档；SEC P3 已于同日完成（见 §11）。
+
+## 11. 实施记录（P3，2026-10-27）
+
+- **SEC-16**：`frontend/nginx.conf` 的 CSP `connect-src` 由 `'self' ws: wss:` 收敛为 `'self'`（CSP3 已覆盖同源 ws/wss）；新增 `map $http_x_forwarded_proto $hsts_header`，仅在 HTTPS 抵达时下发 HSTS（明文直连不下发），三处安全头块同步；[deployment.md](../guide/deployment.md) §6.8.1 补 TLS 终结反代片段（含 `X-Forwarded-Proto` 前提说明）。
+- **SEC-17**：`utils/quota.py` 新增 `consume_eval_quota`（用户级 RPM + 日样本单元，Redis 降级进程内、生产 fail-closed 沿用既有策略）；`/api/evaluate/*` 单条计 1、批量按样本数计费，`EVAL_BATCH_MAX_SAMPLES` 超限 400；新增 `EVAL_RATE_LIMIT_PER_MINUTE=10`、`EVAL_DAILY_QUOTA=200`、`EVAL_BATCH_MAX_SAMPLES=100`。
+- **SEC-18**：会话列表新增 `skip`/`limit`（默认 100、上限 500）；会话与文档批量删除统一受 `BATCH_DELETE_MAX_IDS`（默认 200）约束，超限 400；反馈/坏例列表 `limit` 上限由 1000 收紧为 200。
+- **SEC-19**：`BaseTool` 新增 `url_params`，`ToolRegistry.register` 强制校验 schema 中 URL 型参数必须声明（否则拒绝注册）；`ToolGuard.check_async` 在静态规则之后于线程池执行 `validate_url_safe`（DNS fail-closed），`ToolManager.execute` 统一调用；开关 `GUARDRAIL_TOOL_DNS_CHECK_ENABLED` 默认开启。`fetch_webpage` 声明 `url_params=("url",)`，其抓取仍走 SEC-9 的固定 IP 客户端。
+- **验证**：新增 `tests/test_security_p3.py`（18 例）覆盖上述四项；后端全量 **1316 passed / 105 skipped**、覆盖率 67.17%（≥65 卡点）；`uvx ruff check --select E9,F63,F7,F82 backend` 通过；`nginx -t` 校验通过；前端 typecheck/eslint/build 通过（无前端源码改动）。

@@ -14,13 +14,14 @@ import asyncio
 import hashlib
 from collections import OrderedDict
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, Body
+from fastapi import APIRouter, Depends, HTTPException, Body, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from typing import List, Optional
 import uuid
+from src.config import settings
 from src.database import get_db
 from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback as FeedbackModel
@@ -29,6 +30,9 @@ from src.services.rag_chain import RAGChain
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
+
+# SEC-18：会话列表单页上限（默认 100）；批量删除上限见 settings.security.BATCH_DELETE_MAX_IDS
+SESSION_LIST_MAX_LIMIT = 500
 
 # 快捷问题缓存：key 为历史问题哈希，value 为 (缓存时间, 问题列表)
 # OrderedDict 实现 LRU：命中移到末尾，超限时从头部（最久未使用）淘汰
@@ -152,13 +156,17 @@ async def create_session(
 
 @router.get("/", response_model=List[SessionResponse])
 async def list_sessions(
+    skip: int = Query(0, ge=0, description="跳过数量（分页参数）"),
+    limit: int = Query(100, ge=1, le=SESSION_LIST_MAX_LIMIT, description="每页数量（分页参数）"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
-    获取当前用户的会话列表
+    获取当前用户的会话列表（SEC-18：分页返回，避免大会话历史一次性拉全）
 
     Args:
+        skip: 跳过数量
+        limit: 每页数量（默认 100，上限见 SESSION_LIST_MAX_LIMIT）
         db: 数据库会话
         current_user: 当前认证用户
 
@@ -169,6 +177,8 @@ async def list_sessions(
         select(SessionModel)
         .filter(SessionModel.user_id == current_user.user_id)
         .order_by(SessionModel.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
     )
     sessions = result.scalars().all()
     return [
@@ -380,6 +390,13 @@ async def batch_delete_sessions(
     """
     if not request.ids:
         return {"deleted_count": 0}
+
+    max_ids = int(settings.security.BATCH_DELETE_MAX_IDS)
+    if max_ids and len(request.ids) > max_ids:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单次批量删除最多允许 {max_ids} 个会话，当前 {len(request.ids)} 个",
+        )
 
     try:
         session_ids = [uuid.UUID(session_id) for session_id in request.ids]

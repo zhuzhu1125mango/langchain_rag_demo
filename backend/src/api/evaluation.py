@@ -5,13 +5,25 @@
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from src.auth import CurrentUser, get_current_user
 from src.services.evaluation import GenerationEvaluator, RetrievalEvaluator
+from src.utils.quota import consume_eval_quota, eval_batch_limit
 
 router = APIRouter(prefix="/evaluate", tags=["evaluation"])
+
+
+def _assert_batch_size(samples: List[Any]) -> int:
+    """SEC-17：批量样本上限校验，返回计费单元数（至少 1）。"""
+    limit = eval_batch_limit()
+    if limit and len(samples) > limit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"单次批量评估最多允许 {limit} 个样本，当前 {len(samples)} 个",
+        )
+    return max(1, len(samples))
 
 
 class RetrievalEvalRequest(BaseModel):
@@ -49,6 +61,7 @@ async def evaluate_retrieval(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """评估单次检索结果质量。"""
+    await consume_eval_quota(current_user.user_id, 1)
     evaluator = RetrievalEvaluator()
     result = await evaluator.evaluate(
         question=data.question,
@@ -65,6 +78,8 @@ async def evaluate_retrieval_batch(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """批量评估检索结果质量。"""
+    units = _assert_batch_size(data.samples)
+    await consume_eval_quota(current_user.user_id, units)
     evaluator = RetrievalEvaluator()
     return await evaluator.evaluate_batch(data.samples)
 
@@ -75,6 +90,7 @@ async def evaluate_generation(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """评估单次生成答案质量（忠实度与相关度）。"""
+    await consume_eval_quota(current_user.user_id, 1)
     evaluator = GenerationEvaluator()
     result = await evaluator.evaluate(
         answer=data.answer,
@@ -90,5 +106,7 @@ async def evaluate_generation_batch(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """批量评估生成答案质量。"""
+    units = _assert_batch_size(data.samples)
+    await consume_eval_quota(current_user.user_id, units)
     evaluator = GenerationEvaluator()
     return await evaluator.evaluate_batch(data.samples)

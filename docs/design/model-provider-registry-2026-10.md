@@ -1,6 +1,6 @@
 # 模型 Provider 注册与任务路由（2026-10）
 
-> 状态：方案已确认，P1 实施中  
+> 状态：部分实施（P1 2026-10-25、P2 2026-10-26、P2.1 2026-10-26、P3 2026-10-26 已完成；剩余 P4：Anthropic/Gemini/Azure 原生、租户/成本策略与成本上限告警）
 > 目标：让知澜支持本地 Ollama、OpenAI-Compatible API、Anthropic / Gemini / Azure 等模型服务，按任务路由，支持热切换与降级，同时不破坏现有 Ollama 部署。  
 > 关联：[project-status.md](../project-status.md)、[chat-latency-and-model-config.md](chat-latency-and-model-config.md)、[architecture.md](../architecture.md)
 
@@ -237,6 +237,13 @@ Embedding 切换按“数据迁移”处理：
 
 P1 不改 Embedding 的 Milvus schema，只把构造入口收敛到 registry；P3 做多 Embedding 迁移。
 
+**P3 实现（2026-10-26）**：
+- Embedding 维度/模型以 registry 为权威（`EMBEDDING_DIMENSION` 仅作 legacy 兜底）；`model_index_profile` 记录 collection 的 provider/model/维度/切片数/状态。
+- 保存新 Embedding 配置后，`POST /api/admin/models/apply` 因画像不一致返回 409；必须先 `POST /api/admin/models/index/rebuild`。
+- 重建读取线上集合的标量字段（不重解析源文件），用目标 Embedding 重算 dense 向量，并复用 BM25 词表重算 sparse，写入影子集合后原子换名；失败保留旧集合，成功后保留备份供 `index/rollback`。
+- 重建成功自动应用 DB 配置、刷新 `MilvusService` Embedding 单例并全量失效语义缓存；意图分类示例向量、Wiki 编译与联网搜索的 Embedding 缓存在模型代次变化时自动重建。
+- Reranker 支持可选 `rerank` 路由（Ollama 托管）；未配置时继续回退 `KB_RERANK_*` env，registry 变更时热重建。
+
 ---
 
 ## 8. 管理界面（P2）
@@ -259,9 +266,10 @@ P1 不改 Embedding 的 Milvus schema，只把构造入口收敛到 registry；P
 | 阶段 | 内容 | 验收 |
 |---|---|---|
 | P0 | 触点盘点、接口与能力矩阵、文档 | 本文档 + 任务台账 |
-| P1 | JSON registry + Ollama/OpenAI-Compatible 适配器 + 路由 + env 兜底 + 热重载 | 本地/外部聊天模型可切换；旧 Ollama 配置不改也能启动；能力校验与 fallback 单测通过 |
-| P2 | Provider/Route 管理 API + UI + Key 加密 + 测试连接 + 用量 | 管理员 UI 可添加/切换/回滚；Key 不回显 |
-| P3 | Embedding/Reranker 抽象 + 索引重建 + 缓存失效 | 维度变化必须重建；重建可回滚 |
+| P1 ✅ | JSON registry + Ollama/OpenAI-Compatible 适配器 + 路由 + env 兜底 + 热重载 | 本地/外部聊天模型可切换；旧 Ollama 配置不改也能启动；能力校验与 fallback 单测通过（2026-10-25 完成） |
+| P2 ✅ | Provider/Route 管理 API + UI + Key 加密 + 测试连接；用量统计延后到 P2.1 | 管理员 UI 可添加/切换/回滚；Key 不回显（2026-10-26 完成） |
+| P2.1 ✅ | 用量/Token/成本统计、Provider 级熔断与健康缓存 | 已完成：3 次连续失败打开 60s 熔断、半开探测、`rag_model_provider_calls_total` / `rag_model_tokens_total` / `rag_model_circuit_state`、`GET /api/admin/models/usage`、模型价格配置与成本估算、`model_usage_daily` 按天持久化（默认 60s flush）、设置页「用量与成本」展示与模型单价编辑。待办：成本上限/429 告警（P4） |
+| P3 ✅ | Embedding/Reranker 抽象 + 索引重建 + 缓存失效 | 已完成（2026-10-26）：registry 维度权威 + `model_index_profile` 画像、apply 安全闸门、影子集合全量重向量化与原子换名、失败保留旧索引/备份回滚、语义缓存全量失效、可选 rerank 路由热切换 |
 | P4 | Anthropic/Gemini/Azure 原生 + 租户/成本策略 | 按需 |
 
 ### P1 验收标准
@@ -352,7 +360,39 @@ P1 不改 Embedding 的 Milvus schema，只把构造入口收敛到 registry；P
 
 ### 12.4 P2 限制
 
-- 用量/成本统计、Provider 级熔断/健康缓存尚未实现（P2.1）。
+- 租户级成本上限与 429 告警尚未实现（P4）；成本估算、按天持久化、设置页用量/成本展示与单价编辑已落地，见 §12.6。
 - 管理页当前为全局配置；租户级 Provider/路由属于 P4。
-- Embedding 跨模型迁移、多 collection 重建仍属 P3。
+- Embedding 跨模型迁移已落地（P3）；当前仅支持单 Milvus 集群内的「影子集合 + rename」迁移，跨集群双写/别名切换与备份自动清理仍属后续。
+- `rerank` 路由当前仅支持 Ollama 托管模型；Sentence-Transformers 本地 reranker 继续走 `KB_RERANK_*` env。
 - 外部 Provider 的 Key 推荐通过 `api_key_env`；管理页保存的 Key 依赖 `MODEL_SECRET_ENC_KEY` 稳定，换 key 后需重新录入。
+
+### 12.5 P2.1 实施记录（2026-10-26，后端切片）
+
+- `ChatModelGroup` 从 LangChain `with_fallbacks` 改为显式顺序 fallback：跳过熔断 Provider、逐模型记录结果，流式仅在尚未输出任何分片时才允许切换。
+- 新增 `services/model_health.py`：连续失败 3 次打开 60s 熔断；冷却后半开只放行 1 次探测；成功关闭、失败重新计时；应用 registry 时重置。
+- 新增 `services/model_usage.py`：按 `provider_id + model_id + task` 累计调用、失败、input/output tokens、平均延迟与最近错误；进程内存储，重启清零。
+- 新增指标 `rag_model_provider_calls_total`（provider/model/task/result）、`rag_model_tokens_total`（direction）、`rag_model_circuit_state`（1/0.5/0）。
+- 新增 `GET /api/admin/models/usage`（管理员），返回 `usage` 与 `health` 快照。
+- 验证：全量 **1137 passed / 105 skipped**（新增 `tests/test_model_health.py` 6 例）。
+- 已知边界：流式 Token 依赖 Provider 在末尾分片返回用量，缺失记 0；Embedding 调用暂未纳入熔断/用量。
+
+### 12.6 P2.1 成本估算与用量持久化（2026-10-26）
+
+- `model_deployments` 新增 `input_cost_per_1k` / `output_cost_per_1k` / `price_currency`（迁移 `b3c4d5e6f7a8`）；管理 API 与 registry 快照同步暴露，apply 时校验价格非负。
+- 成本 = `input_tokens/1000 × input_cost_per_1k + output_tokens/1000 × output_cost_per_1k`；未配置价格的调用 `estimated_cost=0` 并计入 `unpriced_calls`，界面需标注“未定价”，不伪装成免费。
+- 新增 `model_usage_daily`（`usage_date + provider_id + model_id + task + cost_currency` 主键）：调用/失败、input/output tokens、延迟总和、已定价/未定价调用数、估算成本、最近错误；不建外键以保留模型删除后的历史。
+- `ModelUsageTracker` 维护进程累计与未落库增量；`model_usage_store` 每 `MODEL_USAGE_FLUSH_INTERVAL_S`（默认 60s）合并写库，应用关闭时最后 flush；写库失败回填内存，不影响请求链路。
+- `GET /api/admin/models/usage?days=7` 返回持久化聚合 + 未落库增量（按 Provider/模型/任务/币种合并）；持久化查询失败时降级为仅返回进程内增量。
+- 设置页（`/settings/models`）新增「用量与成本」卡片：7/30/90 天切换、刷新、调用/失败、Tokens、平均延迟、估算成本与未定价次数；模型编辑支持输入/输出单价与币种，未配置单价的模型在列表标注「未定价」。
+- 验证：后端全量 **1207 passed / 105 skipped**（新增 `tests/test_model_usage_pricing.py` 9 例、`tests/test_embedding_migration.py` 5 例、`tests/test_milvus_embedding_migration.py` 3 例）；前端 `vue-tsc` / ESLint 通过，Vitest **131 passed**。本机无 PostgreSQL，未执行 `alembic upgrade/check`；发布前需在 PG 环境验证。
+
+### 12.7 P3 Embedding/Reranker 迁移（2026-10-26）
+
+- 索引画像：新增 `model_index_profile`（迁移 `c4d5e6f7a8b9`），记录 collection 当前 provider/model/维度、切片数、状态（`ready` / `rebuilding` / `failed` / `rolled_back`）、上一次画像与备份集合。
+- 首次启用 P3（无画像行）时，若 collection 维度与目标一致，会把当前配置视为已同步；旧集合无法推断历史模型名，后续切换才会严格比对画像。
+- 安全闸门：`apply` 校验 Embedding 画像；不一致或重建中返回 409。启动加载 DB 配置时若画像不一致则跳过应用并告警，避免重启后检索维度错配。
+- 重建流程：读取线上集合标量字段 → 用目标 Embedding 重算 dense → 复用 BM25 词表重算 sparse → 写入 `{collection}__rebuild_*` → 原子 rename 为线上，旧集合改名为 `{collection}__backup_*`；失败清理影子集合并保留线上。
+- 回滚：把备份集合换回线上、当前集合归档为 `{collection}__rolledback_*`，并把 DB `embedding` 路由指回旧模型后重新 apply；旧模型已删除时拒绝回滚。
+- 缓存失效：重建/回滚后全量删除 `rag:semcache:*`；意图分类示例向量、Wiki 编译、联网搜索 rerank 兜底的 Embedding 实例按 registry 代次自动刷新。
+- Reranker：`model_manager.get_reranker_model()` 读取可选 `rerank` 路由；`KBReranker` 在 registry 代次变化时重建实例，未配置路由时保持 env 行为。
+- 验证：见 §12.6 末行（后端 1207 passed / 105 skipped；前端 131 passed）。Milvus 重建流程使用 fake client 单测覆盖，未在真实 Milvus 上执行端到端切换。

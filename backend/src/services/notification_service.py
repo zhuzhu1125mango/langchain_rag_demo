@@ -118,13 +118,14 @@ async def broadcast_all(notification: Notification) -> None:
         await broadcast(channel, notification)
 
 
-async def notify_kb_list_changed(kb_id: str = None, action: str = "updated") -> None:
+async def notify_kb_list_changed(kb_id: str = None, action: str = "updated", owner_id: str = None) -> None:
     """
     通知知识库列表已变更
 
     Args:
         kb_id: 变更的知识库ID
         action: 操作类型 (created/updated/deleted)
+        owner_id: 资源所有者；提供时仅向该用户频道额外推送（SEC-8）
     """
     notification = Notification(
         type=NotificationType.KB_LIST_CHANGED,
@@ -135,9 +136,16 @@ async def notify_kb_list_changed(kb_id: str = None, action: str = "updated") -> 
         }
     )
     await broadcast("kb:*", notification)
+    if owner_id:
+        await broadcast(f"user:{owner_id}", notification)
 
 
-async def notify_doc_list_changed(kb_id: str, doc_id: str = None, action: str = "updated") -> None:
+async def notify_doc_list_changed(
+    kb_id: str,
+    doc_id: str = None,
+    action: str = "updated",
+    owner_id: str = None,
+) -> None:
     """
     通知文档列表已变更
 
@@ -145,6 +153,7 @@ async def notify_doc_list_changed(kb_id: str, doc_id: str = None, action: str = 
         kb_id: 所属知识库ID
         doc_id: 变更的文档ID
         action: 操作类型 (created/deleted/updated)
+        owner_id: 资源所有者；提供时仅向该用户频道额外推送（SEC-8）
     """
     # 通知全局文档列表变更
     global_notification = Notification(
@@ -170,6 +179,9 @@ async def notify_doc_list_changed(kb_id: str, doc_id: str = None, action: str = 
         }
     )
     await broadcast(kb_channel, kb_notification)
+
+    if owner_id:
+        await broadcast(f"user:{owner_id}", kb_notification)
 
 
 async def notify_task_progress(task_id: str, progress: int, message: str = "", data: Dict = None) -> None:

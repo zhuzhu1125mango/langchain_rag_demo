@@ -114,8 +114,15 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
-  /** 退出登录：清空用户状态并移除本地 token。 */
-  function logout() {
+  /** 退出登录：先吊销服务端 token（best-effort），再清空本地状态。 */
+  async function logout(): Promise<void> {
+    if (getToken()) {
+      try {
+        await api.post('/auth/logout')
+      } catch {
+        // 网络失败不阻断本地登出；token 到期后自然失效
+      }
+    }
     currentUser.value = null
     clearToken()
   }

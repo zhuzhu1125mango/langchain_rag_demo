@@ -52,8 +52,8 @@ export function useWebSocketNotifications() {
   // scheduleReconnect() 导致 3s 后悄然重连；connect() 重新建立连接时复位此标记。
   let manualClose = false
 
-  // 默认订阅频道
-  const defaultChannels = ['kb:*', 'doc:*']
+  // 默认不订阅全局频道：服务端在 channels 为空时只订阅当前用户频道（SEC-8）
+  const defaultChannels: string[] = []
 
   /** 建立连接：已连接则跳过，连接成功后启动心跳，断开后自动重连。 */
   function connect() {
@@ -71,8 +71,8 @@ export function useWebSocketNotifications() {
 
     const channelParam = subscribedChannels.value.join(',') || defaultChannels.join(',')
     const apiKey = localStorage.getItem('api_key')
-    const queryParams = new URLSearchParams({ channels: channelParam })
-    const wsUrl = buildWsUrl(`/api/ws/notifications?${queryParams.toString()}`)
+    const query = channelParam ? `?${new URLSearchParams({ channels: channelParam }).toString()}` : ''
+    const wsUrl = buildWsUrl(`/api/ws/notifications${query}`)
 
     try {
       ws = new WebSocket(wsUrl)

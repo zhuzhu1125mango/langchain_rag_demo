@@ -83,6 +83,7 @@
 #### 4.2.1 模型选择
 - 默认使用轻量模型 `qwen2.5:3b-instruct`（通过 `FAST_LLM_MODEL_NAME` 配置，也可通过 `INTENT_ROUTER_LLM_MODEL` 单独覆盖）
 - 轻量模型在保证语义理解能力的同时，延迟远低于主推理模型 `qwen3:4b`（原设计为 `qwen2.5:7b` 轻量模型 / `deepseek-r1:7b-qwen-distill-q4_K_M` 主模型，2026-10 已随模型选型切换）
+- 2026-10-26 起：Provider registry 的 `intent_router` 任务路由优先于上述 legacy 配置，见 [model-provider-registry-2026-10.md](model-provider-registry-2026-10.md)
 
 #### 4.2.2 Prompt 设计
 Prompt 要求模型输出结构化 JSON：

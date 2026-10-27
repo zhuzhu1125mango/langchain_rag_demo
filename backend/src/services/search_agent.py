@@ -20,6 +20,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
 from src.config import settings
 from src.services.identity import IDENTITY_PROMPT_RULE
+from src.utils.security import redact_for_log
 from .tools.plugins._datetime_impl import get_current_datetime
 from .tools.plugins.web_search_tool import WebSearchTool
 from .tools.plugins.fetch_webpage_tool import FetchWebpageTool
@@ -447,7 +448,7 @@ class FunctionCallingHandler(BaseSearchAgent):
         # 避免 LLM 笼统回复"无法获取实时信息"
         if not tool_calls:
             if is_realtime_question(question):
-                logger.info(f"Function Calling 未调工具但识别为时效性问题，触发降级: {question}")
+                logger.info(f"Function Calling 未调工具但识别为时效性问题，触发降级: {redact_for_log(question)}")
                 return SearchAgentResult(answer="", context="", sources=[])
             return SearchAgentResult(answer=content, context="", sources=[])
 
@@ -466,7 +467,7 @@ class FunctionCallingHandler(BaseSearchAgent):
         # 推理模型容易把工具调用 JSON 直接输出为回答。
         # 若检测到这种污染，视为回答无效，返回空 answer 触发 RAGChain 降级到 Phase 2 搜索。
         if looks_like_tool_call(answer):
-            logger.warning(f"Function Calling 最终回答被工具 JSON 污染，触发降级: {answer[:200]}")
+            logger.warning(f"Function Calling 最终回答被工具 JSON 污染，触发降级: {redact_for_log(answer)}")
             return SearchAgentResult(answer="", context=context, sources=sources, tool_calls=tool_calls)
 
         return SearchAgentResult(
@@ -486,7 +487,7 @@ class FunctionCallingHandler(BaseSearchAgent):
             # 没有工具调用，直接流式返回原内容（统一按 chunk 输出）
             # 但若为强时效性问题，yield 空内容触发 RAGChain 降级到 Phase 2 直接搜索
             if is_realtime_question(question):
-                logger.info(f"Function Calling 流式未调工具但识别为时效性问题，触发降级: {question}")
+                logger.info(f"Function Calling 流式未调工具但识别为时效性问题，触发降级: {redact_for_log(question)}")
                 yield "", []
                 return
             yield content, []

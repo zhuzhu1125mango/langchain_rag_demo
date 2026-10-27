@@ -68,6 +68,9 @@ class EmbeddingIntentClassifier:
             return self.embeddings
         current_model = model_manager.embedding_model_key
         if self.embeddings is None or self._model_name != current_model:
+            if self._model_name is not None and self._model_name != current_model:
+                # P3：Embedding 模型切换后，示例向量必须重算
+                self._example_embeddings_cache.clear()
             try:
                 logger.info(f"初始化意图分类 Embedding 模型: {current_model}")
                 self.embeddings = model_manager.get_embeddings()

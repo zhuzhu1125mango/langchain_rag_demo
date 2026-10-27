@@ -168,6 +168,7 @@ ollama pull qwen2.5:3b-instruct
 ollama pull bge-m3:latest
 # 注：重排序模型 BAAI/bge-reranker-base 不走 Ollama——由 sentence_transformers
 # 从 HF_HOME 指向的离线缓存加载（离线部署请先用可联网环境预热该缓存）
+# 注：以上为 legacy Ollama 默认分工；如需多 Provider/按任务切换，见 §6.3.2。
 
 # 启动服务（推荐方式）
 uv run python start.py
@@ -483,28 +484,48 @@ services:
 | `TRUSTED_PROXY_CIDRS` | Docker 内网网段 | 仅受信代理的 XFF/X-Real-IP 生效；compose 已注入 |
 | `AGENT_WEB_FETCH_ENABLED` | **false** | 网页深度抓取默认关闭，避免注入后外泄 |
 | `GUARDRAIL_TOOL_DOMAIN_ALLOWLIST` / `DENYLIST` | 按需 | 工具出站域名策略 |
+| `GUARDRAIL_TOOL_DNS_CHECK_ENABLED` | true | SEC-19：URL 参数 DNS 解析 fail-closed 校验（关闭后退化为静态规则） |
+| `EVAL_RATE_LIMIT_PER_MINUTE` / `EVAL_DAILY_QUOTA` / `EVAL_BATCH_MAX_SAMPLES` | 按容量校准 | SEC-17：评估 API 用户级 RPM / 日样本单元 / 单批样本上限 |
+| `BATCH_DELETE_MAX_IDS` | 200 | SEC-18：会话/文档批量删除单次 ID 上限 |
+| `LOG_RETENTION_DAYS` / `TRACE_RETENTION_DAYS` / `AUDIT_RETENTION_DAYS` | 30 / 30 / 365 | SEC-14：应用日志文件、trace、审计日志保留期 |
 | `ADMIN_KEY` | 强随机值 | 学习写入/系统配置/指标重置等管理接口必需 |
 
-### 6.3.2 模型 Provider 注册（P1）
+### 6.3.2 模型 Provider 注册与切换（P1/P2）
 
-P1 支持通过 `MODEL_REGISTRY_FILE` 配置 Ollama / OpenAI-Compatible Provider 与任务路由：
+模型选择统一由 Provider / Model / Route registry 决定，**配置优先级**：
 
-- 文件不存在：自动按 `OLLAMA_*` 生成 legacy registry，现有部署行为不变。
-- 示例：`backend/configs/model_registry.example.json`
-- 运行时文件建议：`backend/data/model_registry.json`（不要提交到仓库）
-- 外部 Provider 的 Key 使用 `api_key_env` 指向环境变量（如 `OPENAI_API_KEY`），不要写进 JSON。
-- Embedding 维度必须与当前 `EMBEDDING_DIMENSION` 一致；切换 embedding 必须重建索引。
-- 修改文件后，下一次模型获取会按 mtime 自动热加载；坏文件会保留上一版快照。
-- `GET /api/config` 与 `/api/config/model` 仅管理员可读，并返回实际 registry 路由。
+| 优先级 | 来源 | 生效方式 |
+|---|---|---|
+| 1（最高） | PostgreSQL（`model_providers` / `model_deployments` / `model_routes`） | 设置 → 模型服务（管理员）保存后点击「校验并应用」；启动时自动加载 |
+| 2 | `MODEL_REGISTRY_FILE` 或默认 `backend/data/model_registry.json` | 文件存在时加载；修改后按 mtime 自动热加载，坏文件保留上一版快照 |
+| 3（兜底） | `.env` 的 `OLLAMA_*` | 自动生成 legacy registry，现有部署行为不变；启动时仍校验 Ollama 模型存在性 |
 
-P2 管理方式（推荐）：
+相关配置：
 
-- 设置 → 模型服务（管理员）维护 Provider/模型/任务路由，点击“校验并应用”热更新。
-- Provider Key 保存在 DB（Fernet 加密），只写不读；建议配置独立的
-  `MODEL_SECRET_ENC_KEY` 并备份。未配置时从 `SECRET_KEY` 派生，换密钥后已存 Key 会失效。
-- 生产环境调用 `/api/admin/models/*` 需要 `X-Admin-Key`。
-- 启动时 DB 有 Provider 配置则优先于 `MODEL_REGISTRY_FILE` / `OLLAMA_*`。
-- 新增表由 Alembic 迁移 `f2b3c4d5e6f7` 创建；生产发布前执行 `alembic upgrade head`。
+| 配置 | 必填 | 说明 |
+|---|---|---|
+| `MODEL_REGISTRY_FILE` | 否 | JSON registry 路径；相对路径以 `backend/` 为根。示例见 `backend/configs/model_registry.example.json` |
+| `MODEL_SECRET_ENC_KEY` | 生产建议 | Provider API Key 的 Fernet 加密密钥；未配置时从 `SECRET_KEY` 派生并告警。**更换后已存 Key 无法解密，需重新录入**，请单独备份 |
+| `MODEL_USAGE_FLUSH_INTERVAL_S` | 否 | 模型用量增量落库间隔（秒，默认 60；0 关闭周期落库，查询仍叠加进程内增量） |
+| `OPENAI_API_KEY` 等 | 按 Provider | 外部 Provider 推荐用 `api_key_env` 引用环境变量；不要把明文 Key 写进 JSON 或提交到仓库 |
+
+操作与边界：
+
+- **管理员入口**：设置 → 模型服务（`/settings/models`），维护 Provider（Ollama / OpenAI-Compatible）、模型能力、上下文/输出/Embedding 维度、任务路由（primary + fallbacks + 外部降级开关）。生产环境页面需输入 `ADMIN_KEY`（`X-Admin-Key`，仅存 sessionStorage）。
+- **生效语义**：Provider/模型/路由保存只写 DB，点击「校验并应用」才替换在线 registry；新请求立即使用新配置，在途请求继续使用旧实例。
+- **能力校验**：`answer` / `fast` / `embedding` 为必需路由；`agent_decision` 主模型必须声明 `tools`（否则 apply 400）；`route.reasoning=native` 而主模型未声明 `reasoning` 仅告警。
+- **数据出域**：外部 Provider 标记 `external`；本地主模型失败降级到外部需显式勾选 `allow_external_fallback`（默认关闭）。
+- **Embedding 不可随聊（P3）**：Embedding 模型/维度以 registry 为权威，`EMBEDDING_DIMENSION` 仅作 legacy 兜底。保存新的 Embedding 路由后直接 apply 会返回 409；必须在设置页「向量索引 / Embedding」点击「重建索引」，完成后自动应用。重建会重新向量化全部切片并原子切换，旧索引保留为备份；可点击「回滚」恢复。Reranker 可热换（可选 `rerank` 路由，Ollama），但需重新跑离线检索评估。
+- **API Key 安全**：DB 中 Fernet 加密，GET 仅返回 `has_api_key` / `api_key_hint`（末四位）；写操作写审计日志 `model.*`。
+- **迁移**：`model_providers/model_deployments/model_routes` 由 `f2b3c4d5e6f7` 创建；模型价格字段与 `model_usage_daily` 由 `b3c4d5e6f7a8` 创建；`model_index_profile` 由 `c4d5e6f7a8b9` 创建。生产发布前执行 `alembic upgrade head`（启动脚本已包含）。
+- **回滚**：删除 DB 中 Provider/模型/路由（或清空三张表）后重启/回退到文件或 legacy；也可用 `MODEL_REGISTRY_FILE` 固定已知可用配置。
+- **故障隔离（P2.1）**：同一 Provider 连续失败 3 次后打开 60s 熔断，期间该 Provider 的任务直接跳到 fallback；冷却后半开只放行一次探测。应用新 registry 会重置熔断状态。
+- **用量观测（P2.1）**：`GET /api/admin/models/usage?days=7` 返回按 `Provider/模型/任务` 的调用数、失败数、Token、平均延迟、估算成本与熔断状态；Prometheus 暴露 `rag_model_provider_calls_total`、`rag_model_tokens_total`、`rag_model_circuit_state`。增量每 `MODEL_USAGE_FLUSH_INTERVAL_S` 落库到 `model_usage_daily`，重启不丢已落库数据；流式 Token 依赖 Provider 在末尾分片返回用量，缺失时记为 0。模型未配置价格时成本记 0 并计入 `unpriced_calls`。
+- **索引迁移（P3）**：`GET /api/admin/models/index/status` 查看当前索引画像/目标配置/是否需要重建；`POST /api/admin/models/index/rebuild?force=false` 后台重建，`POST /api/admin/models/index/rollback` 回滚到上一次重建前。重建读取现有切片文本重新向量化（不依赖原始文件），失败保留线上索引；备份集合 `{collection}__backup_*` 需在确认稳定后人工清理。
+- **健康检查（SEC-12）**：容器 healthcheck 使用 `/health/ready`（DB/Redis/Milvus/MinIO 任一不可用返回 503）；`/health/live` 仅进程探活；`/health/detail`（管理员）返回详细错误。
+- **登出与账号（SEC-10/14）**：`POST /auth/logout` 将 token jti 写入 Redis 吊销名单；`GET /auth/account/export` 导出用户数据，`DELETE /auth/account` 校验密码后注销并级联清理。密码要求 ≥10 位且禁用常见弱口令。
+- **备份与供应链（SEC-13）**：见 [backup-restore.md](backup-restore.md)；CI 已含 Trivy HIGH/CRITICAL 与 SPDX SBOM，Dependabot 每周更新；基础镜像 digest 在发布窗口由运维 pin。
+- **诊断**：`GET /api/config` 与 `/api/config/model`（管理员）返回 `registry_source` 与实际 `route_models`。
 
 ### 6.4 核心配置参数对比
 
@@ -534,6 +555,9 @@ P2 管理方式（推荐）：
 | `TITLE_MAX_LENGTH` | `30` | `30` | 否 |
 | `TITLE_FALLBACK_LENGTH` | `30` | `30` | 否 |
 | `TITLE_GENERATION_MODEL` | 空 | 空 | 否 |
+| `MODEL_REGISTRY_FILE` | 空（legacy `OLLAMA_*`） | 空或指向固定 JSON | 否 |
+| `MODEL_SECRET_ENC_KEY` | 不设置（从 `SECRET_KEY` 派生） | 建议单独设置并备份 | ✅ |
+| `MODEL_USAGE_FLUSH_INTERVAL_S` | `60` | `60`（0 关闭周期落库） | 否 |
 
 > **说明**：
 > - `SEARCH_PROVIDER` 默认 `tavily`，需在 `.env` 中配置有效的 `SEARCH_API_KEY`；若切换为 `searxng` / `duckduckgo` 则无需 Key。
@@ -692,7 +716,7 @@ TITLE_GENERATION_MODEL=
 6. **定期备份**: 定期备份数据库和 MinIO 数据
 7. **最小权限原则**: 为数据库用户分配最小必要权限
 
-#### 6.8.1 TLS 终结建议（W6 #72）
+#### 6.8.1 TLS 终结建议（W6 #72 / SEC-16）
 
 生产前端 nginx（容器内监听 8080，非 root；宿主映射见 compose）为纯 HTTP，且未启用 HTTP/2 与证书管理。
 推荐不在应用容器内配置 TLS，而是由**前置反向代理或 CDN 承担 TLS 终结**：
@@ -700,8 +724,45 @@ TITLE_GENERATION_MODEL=
 经内网 HTTP 转发到 frontend 容器的 8080 端口（宿主映射见 compose，本机因宿主
 80 被外部 nginx 服务占用改绑 8080）。应用侧安全头
 （X-Frame-Options/X-Content-Type-Options/Referrer-Policy/CSP，W6 #59）
-已由 nginx.conf 下发，前置层无需重复添加；若前置层也注入 HSTS 需确认
-与内网明文跳转策略一致。
+已由 nginx.conf 下发，前置层无需重复添加。
+
+SEC-16 起：CSP 的 `connect-src` 已收敛为 `'self'`（CSP3 已覆盖同源 ws/wss，
+同源 SSE/WebSocket 不受影响）；HSTS 由前端 nginx 按请求头
+`X-Forwarded-Proto` 条件下发——仅当请求经 HTTPS 抵达时返回
+`Strict-Transport-Security: max-age=31536000; includeSubDomains`，明文直连不下发。
+因此前置反代**必须**设置转发头，否则 HSTS 不会生效：
+
+```nginx
+# 前置反向代理（TLS 终结）关键片段
+server {
+    listen 443 ssl;
+    server_name rag.example.com;
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;   # 前端容器宿主映射端口
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;   # ← HSTS 生效前提
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;            # SSE 长连接
+    }
+}
+
+server {
+    listen 80;
+    server_name rag.example.com;
+    return 301 https://$host$request_uri;   # HTTP→HTTPS 跳转
+}
+```
+
+若前置层自身也注入 HSTS，需与上述策略保持一致（重复头不会造成危害，
+但应避免内网明文场景误下发）；内网/本地调试可继续使用明文 HTTP，
+前端 nginx 不会下发 HSTS。
 
 **MinIO 镜像来源说明（W6 #70）**：compose 全栈使用社区 fork
 `pgsty/minio:RELEASE.2026-06-18T00-00-00Z`（固定 tag）——MinIO 官方自

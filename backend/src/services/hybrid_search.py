@@ -76,14 +76,30 @@ class KBReranker:
     _ollama_reranker = None
     _model_loaded = False
     _model_failed = False
+    _resolved_generation: Optional[str] = None
 
     def __init__(self, model_name: Optional[str] = None, provider: Optional[str] = None):
         self.model_name = model_name or settings.processing.KB_RERANK_MODEL
         self.provider = (provider or settings.processing.KB_RERANK_PROVIDER).lower()
 
     @classmethod
+    def _registry_reranker(cls):
+        """P3：优先读取 registry 的可选 rerank 路由（当前仅支持 Ollama 托管）。"""
+        try:
+            from src.services.model_manager import model_manager
+
+            resolved = model_manager.get_reranker_model()
+            if resolved is not None and resolved.provider.type == "ollama":
+                return resolved.model.model
+        except Exception:
+            return None
+        return None
+
+    @classmethod
     def _enabled(cls) -> bool:
         """rerank 是否可用（C1：开关关闭或未配置模型时不加载模型）。"""
+        if cls._registry_reranker():
+            return True
         return bool(settings.processing.KB_RERANK_ENABLED and settings.processing.KB_RERANK_MODEL)
 
     @classmethod
@@ -94,9 +110,26 @@ class KBReranker:
 
     @classmethod
     async def get_instance(cls) -> "KBReranker":
-        """获取重排序器单例，避免重复加载模型。"""
+        """获取重排序器单例，避免重复加载模型；registry 变更时重建。"""
+        try:
+            from src.services.model_manager import model_manager
+
+            generation = model_manager.registry_generation
+        except Exception:
+            generation = ""
+        if cls._resolved_generation is not None and generation != cls._resolved_generation:
+            cls._instance = None
+            cls._model = None
+            cls._ollama_reranker = None
+            cls._model_loaded = False
+            cls._model_failed = False
+        cls._resolved_generation = generation
         if cls._instance is None:
-            cls._instance = cls()
+            registry_model = cls._registry_reranker()
+            if registry_model:
+                cls._instance = cls(registry_model, "ollama")
+            else:
+                cls._instance = cls()
         if not cls._enabled():
             # rerank 关闭：不加载模型，rerank() 走 RRF 截断路径
             return cls._instance

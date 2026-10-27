@@ -9,55 +9,240 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, AsyncIterator, List, Optional
 
 from src.config import settings
+from src.services.model_health import ProviderCircuitError, provider_health
 from src.services.model_registry import (
     ModelRegistryError,
     ResolvedModel,
     ResolvedRoute,
     _normalize_ollama_base_url,
 )
+from src.services.model_usage import model_usage
 
 logger = logging.getLogger("rag_system")
 
 
 class ChatModelGroup:
-    """带跨 Provider fallback 的聊天模型组。
+    """带跨 Provider fallback、熔断与用量统计的聊天模型组。
 
-    - 单模型时直接保留原生模型对象，零额外开销
-    - 多模型时用 LangChain ``with_fallbacks``
+    - 主模型失败时按顺序尝试 fallback；熔断中的 Provider 直接跳过
+    - 每次调用记录 Provider/模型/任务的延迟、Token 与失败
     - 显式实现 ``bind_tools``，保证 Agent 决策链路仍可用
+    - ``targets`` 为空（如单测直接构造）时不启用健康检查与用量统计
     """
 
-    def __init__(self, models: List[Any], labels: Optional[List[str]] = None):
+    def __init__(
+        self,
+        models: List[Any],
+        labels: Optional[List[str]] = None,
+        targets: Optional[List[ResolvedModel]] = None,
+        task: str = "",
+    ):
         if not models:
             raise ModelRegistryError("ChatModelGroup 至少需要一个模型")
         self.models = models
         self.labels = labels or [f"model-{i}" for i in range(len(models))]
-        self._runnable = models[0].with_fallbacks(models[1:]) if len(models) > 1 else models[0]
+        self.targets = targets or []
+        self.task = task or "chat"
+
+    def _meta(self, index: int) -> Optional[tuple[str, str, str]]:
+        if index >= len(self.targets):
+            return None
+        target = self.targets[index]
+        return target.provider.id, target.model.id, target.model.model
+
+    def _enter(self, index: int) -> bool:
+        meta = self._meta(index)
+        if meta is None:
+            return True
+        provider_id = meta[0]
+        if provider_health.is_available(provider_id):
+            return True
+        logger.warning("Provider 熔断中，跳过: task=%s, provider=%s", self.task, provider_id)
+        return False
+
+    def _success(self, index: int, started: float, usage: tuple[int, int] = (0, 0)) -> None:
+        meta = self._meta(index)
+        if meta is None:
+            return
+        provider_id, model_id, model_name = meta
+        model_config = getattr(self.targets[index], "model", None)
+        provider_health.record_success(provider_id)
+        model_usage.record(
+            provider_id=provider_id,
+            model_id=model_id,
+            model_name=model_name,
+            task=self.task,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            success=True,
+            input_tokens=usage[0],
+            output_tokens=usage[1],
+            input_cost_per_1k=getattr(model_config, "input_cost_per_1k", None),
+            output_cost_per_1k=getattr(model_config, "output_cost_per_1k", None),
+            currency=getattr(model_config, "price_currency", "USD") or "USD",
+        )
+
+    def _failure(self, index: int, started: float, exc: BaseException) -> None:
+        meta = self._meta(index)
+        if meta is None:
+            return
+        provider_id, model_id, model_name = meta
+        provider_health.record_failure(provider_id, exc)
+        model_usage.record(
+            provider_id=provider_id,
+            model_id=model_id,
+            model_name=model_name,
+            task=self.task,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            success=False,
+            error=f"{type(exc).__name__}: {exc}",
+        )
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> "ChatModelGroup":
         return ChatModelGroup(
             [model.bind_tools(tools, **kwargs) for model in self.models],
             self.labels,
+            self.targets,
+            self.task,
         )
 
     def bind(self, **kwargs: Any) -> "ChatModelGroup":
-        return ChatModelGroup([model.bind(**kwargs) for model in self.models], self.labels)
+        return ChatModelGroup(
+            [model.bind(**kwargs) for model in self.models],
+            self.labels,
+            self.targets,
+            self.task,
+        )
 
     async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
-        return await self._runnable.ainvoke(*args, **kwargs)
+        last_exc: Optional[BaseException] = None
+        for index, model in enumerate(self.models):
+            if not self._enter(index):
+                if last_exc is None:
+                    last_exc = ProviderCircuitError(f"provider 熔断: {self.labels[index]}")
+                continue
+            started = time.perf_counter()
+            try:
+                result = await model.ainvoke(*args, **kwargs)
+            except Exception as exc:
+                self._failure(index, started, exc)
+                last_exc = exc
+                logger.warning(
+                    "模型调用失败，尝试 fallback: task=%s, model=%s, error=%s",
+                    self.task, self.labels[index], exc,
+                )
+                continue
+            self._success(index, started, _token_usage(result))
+            return result
+        if last_exc is not None:
+            raise last_exc
+        raise ModelRegistryError(f"task {self.task} 无可用模型")
 
     def invoke(self, *args: Any, **kwargs: Any) -> Any:
-        return self._runnable.invoke(*args, **kwargs)
+        last_exc: Optional[BaseException] = None
+        for index, model in enumerate(self.models):
+            if not self._enter(index):
+                if last_exc is None:
+                    last_exc = ProviderCircuitError(f"provider 熔断: {self.labels[index]}")
+                continue
+            started = time.perf_counter()
+            try:
+                result = model.invoke(*args, **kwargs)
+            except Exception as exc:
+                self._failure(index, started, exc)
+                last_exc = exc
+                logger.warning(
+                    "模型调用失败，尝试 fallback: task=%s, model=%s, error=%s",
+                    self.task, self.labels[index], exc,
+                )
+                continue
+            self._success(index, started, _token_usage(result))
+            return result
+        if last_exc is not None:
+            raise last_exc
+        raise ModelRegistryError(f"task {self.task} 无可用模型")
 
     async def astream(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
-        async for chunk in self._runnable.astream(*args, **kwargs):
-            yield chunk
+        last_exc: Optional[BaseException] = None
+        for index, model in enumerate(self.models):
+            if not self._enter(index):
+                if last_exc is None:
+                    last_exc = ProviderCircuitError(f"provider 熔断: {self.labels[index]}")
+                continue
+            started = time.perf_counter()
+            yielded = False
+            input_tokens, output_tokens = 0, 0
+            try:
+                async for chunk in model.astream(*args, **kwargs):
+                    yielded = True
+                    chunk_in, chunk_out = _token_usage(chunk)
+                    input_tokens = max(input_tokens, chunk_in)
+                    output_tokens = max(output_tokens, chunk_out)
+                    yield chunk
+            except Exception as exc:
+                self._failure(index, started, exc)
+                if yielded:
+                    # 已经向客户端输出内容，不能再切换模型
+                    raise
+                last_exc = exc
+                logger.warning(
+                    "模型流式调用失败，尝试 fallback: task=%s, model=%s, error=%s",
+                    self.task, self.labels[index], exc,
+                )
+                continue
+            self._success(index, started, (input_tokens, output_tokens))
+            return
+        if last_exc is not None:
+            raise last_exc
+        raise ModelRegistryError(f"task {self.task} 无可用模型")
 
     def stream(self, *args: Any, **kwargs: Any) -> Any:
-        return self._runnable.stream(*args, **kwargs)
+        last_exc: Optional[BaseException] = None
+        for index, model in enumerate(self.models):
+            if not self._enter(index):
+                if last_exc is None:
+                    last_exc = ProviderCircuitError(f"provider 熔断: {self.labels[index]}")
+                continue
+            started = time.perf_counter()
+            yielded = False
+            input_tokens, output_tokens = 0, 0
+            try:
+                for chunk in model.stream(*args, **kwargs):
+                    yielded = True
+                    chunk_in, chunk_out = _token_usage(chunk)
+                    input_tokens = max(input_tokens, chunk_in)
+                    output_tokens = max(output_tokens, chunk_out)
+                    yield chunk
+            except Exception as exc:
+                self._failure(index, started, exc)
+                if yielded:
+                    raise
+                last_exc = exc
+                logger.warning(
+                    "模型流式调用失败，尝试 fallback: task=%s, model=%s, error=%s",
+                    self.task, self.labels[index], exc,
+                )
+                continue
+            self._success(index, started, (input_tokens, output_tokens))
+            return
+        if last_exc is not None:
+            raise last_exc
+        raise ModelRegistryError(f"task {self.task} 无可用模型")
+
+
+def _token_usage(message: Any) -> tuple[int, int]:
+    """尽量从消息/流式分片中提取 input/output token 数。"""
+    usage = getattr(message, "usage_metadata", None) or {}
+    response_metadata = getattr(message, "response_metadata", None) or {}
+    input_tokens = usage.get("input_tokens") or response_metadata.get("prompt_eval_count") or 0
+    output_tokens = usage.get("output_tokens") or response_metadata.get("eval_count") or 0
+    try:
+        return int(input_tokens), int(output_tokens)
+    except (TypeError, ValueError):
+        return 0, 0
 
 
 def _ollama_base_url(provider: Any) -> Optional[str]:
@@ -185,7 +370,7 @@ def build_route_models(
         for item in candidates
     ]
     labels = [f"{item.provider.id}/{item.model.id}" for item in candidates]
-    return ChatModelGroup(models, labels)
+    return ChatModelGroup(models, labels, candidates, route.task)
 
 
 def build_embeddings(resolved: ResolvedModel) -> Any:

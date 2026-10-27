@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 from src.database import get_db
-from src.auth import get_current_user, CurrentUser
+from src.auth import get_current_user, require_admin, CurrentUser
 from src.models import Tag
 
 router = APIRouter(prefix="/tags", tags=["tags"])
@@ -38,7 +38,7 @@ class TagCreate(BaseModel):
 async def create_tag(
     data: TagCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     """
     创建标签
@@ -97,7 +97,7 @@ async def update_tag(
     tag_id: str,
     data: TagCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     """
     更新标签
@@ -130,7 +130,7 @@ async def update_tag(
 async def delete_tag(
     tag_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     """
     删除标签

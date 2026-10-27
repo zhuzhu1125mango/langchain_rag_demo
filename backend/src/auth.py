@@ -9,6 +9,7 @@ import datetime
 import hashlib
 import hmac
 import logging
+import time
 from typing import Optional
 import uuid
 
@@ -33,6 +34,78 @@ JWT_ALGORITHM = "HS256"
 # 用户级 API Key last_used_at 写库节流：距上次记录超过该秒数才 UPDATE，
 # 防止每个认证请求都写库（泄露感知线索只需分钟级精度）
 API_KEY_LAST_USED_THROTTLE_SECONDS = 60.0
+
+# SEC-10：JWT 吊销名单。jti 同时写入进程内集合（保证本 worker 立即生效）与
+# Redis（多 worker 一致）；Redis 不可用时降级为进程内名单，不阻断认证主链路。
+_JWT_REVOKED_PREFIX = "rag:jwt:revoked:"
+_revoked_jtis: dict[str, float] = {}
+_revocation_redis = None
+_revocation_retry_at = 0.0
+
+
+def _get_revocation_redis():
+    """懒加载同步 Redis 客户端（短超时，失败返回 None）。"""
+    global _revocation_redis
+    if _revocation_redis is not None:
+        return _revocation_redis
+    try:
+        import redis as sync_redis
+
+        password = getattr(settings.redis, "REDIS_PASSWORD", None)
+        _revocation_redis = sync_redis.Redis(
+            host=settings.redis.REDIS_HOST,
+            port=settings.redis.REDIS_PORT,
+            db=settings.redis.REDIS_DB,
+            password=password or None,
+            socket_connect_timeout=0.3,
+            socket_timeout=0.3,
+            decode_responses=True,
+        )
+    except Exception as exc:
+        logger.warning("JWT 吊销 Redis 客户端初始化失败，降级进程内名单: %s", exc)
+        _revocation_redis = None
+    return _revocation_redis
+
+
+def _revoke_jti(jti: Optional[str], exp: Optional[int]) -> None:
+    """把 jti 加入吊销名单（本地 + Redis，TTL 到 token 过期）。"""
+    if not jti:
+        return
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    expires_at = int(exp or 0) or (now + 3600)
+    if expires_at <= now:
+        return
+    _revoked_jtis[jti] = expires_at
+    if len(_revoked_jtis) > 5000:
+        _revoked_jtis.clear()
+    client = _get_revocation_redis()
+    if client is None:
+        return
+    try:
+        client.set(f"{_JWT_REVOKED_PREFIX}{jti}", "1", ex=max(1, expires_at - now))
+    except Exception as exc:
+        logger.warning("JWT 吊销写入 Redis 失败（仅本进程生效）: %s", exc)
+
+
+def _is_jti_revoked(jti: Optional[str]) -> bool:
+    global _revocation_retry_at
+    if not jti:
+        return False
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+    expires_at = _revoked_jtis.get(jti)
+    if expires_at and expires_at > now:
+        return True
+    if time.monotonic() < _revocation_retry_at:
+        return False
+    client = _get_revocation_redis()
+    if client is None:
+        return False
+    try:
+        return bool(client.exists(f"{_JWT_REVOKED_PREFIX}{jti}"))
+    except Exception:
+        # Redis 故障时 30s 内不再重试，避免每个请求都阻塞到超时
+        _revocation_retry_at = time.monotonic() + 30
+        return False
 
 # 认证方式声明
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
@@ -160,6 +233,7 @@ def create_access_token(user_id: str, orig_iat: Optional[datetime.datetime] = No
         "iat": int(now.timestamp()),
         "exp": int((now + datetime.timedelta(minutes=expire_minutes)).timestamp()),
         "orig_iat": int((orig_iat or now).timestamp()),
+        "jti": uuid.uuid4().hex,
     }
     return pyjwt.encode(payload, secret, algorithm=JWT_ALGORITHM)
 
@@ -202,6 +276,8 @@ def refresh_access_token(token: str) -> Optional[str]:
     sub = payload.get("sub")
     if not sub:
         return None
+    if _is_jti_revoked(payload.get("jti")):
+        return None
     max_age_days = getattr(settings, "ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS", None) or getattr(
         settings.security, "ACCESS_TOKEN_REFRESH_MAX_AGE_DAYS", 7
     )
@@ -217,7 +293,24 @@ def refresh_access_token(token: str) -> Optional[str]:
     now = datetime.datetime.now(datetime.timezone.utc)
     if now - orig_dt > datetime.timedelta(days=max_age_days):
         return None
+    # SEC-10：refresh 轮换——旧 token 立即失效，避免同一 token 无限续期
+    _revoke_jti(payload.get("jti"), payload.get("exp"))
     return create_access_token(str(sub), orig_iat=orig_dt)
+
+
+def logout_token(token: str) -> bool:
+    """吊销 access token（登出/改密后调用）；无效或已过期 token 静默成功。"""
+    secret = _get_secret_key()
+    if not secret:
+        return False
+    try:
+        payload = pyjwt.decode(
+            token, secret, algorithms=[JWT_ALGORITHM], options={"verify_exp": False}
+        )
+    except pyjwt.PyJWTError:
+        return False
+    _revoke_jti(payload.get("jti"), payload.get("exp"))
+    return True
 
 
 def _extract_user_from_jwt(credentials: HTTPAuthorizationCredentials) -> Optional[CurrentUser]:
@@ -238,6 +331,8 @@ def _extract_user_from_jwt(credentials: HTTPAuthorizationCredentials) -> Optiona
     sub = payload.get("sub")
     if not sub:
         return None
+    if _is_jti_revoked(payload.get("jti")):
+        return None
     return CurrentUser(user_id=str(sub), is_authenticated=True)
 
 
@@ -252,6 +347,8 @@ def verify_jwt_token(token: str) -> Optional[CurrentUser]:
         return None
     sub = payload.get("sub")
     if not sub:
+        return None
+    if _is_jti_revoked(payload.get("jti")):
         return None
     return CurrentUser(user_id=str(sub), is_authenticated=True)
 

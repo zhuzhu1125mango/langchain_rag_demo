@@ -5,7 +5,7 @@
 # 特点：安装全部依赖（含开发依赖），uvicorn 启动时启用 --reload 热重载，
 #       源码通过 docker-compose 卷挂载，无需在镜像中固化代码变更。
 # =============================================================================
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:dddfd7e07f9d15aeeca61529320492139d21cac7f0070c00609243e51e4e0016
 
 WORKDIR /app
 
@@ -19,10 +19,10 @@ RUN sed -i 's|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.o
     && rm -rf /var/lib/apt/lists/*
 
 # 安装 uv（直接从官方镜像复制二进制，无需容器内 pip 下载）
-# 版本钉死 0.6.3（与 Dockerfile.prod 一致）：避免 :latest 漂移导致构建不可复现、
+# 版本钉死 0.6.3 并按 digest 固定（与 Dockerfile.prod 一致）：避免 :latest 漂移导致构建不可复现、
 # 以及新版 uv 的 lock 格式与 uv.lock 不兼容
 # pypi 源已在 pyproject.toml/uv.lock 中锁定为清华镜像，无需环境变量
-COPY --from=ghcr.io/astral-sh/uv:0.6.3 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.6.3@sha256:8257f3d17fd04794feaf89d83b4ccca3b2eaa5501de9399fa53929843c0a5b55 /uv /usr/local/bin/uv
 
 # 复制依赖清单（利用 Docker 缓存层，依赖不变时跳过后续安装）
 COPY pyproject.toml uv.lock ./

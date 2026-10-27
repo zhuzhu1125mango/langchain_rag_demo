@@ -2,7 +2,7 @@
 
 > 定位：监控栈的使用入口——看什么面板、指标含义、告警规则与处置思路。
 > 配置文件：`configs/prometheus/`、`configs/alertmanager/`、`configs/grafana/`
-> 更新时间：2026-09-24
+> 更新时间：2026-10-26
 
 ## 1. 访问入口
 
@@ -51,6 +51,23 @@
 | `wiki_compilations_total` 等 wiki_* 指标族 | Counter/Histogram | Wiki 编译次数/产出页数/耗时/事实保留率/锁获取/矛盾发现 |
 
 > 完整定义以 `backend/src/middleware/prometheus.py` 为准（指标较多，此处列核心族）。
+
+### 3.1 模型路由与 Provider 观测（P1/P2.1）
+
+- 按 `model_name` 维度的旧指标保留（`rag_llm_calls_total` / `..._errors_total` / `..._duration_seconds`）；P2.1 新增按 Provider 与任务归因：
+  - `rag_model_provider_calls_total{provider_id, model_name, task, result}`：调用数/失败数（result=success/error）
+  - `rag_model_tokens_total{provider_id, model_name, direction}`：input/output Token（流式取决于 Provider 是否在末尾返回用量）
+  - `rag_model_circuit_state{provider_id}`：1=open、0.5=half_open、0=closed；连续失败 3 次打开 60s 熔断
+- 切换模型后指标标签会新增/更替对应 `provider_id` / `model_name` 序列；Grafana「RAG Overview」按模型聚合，不会因切换出现断点。
+- 熔断期间该 Provider 的调用会被直接跳过并计入应用日志 warning（`Provider 熔断中，跳过`）；用量与熔断状态可用 `GET /api/admin/models/usage?days=7` 查看。
+- 用量增量每 `MODEL_USAGE_FLUSH_INTERVAL_S`（默认 60s）写入 `model_usage_daily`，应用关闭时最后 flush；查询接口返回最近 N 天持久化聚合 + 当前进程未落库增量，重启只可能丢失最后一个 flush 周期的增量。
+- 成本估算按模型配置的每 1K tokens 单价计算；未配置价格的调用 `estimated_cost=0` 且计入 `unpriced_calls`，需结合该字段判断成本数据是否完整。
+- 外部 Provider 的失败与超时同样计入 `rag_llm_call_errors_total` 与熔断计数；排查时结合 `/api/config` 的 `registry_source` 与 `route_models` 确认真实路由。
+- **当前仍未实现**：按租户维度的配额/成本上限与 429 告警（属于 MODEL-P4）；设置页已提供用量/成本展示与模型单价配置。
+- **索引迁移（P3）**：`GET /api/admin/models/index/status` 查看当前索引画像与目标 Embedding 配置；重建期间 `status=rebuilding`，失败会记录 `last_error` 并保留线上索引。重建/回滚会全量失效语义缓存（`rag:semcache:*`），命中率短时下降属预期。
+- **健康探针（SEC-12）**：`/health/live` 仅判断进程存活；`/health/ready` 深探 DB/Redis/Milvus/MinIO，任一失败返回 503；`/health/detail`（管理员）含依赖错误与 Ollama。
+- **认证与隐私（SEC-10/14）**：登出/refresh 轮换通过 `rag:jwt:revoked:*` 吊销 jti；日志中用户问题已替换为 `<redacted:hash:len>`，排查时用 trace 表而非日志还原原文。
+- 切换 Embedding 模型后，历史向量仍由旧模型生成；在重建索引前不要以检索指标下降判断新模型质量。
 
 ## 4. 告警规则（configs/prometheus/alerts.yml）
 

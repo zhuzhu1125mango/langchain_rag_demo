@@ -160,12 +160,12 @@ class TestAuthEndpoints:
     async def test_register_success(self):
         db = FakeDb(scalar_result=None)  # 用户名不存在
         resp = await register(
-            RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+            RegisterRequest(username="alice", password="secret12345"), request=self._request(), db=db
         )
         assert resp.token_type == "bearer"
         assert len(db.added) == 1
         assert db.committed is True
-        assert verify_password("secret123", db.added[0].password_hash)
+        assert verify_password("secret12345", db.added[0].password_hash)
         # token 可解出用户 id
         assert verify_jwt_token(resp.access_token).user_id == resp.user_id
 
@@ -173,7 +173,7 @@ class TestAuthEndpoints:
         db = FakeDb(scalar_result=uuid.uuid4())  # 用户名已存在
         with pytest.raises(HTTPException) as exc:
             await register(
-                RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+                RegisterRequest(username="alice", password="secret12345"), request=self._request(), db=db
             )
         assert exc.value.status_code == 409
 
@@ -182,7 +182,7 @@ class TestAuthEndpoints:
         db = FakeDb()
         with pytest.raises(HTTPException) as exc:
             await register(
-                RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+                RegisterRequest(username="alice", password="secret12345"), request=self._request(), db=db
             )
         assert exc.value.status_code == 403
 
@@ -191,7 +191,7 @@ class TestAuthEndpoints:
         db = FakeDb()
         with pytest.raises(HTTPException) as exc:
             await register(
-                RegisterRequest(username="alice", password="secret123"), request=self._request(), db=db
+                RegisterRequest(username="alice", password="secret12345"), request=self._request(), db=db
             )
         assert exc.value.status_code == 503
 

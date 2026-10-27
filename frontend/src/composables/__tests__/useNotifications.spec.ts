@@ -88,13 +88,13 @@ afterEach(() => {
 })
 
 describe('连接与首帧鉴权', () => {
-  it('挂载即连接：URL 携带默认频道，open 后发送 auth 帧（token + api_key）', () => {
+  it('挂载即连接：默认不传全局频道，open 后发送 auth 帧（token + api_key）', () => {
     mountNotifications()
     const ws = lastSocket()
 
     expect(FakeWebSocket.instances).toHaveLength(1)
     expect(ws.url).toContain('/api/ws/notifications')
-    expect(ws.url).toContain(encodeURIComponent('kb:*,doc:*'))
+    expect(ws.url).not.toContain('channels=')
 
     ws.open()
     expect(ws.sent[0]).toEqual({ type: 'auth', token: 'jwt-token-123', api_key: 'key-abc' })

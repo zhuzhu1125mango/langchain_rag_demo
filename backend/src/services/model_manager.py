@@ -21,6 +21,7 @@ from src.services.model_adapters import build_embeddings, build_route_models
 from src.services.model_registry import (
     DEFAULT_REGISTRY_PATH,
     ModelRegistry,
+    ResolvedModel,
     ResolvedRoute,
 )
 
@@ -78,6 +79,15 @@ class ModelManager:
         self._db_registry_active = False
         self._registry_revision = 0
 
+    def _reset_provider_health(self) -> None:
+        """registry 变更后清空 Provider 熔断状态（保留用量累计）。"""
+        try:
+            from src.services.model_health import provider_health
+
+            provider_health.reset()
+        except Exception:
+            logger.debug("重置 Provider 健康状态失败", exc_info=True)
+
     # ------------------------------------------------------------------
     # Registry lifecycle
     # ------------------------------------------------------------------
@@ -103,6 +113,7 @@ class ModelManager:
         self._registry_revision += 1
         self._registry_path = path
         self._registry_mtime = path.stat().st_mtime if path.exists() else None
+        self._reset_provider_health()
         logger.info("模型注册表已加载: source=%s, providers=%d, models=%d, routes=%d",
                     registry.source, len(registry.providers), len(registry.models), len(registry.routes))
 
@@ -136,6 +147,7 @@ class ModelManager:
         self._registry_mtime = None
         self._registry_revision += 1
         self._embeddings_cache.clear()
+        self._reset_provider_health()
         logger.info(
             "模型 registry 已应用: source=%s, providers=%d, models=%d, routes=%d, revision=%d",
             source, len(registry.providers), len(registry.models), len(registry.routes), self._registry_revision,
@@ -150,8 +162,17 @@ class ModelManager:
 
             async with async_session() as db:
                 config = await load_registry_config_from_db(db)
-            if config is None:
-                return False
+                if config is None:
+                    return False
+                # MODEL-P3：Embedding 画像与索引不一致时跳过应用，避免重启后检索维度错配
+                from src.services.embedding_migration import config_matches_indexed_profile
+
+                if not await config_matches_indexed_profile(db, config):
+                    logger.warning(
+                        "DB 模型配置的 Embedding 画像与 Milvus 索引不一致，已跳过应用；"
+                        "请在管理页「模型服务 → 索引」完成重建后再应用/重启"
+                    )
+                    return False
             self.apply_registry_config(config, source="database")
             return True
         except Exception as exc:
@@ -286,6 +307,20 @@ class ModelManager:
         if cache_key not in self._embeddings_cache:
             self._embeddings_cache[cache_key] = build_embeddings(resolved)
         return self._embeddings_cache[cache_key]
+
+    def get_reranker_model(self) -> Optional[ResolvedModel]:
+        """可选的 rerank 路由；未配置时返回 None，回退 env 的 KBReranker 配置。"""
+        registry = self._get_registry()
+        route = registry.routes.get("rerank")
+        if route is None:
+            return None
+        try:
+            resolved = registry.get_model(route.primary)
+        except Exception:
+            return None
+        if not resolved.provider.enabled or not resolved.model.has("rerank"):
+            return None
+        return resolved
 
     async def describe_route(self, task: str) -> Dict[str, Any]:
         """返回任务路由的可展示信息（管理 UI / 诊断用）。"""

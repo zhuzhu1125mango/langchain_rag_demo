@@ -215,3 +215,35 @@ async def refund_upload_quota(user_id: str, size_bytes: int) -> None:
         _memory_counters.get(key, (time.monotonic() + 86400, 0))[0],
         max(0, _memory_counters.get(key, (0, 0))[1] - size_bytes),
     )
+
+
+async def consume_eval_quota(user_id: str, units: int = 1) -> None:
+    """消耗评估 API 配额（SEC-17）：每分钟请求数 + 每日样本单元数。
+
+    评估会触发 embedding/LLM 调用，按用户限流避免单个账号反复刷评估接口
+    拖垮共享资源。``units`` 为本次请求的样本数（单条 = 1），
+    超出任一层返回 429。
+    """
+    if not _enabled() or units <= 0:
+        return
+
+    sec = settings.security
+    if not await check_rate_limit_async(
+        f"rag:quota:eval:rpm:{user_id}", sec.EVAL_RATE_LIMIT_PER_MINUTE, 60
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="评估请求过于频繁，请稍后再试",
+            headers={"Retry-After": "60"},
+        )
+
+    daily_key = f"rag:quota:eval:daily:{_date_key()}:{user_id}"
+    if not await _consume_counter(
+        daily_key, units, sec.EVAL_DAILY_QUOTA, _seconds_until_utc_midnight()
+    ):
+        _raise_quota("评估每日")
+
+
+def eval_batch_limit() -> int:
+    """批量评估单次样本上限（SEC-17；<=0 表示不限）。"""
+    return max(0, int(getattr(settings.security, "EVAL_BATCH_MAX_SAMPLES", 100) or 0))

@@ -28,23 +28,63 @@ from src.services.notification_service import (
     NotificationType,
     Notification
 )
+from src.services.progress_manager import progress_store
 
 router = APIRouter(tags=["notifications"])
 
 
-def _is_owned_doc_channel(channel: str) -> Optional[str]:
-    """若为按知识库归属的频道（doc:{kb_id}），返回 kb_id；否则返回 None。
+def _is_internal_user(current_user: CurrentUser) -> bool:
+    """全局频道（kb:* / doc:*）仅内部/管理员：API Key 用户与开发默认用户。"""
+    return current_user.user_id in {"api_key_user", "default"}
 
-    全局/任务类频道（kb:*、doc:*、task:* 及自定义）不属于越权面，
-    仅对需要知识库归属校验的 doc:{kb_id} 频道进行所有权校验。
-    """
+
+def _is_owned_doc_channel(channel: str) -> Optional[str]:
+    """若为按知识库归属的频道（doc:{kb_id}），返回 kb_id；否则返回 None。"""
     prefix = "doc:"
     if channel.startswith(prefix):
         kb_id = channel[len(prefix):]
-        # 排除通配符全局频道
         if kb_id and kb_id != "*":
             return kb_id
     return None
+
+
+def _task_owned(task_id: str, current_user: CurrentUser) -> bool:
+    progress = progress_store.get(task_id)
+    if progress is None:
+        return False
+    owner_id = getattr(progress, "owner_id", None)
+    return bool(owner_id) and owner_id == current_user.user_id
+
+
+async def _assert_channel_allowed(
+    db: AsyncSession, channel: str, current_user: CurrentUser
+) -> None:
+    """SEC-8：全局频道仅内部；doc/task 频道校验资源归属；其余频道一律拒绝。"""
+    if channel.startswith("user:"):
+        if channel[len("user:"):] != current_user.user_id and not _is_internal_user(current_user):
+            raise BadRequestException("无权订阅该用户频道")
+        return
+    if channel in {"kb:*", "doc:*"}:
+        if not _is_internal_user(current_user):
+            raise BadRequestException("全局频道仅管理员/内部服务可订阅")
+        return
+    if channel.startswith("doc:"):
+        await _assert_doc_channel_owned(db, channel, current_user)
+        return
+    if channel.startswith("kb:"):
+        kb_id = channel[len("kb:"):]
+        if not kb_id or kb_id == "*":
+            if not _is_internal_user(current_user):
+                raise BadRequestException("全局频道仅管理员/内部服务可订阅")
+            return
+        await _assert_doc_channel_owned(db, f"doc:{kb_id}", current_user)
+        return
+    if channel.startswith("task:"):
+        task_id = channel[len("task:"):]
+        if not _task_owned(task_id, current_user) and not _is_internal_user(current_user):
+            raise BadRequestException("无权订阅该任务频道")
+        return
+    raise BadRequestException("不支持的通知频道")
 
 
 async def _assert_doc_channel_owned(
@@ -131,7 +171,7 @@ manager = ConnectionManager()
 @router.websocket("/ws/notifications")
 async def websocket_notifications(
     websocket: WebSocket,
-    channels: str = Query(default="kb:*,doc:*", description="逗号分隔的订阅频道，支持通配符如 kb:*"),
+    channels: str = Query(default="", description="逗号分隔的订阅频道；为空时仅订阅当前用户频道"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -153,14 +193,16 @@ async def websocket_notifications(
     current_user = await get_current_user_for_ws(websocket)
     connection_id = str(uuid.uuid4())
 
-    # 解析频道列表
+    # 解析频道列表；SEC-8 默认只订阅当前用户频道（全局频道仅内部）
     channel_list = [c.strip() for c in channels.split(",") if c.strip()]
+    if not channel_list:
+        channel_list = [f"user:{current_user.user_id}"]
 
-    # 越权校验：doc:{kb_id} 频道要求知识库归属当前用户，否则拒绝建立连接
+    # 越权校验：user/doc/kb/task 频道均需通过归属校验
     for channel in channel_list:
         try:
-            await _assert_doc_channel_owned(db, channel, current_user)
-        except HTTPException:
+            await _assert_channel_allowed(db, channel, current_user)
+        except (HTTPException, BadRequestException):
             await websocket.close(code=1008, reason="无权订阅该频道")
             return
 
@@ -184,8 +226,8 @@ async def websocket_notifications(
                     valid_new = []
                     for channel in new_channels:
                         try:
-                            await _assert_doc_channel_owned(db, channel, current_user)
-                        except HTTPException:
+                            await _assert_channel_allowed(db, channel, current_user)
+                        except (HTTPException, BadRequestException):
                             # 越权频道：拒绝订阅，但不中断连接
                             continue
                         subscribe(channel, websocket)
@@ -232,7 +274,7 @@ async def websocket_knowledge_bases(websocket: WebSocket):
     current_user = await get_current_user_for_ws(websocket)
     connection_id = str(uuid.uuid4())
 
-    await manager.connect(websocket, connection_id, ["kb:*"], user_id=current_user.user_id)
+    await manager.connect(websocket, connection_id, [f"user:{current_user.user_id}"], user_id=current_user.user_id)
 
     try:
         while True:

@@ -1,7 +1,7 @@
 # 架构总览
 
 > 定位：一页讲清系统拓扑、问答链路与数据流。细节实现以代码为准。
-> 更新时间：2026-10-03
+> 更新时间：2026-10-26
 
 ## 1. 技术栈
 
@@ -14,7 +14,7 @@
 | 关系库 | PostgreSQL（会话/知识库元数据/反馈/实验等） |
 | 缓存 | Redis |
 | 联网搜索 | Tavily（在线 API，默认 provider） |
-| 模型 | P1 起支持 Provider/Model/Route registry（`MODEL_REGISTRY_FILE`）：Ollama 原生 + OpenAI-Compatible，按任务路由并支持 fallback；未配置文件时自动按 `.env` 的 `OLLAMA_*` 生成 legacy 路由。开发栈当前取值：`qwen3:4b`（主模型，深度思考专用）、`qwen2.5:3b-instruct`（快模型：关闭深度思考时的直答 + 意图路由/标题/改写等辅助任务）、`bge-m3`（embedding，1024 维）、`bge-reranker-base`（重排，经 sentence-transformers 或 Ollama）。详见 [model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) |
+| 模型 | Provider/Model/Route registry（`ModelManager` 统一入口）：Ollama 原生 + OpenAI-Compatible，按任务路由、能力校验与 fallback。配置优先级 **DB（P2 管理 API/设置页）> `MODEL_REGISTRY_FILE` JSON > `OLLAMA_*` legacy 自动生成**；聊天模型可热切换，Embedding 变更必须重建 Milvus 索引。开发栈当前取值：`qwen3:4b`（主模型，深度思考专用）、`qwen2.5:3b-instruct`（快模型：关闭深度思考时的直答 + 意图路由/标题/改写等辅助任务）、`bge-m3`（embedding，1024 维）、`bge-reranker-base`（重排，经 sentence-transformers 或 Ollama）。详见 [model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) |
 | 监控 | Prometheus + Grafana + Alertmanager + postgres-exporter |
 
 ## 2. 服务拓扑（docker-compose）
@@ -29,7 +29,8 @@
                         ├──► Milvus ◄── etcd（元数据）
                         │     └────── MinIO（Milvus 存储 + 文档原文件）
                         ├──► Tavily（联网搜索）
-                        └──► Ollama（本机部署，非容器内）
+                        ├──► Ollama（本机部署，非容器内）
+                        └──►（可选）OpenAI-Compatible API（管理员显式启用；默认关闭）
 ```
 
 - 开发环境：`docker-compose.dev.yml`（前端走 Vite dev server）
@@ -39,7 +40,7 @@
 - 后端启动约束（`src/main.py` 的 lifespan，按顺序）：
   1. 生产模式强制校验 `SECRET_KEY` 强度与关键凭据非空，缺失即拒绝启动
   2. 生产模式校验注册策略：`AUTH_ALLOW_REGISTRATION=true` 且未显式 `ALLOW_OPEN_REGISTRATION_IN_PROD=true` → 拒绝启动（SEC-2）
-  3. 校验三个模型名非空且存在于本地 Ollama（`/api/tags`），缺失即拒绝启动
+  3. 校验模型配置：DB 有 Provider 配置时按 registry 校验；否则按 `MODEL_REGISTRY_FILE` / `backend/data/model_registry.json` 校验；两者都没有时回退 legacy，强制校验 `OLLAMA_*` 三个模型名非空且存在于本地 Ollama（`/api/tags`），缺失即拒绝启动
   4. 建表（`init_db`）+ 预热 `CacheService`（Redis 为必需依赖，8 秒超时）
   5. LLM 预热为 best-effort，失败仅告警不中断启动
 
@@ -67,6 +68,41 @@
             → 输出清洗（output_sanitizer：过滤推理前缀/复述）
 ```
 
+### 模型路由层（Provider / Model / Route）
+
+所有 LLM/Embedding 调用经 `ModelManager` 从 registry 解析，不在业务层直接构造 `ChatOllama`：
+
+| 任务 | 用途 | 能力要求 |
+|---|---|---|
+| `answer` | 深度思考开启时的主回答 | chat + stream（可选 reasoning） |
+| `answer_direct` | 深度思考关闭时的直答 | chat + stream |
+| `fast` | 通用轻量任务兜底 | chat |
+| `intent_router` / `title_generation` / `query_rewrite` / `verifier` | 意图、标题、改写、校验 | chat |
+| `agent_decision` | Agent 工具决策 | chat + tools |
+| `wiki_compile` / `doc_analyze` | Wiki 编译、文档分析 | chat |
+| `embedding` | 检索/语义缓存/意图分类/引用补全 | embedding |
+
+- `answer` / `fast` / `embedding` 为必需路由；其他聊天任务未单独配置时回退 `fast` 路由。
+- 主模型失败按 route `fallbacks` 降级；本地主模型降级到外部 Provider 需显式 `allow_external_fallback`（默认禁止，避免数据出域）。
+- `agent_decision` 只接受声明 `tools` 的模型；Embedding 维度必须与 `EMBEDDING_DIMENSION` 一致。
+- 配置代次（`registry_generation`）变化时，`RAGChain` / `TitleGenerator` / `WikiCompiler` 的模型缓存自动失效；在途请求继续使用旧实例。
+
+### 熔断、用量与成本（P2.1）
+
+- 每个 Provider 连续失败 3 次后打开 60s 熔断，期间该 Provider 的所有任务直接跳过并走 fallback；冷却后半开，只放行一次探测，成功关闭、失败重新计时。
+- 熔断状态仅存进程内存；应用新 registry 后重置，避免旧 Provider 故障拖住新配置。
+- 每次聊天调用按 `provider_id + model_id + task` 记录调用数、失败数、input/output tokens、平均延迟与估算成本；成本 = tokens / 1000 × 模型配置的每 1K tokens 单价，未配置价格的调用记 0 并计入 `unpriced_calls`。
+- 用量增量每 `MODEL_USAGE_FLUSH_INTERVAL_S`（默认 60s）写入 `model_usage_daily`（日期 + Provider + 模型 + 任务 + 币种），应用关闭时最后 flush；写库失败回填内存，不影响请求链路。
+- 指标：`rag_model_provider_calls_total`、`rag_model_tokens_total`、`rag_model_circuit_state`（1=open / 0.5=half_open / 0=closed）；管理接口 `GET /api/admin/models/usage?days=7` 返回持久化聚合 + 未落库增量。
+- 设置页「模型服务」已展示用量/成本并支持单价编辑；成本上限/429 告警仍为待办；Embedding 调用暂未纳入熔断/用量。
+
+### Embedding 迁移与 Reranker（P3）
+
+- Embedding 模型/维度以 registry 为权威；`model_index_profile` 记录 collection 当前画像与状态。保存新 Embedding 配置后，apply 会因画像不一致返回 409，必须先重建索引。
+- 重建：读取线上集合标量字段 → 用目标 Embedding 重算 dense + 复用 BM25 词表重算 sparse → 写入 `{collection}__rebuild_*` → 原子 rename；失败保留线上，成功后旧集合改名 `{collection}__backup_*` 供回滚。
+- 重建/回滚会全量失效语义缓存，并按 registry 代次刷新意图分类、Wiki 编译、联网搜索与 MilvusService 的 Embedding 实例。
+- 可选 `rerank` 路由（Ollama 托管）优先于 `KB_RERANK_*` env；registry 变更时 `KBReranker` 热重建。Sentence-Transformers 本地 reranker 仍走 env。
+
 ### 流式响应（SSE）
 
 - 路由：`POST /api/chat/stream`，`StreamingResponse` 推送事件
@@ -78,7 +114,7 @@
 
 | 存储 | 内容 |
 |---|---|
-| PostgreSQL | 用户（`users`）、知识库/文档元数据、会话与消息（JSONB）、反馈/坏例、实验（A/B）、标签/分类、请求 trace、Wiki 编译页（`wiki_pages`）、审计日志（`audit_logs`）、学习引擎配置 |
+| PostgreSQL | 用户（`users`）、知识库/文档元数据、会话与消息（JSONB）、反馈/坏例、实验（A/B）、标签/分类、请求 trace、Wiki 编译页（`wiki_pages`）、审计日志（`audit_logs`）、学习引擎配置、模型注册（`model_providers` / `model_deployments` / `model_routes`）、模型用量日聚合（`model_usage_daily`）、索引 Embedding 画像（`model_index_profile`） |
 | Milvus | 文档向量 + BM25 稀疏向量（含词表持久化）；Wiki 编译页切片以 `source_kind="wiki"` 同集合区分；Agent 记忆以 `source_kind="memory"` 复用同集合 |
 | MinIO | 文档原文件、Milvus 底层存储 |
 | Redis | 缓存（知识库列表、快捷问题等）；语义缓存条目；Wiki 分布式锁（`WIKI_DISTRIBUTED_LOCK`，Redis 不可用时降级为进程内锁）。注：Wiki 编译**去抖队列是进程内实现**（`wiki_compile_scheduler.py` 用 per-KB 集合 + asyncio 计时器，多副本部署时各 worker 独立去抖） |
@@ -87,8 +123,18 @@
 
 | 目录/模块 | 职责 |
 |---|---|
-| `api/` | 路由层（17 个模块，不写业务逻辑）：auth、chat、knowledge_base、wiki、document、session、trace、audit、category、tag、feedback、badcase、learning、experiment、config、evaluation、notification |
-| `services/` | 业务核心：决策管线、检索、生成、搜索、工具、评估、学习引擎 |
+| `api/` | 路由层（18 个模块，不写业务逻辑）：auth、chat、knowledge_base、wiki、document、session、trace、audit、category、tag、feedback、badcase、learning、experiment、config、evaluation、notification、admin_models |
+| `services/` | 业务核心：决策管线、检索、生成、搜索、工具、评估、学习引擎、模型注册/健康/用量 |
+| `services/model_registry.py` | Provider/Model/Route Pydantic 配置、legacy Ollama bootstrap、JSON 加载、能力/路由/维度校验、跨 Provider fallback 过滤 |
+| `services/model_adapters.py` | Ollama / OpenAI-Compatible 的 Chat 与 Embedding 适配器；`ChatModelGroup` 按序 fallback（跳过熔断 Provider）、记录用量并保留 `bind_tools` |
+| `services/model_manager.py` | 模型统一入口：按任务路由、registry 热加载/DB 应用、配置代次、Embedding 实例缓存 |
+| `services/model_health.py` | Provider 级熔断：连续失败阈值、冷却半开探测、跳过热熔断 Provider；registry 变更时重置 |
+| `services/model_usage.py` | 进程内用量聚合：Provider/模型/任务的调用、失败、Token、平均延迟、成本估算与未落库增量 |
+| `services/model_usage_store.py` | 用量增量周期落库、最近 N 天聚合查询、持久化与进程内数据合并 |
+| `services/embedding_migration.py` | Embedding 索引画像、apply 安全闸门、影子集合重建/原子切换/回滚、缓存失效编排 |
+| `services/model_config_service.py` | P2 DB↔registry 转换、Provider/模型/路由 CRUD、连接测试/模型发现、校验并应用 |
+| `services/model_secret_cipher.py` | Provider API Key Fernet 加解密（`MODEL_SECRET_ENC_KEY`，缺省从 `SECRET_KEY` 派生） |
+| `services/account_service.py` | 账号数据导出与注销级联清理（SEC-14） |
 | `services/rag_chain.py` | RAG 问答链编排门面：依赖装配（`__init__`/`_async_init`）+ 公开 API（`run`/`arun_stream`）+ 生命周期；管线各阶段已拆入 `services/pipeline/`（文件已从约 2000 行瘦身为门面） |
 | `services/pipeline/` | 管线拆分（自 `rag_chain.py` 抽出）：`state.py`（共享状态 / ContextVar / 提示词模板）、`stages.py`（阶段 1-9 编排 + 终态清理）、`retrieval.py`、`agent.py`、`generation.py`、`insights.py` |
 | `services/agent_orchestrator.py` | 有界 Agent 编排：plan-execute 循环（max_steps=3 + 时间预算熔断），KB/Wiki/搜索工具统一接入，`AGENT_ORCHESTRATOR_ENABLED` 默认开启（W6 灰度转正 2026-09-29；有界循环自带降级链）；SEC-5：不可信观察隔离、工具出站域名/DLP、`fetch_webpage` 默认关闭 |
@@ -105,7 +151,7 @@
 | `services/trace_collector.py` | 请求链路追踪采集（对应 `/api/traces`） |
 | `services/audit_service.py` | 审计日志记录与查询（P2-4，best-effort 写入不阻断主流程，对应 `/api/audit`） |
 | `middleware/` | Prometheus 指标、自定义 Metrics 中间件 |
-| `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验）、`rate_limit.py`（受信代理 IP + Redis/进程内限流）、`quota.py`（聊天/上传资源配额） |
+| `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验）、`rate_limit.py`（受信代理 IP + Redis/进程内限流）、`quota.py`（聊天/上传/评估配额）、`safe_http.py`（连接层固定 IP 的 SSRF 安全客户端） |
 | `models/strategy.py` | 学习样本：`strategy_executions.user_id`（SEC-1 owner 隔离） |
 | `auth.py` | 认证：`X-API-Key`（全局单租户 / 用户级 API Key，后者解析为真实 `user_id`）+ JWT 多用户（注册/登录/`/me`/`/refresh`）+ `require_owner` 对象级授权 + WS 首帧鉴权 |
 | `prompts/` | 提示词模板（aiofiles 异步加载） |
@@ -117,7 +163,8 @@
 - **可降级**：混合检索失败回退 dense；联网搜索失败不影响知识库回答；工具失败降级为 LLM 直答
 - **输出净化**：答案不携带推理前缀、不整段复述原文，关键事实标注 `[n]` 来源编号
 - **安全边界（SEC-1~5）**：主资源按 `owner_id` 隔离；学习样本 owner 过滤；生产默认关闭开放注册；受信代理 IP + Redis 限流；聊天/上传配额；下架/移动 KB 与向量、语义缓存保持一致；检索/网页/工具观察按不可信上下文隔离，工具出站受域名/DLP 约束，`fetch_webpage` 默认关闭
-- **离线优先**：所有模型本地部署，禁用付费 API
+- **安全边界（SEC-6~21）**：实验/通知/分类标签归属收口；JWT `jti` 吊销 + 登出；SSRF 连接层固定 IP（`safe_http`）+ 工具 URL 参数 DNS fail-closed；`/health/live`/`ready` 拆分；账号导出/注销与日志保留期清扫；评估 API 用户级配额；会话分页与批量上限；前端 CSP `connect-src 'self'` + 条件 HSTS（详见 [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md)）
+- **离线优先**：默认所有模型本地部署（Ollama），无需付费 API；外部 OpenAI-Compatible Provider 为**可选能力**，需管理员在「设置 → 模型服务」显式添加并启用，本地主模型降级到外部默认禁止（`allow_external_fallback=false`），避免数据出域
 
 ## 7. 相关文档
 
@@ -126,5 +173,6 @@
 - 开发与测试：[guide/development.md](guide/development.md)
 - 监控运维：[guide/monitoring.md](guide/monitoring.md)
 - 后续优化：[design/improvement-roadmap.md](design/improvement-roadmap.md)
+- 模型 Provider/路由：[design/model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md)
 - 安全与多租户：[design/security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md)
 - 专项设计：见 `design/` 目录

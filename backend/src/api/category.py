@@ -10,13 +10,13 @@
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 from src.database import get_db
-from src.auth import get_current_user, CurrentUser
-from src.models import Category
+from src.auth import get_current_user, require_admin, CurrentUser
+from src.models import Category, Document
 
 router = APIRouter(prefix="/categories", tags=["categories"])
 
@@ -42,7 +42,7 @@ class CategoryCreate(BaseModel):
 async def create_category(
     data: CategoryCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     """
     创建分类
@@ -144,7 +144,7 @@ async def update_category(
     category_id: str,
     data: CategoryCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     """
     更新分类
@@ -179,7 +179,7 @@ async def update_category(
 async def delete_category(
     category_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     """
     删除分类
@@ -197,7 +197,13 @@ async def delete_category(
         category = result.scalar_one_or_none()
         if not category:
             raise HTTPException(status_code=404, detail="分类不存在")
-        
+
+        in_use = await db.scalar(
+            select(func.count()).select_from(Document).where(Document.category_id == category.id)
+        )
+        if in_use:
+            raise HTTPException(status_code=409, detail=f"分类下仍有 {in_use} 个文档，无法删除")
+
         await db.delete(category)
         await db.commit()
         return {"message": "删除成功"}

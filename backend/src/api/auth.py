@@ -19,7 +19,8 @@ import hashlib
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, select
@@ -33,6 +34,7 @@ from src.auth import (
     get_current_user,
     hash_password,
     jwt_bearer,
+    logout_token,
     refresh_access_token,
     verify_password,
 )
@@ -50,7 +52,7 @@ class RegisterRequest(BaseModel):
     """注册请求。"""
 
     username: str = Field(min_length=3, max_length=64, pattern=r"^[a-zA-Z0-9_-]+$")
-    password: str = Field(min_length=6, max_length=128)
+    password: str = Field(min_length=10, max_length=128)
 
 
 class LoginRequest(BaseModel):
@@ -73,6 +75,12 @@ class MeResponse(BaseModel):
 
     user_id: str
     username: str
+
+
+class DeleteAccountRequest(BaseModel):
+    """账号注销请求（需再次校验密码）。"""
+
+    password: str = Field(min_length=1, max_length=128)
 
 
 def _get_jwt_settings():
@@ -102,6 +110,13 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
     exists = await db.scalar(select(User.id).where(User.username == data.username))
     if exists:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="用户名已存在")
+
+    from src.utils.security import WeakPasswordError, validate_password_strength
+
+    try:
+        validate_password_strength(data.password, data.username)
+    except WeakPasswordError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
     user = User(username=data.username, password_hash=hash_password(data.password))
     db.add(user)
@@ -163,6 +178,68 @@ async def refresh_token(jwt_credentials: HTTPAuthorizationCredentials = Depends(
         )
     payload = decode_access_token(new_token) or {}
     return TokenResponse(access_token=new_token, user_id=str(payload.get("sub", "")))
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(jwt_credentials: HTTPAuthorizationCredentials = Depends(jwt_bearer)):
+    """登出：把当前 access token 的 jti 加入吊销名单，旧 token 立即 401。"""
+    if jwt_credentials:
+        logout_token(jwt_credentials.credentials)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/account/export")
+async def export_account(
+    current_user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """导出当前用户数据（SEC-14）；不含密码哈希与 API Key 明文。"""
+    from src.services.account_service import export_user_data
+
+    try:
+        data = await export_user_data(db, current_user.user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    filename = f"zhilan-account-{current_user.user_id}.json"
+    return JSONResponse(
+        content=data,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    data: DeleteAccountRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    jwt_credentials: HTTPAuthorizationCredentials = Depends(jwt_bearer),
+    db: AsyncSession = Depends(get_db),
+):
+    """注销当前账号并级联清理资源（SEC-14）；需校验密码，完成后吊销 token。"""
+    from src.services.account_service import delete_user_account
+
+    try:
+        uid = uuid.UUID(current_user.user_id)
+    except (ValueError, AttributeError):
+        raise HTTPException(status_code=400, detail="当前认证方式不支持注销账号")
+    user = await db.scalar(select(User).where(User.id == uid))
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if not verify_password(data.password, user.password_hash):
+        raise HTTPException(status_code=403, detail="密码错误，无法注销账号")
+
+    from src.services.audit_service import record_audit
+
+    await record_audit(
+        action="auth.account.delete",
+        resource_type="user",
+        resource_id=str(uid),
+        detail={"username": user.username},
+        actor_user_id=str(uid),
+    )
+    await delete_user_account(db, current_user.user_id)
+    if jwt_credentials:
+        logout_token(jwt_credentials.credentials)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/me", response_model=MeResponse)

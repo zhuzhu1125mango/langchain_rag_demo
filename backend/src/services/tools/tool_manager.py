@@ -67,6 +67,8 @@ class BaseTool(ABC):
     risk_level: str = "read"
     # 是否强制人工审批（write 级工具由 ApprovalGate 自动纳入，无需逐个声明）
     requires_approval: bool = False
+    # SEC-19：URL 型参数名必须显式声明（注册时校验），ToolGuard 据此做 DNS/SSRF 校验
+    url_params: tuple = ()
 
     @abstractmethod
     async def execute(self, **kwargs) -> ToolResult:
@@ -93,6 +95,19 @@ class BaseTool(ABC):
         }
 
 
+_URL_PARAM_NAMES = {"url", "uri", "link", "href", "target_url", "source_url", "webpage"}
+
+
+def _schema_url_params(tool: BaseTool) -> List[str]:
+    """参数 schema 中形似 URL 的键（SEC-19：注册时必须显式声明）。"""
+    properties = (getattr(tool, "parameters", None) or {}).get("properties") or {}
+    return [
+        key
+        for key in properties
+        if (key or "").lower() in _URL_PARAM_NAMES or (key or "").lower().endswith("_url")
+    ]
+
+
 class ToolRegistry:
     """工具注册表，管理所有已注册工具。"""
 
@@ -100,9 +115,20 @@ class ToolRegistry:
         self._tools: Dict[str, BaseTool] = {}
 
     def register(self, tool: BaseTool) -> None:
-        """注册一个工具实例。"""
+        """注册一个工具实例。
+
+        SEC-19：参数 schema 里的 URL 型参数必须在 ``url_params`` 中显式声明，
+        否则拒绝注册——避免新增 URL 工具绕过 ToolGuard 的出站校验。
+        """
         if not tool.name:
             raise ValueError("Tool name cannot be empty")
+        declared = {str(key).lower() for key in (getattr(tool, "url_params", ()) or ())}
+        undeclared = [key for key in _schema_url_params(tool) if key.lower() not in declared]
+        if undeclared:
+            raise ValueError(
+                f"工具 {tool.name} 未声明 URL 参数 {undeclared}，"
+                "请在 url_params 中显式声明后再注册"
+            )
         if tool.name in self._tools:
             logger.warning(f"工具 {tool.name} 已被注册，将被覆盖")
         self._tools[tool.name] = tool
@@ -178,10 +204,11 @@ class ToolManager:
                 error=f"工具 '{tool_name}' 未注册",
             )
 
-        # AM-2 工具护栏：参数长度/URL/路径穿越统一在唯一执行入口拦截
+        # AM-2 工具护栏：参数长度/URL/路径穿越统一在唯一执行入口拦截；
+        # SEC-19：URL 参数额外做 DNS 解析校验（线程池执行，避免阻塞事件循环）
         from src.services.guardrails import get_tool_guard
 
-        guard_hit = get_tool_guard().check(tool, kwargs)
+        guard_hit = await get_tool_guard().check_async(tool, kwargs)
         if guard_hit is not None:
             logger.warning(f"工具护栏拦截: tool={tool_name} rule={guard_hit.rule}")
             return ToolResult(

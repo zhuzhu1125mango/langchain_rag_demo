@@ -1,7 +1,7 @@
 # 开发环境镜像
 # 基于node:20-alpine，全局安装 pnpm 后安装依赖并复制源码，
 # 启动 Vite 开发服务器（--host 0.0.0.0 暴露给容器外访问），监听 5173 端口。
-FROM node:20-alpine
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293
 
 WORKDIR /app
 

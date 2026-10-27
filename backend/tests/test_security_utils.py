@@ -122,11 +122,11 @@ class TestUrlValidation:
         monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
         assert is_url_safe("http://example.com/path") is True
 
-    def test_domain_dns_failure_is_safe(self, monkeypatch):
-        """解析失败时保持放行（后续真实连接同样无法建立，不损失可用性）。"""
+    def test_domain_dns_failure_is_rejected(self, monkeypatch):
+        """SEC-9：解析失败 fail-closed，不得放行。"""
 
         def fake_getaddrinfo(host, port, **kwargs):
             raise socket.gaierror("DNS failure")
 
         monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-        assert is_url_safe("http://example.com/path") is True
+        assert is_url_safe("http://example.com/path") is False

@@ -587,7 +587,8 @@ async def stream_answer(
                 if chunk:
                     full_answer += chunk
                     content_payload = {'type': 'content', 'content': chunk}
-                    logger.debug(f"SSE content payload: {content_payload}")
+                    # SEC-14：SSE 分片即答案原文，日志只记录长度
+                    logger.debug("SSE content chunk: length=%d", len(chunk))
                     yield f"data: {json.dumps(content_payload)}\n\n"
                 sources = source_texts
                 source_metadata = source_meta

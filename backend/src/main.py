@@ -21,7 +21,7 @@ import hmac
 import time
 import asyncio
 from contextvars import ContextVar
-from logging.handlers import RotatingFileHandler
+from logging.handlers import TimedRotatingFileHandler
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,10 +80,10 @@ class RequestIdLogFilter(logging.Filter):
 _log_handlers: list = [logging.StreamHandler()]
 if not settings.IS_PRODUCTION:
     _log_handlers.append(
-        RotatingFileHandler(
+        TimedRotatingFileHandler(
             os.path.join(LOG_DIR, "app.log"),
-            maxBytes=10 * 1024 * 1024,
-            backupCount=5,
+            when="midnight",
+            backupCount=max(1, int(settings.security.LOG_RETENTION_DAYS or 30)),
             encoding="utf-8",
         )
     )
@@ -344,6 +344,22 @@ async def lifespan(app: FastAPI):
     # 模型配置校验（A2）：legacy 仍校验 Ollama；DB/file registry 走注册表校验。
     await _validate_model_config()
 
+    # MODEL-P2.1：模型用量增量定期落库（best-effort，DB 不可用仅告警）
+    usage_flush_interval = float(settings.model.MODEL_USAGE_FLUSH_INTERVAL_S or 0)
+    usage_flush_task = None
+    if usage_flush_interval > 0:
+        from src.services.model_usage_store import flush_usage_deltas, periodic_flush
+
+        usage_flush_task = asyncio.create_task(periodic_flush(usage_flush_interval))
+        logger.info("模型用量落库任务已启动: interval=%ss", usage_flush_interval)
+
+    # SEC-14：数据库日志/trace 保留期清扫（每天一次；失败仅告警）
+    from src.services.retention_service import periodic_retention
+
+    retention_task = asyncio.create_task(
+        periodic_retention(float(settings.security.RETENTION_SWEEP_INTERVAL_S or 86400))
+    )
+
     # 预热核心异步服务，避免首次请求阻塞事件循环
     try:
         from src.services.vector_store import VectorStoreManager
@@ -446,6 +462,24 @@ async def lifespan(app: FastAPI):
         await learning_task
     except asyncio.CancelledError:
         logger.info("后台定时学习任务已取消")
+
+    # MODEL-P2.1：停止周期落库并做最后一次 flush
+    if usage_flush_task is not None:
+        usage_flush_task.cancel()
+        try:
+            await usage_flush_task
+        except asyncio.CancelledError:
+            logger.info("模型用量落库任务已取消")
+        try:
+            await flush_usage_deltas()
+        except Exception as exc:
+            logger.warning("关闭时模型用量落库失败: %s", exc)
+
+    retention_task.cancel()
+    try:
+        await retention_task
+    except asyncio.CancelledError:
+        logger.info("保留期清扫任务已取消")
 
     try:
         from src.services.wiki_lint_scheduler import stop_scheduler
@@ -571,54 +605,53 @@ def read_root():
     return {"message": "RAG Knowledge Base QA System API"}
 
 
+@app.get("/health/live")
+async def health_live():
+    """浅探活（SEC-12）：仅表示进程可响应，不检查依赖。"""
+    return {"status": "alive"}
+
+
 @app.get("/health")
 async def health_check():
-    """健康检查接口，用于服务状态监控"""
+    """兼容旧探针：等同于 /health/live。"""
     return {"status": "healthy"}
 
 
-@app.get("/health/detail")
-async def health_check_detail(current_user: CurrentUser = Depends(require_admin)):
-    """详细健康检查接口，检查各依赖服务状态（管理接口：暴露依赖拓扑，需管理员权限）。"""
-    checks = {}
-    
-    try:
-        async with async_engine.begin() as conn:
-            await conn.run_sync(lambda c: None)
-        checks["database"] = {"status": "healthy"}
-    except Exception as e:
-        # 详细错误仅进日志，避免向客户端泄露连接串/拓扑信息
-        logger.error(f"健康检查数据库异常: {e}", exc_info=True)
-        checks["database"] = {"status": "unhealthy", "error": "数据库连接失败"}
+async def _collect_health_checks(*, include_ollama: bool, detailed: bool) -> dict:
+    """探测 DB/Redis/Milvus/MinIO（可选 Ollama），供 ready 与 detail 共用。"""
+    checks: dict = {}
 
-    try:
-        from src.services.cache_service import CacheService
-        cache = await CacheService.get_instance()
-        if await cache.ping():
-            checks["redis"] = {"status": "healthy"}
-        else:
-            checks["redis"] = {"status": "unhealthy", "error": "Redis ping 失败或缓存服务不可用"}
-    except Exception as e:
-        logger.error(f"健康检查 Redis 异常: {e}", exc_info=True)
-        checks["redis"] = {"status": "unhealthy", "error": "Redis 连接失败"}
-
-    # W6 #13：补关键依赖健康探测（Milvus / MinIO / Ollama）。
-    # 探测为轻量操作且带 3s 超时；错误详情仅进日志，客户端只见通用文案。
-    async def _probe(name: str, coro_factory) -> None:
+    async def _record(name: str, coro_factory) -> None:
         try:
             await asyncio.wait_for(coro_factory(), timeout=3.0)
-            checks[name] = {"status": "healthy"}
+            checks[name] = {"status": "healthy"} if detailed else "ok"
         except Exception as e:
-            logger.error(f"健康检查 {name} 异常: {e}", exc_info=True)
-            checks[name] = {"status": "unhealthy", "error": f"{name} 连接失败"}
+            # 错误详情仅进日志，避免向客户端泄露连接串/拓扑
+            logger.error("健康检查 %s 异常: %s", name, e, exc_info=True)
+            checks[name] = (
+                {"status": "unhealthy", "error": f"{name} 连接失败"} if detailed else "fail"
+            )
+
+    async def _probe_db():
+        async with async_engine.begin() as conn:
+            await conn.run_sync(lambda c: None)
+
+    async def _probe_redis():
+        from src.services.cache_service import CacheService
+
+        cache = await CacheService.get_instance()
+        if not await cache.ping():
+            raise RuntimeError("Redis ping 失败或缓存服务不可用")
 
     async def _probe_milvus():
         from src.services.milvus_service import MilvusService
+
         milvus = await MilvusService.get_instance()
         await milvus.client.has_collection(settings.milvus.MILVUS_COLLECTION_NAME)
 
     async def _probe_minio():
         from src.services.minio_service import MinioService
+
         minio = await MinioService.get_instance()
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
@@ -627,21 +660,38 @@ async def health_check_detail(current_user: CurrentUser = Depends(require_admin)
 
     async def _probe_ollama():
         import httpx
+
         host = (settings.model.OLLAMA_HOST or "http://localhost:11434").rstrip("/")
         async with httpx.AsyncClient(timeout=2.5) as client:
             resp = await client.get(f"{host}/api/version")
             resp.raise_for_status()
 
-    await _probe("milvus", _probe_milvus)
-    await _probe("minio", _probe_minio)
-    await _probe("ollama", _probe_ollama)
+    await _record("database", _probe_db)
+    await _record("redis", _probe_redis)
+    await _record("milvus", _probe_milvus)
+    await _record("minio", _probe_minio)
+    if include_ollama:
+        await _record("ollama", _probe_ollama)
+    return checks
 
+
+@app.get("/health/ready")
+async def health_ready():
+    """就绪探针（SEC-12）：任一关键依赖不可用返回 503，供容器编排使用。"""
+    checks = await _collect_health_checks(include_ollama=False, detailed=False)
+    ready = all(value == "ok" for value in checks.values())
+    return JSONResponse(
+        status_code=200 if ready else 503,
+        content={"status": "ready" if ready else "not_ready", "checks": checks},
+    )
+
+
+@app.get("/health/detail")
+async def health_check_detail(current_user: CurrentUser = Depends(require_admin)):
+    """详细健康检查接口（管理接口：暴露依赖拓扑与错误，需管理员权限）。"""
+    checks = await _collect_health_checks(include_ollama=True, detailed=True)
     overall_status = "healthy" if all(c["status"] == "healthy" for c in checks.values()) else "unhealthy"
-    
-    return {
-        "status": overall_status,
-        "checks": checks
-    }
+    return {"status": overall_status, "checks": checks}
 
 
 @app.get("/metrics")

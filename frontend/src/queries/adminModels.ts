@@ -1,3 +1,4 @@
+import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { api } from '@/utils/axios'
 
@@ -28,6 +29,9 @@ export interface AdminModel {
   max_output_tokens: number
   embedding_dimension: number
   temperature?: number | null
+  input_cost_per_1k?: number | null
+  output_cost_per_1k?: number | null
+  price_currency?: string
   enabled: boolean
 }
 
@@ -72,6 +76,9 @@ export interface ModelPayload {
   max_output_tokens?: number
   embedding_dimension?: number
   temperature?: number | null
+  input_cost_per_1k?: number | null
+  output_cost_per_1k?: number | null
+  price_currency?: string
   enabled?: boolean
 }
 
@@ -93,6 +100,63 @@ export interface ConnectionTestResult {
   error?: string
 }
 
+export interface ModelUsageRow {
+  provider_id: string
+  model_id: string
+  model_name: string
+  task: string
+  currency: string
+  calls: number
+  errors: number
+  input_tokens: number
+  output_tokens: number
+  avg_latency_ms: number
+  priced_calls: number
+  unpriced_calls: number
+  estimated_cost: number
+  last_error?: string
+}
+
+export interface ProviderHealthRow {
+  provider_id: string
+  state: string
+  consecutive_failures: number
+  total_calls: number
+  total_failures: number
+  total_skipped: number
+  opened_at?: number | null
+  last_failure_at?: number | null
+  last_error?: string
+}
+
+export interface ModelUsageResponse {
+  usage: ModelUsageRow[]
+  health: ProviderHealthRow[]
+  days: number
+}
+
+export interface IndexProfileInfo {
+  profile_id: string
+  provider_id?: string
+  model_id?: string
+  model_name: string
+  display_name?: string
+  dimension: number
+}
+
+export interface IndexStatus {
+  collection: string
+  indexed: IndexProfileInfo | null
+  target: IndexProfileInfo
+  in_sync: boolean
+  needs_rebuild: boolean
+  can_rollback: boolean
+  status: string
+  chunk_count: number
+  backup_collection?: string | null
+  last_error?: string
+}
+
 const ADMIN_KEY_STORAGE = 'rag_admin_key'
 
 export function getAdminKey(): string {
@@ -110,6 +174,7 @@ function adminHeaders(): Record<string, string> {
 }
 
 const snapshotKey = ['admin_model_snapshot'] as const
+const indexStatusKey = ['admin_model_index_status'] as const
 
 export function useAdminModelSnapshot() {
   return useQuery({
@@ -123,6 +188,59 @@ export function useAdminModelSnapshot() {
 function useInvalidate() {
   const queryClient = useQueryClient()
   return () => queryClient.invalidateQueries({ queryKey: snapshotKey })
+}
+
+/** Embedding 索引画像：当前索引 vs 待应用配置、重建中状态。 */
+export function useIndexStatus() {
+  return useQuery({
+    queryKey: indexStatusKey,
+    queryFn: async (): Promise<IndexStatus> =>
+      api.get<IndexStatus>('/admin/models/index/status', { headers: adminHeaders() }),
+    staleTime: 5_000,
+    retry: false,
+    refetchInterval: query => (query.state.data?.status === 'rebuilding' ? 5_000 : false)
+  })
+}
+
+function useIndexInvalidate() {
+  const queryClient = useQueryClient()
+  return () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: indexStatusKey }),
+      queryClient.invalidateQueries({ queryKey: snapshotKey })
+    ])
+}
+
+export function useRebuildIndex() {
+  const invalidate = useIndexInvalidate()
+  return useMutation({
+    mutationFn: async (force: boolean) =>
+      api.post('/admin/models/index/rebuild', {}, { params: { force }, headers: adminHeaders() }),
+    onSuccess: invalidate
+  })
+}
+
+export function useRollbackIndex() {
+  const invalidate = useIndexInvalidate()
+  return useMutation({
+    mutationFn: async () =>
+      api.post<IndexStatus>('/admin/models/index/rollback', {}, { headers: adminHeaders() }),
+    onSuccess: invalidate
+  })
+}
+
+/** 模型用量与成本（持久化最近 N 天 + 当前进程未落库增量）。 */
+export function useModelUsage(days: MaybeRefOrGetter<number> = 7) {
+  return useQuery({
+    queryKey: computed(() => ['admin_model_usage', toValue(days)]),
+    queryFn: async (): Promise<ModelUsageResponse> =>
+      api.get<ModelUsageResponse>('/admin/models/usage', {
+        params: { days: toValue(days) },
+        headers: adminHeaders()
+      }),
+    staleTime: 15_000,
+    retry: false
+  })
 }
 
 export function useCreateProvider() {

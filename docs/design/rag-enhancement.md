@@ -569,6 +569,8 @@ QUERY_REWRITE_MODEL=
 TITLE_GENERATION_MODEL=
 ```
 
+> 以上为 legacy 模式配置；P1/P2 起 Provider/Model/Route registry（DB 或 `MODEL_REGISTRY_FILE`）优先，按任务路由并支持热切换，见 [model-provider-registry-2026-10.md](model-provider-registry-2026-10.md)。
+
 ---
 
 ## 7. 测试与验收

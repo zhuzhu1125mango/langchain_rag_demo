@@ -43,9 +43,15 @@ def _model_config() -> ModelConfig:
     from src.services.model_manager import model_manager
 
     registry = model_manager.registry
+    try:
+        embedding_dimension = int(
+            registry.get_embedding_model().model.embedding_dimension or settings.model.EMBEDDING_DIMENSION
+        )
+    except Exception:
+        embedding_dimension = settings.model.EMBEDDING_DIMENSION
     return ModelConfig(
         embedding_model_name=registry.get_model_name("embedding") or (settings.model.EMBEDDING_MODEL_NAME or ""),
-        embedding_dimension=settings.model.EMBEDDING_DIMENSION,
+        embedding_dimension=embedding_dimension,
         ollama_model_name=registry.get_model_name("answer") or (settings.model.OLLAMA_MODEL_NAME or ""),
         ollama_direct_model_name=registry.get_model_name("answer_direct") or "",
         fast_llm_model_name=registry.get_model_name("fast") or (settings.model.FAST_LLM_MODEL_NAME or ""),

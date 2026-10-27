@@ -103,6 +103,10 @@ class ModelConfig(BaseModel):
     max_output_tokens: int = 0
     embedding_dimension: int = 0
     temperature: Optional[float] = None
+    # 成本估算单价（每 1K tokens）；未配置时成本记为未知
+    input_cost_per_1k: Optional[float] = None
+    output_cost_per_1k: Optional[float] = None
+    price_currency: str = "USD"
 
     def has(self, capability: str) -> bool:
         return capability in self.capabilities
@@ -257,6 +261,23 @@ class ModelRegistry:
 
         models.extend(extra_models)
 
+        # P3：可选 rerank 路由（仅当 env 配置了 Ollama 托管的 reranker 模型）
+        rerank_model = settings.processing.KB_RERANK_MODEL
+        if (
+            settings.processing.KB_RERANK_ENABLED
+            and rerank_model
+            and (settings.processing.KB_RERANK_PROVIDER or "").lower() == "ollama"
+        ):
+            models.append(
+                ModelConfig(
+                    id="legacy-rerank",
+                    provider="legacy-ollama",
+                    model=rerank_model,
+                    display_name="本地重排序模型",
+                    capabilities=["rerank"],
+                )
+            )
+
         routes: Dict[str, RouteConfig] = {
             "answer": RouteConfig(primary="legacy-answer", fallbacks=["legacy-fast"]),
             "answer_direct": RouteConfig(primary="legacy-direct", fallbacks=["legacy-fast"]),
@@ -270,6 +291,8 @@ class ModelRegistry:
             "doc_analyze": RouteConfig(primary="legacy-fast"),
             "embedding": RouteConfig(primary="legacy-embedding"),
         }
+        if any(model.id == "legacy-rerank" for model in models):
+            routes["rerank"] = RouteConfig(primary="legacy-rerank")
         return cls(ModelRegistryConfig(providers=providers, models=models, routes=routes), source=source)
 
     def _validate(self) -> None:
@@ -309,11 +332,22 @@ class ModelRegistry:
                 raise ModelRegistryError(f"model {model.id} 含未知能力: {sorted(unknown_caps)}")
             if model.has("embedding"):
                 dimension = model.embedding_dimension or settings.model.EMBEDDING_DIMENSION
+                if dimension <= 0:
+                    raise ModelRegistryError(f"embedding 模型 {model.id} 必须声明正整数维度")
                 if dimension != settings.model.EMBEDDING_DIMENSION:
-                    raise ModelRegistryError(
-                        f"embedding 模型 {model.id} 维度 {dimension} 与当前配置 "
-                        f"{settings.model.EMBEDDING_DIMENSION} 不一致；切换 Embedding 必须重建索引"
+                    # P3：维度以 registry 为权威；变更需先重建索引，由 apply 闸门拦截，
+                    # 这里不再直接拒绝，否则无法在管理页保存目标配置并触发迁移。
+                    logger.warning(
+                        "embedding 模型 %s 维度 %d 与当前 EMBEDDING_DIMENSION=%d 不一致，"
+                        "应用配置前需重建 Milvus 索引",
+                        model.id,
+                        dimension,
+                        settings.model.EMBEDDING_DIMENSION,
                     )
+            for price_field in ("input_cost_per_1k", "output_cost_per_1k"):
+                price = getattr(model, price_field)
+                if price is not None and price < 0:
+                    raise ModelRegistryError(f"model {model.id} 的 {price_field} 不能为负数")
 
         embedding_route = self.routes["embedding"]
         embedding_model = self.models.get(embedding_route.primary)

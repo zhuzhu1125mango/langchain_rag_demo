@@ -105,11 +105,16 @@ class WikiCompiler:
 
     def _get_embeddings(self):
         # 复用 model_manager 共享 OllamaEmbeddings 单例（B2，与检索链路同源连接），
-        # 避免自建实例在容器环境因缺少连接配置而失效
-        if self._embeddings is None:
-            from src.services.model_manager import model_manager
+        # 避免自建实例在容器环境因缺少连接配置而失效；P3 模型切换后自动刷新
+        from src.services.model_manager import model_manager
 
+        try:
+            current_key = model_manager.embedding_model_key
+        except Exception:
+            current_key = ""
+        if self._embeddings is None or (current_key and current_key != getattr(self, "_embeddings_key", "")):
             self._embeddings = model_manager.get_embeddings()
+            self._embeddings_key = current_key
         return self._embeddings
 
     # ------------------------------------------------------------------

@@ -64,6 +64,33 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         self._flush_limiter = AsyncLimiter(1, flush_interval)
         # schema 是否含 heading_path 字段（P0-2a 结构化分块），决定插入/查询是否携带
         self._has_heading_path: bool = False
+        # P3：记录 embeddings 实例对应的 registry 模型标识，切换 Embedding 后自动刷新
+        self._embeddings_key: str = ""
+
+    def _embedding_dimension(self) -> int:
+        """当前 Embedding 维度：registry 为权威，legacy/env 作为兜底。"""
+        try:
+            model = model_manager.registry.get_embedding_model().model
+            return int(model.embedding_dimension or settings.model.EMBEDDING_DIMENSION)
+        except Exception:
+            return int(settings.model.EMBEDDING_DIMENSION)
+
+    def _get_embeddings(self):
+        """按当前 registry 获取共享 Embedding 实例；模型切换时自动刷新。"""
+        try:
+            key = model_manager.embedding_model_key
+        except Exception:
+            key = ""
+        if self.embeddings is None or (key and key != self._embeddings_key):
+            self.embeddings = model_manager.get_embeddings()
+            self._embeddings_key = key
+        return self.embeddings
+
+    def refresh_embeddings(self) -> None:
+        """索引迁移/registry 切换后强制刷新 Embedding 实例。"""
+        self._embeddings_key = ""
+        self.embeddings = None
+        self._get_embeddings()
 
     async def _async_init(self):
         """异步初始化 Milvus 连接、Embedding 模型并确保集合就绪。"""
@@ -72,7 +99,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             db_name=settings.milvus.MILVUS_DATABASE
         )
         # B2：embeddings 走 model_manager 共享单例，避免各服务重复构造
-        self.embeddings = model_manager.get_embeddings()
+        self._get_embeddings()
         await self._ensure_collection()
         # 启动时加载与 collection 绑定的持久化 BM25 词表，
         # 保证查询编码空间与历史 sparse 向量一致（不依赖"先插入过文档"）
@@ -111,7 +138,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             await self._ensure_sparse_index()
         await self.client.load_collection(settings.milvus.MILVUS_COLLECTION_NAME)
 
-    async def _build_schema(self):
+    async def _build_schema(self, dimension: Optional[int] = None):
         """构建包含 dense 与 sparse 向量的集合 schema。"""
         schema = AsyncMilvusClient.create_schema(
             auto_id=False,
@@ -121,7 +148,11 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         schema.add_field("kb_id", DataType.VARCHAR, max_length=64, default_value="")
         schema.add_field("document_id", DataType.VARCHAR, max_length=64)
         schema.add_field("content", DataType.VARCHAR, max_length=65535, enable_analyzer=True)
-        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=settings.model.EMBEDDING_DIMENSION)
+        schema.add_field(
+            "embedding",
+            DataType.FLOAT_VECTOR,
+            dim=int(dimension or self._embedding_dimension()),
+        )
         schema.add_field("source", DataType.VARCHAR, max_length=512)
         schema.add_field("chunk_index", DataType.INT64)
         # P0-2a：结构化分块的标题路径（"A > B > C"），旧集合通过 add_collection_field 兼容
@@ -197,8 +228,9 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             fields.append("source_kind")
         return fields
 
-    async def _create_indexes(self):
+    async def _create_indexes(self, collection_name: Optional[str] = None):
         """创建 dense HNSW 索引与 sparse 索引。"""
+        target = collection_name or settings.milvus.MILVUS_COLLECTION_NAME
         # Dense HNSW 索引
         index_params = self.client.prepare_index_params(
             field_name="embedding",
@@ -211,7 +243,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             index_name=settings.milvus.MILVUS_INDEX_NAME
         )
         await self.client.create_index(
-            collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+            collection_name=target,
             index_params=index_params
         )
         # Sparse BM25 索引
@@ -224,7 +256,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                 index_name=f"{settings.milvus.MILVUS_INDEX_NAME}_sparse"
             )
             await self.client.create_index(
-                collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+                collection_name=target,
                 index_params=sparse_index_params
             )
 
@@ -265,7 +297,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         for field in collection_info["fields"]:
             if field["name"] == "embedding" and field["type"] == DataType.FLOAT_VECTOR:
                 current_dim = field.get("params", {}).get("dim")
-                expected_dim = settings.model.EMBEDDING_DIMENSION
+                expected_dim = self._embedding_dimension()
                 if current_dim is not None and current_dim != expected_dim:
                     if not settings.milvus.MILVUS_REBUILD_ON_MISMATCH:
                         raise RuntimeError(
@@ -285,6 +317,164 @@ class MilvusService(AsyncSingleton["MilvusService"]):
                     )
                     await self._create_indexes()
                 break
+
+    async def describe_embedding_dimension(self, collection_name: Optional[str] = None) -> Optional[int]:
+        """返回集合 embedding 字段维度；集合不存在时返回 None。"""
+        name = collection_name or settings.milvus.MILVUS_COLLECTION_NAME
+        if not await self.client.has_collection(name):
+            return None
+        info = await self.client.describe_collection(name)
+        for field in info.get("fields", []):
+            if field.get("name") == "embedding" and field.get("type") == DataType.FLOAT_VECTOR:
+                return int(field.get("params", {}).get("dim") or 0) or None
+        return None
+
+    async def _collection_count(self, collection_name: str) -> int:
+        if not await self.client.has_collection(collection_name):
+            return 0
+        rows = await self.client.query(
+            collection_name=collection_name,
+            filter="",
+            output_fields=["count(*)"],
+        )
+        return int(rows[0]["count(*)"] if rows else 0)
+
+    async def rebuild_collection(
+        self,
+        target_dimension: int,
+        embeddings: Any,
+        progress_cb: Optional[Any] = None,
+    ) -> Dict[str, Any]:
+        """把现有集合内容重新向量化写入影子集合（P3）。
+
+        只读取标量字段并复用现有 chunk 文本，不重新解析源文件；sparse 向量复用
+        与 collection 绑定的 BM25 词表重新编码，保持查询编码空间一致。
+        成功后返回影子集合名，由 ``swap_collection`` 原子替换。
+        """
+        live = settings.milvus.MILVUS_COLLECTION_NAME
+        shadow = f"{live}__rebuild_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+        has_live = await self.client.has_collection(live)
+        total = await self._collection_count(live) if has_live else 0
+
+        schema = await self._build_schema(dimension=target_dimension)
+        await self.client.create_collection(collection_name=shadow, schema=schema)
+
+        inserted = 0
+        skipped = 0
+        if has_live and total:
+            info = await self.client.describe_collection(live)
+            available = {f["name"] for f in info.get("fields", [])}
+            output_fields = [
+                name
+                for name in ("id", "kb_id", "document_id", "content", "source", "chunk_index", "heading_path", "source_kind")
+                if name in available
+            ]
+            batch_size = 500
+            offset = 0
+            while offset < total:
+                rows = await self.client.query(
+                    collection_name=live,
+                    filter="",
+                    output_fields=output_fields,
+                    limit=batch_size,
+                    offset=offset,
+                )
+                if not rows:
+                    break
+                offset += len(rows)
+                usable = [row for row in rows if str(row.get("content") or "").strip()]
+                skipped += len(rows) - len(usable)
+                if not usable:
+                    continue
+                texts = [str(row["content"]) for row in usable]
+                dense_vectors = await embeddings.aembed_documents(texts)
+                if dense_vectors and len(dense_vectors[0]) != target_dimension:
+                    raise RuntimeError(
+                        f"目标 Embedding 维度 {len(dense_vectors[0])} 与声明维度 {target_dimension} 不一致"
+                    )
+                sparse_vectors = await self._encode_sparse_for_migration(texts)
+                data = []
+                for index, (row, vector) in enumerate(zip(usable, dense_vectors)):
+                    item = {
+                        "id": str(row["id"]),
+                        "kb_id": row.get("kb_id") or "",
+                        "document_id": row.get("document_id") or "",
+                        "content": row["content"],
+                        "embedding": vector,
+                        "source": row.get("source") or "",
+                        "chunk_index": int(row.get("chunk_index") or 0),
+                        "heading_path": row.get("heading_path") or "",
+                        "source_kind": row.get("source_kind") or "raw",
+                    }
+                    if sparse_vectors and index < len(sparse_vectors):
+                        item["sparse_embedding"] = sparse_vectors[index]
+                    data.append(item)
+                await self.client.insert(collection_name=shadow, data=data)
+                inserted += len(data)
+                if progress_cb is not None:
+                    await progress_cb(inserted, total)
+
+        await self.client.flush(collection_name=shadow)
+        await self._create_indexes(collection_name=shadow)
+        await self.client.load_collection(shadow)
+        logger.info("Embedding 索引影子集合构建完成: %s, chunks=%d, skipped=%d", shadow, inserted, skipped)
+        return {
+            "shadow_collection": shadow,
+            "chunk_count": inserted,
+            "source_count": total,
+            "skipped": skipped,
+        }
+
+    async def _encode_sparse_for_migration(self, texts: List[str]) -> Optional[List[Any]]:
+        """用现有 BM25 词表编码；词表缺失时跳过 sparse（dense 仍可用）。"""
+        if not self._sparse_enabled:
+            return None
+        if self.bm25_ef is None:
+            await asyncio.to_thread(self._load_bm25_vocabulary)
+        if self.bm25_ef is None:
+            logger.warning("BM25 词表不可用，重建集合将不写入 sparse 向量")
+            return None
+        try:
+            raw = await asyncio.to_thread(self.bm25_ef.encode_documents, texts)
+            return await asyncio.to_thread(self._convert_sparse_embeddings, raw)
+        except Exception as exc:
+            logger.warning("重建集合时 BM25 编码失败，跳过 sparse: %s", exc)
+            return None
+
+    async def swap_collection(self, shadow_collection: str) -> str:
+        """把影子集合替换为线上集合，旧集合保留为备份；失败时尝试还原。"""
+        live = settings.milvus.MILVUS_COLLECTION_NAME
+        backup = f"{live}__backup_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+        await self.client.rename_collection(live, backup)
+        try:
+            await self.client.rename_collection(shadow_collection, live)
+            await self.client.load_collection(live)
+        except Exception:
+            try:
+                await self.client.rename_collection(backup, live)
+                await self.client.load_collection(live)
+            except Exception as restore_exc:  # pragma: no cover - 极端故障路径
+                logger.error("索引交换失败且自动还原失败，需人工介入: %s", restore_exc)
+            raise
+        return backup
+
+    async def restore_collection(self, backup_collection: str) -> str:
+        """回滚：把备份集合换回线上，当前集合归档保留。"""
+        live = settings.milvus.MILVUS_COLLECTION_NAME
+        archive = f"{live}__rolledback_{int(time.time())}_{uuid.uuid4().hex[:4]}"
+        if await self.client.has_collection(live):
+            await self.client.rename_collection(live, archive)
+        await self.client.rename_collection(backup_collection, live)
+        await self.client.load_collection(live)
+        return archive
+
+    async def drop_collection_by_name(self, collection_name: str) -> None:
+        """删除非线上集合（影子/失败副本）；线上集合必须走受控迁移流程。"""
+        live = settings.milvus.MILVUS_COLLECTION_NAME
+        if collection_name == live:
+            raise RuntimeError("拒绝删除线上 Milvus 集合")
+        if await self.client.has_collection(collection_name):
+            await self.client.drop_collection(collection_name)
 
     async def _add_sparse_field_if_missing(self):
         """兼容旧集合：缺少 sparse_embedding 字段时不删除数据，仅记录日志。
@@ -369,19 +559,20 @@ class MilvusService(AsyncSingleton["MilvusService"]):
         # （Semaphore 2）跑子批 aembed_documents，降低峰值并可能提速。aembed 返回与输入同序，
         # 按子批 flat 回原序，保证下游 zip(documents, embedding) 一一对应。
         _EMBED_SUB_BATCH = 32
+        embeddings = self._get_embeddings()
         if len(contents) > _EMBED_SUB_BATCH:
             _sem = asyncio.Semaphore(2)
 
             async def _embed_sub(batch):
                 async with _sem:
-                    return await self.embeddings.aembed_documents(batch)
+                    return await embeddings.aembed_documents(batch)
 
             _sub_lists = await asyncio.gather(
                 *(_embed_sub(contents[i:i + _EMBED_SUB_BATCH]) for i in range(0, len(contents), _EMBED_SUB_BATCH))
             )
             embeddings_list = [v for _sl in _sub_lists for v in _sl]
         else:
-            embeddings_list = await self.embeddings.aembed_documents(contents)
+            embeddings_list = await embeddings.aembed_documents(contents)
 
         # 阶段一：计算 BM25 sparse embedding
         sparse_embeddings = None
@@ -532,7 +723,7 @@ class MilvusService(AsyncSingleton["MilvusService"]):
             query_embedding: 预计算的 query 向量，传入时跳过 aembed_query 避免重复计算。
         """
         if query_embedding is None:
-            query_embedding = await self.embeddings.aembed_query(query)
+            query_embedding = await self._get_embeddings().aembed_query(query)
 
         search_params = {
             "metric_type": "IP",

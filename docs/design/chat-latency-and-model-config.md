@@ -1,6 +1,7 @@
 # 问答链路首字延迟治理与模型配置去硬编码方案
 
 > 状态：已实施（2026-09-07），实施记录见文末 §10；2026-10-03 二次优化与瓶颈诊断见 §11，直答模型 A/B 实测与定稿见 §12，2026-10-12 后续优化实测（多轮慢例修复 / reranker 换型 / 天气提取器修复）见 §13
+> 后续演进：模型选择已由 [model-provider-registry-2026-10.md](model-provider-registry-2026-10.md) 的 Provider/Model/Route registry 接管（P1 2026-10-25、P2 2026-10-26）；本篇保留历史决策、延迟治理与 A/B 记录，`.env` 模型配置仅作 legacy 兜底
 > 范围：后端问答管线（backend/src）、前端 ChatView 事件处理（frontend/src）
 > 约束：离线开源模型（Ollama）；模型名不得硬编码，一律走配置；深度思考仅保留 开/关 两态；回答须结合知识库检索与模型自身智能
 
@@ -46,6 +47,8 @@
 | `OLLAMA_SUPPORTS_THINKING` | `true` | qwen3 支持思考 |
 
 **2026-10-03 更新**：直答与辅助任务已切换为 `qwen2.5:3b-instruct`（原生非思考），与主模型 `qwen3:4b` 分属不同常驻角色——下文 §2.2 原「主辅同名、无换载」的结论已不再适用；显存约束改由「4B 仅 `deep_thinking=on` 主回答链，其余全部走 3B」保证（详见 [project-status.md §四](../project-status.md) 与 [direct-model-switch-plan-2026-10-03.md](../archive/direct-model-switch-plan-2026-10-03.md)）。
+
+**2026-10-26 更新**：上表为 legacy 模式默认值；P1/P2 起可经 DB/JSON registry 按任务覆盖（配置优先级与切换方式见 [model-provider-registry-2026-10.md](model-provider-registry-2026-10.md) §4/§8）。
 
 ### 2.3 模型名硬编码点清单
 

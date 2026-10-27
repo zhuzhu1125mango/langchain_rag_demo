@@ -93,9 +93,9 @@ docs/
 | [agent-maturity-gap-analysis.md](design/agent-maturity-gap-analysis.md) | 已确认 | Agent 成熟度对标与差距分析（2026-10-20）：对标业界做法与主流产品，给出能力矩阵/差距清单/优先级；落地项见 [project-status.md](project-status.md) §二「Agent 成熟度差距」 |
 | [agent-eval-trace.md](design/agent-eval-trace.md) | 部分实施 | Agent 轨迹级评测（AM-1）：①②③ 已实施（2026-10-20，单测 +16；`AGENT_TRAJ_EVAL_ENABLED` 默认关）；④ 在线抽样待办 |
 | [agent-guardrails-hitl.md](design/agent-guardrails-hitl.md) | 已实施 | Agent 护栏与 HITL（AM-2，2026-10-22）：输入/工具/输出三层确定性护栏 + 审批闸门（`AGENT_APPROVAL_MODE` 默认 off，审批名单为空时不触发）；端到端 SSE `approval_required` + 回执 API + 前端审批卡片 |
-| [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) | 已实施 | 安全与多租户加固（2026-10-24 对抗性审查）：P1×5 **已完成**；P2×10 待办；P3×6 中 SEC-20/21 已完成、SEC-18 部分完成。任务拆分见 [project-status.md](project-status.md)「安全与多租户加固专项」 |
+| [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) | 部分实施 | 安全与多租户加固（2026-10-24 对抗性审查）：P1×5 已完成；P2 中 SEC-6/7/8/10/11/12 完成、SEC-9/13/14/15 部分完成；P3×6 中 SEC-20/21 已完成、SEC-18 部分完成。任务拆分见 [project-status.md](project-status.md)「安全与多租户加固专项」 |
 | [ui-visual-polish-2026-10.md](design/ui-visual-polish-2026-10.md) | 已实施 | 前端视觉收口（VIS-3，2026-10-24）：8px 网格/768px 聊天主列、EP 弹窗/下拉/表单/表格 token 化、侧栏与知识库/设置页密度收口；浅深色与移动端截图验证 |
-| [model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) | P2 已实施 | 模型 Provider/Model/Route 三层：Ollama + OpenAI-Compatible、任务路由、能力校验、热切换/fallback；DB 配置 + 加密 Key + 管理 API/UI；P3 Embedding 迁移 |
+| [model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) | 部分实施 | 模型 Provider/Model/Route 三层：P1/P2/P2.1/P3 已完成（2026-10-26）；含熔断、用量/成本持久化、设置页展示、Embedding 影子集合重建/回滚与可选 rerank 路由；剩余 P4（Anthropic/Gemini/Azure、租户/成本策略） |
 | [evolution-roadmap-2026-10.md](design/evolution-roadmap-2026-10.md) | 已确认 | 全项目演进与完善路线（2026-10-22 审计）：业界「标配/差异化/避免」对标 + 代码/UX/视觉/运维差距证据 + 三批次执行序；任务条目见 [project-status.md](project-status.md) §二「全项目完善与演进专项」 |
 | [evolution-research-2026-09.md](design/evolution-research-2026-09.md) | 已确认 | 演进方向调研（2026-09-23）：从 RAG 问答到自进化知识运行时，四阶段路线于 2026-09-29 owner 拍板转正，立项见 special-projects-2026-09.md |
 | [wiki-navigable-workspace.md](design/wiki-navigable-workspace.md) | 已实施 | 阶段一：Wiki 升级为 Agent 可导航工作空间（D1/D3/D4 落地；D2/D5 经 A/B 证伪后回退默认值，见 §10） |
@@ -116,6 +116,7 @@ docs/
 | 本地开发/跑测试 | [guide/development.md](guide/development.md) |
 | 排查线上问题 | [guide/monitoring.md](guide/monitoring.md) → [guide/development.md](guide/development.md) 踩坑记录 |
 | 查接口 | [api.md](api.md)（另有 Swagger UI: `http://localhost:8000/docs`） |
+| 配置/切换模型 | 设置 → 模型服务（`/settings/models`）→ [design/model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) → [guide/deployment.md](guide/deployment.md) §6.3.2 |
 | 了解技术决策/规划 | [project-status.md](project-status.md) → [design/special-projects-2026-09.md](design/special-projects-2026-09.md) → [design/improvement-roadmap.md](design/improvement-roadmap.md) |
 | 跟进实施状态 | [project-status.md](project-status.md)（已完成/待办台账）→ 本文件「design/ 文档状态表」→ 对应文档的实施记录章节 |
 | 公网上线/安全评估 | [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) → [project-status.md](project-status.md)「安全与多租户加固专项」→ [agent-guardrails-hitl.md](design/agent-guardrails-hitl.md) |

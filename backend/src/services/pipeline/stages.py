@@ -44,6 +44,7 @@ from src.services.reasoning import (
 from src.services.semantic_cache_service import SemanticCacheService
 from src.services.identity import build_identity_answer
 from src.services.trace_collector import TraceCollector
+from src.utils.security import redact_for_log
 from src.services.tools.plugins._datetime_impl import build_datetime_answer
 
 logger = logging.getLogger("rag_system")
@@ -333,7 +334,7 @@ class PipelineStagesMixin:
         if intent_decision.context_rewrite:
             if intent_decision.context_rewrite != state.resolved_question:
                 state.resolved_question = intent_decision.context_rewrite
-                logger.info(f"使用意图路由改写后的问题: {state.resolved_question}")
+                logger.info(f"使用意图路由改写后的问题: {redact_for_log(state.resolved_question)}")
                 yield ("reasoning", self._reasoning_payload(
                     REASONING_STEP_CONTEXT_REWRITE,
                     "done",

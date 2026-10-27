@@ -19,6 +19,7 @@ from src.services.search_agent import (
     SearchAgentResult,
     SearchToolkit,
 )
+from src.utils.security import redact_for_log
 
 logger = logging.getLogger("rag_system")
 
@@ -212,9 +213,9 @@ class AgentMixin:
             answer_polluted = looks_like_tool_call(state.final_answer)
             if (not state.final_answer and not agent_sources or answer_polluted) and settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
                 if answer_polluted:
-                    logger.warning(f"Agent 回答被工具 JSON 污染，降级到 Phase 2 联网搜索: {state.resolved_question}")
+                    logger.warning(f"Agent 回答被工具 JSON 污染，降级到 Phase 2 联网搜索: {redact_for_log(state.resolved_question)}")
                 else:
-                    logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {state.resolved_question}")
+                    logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {redact_for_log(state.resolved_question)}")
                 async for ev in self._phase2_web_search(state):
                     yield ev
                 # 不终止，继续走后续 final_context 构建与回答生成逻辑。
@@ -237,7 +238,7 @@ class AgentMixin:
             agent_sources = agent_result.sources
         elif settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
             # 方案B：Agent 未调用工具时降级到 Phase 2 联网搜索
-            logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {state.resolved_question}")
+            logger.info(f"Agent 输出为空，降级到 Phase 2 联网搜索: {redact_for_log(state.resolved_question)}")
             async for ev in self._phase2_web_search(state):
                 yield ev
             state.is_agent_mode = False
@@ -334,9 +335,9 @@ class AgentMixin:
                 state.trace.set_pollution_detected(True)
             if (not state.final_answer or polluted) and settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
                 if polluted:
-                    logger.warning(f"Agent 循环回答被污染，降级到 Phase 2: {state.resolved_question}")
+                    logger.warning(f"Agent 循环回答被污染，降级到 Phase 2: {redact_for_log(state.resolved_question)}")
                 else:
-                    logger.info(f"Agent 循环输出为空，降级到 Phase 2: {state.resolved_question}")
+                    logger.info(f"Agent 循环输出为空，降级到 Phase 2: {redact_for_log(state.resolved_question)}")
                 async for ev2 in self._phase2_web_search(state):
                     yield ev2
                 state.is_agent_mode = False
@@ -369,7 +370,7 @@ class AgentMixin:
                 f"context_length={len(context)}, sources={len(state.source_metadata)}"
             )
         elif settings.search.SEARCH_AGENT_FALLBACK_TO_PHASE2:
-            logger.info(f"Agent 循环未获得上下文，降级到 Phase 2: {state.resolved_question}")
+            logger.info(f"Agent 循环未获得上下文，降级到 Phase 2: {redact_for_log(state.resolved_question)}")
             async for ev2 in self._phase2_web_search(state):
                 yield ev2
             state.is_agent_mode = False
