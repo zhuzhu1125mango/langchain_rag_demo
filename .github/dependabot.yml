@@ -10,13 +10,17 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
     ignore:
-      # OPS-2 收口（2026-10-27）：这两项的大版本被上游硬约束锁死，登记豁免避免重复 PR。
+      # OPS-2 收口（2026-10-27）：以下依赖被上游硬约束锁死，登记豁免避免重复 PR。
       # filelock 4.x 需 unstructured 放宽 <4.0.0（见 .trivyignore 与 pyproject 注释）；
-      # transformers 5.x 与 ocr-mineru 组（mineru<5）冲突。解除前请先验证依赖图可解析。
+      # transformers 5.x 与 ocr-mineru 组（mineru<5）冲突；
+      # tokenizers >0.23.0 与 transformers 4.57.x（要求 <=0.23.0）冲突，后者被 mineru 锁定。
+      # 解除前请先验证 `uv lock` 可解析（含 ocr-mineru extra）。
       - dependency-name: "filelock"
         update-types: ["version-update:semver-major"]
       - dependency-name: "transformers"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "tokenizers"
+        update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
   - package-ecosystem: npm
     directory: /frontend
     schedule:
