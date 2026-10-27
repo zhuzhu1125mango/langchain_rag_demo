@@ -78,7 +78,8 @@ class ModelUsageDaily(Base):
 
     __tablename__ = "model_usage_daily"
 
-    usage_date = Column(Date, primary_key=True, nullable=False)
+    # 按日期范围查询走独立索引（与迁移 b3c4d5e6f7a8 的 ix_model_usage_daily_usage_date 对齐）
+    usage_date = Column(Date, primary_key=True, nullable=False, index=True)
     provider_id = Column(String(36), primary_key=True, nullable=False)
     model_id = Column(String(36), primary_key=True, nullable=False)
     task = Column(String(64), primary_key=True, nullable=False)
