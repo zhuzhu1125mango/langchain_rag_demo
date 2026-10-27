@@ -76,7 +76,7 @@ dependencies = [
     # 强制 filelock<4.0.0，暂维持 3.29.1 并在 .trivyignore 登记该条，待上游放宽后升级
     "filelock==3.29.1",
     "fsspec==2026.6.0",
-    "huggingface_hub>=0.34.0,<2.0",
+    "huggingface_hub>=0.34.0,<3.0",
     "safetensors==0.7.0",
     "tokenizers==0.22.2",
     "jieba==0.42.1",
@@ -102,7 +102,7 @@ dependencies = [
     "duckduckgo-search==8.1.1",
     # P1-1 JWT 多用户认证（OPS-6：2.14 修复公钥/空 HMAC Key 认证绕过）
     "pyjwt>=2.14,<3",
-    "bcrypt>=4.0,<5",
+    "bcrypt>=4.0,<6",
     "tavily>=1.1.0",
     "langchain-openai>=1.2.2",
 ]
@@ -117,7 +117,7 @@ dev = [
     "pytest-cov==7.1.0",
     "pytest-mock==3.15.1",
     "black==26.5.1",
-    "isort==8.0.1",
+    "isort==9.0.2",
     "flake8==7.3.0",
     "pytest-timeout>=2.4.0",
 ]

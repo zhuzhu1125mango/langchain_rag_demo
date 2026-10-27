@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # .env.dev / .env.prod 被 .gitignore 忽略、不入库，脚本 read_env_keys 遇缺失文件
       # 会 sys.exit(2) → CI 必然失败。这里用 .env.example 生成占位 dev/prod 副本，
@@ -55,11 +55,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install uv
         # uvx 依赖 uv（W6 #64 首轮 CI 复盘：runner 无预装，exit 127）
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           enable-cache: false
 
@@ -70,7 +70,7 @@ jobs:
         with:
           version: 10
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install gitleaks
         run: |
@@ -124,11 +124,11 @@ jobs:
       # Unit job 无 minio 容器，对齐默认（W6 #11 默认改 true，显式关闭防本地 http 连接歧义）
       MINIO_SECURE: "false"
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install uv
         # 注意：setup-uv 自 v9 起无 v10/v9 主版本别名 tag，只能用完整版本 tag
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -206,11 +206,11 @@ jobs:
       SKIP_OLLAMA_CHECK: "true"
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install uv
         # 注意：setup-uv 自 v9 起无 v10/v9 主版本别名 tag，只能用完整版本 tag
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -292,11 +292,11 @@ jobs:
       run:
         working-directory: backend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Install uv
         # 注意：setup-uv 自 v9 起无 v10/v9 主版本别名 tag，只能用完整版本 tag
-        uses: astral-sh/setup-uv@v10.0.1
+        uses: astral-sh/setup-uv@v10.3.2
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -318,14 +318,14 @@ jobs:
 
       - name: Upload eval report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: eval-report
           path: backend/eval_report.json
 
       - name: Upload multi-query A/B report
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: mq-ab-report
           path: backend/mq_ab_report.json
@@ -338,13 +338,13 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
           version: 10
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -373,7 +373,7 @@ jobs:
 
       - name: Upload E2E report
         if: failure()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: frontend/playwright-report/

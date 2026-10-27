@@ -9,6 +9,14 @@ updates:
       backend-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # OPS-2 收口（2026-10-27）：这两项的大版本被上游硬约束锁死，登记豁免避免重复 PR。
+      # filelock 4.x 需 unstructured 放宽 <4.0.0（见 .trivyignore 与 pyproject 注释）；
+      # transformers 5.x 与 ocr-mineru 组（mineru<5）冲突。解除前请先验证依赖图可解析。
+      - dependency-name: "filelock"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "transformers"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
     directory: /frontend
     schedule:
@@ -18,6 +26,14 @@ updates:
       frontend-minor:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    ignore:
+      # 大版本需人工评估（已关闭的 15.x/26.x PR 不再重复打扰）；解除 ignore 后手动升级。
+      - dependency-name: "markdown-it"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@vueuse/core"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

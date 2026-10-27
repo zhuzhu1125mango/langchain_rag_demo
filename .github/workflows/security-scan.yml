@@ -14,7 +14,7 @@ jobs:
   trivy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # OPS-6：依赖已升级到修复版本；仅 .trivyignore 中登记的 4 条（filelock/transformers
       # 上游约束）豁免，其余 HIGH/CRITICAL 阻断。
       - name: Trivy filesystem scan (high/critical)
@@ -39,7 +39,7 @@ jobs:
           format: json
           output: trivy-results.json
       - name: Upload Trivy report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-results
           path: trivy-results.json
@@ -48,7 +48,7 @@ jobs:
   sbom:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Generate SBOM (SPDX)
         uses: anchore/sbom-action@v0
         with:
