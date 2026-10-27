@@ -151,7 +151,7 @@
 | `services/trace_collector.py` | 请求链路追踪采集（对应 `/api/traces`） |
 | `services/audit_service.py` | 审计日志记录与查询（P2-4，best-effort 写入不阻断主流程，对应 `/api/audit`） |
 | `middleware/` | Prometheus 指标、自定义 Metrics 中间件 |
-| `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验）、`rate_limit.py`（受信代理 IP + Redis/进程内限流）、`quota.py`（聊天/上传/评估配额）、`safe_http.py`（连接层固定 IP 的 SSRF 安全客户端） |
+| `utils/` | AsyncSingleton（服务单例统一基类）、安全工具、敏感词、校验器（含 `validate_kb_ownership` 归属校验）、`rate_limit.py`（受信代理 IP + Redis/进程内限流）、`quota.py`（聊天/上传/评估配额）、`safe_http.py`（连接层固定 IP 的 SSRF 安全客户端）、`log_context.py`（request_id/user/stage 结构化日志上下文） |
 | `models/strategy.py` | 学习样本：`strategy_executions.user_id`（SEC-1 owner 隔离） |
 | `auth.py` | 认证：`X-API-Key`（全局单租户 / 用户级 API Key，后者解析为真实 `user_id`）+ JWT 多用户（注册/登录/`/me`/`/refresh`）+ `require_owner` 对象级授权 + WS 首帧鉴权 |
 | `prompts/` | 提示词模板（aiofiles 异步加载） |

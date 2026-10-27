@@ -45,6 +45,7 @@ from src.services.semantic_cache_service import SemanticCacheService
 from src.services.identity import build_identity_answer
 from src.services.trace_collector import TraceCollector
 from src.utils.security import redact_for_log
+from src.utils.log_context import log_stage
 from src.services.tools.plugins._datetime_impl import build_datetime_answer
 
 logger = logging.getLogger("rag_system")
@@ -288,6 +289,7 @@ class PipelineStagesMixin:
         async for ev in self._finalize(state):
             yield ev
 
+    @log_stage("enhance_context")
     async def _stage_enhance_context(self, state: _PipelineState):
         """阶段 1：上下文增强（指代消解与上下文压缩）。"""
         enhanced = await self.enhance_context(state.question, state.history or [], state.session_id)
@@ -295,6 +297,7 @@ class PipelineStagesMixin:
         state.history_context = enhanced["enhanced_context"]
         state.trace.data["resolved_question"] = state.resolved_question
 
+    @log_stage("intent")
     async def _stage_intent(self, state: _PipelineState):
         """阶段 3：意图路由，tool_first 类问题优先走工具执行。"""
         intent_start = time.time()
@@ -343,6 +346,7 @@ class PipelineStagesMixin:
                     metadata={"rewritten_question": state.resolved_question},
                 ))
 
+    @log_stage("tool_first")
     async def _stage_tool_first(self, state: _PipelineState):
         """阶段 4：工具优先执行，成功时流式生成答案并短路后续流程。"""
         intent_decision = state.intent_decision
@@ -425,6 +429,7 @@ class PipelineStagesMixin:
                 content="工具调用失败，转入检索生成流程",
             ))
 
+    @log_stage("decide")
     async def _stage_decide(self, state: _PipelineState):
         """阶段 5：知识库使用决策（决策结果写入请求级 ContextVar）。"""
         strategy_decision = await self._should_use_knowledge_base(
@@ -438,6 +443,7 @@ class PipelineStagesMixin:
             and state.decision.mode in (QAMode.FUNCTION_CALLING, QAMode.AGENT_SEARCH)
         )
 
+    @log_stage("semantic_cache")
     async def _stage_semantic_cache_lookup(self, state: _PipelineState):
         """阶段 5.5：语义缓存查找（P1-3）。命中时回放缓存答案并短路后续流程。
 
@@ -533,6 +539,7 @@ class PipelineStagesMixin:
         _background_store_tasks.add(task)
         task.add_done_callback(_background_store_tasks.discard)
 
+    @log_stage("kb_retrieval")
     async def _stage_kb_retrieval(self, state: _PipelineState):
         """阶段 8：知识库检索与相关性评估。"""
         if not (state.use_kb and state.decision and state.decision.mode in (
@@ -625,6 +632,7 @@ class PipelineStagesMixin:
                 estimated=True,
             )
 
+    @log_stage("generation")
     async def _stage_generate(self, state: _PipelineState):
         """阶段 9：构建最终上下文（ContextBuilder）并流式生成回答。"""
         # Agent 来源是 kb_search + web_search 的混合体，需按 source_type 分流：
@@ -835,6 +843,7 @@ class PipelineStagesMixin:
             # 收尾为最佳努力（best-effort），异常不应向客户端回传或阻塞断连流程
             logger.warning(f"终态清理异常: {e}", exc_info=True)
 
+    @log_stage("finalize")
     async def _finalize(self, state: _PipelineState):
         """终态：执行清理副作用并产出 ("final", state) 事件。"""
         await self._finalize_side_effects(state)

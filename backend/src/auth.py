@@ -22,6 +22,7 @@ from starlette.exceptions import WebSocketException
 from pydantic import BaseModel
 
 from src.config import settings
+from src.utils.log_context import bind_user
 
 logger = logging.getLogger(__name__)
 
@@ -362,6 +363,12 @@ def validate_uuid_user_id(user_id: str) -> bool:
         return False
 
 
+def _bind_auth_user(user: CurrentUser) -> CurrentUser:
+    """OPS-3：认证成功后把 user_id 写入日志上下文（贯穿后续服务层日志）。"""
+    bind_user(user.user_id)
+    return user
+
+
 async def get_current_user(
     api_key: Optional[str] = Security(api_key_header),
     jwt_credentials: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer),
@@ -389,19 +396,19 @@ async def get_current_user(
     configured_key = getattr(settings, "API_KEY", None) or getattr(settings.security, "API_KEY", None)
 
     if api_key and _verify_api_key(api_key):
-        return CurrentUser(user_id="api_key_user", is_authenticated=True)
+        return _bind_auth_user(CurrentUser(user_id="api_key_user", is_authenticated=True))
 
     # 用户级 API Key（E.6）：全局 Key 未命中时按哈希解析绑定用户。
     # 仅在携带 X-API-Key 头且开关开启时才产生一次 DB 查询，JWT 主路径零开销。
     if api_key:
         user = await _resolve_api_key(api_key)
         if user:
-            return user
+            return _bind_auth_user(user)
 
     if jwt_credentials:
         user = _extract_user_from_jwt(jwt_credentials)
         if user:
-            return user
+            return _bind_auth_user(user)
 
     # 未配置 API_KEY 且非生产环境：开发模式允许匿名访问。
     # 按 IS_PRODUCTION（APP_ENV）判定而非 IN_DOCKER：非 Docker 裸跑的
@@ -468,14 +475,14 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
     api_key = first_frame.get("api_key") if isinstance(first_frame, dict) else None
     if api_key and _verify_api_key(api_key):
         await websocket.send_json({"type": "auth_ok"})
-        return CurrentUser(user_id="api_key_user", is_authenticated=True)
+        return _bind_auth_user(CurrentUser(user_id="api_key_user", is_authenticated=True))
 
     # 用户级 API Key（E.6）：全局 Key 未命中时按哈希解析绑定用户
     if api_key:
         user = await _resolve_api_key(api_key)
         if user:
             await websocket.send_json({"type": "auth_ok"})
-            return user
+            return _bind_auth_user(user)
 
     # JWT 用户：首帧 {"type": "auth", "token": "<access_token>"}
     token = first_frame.get("token") if isinstance(first_frame, dict) else None
@@ -483,7 +490,7 @@ async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
         user = verify_jwt_token(token)
         if user:
             await websocket.send_json({"type": "auth_ok"})
-            return user
+            return _bind_auth_user(user)
 
     await websocket.close(code=1008, reason="无效的认证凭据")
     raise WebSocketException(code=1008, reason="无效的认证凭据")

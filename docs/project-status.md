@@ -169,7 +169,7 @@
 | CODE-4 | API / 类型分层 | `queries/kb.ts` 967 行混合请求、类型与转换 | P2 | 前端 |
 | OPS-1 | 运维手册补全 | `docs/guide` 仅 deployment/development/monitoring；无备份 / 恢复 / 回滚 / 容量 | P1 | 开发 |
 | OPS-2 | 供应链安全 | ✅ **已完成（2026-10-27）**：dependabot + Trivy/SBOM CI；依赖升级后 Trivy 恢复阻断（HIGH/CRITICAL），仅 `.trivyignore` 登记 filelock/transformers 各 1/3 条上游约束豁免（复核 2026-11-30） | P1 | 开发 |
-| OPS-3 | 结构化日志 | stdlib 文本日志，未统一注入 request_id / 用户 / 阶段上下文 | P2 | 开发 |
+| OPS-3 | 结构化日志 | ✅ **已完成（2026-10-27）**：`utils/log_context.py` 统一注入 `request_id`/`user_id`/`stage`，中间件请求级作用域 + 认证依赖绑定用户 + `@log_stage` 覆盖 8 个管道阶段；`LOG_FORMAT=json` 可切单行 JSON（默认 text 追加 `[rid/user/stage]`），`LOG_LEVEL` 可配；新增 `test_log_context.py` 10 例 | P2 | 开发 |
 | OPS-4 | 回归与演练 | 无 nightly 性能回归、无迁移回滚演练 | P2 | 开发 |
 | OPS-5 | 覆盖率上调 | 62.12% → 65%（只升不降） | P3 | 开发 |
 | OPS-6 | 依赖漏洞修复与 Trivy 阻断 | ✅ **已完成（2026-10-27）**：后端升级 aiohttp 3.14.4 / certifi 2026.10.18 / cryptography 50 / fsspec 2026.6 / langsmith 0.8.18 / pillow 13 / pyjwt 2.15.1 / pypdf 6.21.2 / sentence-transformers 5.6 / unstructured 0.24 / urllib3 2.8；前端 axios 1.20 / dompurify 3.4.17 / markdown-it 14.3.3 / vite 8.3.5 / vue 3.5.44 + 传递依赖；`security-scan` trivy `exit-code=1` 恢复阻断；filelock（unstructured 锁 <4）与 transformers（OCR 组锁 <5）登记豁免 | P1 | 开发 |

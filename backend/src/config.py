@@ -607,6 +607,17 @@ class ExperimentSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 
+class LoggingSettings(BaseSettings):
+    """结构化日志配置（OPS-3）。"""
+
+    # 日志级别（DEBUG/INFO/WARNING/ERROR）
+    LOG_LEVEL: str = "INFO"
+    # 输出格式：text（默认，便于本地阅读）| json（单行 JSON，便于采集端解析）
+    LOG_FORMAT: str = "text"
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
+
+
 class Settings(BaseSettings):
     """聚合所有子配置的根配置类。"""
 
@@ -615,6 +626,7 @@ class Settings(BaseSettings):
     milvus: MilvusSettings = MilvusSettings()
     redis: RedisSettings = RedisSettings()
     security: SecuritySettings = SecuritySettings()
+    logging: LoggingSettings = LoggingSettings()
     cors: CorsSettings = CorsSettings()
     model: ModelSettings = ModelSettings()
     processing: ProcessingSettings = ProcessingSettings()

@@ -20,7 +20,6 @@ import secrets
 import hmac
 import time
 import asyncio
-from contextvars import ContextVar
 from logging.handlers import TimedRotatingFileHandler
 from uuid import uuid4
 from fastapi import FastAPI, HTTPException, Request, Depends, status
@@ -62,17 +61,13 @@ try:
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
-# W6 #16：request_id 经 contextvars 贯穿到 services/ 层日志（此前仅中间件自身
-# 打的日志带 request_id，服务层日志无法关联到具体请求）
-_request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
-
-
-class RequestIdLogFilter(logging.Filter):
-    """把当前请求的 request_id 注入每条日志记录（非请求上下文时为 '-'）。"""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.request_id = _request_id_var.get()
-        return True
+# W6 #16 / OPS-3：request_id、user_id、stage 经 contextvars 贯穿到 services/ 层日志
+# （此前仅中间件自身日志带 request_id，服务层无法关联具体请求/用户/阶段）
+from src.utils.log_context import (  # noqa: E402
+    ContextLogFilter,
+    build_formatter,
+    request_scope,
+)
 
 
 # W6 #14：生产日志统一 stdout（由 Docker/外部采集收敛），规避多 worker 场景下
@@ -87,13 +82,19 @@ if not settings.IS_PRODUCTION:
             encoding="utf-8",
         )
     )
-_request_filter = RequestIdLogFilter()
+_log_formatter = build_formatter(getattr(settings.logging, "LOG_FORMAT", "text"))
+_request_filter = ContextLogFilter()
 for _h in _log_handlers:
+    _h.setFormatter(_log_formatter)
     _h.addFilter(_request_filter)
+# 同时在 logger 级注入，保证第三方 handler（如测试 caplog）也能拿到上下文字段
+logging.getLogger("rag_system").addFilter(_request_filter)
 
+_log_level = getattr(
+    logging, str(getattr(settings.logging, "LOG_LEVEL", "INFO") or "INFO").upper(), logging.INFO
+)
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s [%(request_id)s] - %(message)s",
+    level=_log_level,
     handlers=_log_handlers,
 )
 logger = logging.getLogger("rag_system")
@@ -105,9 +106,11 @@ class RequestTracingMiddleware:
 
     async def __call__(self, scope, receive, send):
         request_id = str(uuid4())
-        # W6 #16：写入 contextvar，服务层日志经 RequestIdLogFilter 自动关联
-        token = _request_id_var.set(request_id)
+        # OPS-3：请求级日志上下文（request_id/user_id/stage 自动注入服务层日志）
+        with request_scope(request_id):
+            await self._handle(scope, receive, send, request_id)
 
+    async def _handle(self, scope, receive, send, request_id: str):
         # SEC-3：统一解析受信代理后的真实客户端 IP，写回 scope["client"]，
         # 使限流/审计等所有 request.client.host 读取点口径一致。
         from src.utils.rate_limit import resolve_client_ip
@@ -146,8 +149,6 @@ class RequestTracingMiddleware:
             await self.app(scope, receive, send_wrapper)
         else:
             await self.app(scope, receive, send)
-
-        _request_id_var.reset(token)
 
 
 async def _periodic_learning_task():

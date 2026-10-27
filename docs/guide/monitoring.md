@@ -67,6 +67,12 @@
 - **索引迁移（P3）**：`GET /api/admin/models/index/status` 查看当前索引画像与目标 Embedding 配置；重建期间 `status=rebuilding`，失败会记录 `last_error` 并保留线上索引。重建/回滚会全量失效语义缓存（`rag:semcache:*`），命中率短时下降属预期。
 - **健康探针（SEC-12）**：`/health/live` 仅判断进程存活；`/health/ready` 深探 DB/Redis/Milvus/MinIO，任一失败返回 503；`/health/detail`（管理员）含依赖错误与 Ollama。
 - **认证与隐私（SEC-10/14）**：登出/refresh 轮换通过 `rag:jwt:revoked:*` 吊销 jti；日志中用户问题已替换为 `<redacted:hash:len>`，排查时用 trace 表而非日志还原原文。
+- **结构化日志（OPS-3）**：每条日志自动携带 `request_id` / `user_id` / `stage` 三个上下文维度。
+  - `LOG_LEVEL`（默认 `INFO`）、`LOG_FORMAT`（`text` 默认 / `json`）；
+  - text 格式追加 `[rid=... user=... stage=...]`，json 输出单行对象（`ts/level/logger/message/request_id/user_id/stage`，异常含 `exc_info`）；
+  - `user_id` 在认证依赖通过后绑定（匿名/API Key 全局用户为 `api_key_user`，未认证为 `-`）；
+  - `stage` 覆盖管道阶段：`enhance_context` / `intent` / `tool_first` / `decide` / `semantic_cache` / `kb_retrieval` / `generation` / `finalize`；
+  - 排查慢请求时可按 `request_id` 过滤全链路日志，按 `stage` 聚合定位耗时阶段。
 - 切换 Embedding 模型后，历史向量仍由旧模型生成；在重建索引前不要以检索指标下降判断新模型质量。
 
 ## 4. 告警规则（configs/prometheus/alerts.yml）
