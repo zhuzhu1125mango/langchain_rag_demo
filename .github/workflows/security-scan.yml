@@ -39,7 +39,7 @@ jobs:
           format: json
           output: trivy-results.json
       - name: Upload Trivy report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: trivy-results
           path: trivy-results.json
