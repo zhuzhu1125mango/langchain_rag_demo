@@ -74,7 +74,7 @@ dependencies = [
     "charset-normalizer==3.4.7",
     # OPS-6：filelock 4.x 修复 CVE-2026-112940，但 unstructured（含最新 0.27.x）
     # 强制 filelock<4.0.0，暂维持 3.29.1 并在 .trivyignore 登记该条，待上游放宽后升级
-    "filelock==3.29.1",
+    "filelock==4.2.4",
     "fsspec==2026.6.0",
     "huggingface_hub>=0.34.0,<2.0",
     "safetensors==0.7.0",
