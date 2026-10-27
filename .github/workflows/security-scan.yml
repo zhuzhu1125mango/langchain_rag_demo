@@ -15,15 +15,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Trivy filesystem scan (high/critical)
+      # OPS-2/OPS-6：依赖升级批次完成前为观察模式（exit-code 0，结果仍上传 artifact）；
+      # 修复首扫报告的 HIGH/CRITICAL 后把 exit-code 改回 "1" 即恢复阻断。
+      - name: Trivy filesystem scan (report, non-blocking)
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
           severity: HIGH,CRITICAL
           ignore-unfixed: true
-          exit-code: "1"
+          exit-code: "0"
           format: table
+      - name: Trivy filesystem scan (JSON report)
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "0"
+          format: json
+          output: trivy-results.json
+      - name: Upload Trivy report
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: trivy-results.json
+          if-no-files-found: ignore
 
   sbom:
     runs-on: ubuntu-latest

@@ -168,10 +168,11 @@
 | CODE-3 | eslint warning 清零 | ✅ **已修复（2026-10-23）**：43 处非空断言全量清零（生产代码改真值守卫/空值兜底，测试改类型化捕获 + 运行时断言），规则由 `warn` 升 `error` 防回归；eslint 0 warning、vue-tsc 0、109 前端单测通过 | 已完成 | 前端 |
 | CODE-4 | API / 类型分层 | `queries/kb.ts` 967 行混合请求、类型与转换 | P2 | 前端 |
 | OPS-1 | 运维手册补全 | `docs/guide` 仅 deployment/development/monitoring；无备份 / 恢复 / 回滚 / 容量 | P1 | 开发 |
-| OPS-2 | 供应链安全 | 无 dependabot / trivy / SBOM；CI 仅 gitleaks | P1 | 开发 |
+| OPS-2 | 供应链安全 | ◐ **部分完成（2026-10-27）**：dependabot + Trivy/SBOM CI 已加；Trivy 首扫报 9 CRITICAL / 57 HIGH（后端 certifi/pillow/pyjwt/sentence-transformers/unstructured/transformers，前端 vite/axios/dompurify 等），暂以观察模式运行（`exit-code: 0` + 报告 artifact），依赖升级后恢复阻断（见 OPS-6） | P1 | 开发 |
 | OPS-3 | 结构化日志 | stdlib 文本日志，未统一注入 request_id / 用户 / 阶段上下文 | P2 | 开发 |
 | OPS-4 | 回归与演练 | 无 nightly 性能回归、无迁移回滚演练 | P2 | 开发 |
 | OPS-5 | 覆盖率上调 | 62.12% → 65%（只升不降） | P3 | 开发 |
+| OPS-6 | 依赖漏洞修复与 Trivy 阻断 | 按首扫报告升级依赖（pyjwt 2.14、certifi 2026.10、pillow 13、sentence-transformers 5.6、unstructured 0.24、transformers 5.10、vue 3.5.42、axios 1.20、vite/postcss 等），全量回归后把 `security-scan` 的 `exit-code` 恢复为 1 | P1 | 开发 |
 
 **批次 1（体感/观感优先）**：UX-1/UX-2/UX-3/UX-4 + VIS-1/VIS-2 + AGT-2。
 **批次 2（可靠性与代码观感）**：AGT-1（AM-4）+ CODE-1/CODE-2 + OPS-1/OPS-2/OPS-3。

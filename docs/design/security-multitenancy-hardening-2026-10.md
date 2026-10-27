@@ -346,3 +346,4 @@
 - **SEC-18**：会话列表新增 `skip`/`limit`（默认 100、上限 500）；会话与文档批量删除统一受 `BATCH_DELETE_MAX_IDS`（默认 200）约束，超限 400；反馈/坏例列表 `limit` 上限由 1000 收紧为 200。
 - **SEC-19**：`BaseTool` 新增 `url_params`，`ToolRegistry.register` 强制校验 schema 中 URL 型参数必须声明（否则拒绝注册）；`ToolGuard.check_async` 在静态规则之后于线程池执行 `validate_url_safe`（DNS fail-closed），`ToolManager.execute` 统一调用；开关 `GUARDRAIL_TOOL_DNS_CHECK_ENABLED` 默认开启。`fetch_webpage` 声明 `url_params=("url",)`，其抓取仍走 SEC-9 的固定 IP 客户端。
 - **验证**：新增 `tests/test_security_p3.py`（18 例）覆盖上述四项；后端全量 **1316 passed / 105 skipped**、覆盖率 67.17%（≥65 卡点）；`uvx ruff check --select E9,F63,F7,F82 backend` 通过；`nginx -t` 校验通过；前端 typecheck/eslint/build 通过（无前端源码改动）。
+- **CI 收口（同日）**：`model_usage_daily.usage_date` 补 `index=True` 与迁移索引对齐（消除 `alembic check` 漂移）；`security-scan` 的 trivy-action 改 `v0.36.0`（原 `0.28.0` 无对应 tag）。Trivy 首扫报 9 CRITICAL / 57 HIGH（均为有修复版本的依赖漏洞），暂以观察模式（`exit-code: 0` + JSON artifact）运行，待 OPS-6 依赖升级后恢复阻断。
