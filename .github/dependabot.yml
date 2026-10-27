@@ -6,14 +6,12 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
-      # 补丁级自动成组（低风险）；次版本仍成组但排除核心框架，避免 47 项跨框架
-      # 大杂烩 PR（2026-10-27 #18 复盘）。被排除项按单包 PR 逐个评审。
-      backend-patch:
-        patterns: ["*"]
-        update-types: ["patch"]
+      # minor+patch 必须在同一组：2026-10-27 复盘发现拆组会导致组内组合不兼容
+      # （如 trafilatura 2.3.1 要求 lxml>=6.1.3，而 lxml 补丁被分到另一组）。
+      # 仍排除核心框架，避免 47 项跨框架大杂烩（#18）；被排除项按单包 PR 逐个评审。
       backend-minor:
         patterns: ["*"]
-        update-types: ["minor"]
+        update-types: ["minor", "patch"]
         exclude-patterns:
           - "fastapi"
           - "uvicorn"
