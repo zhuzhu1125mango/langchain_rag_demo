@@ -47,6 +47,8 @@
 | 内存 | 8GB | 16GB |
 | 磁盘 | 50GB | 100GB+ |
 
+> 上表为最小可用口径；按文档规模估算 Milvus/PG/备份盘容量与扩容阈值见 [backup-restore.md](backup-restore.md) §6。
+
 ---
 
 ## 2. 开发/生产环境分离
@@ -525,7 +527,7 @@ services:
 - **索引迁移（P3）**：`GET /api/admin/models/index/status` 查看当前索引画像/目标配置/是否需要重建；`POST /api/admin/models/index/rebuild?force=false` 后台重建，`POST /api/admin/models/index/rollback` 回滚到上一次重建前。重建读取现有切片文本重新向量化（不依赖原始文件），失败保留线上索引；备份集合 `{collection}__backup_*` 需在确认稳定后人工清理。
 - **健康检查（SEC-12）**：容器 healthcheck 使用 `/health/ready`（DB/Redis/Milvus/MinIO 任一不可用返回 503）；`/health/live` 仅进程探活；`/health/detail`（管理员）返回详细错误。
 - **登出与账号（SEC-10/14）**：`POST /auth/logout` 将 token jti 写入 Redis 吊销名单；`GET /auth/account/export` 导出用户数据，`DELETE /auth/account` 校验密码后注销并级联清理。密码要求 ≥10 位且禁用常见弱口令。
-- **备份与供应链（SEC-13）**：见 [backup-restore.md](backup-restore.md)；CI 已含 Trivy HIGH/CRITICAL 与 SPDX SBOM，Dependabot 每周更新；基础镜像 digest 在发布窗口由运维 pin。
+- **备份与供应链（SEC-13 / OPS-1）**：备份、恢复、回滚与容量规划统一见 [backup-restore.md](backup-restore.md)（RPO/RTO、恢复顺序、回滚矩阵、容量模型与演练）；CI 已含 Trivy HIGH/CRITICAL 与 SPDX SBOM，Dependabot 每周更新；基础镜像 digest 在发布窗口由运维 pin。
 - **诊断**：`GET /api/config` 与 `/api/config/model`（管理员）返回 `registry_source` 与实际 `route_models`。
 
 ### 6.4 核心配置参数对比

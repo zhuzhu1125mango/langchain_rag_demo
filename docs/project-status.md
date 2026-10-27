@@ -167,7 +167,7 @@
 | CODE-2 | 异常分级治理 | 334 处 `except Exception`；缺「可恢复 / 需上报 / 编程错误」分级与统一上下文 | P1 | 开发 |
 | CODE-3 | eslint warning 清零 | ✅ **已修复（2026-10-23）**：43 处非空断言全量清零（生产代码改真值守卫/空值兜底，测试改类型化捕获 + 运行时断言），规则由 `warn` 升 `error` 防回归；eslint 0 warning、vue-tsc 0、109 前端单测通过 | 已完成 | 前端 |
 | CODE-4 | API / 类型分层 | `queries/kb.ts` 967 行混合请求、类型与转换 | P2 | 前端 |
-| OPS-1 | 运维手册补全 | `docs/guide` 仅 deployment/development/monitoring；无备份 / 恢复 / 回滚 / 容量 | P1 | 开发 |
+| OPS-1 | 运维手册补全 | ✅ **已完成（2026-10-27）**：`guide/backup-restore.md` 扩为运维 Runbook——对象级 RPO/RTO、备份产物校验与 cron、恢复顺序与恢复后必做（schema 对齐/缓存失效/维度核对）、回滚决策矩阵（应用/迁移/索引/配置/凭据）、容量模型（切片数→Milvus/PG/备份盘）与 70%/85% 扩容阈值、季度恢复+回滚演练记录模板；`docs/README` 与 deployment/monitoring 交叉引用 | 已完成 | 开发 |
 | OPS-2 | 供应链安全 | ✅ **已完成（2026-10-27）**：dependabot + Trivy/SBOM CI；依赖升级后 Trivy 恢复阻断（HIGH/CRITICAL），仅 `.trivyignore` 登记 filelock/transformers 各 1/3 条上游约束豁免（复核 2026-11-30） | P1 | 开发 |
 | OPS-3 | 结构化日志 | ✅ **已完成（2026-10-27）**：`utils/log_context.py` 统一注入 `request_id`/`user_id`/`stage`，中间件请求级作用域 + 认证依赖绑定用户 + `@log_stage` 覆盖 8 个管道阶段；`LOG_FORMAT=json` 可切单行 JSON（默认 text 追加 `[rid/user/stage]`），`LOG_LEVEL` 可配；新增 `test_log_context.py` 10 例 | P2 | 开发 |
 | OPS-4 | 回归与演练 | 无 nightly 性能回归、无迁移回滚演练 | P2 | 开发 |

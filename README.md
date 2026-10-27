@@ -945,6 +945,7 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 | 部署指南 | 开发/生产环境部署说明 | [docs/guide/deployment.md](docs/guide/deployment.md) |
 | 开发与测试指南 | 本地开发、测试执行、CI 说明、踩坑记录 | [docs/guide/development.md](docs/guide/development.md) |
 | 监控运维指南 | 监控栈使用、指标说明、告警规则与处置 | [docs/guide/monitoring.md](docs/guide/monitoring.md) |
+| 运维 Runbook | 备份/恢复/回滚矩阵、容量模型与扩容阈值、季度演练（OPS-1） | [docs/guide/backup-restore.md](docs/guide/backup-restore.md) |
 | 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](docs/project-status.md) |
 | 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
 | 全项目演进路线 | 2026-10 对标审计：标配/差异化/避免、UX/视觉/代码/运维差距与三批执行序 | [docs/design/evolution-roadmap-2026-10.md](docs/design/evolution-roadmap-2026-10.md) |
@@ -994,7 +995,7 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8080, 9002, 9003, 19531, 9092, 3001, 9094, 9095；前端 8080 绑定 0.0.0.0，其余均仅绑定回环地址。前端容器内监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
 10. **联网搜索稳定性**: 联网搜索默认走 Tavily 在线 API，需在 `SEARCH_API_KEY` 配置有效的 Key；如遇网络或配额限制可切换其它 provider
-11. **公网多租户边界**: SEC-1~5 已完成；SEC P2 主体已完成（实验/通知隔离、SSRF fail-closed、JWT 吊销、缓存索引、live/ready、账号导出/注销与日志脱敏），但 SEC-9 传输层 IP 固定、SEC-13 镜像 digest、SEC-14 日志保留期、SEC-15 覆盖率 65 仍待补；公网多租户请按受控网络 + 最小权限运营，详见 [安全与多租户加固](docs/design/security-multitenancy-hardening-2026-10.md)
+11. **公网多租户边界**: SEC-1~5 已完成；SEC P2（实验/通知隔离、SSRF fail-closed、JWT 吊销、缓存索引、live/ready、账号导出/注销与日志脱敏、传输层 IP 固定、镜像 digest、日志保留期、覆盖率 65）与 SEC P3（CSP/HSTS、评估配额、分页/批量上限、ToolGuard DNS fail-closed）已完成；公网多租户仍请按受控网络 + 最小权限运营，详见 [安全与多租户加固](docs/design/security-multitenancy-hardening-2026-10.md)
 
 ### 环境启停
 

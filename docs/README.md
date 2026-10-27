@@ -7,7 +7,7 @@
 | 目录 | 职责 | 归档/流转规则 |
 |---|---|---|
 | 顶层（`architecture.md`、`api.md`、`project-status.md`） | 随代码持续维护的核心参考；`project-status.md` 另承担「已完成 / 剩余待办」台账职责 | 代码结构或接口变更时必须同步更新 |
-| `guide/` | 操作指南（部署、开发、监控） | 与实际操作流程保持一致，流程变更即更新 |
+| `guide/` | 操作指南（部署、开发、监控、备份/回滚/容量） | 与实际操作流程保持一致，流程变更即更新 |
 | `design/` | 设计文档（对标 RFC），一文一事 | 遵循「设计先行 → 确认后实施」；实施完成后回写实施记录章节并更新状态；完全落地且不再单独演进后可移入 `archive/` |
 | `archive/` | 归档（一次性报告、已完结文档） | 只读封存，不再更新；文件名可带日期后缀 |
 
@@ -34,7 +34,8 @@ docs/
 ├── guide/               # 操作指南
 │   ├── deployment.md    #   部署（开发/生产环境）
 │   ├── development.md   #   开发与测试（含踩坑记录）
-│   └── monitoring.md    #   监控运维（指标、告警、处置）
+│   ├── monitoring.md    #   监控运维（指标、告警、处置）
+│   └── backup-restore.md #  备份 / 恢复 / 回滚 / 容量与演练（运维 Runbook）
 ├── design/              # 设计文档（对标 RFC），状态见下表
 │   ├── improvement-roadmap.md
 │   ├── rag-enhancement.md
@@ -115,6 +116,7 @@ docs/
 | 新人上手 | 根 [README](../README.md) → [architecture.md](architecture.md) → [guide/deployment.md](guide/deployment.md) |
 | 本地开发/跑测试 | [guide/development.md](guide/development.md) |
 | 排查线上问题 | [guide/monitoring.md](guide/monitoring.md) → [guide/development.md](guide/development.md) 踩坑记录 |
+| 备份/恢复/回滚/扩容 | [guide/backup-restore.md](guide/backup-restore.md)（RPO/RTO、恢复顺序、回滚矩阵、容量模型与演练） |
 | 查接口 | [api.md](api.md)（另有 Swagger UI: `http://localhost:8000/docs`） |
 | 配置/切换模型 | 设置 → 模型服务（`/settings/models`）→ [design/model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) → [guide/deployment.md](guide/deployment.md) §6.3.2 |
 | 了解技术决策/规划 | [project-status.md](project-status.md) → [design/special-projects-2026-09.md](design/special-projects-2026-09.md) → [design/improvement-roadmap.md](design/improvement-roadmap.md) |

@@ -127,4 +127,5 @@ docker compose restart prometheus
 ## 相关文档
 
 - 部署与端口规划：[deployment.md](deployment.md)
+- 备份 / 恢复 / 回滚 / 容量与演练：[backup-restore.md](backup-restore.md)
 - 架构总览：[../architecture.md](../architecture.md)
