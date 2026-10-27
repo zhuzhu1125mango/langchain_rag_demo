@@ -54,6 +54,8 @@ jobs:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      UV_HTTP_TIMEOUT: "120"
     steps:
       - uses: actions/checkout@v7
 
@@ -123,6 +125,8 @@ jobs:
       SKIP_OLLAMA_CHECK: "true"
       # Unit job 无 minio 容器，对齐默认（W6 #11 默认改 true，显式关闭防本地 http 连接歧义）
       MINIO_SECURE: "false"
+      # 清华 PyPI 镜像在托管 runner 上偶发超时（2026-10-27 #18/#19/#21 复盘）：放宽下载超时
+      UV_HTTP_TIMEOUT: "120"
     steps:
       - uses: actions/checkout@v7
 
@@ -193,6 +197,8 @@ jobs:
       MINIO_BUCKET_NAME: documents
       # CI minio 容器为 http；config 默认已改 secure=true（W6 #11 安全默认），需显式关闭
       MINIO_SECURE: "false"
+      # 清华 PyPI 镜像在托管 runner 上偶发超时（2026-10-27 #18/#19/#21 复盘）：放宽下载超时
+      UV_HTTP_TIMEOUT: "120"
       MILVUS_HOST: localhost
       MILVUS_PORT: "19530"
       # 应用启动时 Ollama 未就绪属预期：预热为 best-effort，连接失败仅告警不阻塞
@@ -288,6 +294,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: backend-unit
     timeout-minutes: 20
+    env:
+      UV_HTTP_TIMEOUT: "120"
     defaults:
       run:
         working-directory: backend

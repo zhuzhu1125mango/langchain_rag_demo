@@ -6,9 +6,24 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # 补丁级自动成组（低风险）；次版本仍成组但排除核心框架，避免 47 项跨框架
+      # 大杂烩 PR（2026-10-27 #18 复盘）。被排除项按单包 PR 逐个评审。
+      backend-patch:
+        patterns: ["*"]
+        update-types: ["patch"]
       backend-minor:
         patterns: ["*"]
-        update-types: ["minor", "patch"]
+        update-types: ["minor"]
+        exclude-patterns:
+          - "fastapi"
+          - "uvicorn"
+          - "sqlalchemy"
+          - "alembic"
+          - "langchain*"
+          - "pymilvus*"
+          - "pandas"
+          - "unstructured"
+          - "sentence-transformers"
     ignore:
       # OPS-2 收口（2026-10-27）：以下依赖被上游硬约束锁死，登记豁免避免重复 PR。
       # filelock 4.x 需 unstructured 放宽 <4.0.0（见 .trivyignore 与 pyproject 注释）；
@@ -21,6 +36,12 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "tokenizers"
         update-types: ["version-update:semver-major", "version-update:semver-minor", "version-update:semver-patch"]
+      # sentence-transformers 6.x 要求 transformers>=5,<6；mineru 4.x 也要求 transformers 5.x 且
+      # 依赖 gradio>=6.8（与主依赖冲突）。二者与 OCR 组绑定，待 OCR 组升级方案定稿后一起评估。
+      - dependency-name: "sentence-transformers"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "mineru"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: npm
     directory: /frontend
     schedule:
