@@ -76,7 +76,7 @@ dependencies = [
     # 强制 filelock<4.0.0，暂维持 3.29.1 并在 .trivyignore 登记该条，待上游放宽后升级
     "filelock==3.29.1",
     "fsspec==2026.6.0",
-    "huggingface_hub>=0.34.0,<2.0",
+    "huggingface_hub>=0.34.0,<3.0",
     "safetensors==0.7.0",
     "tokenizers==0.22.2",
     "jieba==0.42.1",
