@@ -146,7 +146,7 @@ def cleanup_fakes(monkeypatch):
         pass
 
     monkeypatch.setattr(
-        "src.api.knowledge_base.VectorStoreManager.get_instance",
+        "src.api.knowledge_base.manage.VectorStoreManager.get_instance",
         fake_vector_get_instance,
     )
     monkeypatch.setattr(
@@ -154,7 +154,7 @@ def cleanup_fakes(monkeypatch):
         fake_minio_get_instance,
     )
     monkeypatch.setattr(
-        "src.api.knowledge_base.invalidate_kb_list_cache", fake_invalidate
+        "src.api.knowledge_base.manage.invalidate_kb_list_cache", fake_invalidate
     )
     return holder
 
@@ -210,7 +210,7 @@ class TestKbSingleDelete:
         """向量清理失败不阻塞数据库记录删除。"""
         broken = FakeVectorStore(error=RuntimeError("milvus down"))
         monkeypatch.setattr(
-            "src.api.knowledge_base.VectorStoreManager.get_instance",
+            "src.api.knowledge_base.manage.VectorStoreManager.get_instance",
             _fake_get_instance(broken),
         )
         db, result = await run_delete(kb, current_user)

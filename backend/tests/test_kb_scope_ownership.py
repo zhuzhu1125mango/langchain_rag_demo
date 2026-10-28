@@ -22,7 +22,8 @@ import uuid
 import pytest
 from fastapi import HTTPException
 
-import src.api.knowledge_base as kb_api
+import src.api.knowledge_base as kb_api  # 包级导出（模型/端点）
+import src.api.knowledge_base.query as kb_query
 from src.auth import CurrentUser
 
 USER_A_KB = "11111111-1111-1111-1111-111111111111"
@@ -90,8 +91,8 @@ def _patch_chain(monkeypatch, chain):
     async def _get_vector_store(*_args, **_kwargs):
         return object()
 
-    monkeypatch.setattr(kb_api.RAGChain, "get_instance", _get_instance)
-    monkeypatch.setattr(kb_api.VectorStoreManager, "get_instance", _get_vector_store)
+    monkeypatch.setattr(kb_query.RAGChain, "get_instance", _get_instance)
+    monkeypatch.setattr(kb_query.VectorStoreManager, "get_instance", _get_vector_store)
 
 
 @pytest.fixture

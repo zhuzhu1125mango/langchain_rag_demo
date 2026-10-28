@@ -1,35 +1,17 @@
-"""
-知识库管理API - KnowledgeBase API
+"""知识库维护路由：创建/更新/删除/批量删除/设为默认（CODE-1 拆分）。"""
 
-提供知识库的CRUD操作接口，包括：
-1. 创建知识库
-2. 获取知识库列表
-3. 获取知识库详情
-4. 更新知识库
-5. 删除知识库
-6. 设置默认知识库
-7. 智能推荐知识库
-8. 生成知识图谱
-
-注：重复文档检测、文档质量评估、文档自动分类已统一由 document 模块提供。
-"""
-
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Body, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update, func, delete
-from pydantic import BaseModel
-from typing import List, Literal, Optional
+from sqlalchemy import select, func, delete
+from typing import List
 from datetime import timedelta
 import uuid
 import asyncio
 import logging
 from src.database import get_db
 from src.auth import get_current_user, CurrentUser, require_owner
-from src.utils.validators import parse_uuid_list, validate_kb_ownership
 from src.models import KnowledgeBase, Document
 from src.services.vector_store import VectorStoreManager
-from src.services.cache_service import CacheService
-from src.services.rag_chain import RAGChain
 from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
 
 logger = logging.getLogger("knowledge_base_api")
@@ -43,90 +25,20 @@ BATCH_DELETE_CHUNK_SIZE = 800
 # 这里再加一层保护，确保任何情况下知识库列表接口都不会被缓存阻塞。
 KB_CACHE_OPERATION_TIMEOUT = 2.0
 
-router = APIRouter(prefix="/knowledge_bases", tags=["knowledge_bases"])
+from src.services.vector_store import VectorStoreManager
+from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
 
+from .common import (
+    BatchDeleteKnowledgeBasesRequest,
+    BatchDeleteKnowledgeBasesResponse,
+    KnowledgeBaseCreate,
+    KnowledgeBaseResponse,
+    KnowledgeBaseUpdate,
+    invalidate_kb_list_cache,
+    set_single_default,
+)
 
-class KnowledgeBaseCreate(BaseModel):
-    """创建知识库请求模型。"""
-    name: str
-    description: Optional[str] = None
-    embedding_model: Optional[str] = "bge-m3:latest"
-
-
-class KnowledgeBaseUpdate(BaseModel):
-    """更新知识库请求模型。"""
-    name: Optional[str] = None
-    description: Optional[str] = None
-    embedding_model: Optional[str] = None
-    # W6 #28：Literal 限制合法值（非法值 422），与 KB.status 的 active/inactive 对齐
-    status: Optional[Literal["active", "inactive"]] = None
-
-
-class KnowledgeBaseResponse(BaseModel):
-    """知识库响应模型。"""
-    id: str
-    name: str
-    description: Optional[str] = None
-    embedding_model: str
-    is_default: bool
-    status: str
-    document_count: int
-    created_at: str
-    updated_at: str
-
-
-class KBRecommendationRequest(BaseModel):
-    """知识库推荐请求模型。"""
-    question: str
-    top_k: Optional[int] = 3
-
-
-class KBRecommendationResponse(BaseModel):
-    """知识库推荐响应模型。"""
-    kb_id: str
-    relevance_score: float
-    matched_chunks: int
-
-
-class KnowledgeGraphResponse(BaseModel):
-    """知识图谱响应模型。"""
-    nodes: List[dict]
-    edges: List[dict]
-    summary: str
-
-
-class BatchDeleteKnowledgeBasesRequest(BaseModel):
-    """批量删除知识库请求模型。"""
-    ids: List[str]
-
-
-class BatchDeleteKnowledgeBasesResponse(BaseModel):
-    """批量删除知识库响应模型。"""
-    deleted_count: int
-    skipped_ids: List[str]
-
-
-async def set_single_default(db: AsyncSession, kb_id: uuid.UUID, owner_id: str):
-    """设置指定用户的唯一默认知识库。
-
-    「清空默认标志」仅作用于该 owner 名下的知识库，避免跨用户重置。
-
-    Args:
-        db: 数据库会话。
-        kb_id: 目标知识库 ID（调用方需已校验归属）。
-        owner_id: 资源所有者标识。
-    """
-    await db.execute(
-        update(KnowledgeBase)
-        .where(KnowledgeBase.owner_id == owner_id)
-        .values(is_default=False)
-    )
-    result = await db.execute(select(KnowledgeBase).filter(KnowledgeBase.id == kb_id))
-    kb = result.scalar_one_or_none()
-    if kb:
-        kb.is_default = True
-    await db.commit()
-
+router = APIRouter(tags=["knowledge_bases"])
 
 @router.post("/", response_model=KnowledgeBaseResponse)
 async def create_knowledge_base(
@@ -184,187 +96,6 @@ async def create_knowledge_base(
         created_at=kb.created_at.isoformat(),
         updated_at=kb.updated_at.isoformat() if kb.updated_at else kb.created_at.isoformat()
     )
-
-
-class KnowledgeBaseListResponse(BaseModel):
-    """知识库列表响应模型。"""
-    items: List[KnowledgeBaseResponse]
-    total: int
-    page: int
-    page_size: int
-    total_pages: int
-
-
-def _kb_list_cache_key(user_id: str, page: int, page_size: int) -> str:
-    """生成知识库列表缓存键。"""
-    return f"{KB_LIST_CACHE_PREFIX}:{user_id}:{page}:{page_size}"
-
-
-async def invalidate_kb_list_cache(user_id: str) -> None:
-    """使指定用户的知识库列表缓存失效。"""
-    try:
-        cache = await CacheService.get_instance()
-        await cache.clear_pattern(f"{KB_LIST_CACHE_PREFIX}:{user_id}:*")
-    except Exception as exc:
-        logger.warning("清除知识库列表缓存失败: %s", exc)
-
-
-@router.get("/", response_model=KnowledgeBaseListResponse)
-async def list_knowledge_bases(
-    db: AsyncSession = Depends(get_db),
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(10, ge=1, le=1000, description="每页数量"),
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    cache_key = _kb_list_cache_key(current_user.user_id, page, page_size)
-    cache = None
-    cached = None
-    try:
-        cache = await asyncio.wait_for(
-            CacheService.get_instance(), timeout=KB_CACHE_OPERATION_TIMEOUT
-        )
-        cached = await asyncio.wait_for(
-            cache.get(cache_key), timeout=KB_CACHE_OPERATION_TIMEOUT
-        )
-    except Exception as exc:
-        logger.warning("读取知识库列表缓存失败: %s", exc)
-
-    if cached is not None:
-        return KnowledgeBaseListResponse(**cached)
-
-    subq = select(
-        Document.kb_id,
-        func.count(Document.id).label("doc_count")
-    ).filter(Document.owner_id == current_user.user_id).group_by(Document.kb_id).subquery()
-
-    owner_filter = KnowledgeBase.owner_id == current_user.user_id
-    total_result = await db.execute(select(func.count(KnowledgeBase.id)).filter(owner_filter))
-    total = total_result.scalar_one()
-
-    offset = (page - 1) * page_size
-
-    result = await db.execute(
-        select(
-            KnowledgeBase,
-            func.coalesce(subq.c.doc_count, 0).label("document_count")
-        ).outerjoin(subq, KnowledgeBase.id == subq.c.kb_id)
-        .filter(owner_filter)
-        .offset(offset)
-        .limit(page_size)
-    )
-
-    items = []
-    for kb, doc_count in result.all():
-        items.append(KnowledgeBaseResponse(
-            id=str(kb.id),
-            name=kb.name,
-            description=kb.description,
-            embedding_model=kb.embedding_model,
-            is_default=kb.is_default,
-            status=kb.status,
-            document_count=doc_count,
-            created_at=kb.created_at.isoformat(),
-            updated_at=kb.updated_at.isoformat() if kb.updated_at else kb.created_at.isoformat()
-        ))
-
-    total_pages = (total + page_size - 1) // page_size
-
-    response = KnowledgeBaseListResponse(
-        items=items,
-        total=total,
-        page=page,
-        page_size=page_size,
-        total_pages=total_pages
-    )
-
-    if cache is not None:
-        try:
-            await asyncio.wait_for(
-                cache.set(cache_key, response.model_dump(), expire=KB_LIST_CACHE_TTL),
-                timeout=KB_CACHE_OPERATION_TIMEOUT,
-            )
-        except Exception as exc:
-            logger.warning("写入知识库列表缓存失败: %s", exc)
-
-    return response
-
-
-@router.get("/default", response_model=KnowledgeBaseResponse)
-async def get_default_knowledge_base(
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    result = await db.execute(
-        select(KnowledgeBase).filter(
-            KnowledgeBase.is_default == True,
-            KnowledgeBase.owner_id == current_user.user_id,
-        )
-    )
-    kb = result.scalar_one_or_none()
-    if not kb:
-        raise HTTPException(status_code=404, detail="没有找到默认知识库")
-
-    doc_count_result = await db.execute(
-        select(func.count(Document.id)).filter(
-            Document.kb_id == kb.id,
-            Document.owner_id == current_user.user_id
-        )
-    )
-    doc_count = doc_count_result.scalar_one()
-
-    return KnowledgeBaseResponse(
-        id=str(kb.id),
-        name=kb.name,
-        description=kb.description,
-        embedding_model=kb.embedding_model,
-        is_default=kb.is_default,
-        status=kb.status,
-        document_count=doc_count,
-        created_at=kb.created_at.isoformat(),
-        updated_at=kb.updated_at.isoformat() if kb.updated_at else kb.created_at.isoformat()
-    )
-
-
-@router.get("/{kb_id}", response_model=KnowledgeBaseResponse)
-async def get_knowledge_base(
-    kb_id: str,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = Depends(get_current_user),
-):
-    try:
-        kb_id_uuid = uuid.UUID(kb_id)
-
-        result = await db.execute(
-            select(KnowledgeBase).filter(KnowledgeBase.id == kb_id_uuid)
-        )
-        kb = result.scalar_one_or_none()
-        if not kb:
-            raise HTTPException(status_code=404, detail="知识库不存在")
-
-        require_owner(kb.owner_id, current_user)
-
-        doc_count_result = await db.execute(
-            select(func.count(Document.id)).filter(
-                Document.kb_id == kb_id_uuid,
-                Document.owner_id == current_user.user_id
-            )
-        )
-        doc_count = doc_count_result.scalar_one()
-
-        return KnowledgeBaseResponse(
-            id=str(kb.id),
-            name=kb.name,
-            description=kb.description,
-            embedding_model=kb.embedding_model,
-            is_default=kb.is_default,
-            status=kb.status,
-            document_count=doc_count,
-            created_at=kb.created_at.isoformat(),
-            updated_at=kb.updated_at.isoformat() if kb.updated_at else kb.created_at.isoformat()
-        )
-    except ValueError:
-        raise HTTPException(status_code=400, detail="无效的知识库ID")
-
 
 @router.put("/{kb_id}", response_model=KnowledgeBaseResponse)
 async def update_knowledge_base(
@@ -428,7 +159,6 @@ async def update_knowledge_base(
         )
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的知识库ID")
-
 
 @router.delete("/{kb_id}")
 async def delete_knowledge_base(
@@ -501,7 +231,6 @@ async def delete_knowledge_base(
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的知识库ID")
 
-
 async def _cleanup_kb_artifacts(
     doc_file_paths: List[tuple],
     kb_ids: List[str],
@@ -546,7 +275,6 @@ async def _cleanup_kb_artifacts(
         len(doc_file_paths),
         len(kb_ids),
     )
-
 
 @router.post("/batch-delete", response_model=BatchDeleteKnowledgeBasesResponse)
 async def batch_delete_knowledge_bases(
@@ -678,7 +406,6 @@ async def batch_delete_knowledge_bases(
         skipped_ids=skipped_ids,
     )
 
-
 @router.post("/{kb_id}/set_default")
 async def set_default_knowledge_base(
     kb_id: str,
@@ -697,94 +424,3 @@ async def set_default_knowledge_base(
         return {"message": "已设置为默认知识库"}
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的知识库ID")
-
-
-async def _owned_kb_ids(db: AsyncSession, current_user: CurrentUser) -> List[str]:
-    """取当前用户拥有的全部知识库 ID（可能为空列表）。
-
-    调用方在结果为空时**必须短路返回**，不可把空列表继续下传：
-    检索层把空 kb_ids 当作"不限定范围"，会退化为跨用户的全量检索。
-    """
-    result = await db.execute(
-        select(KnowledgeBase.id).filter(KnowledgeBase.owner_id == current_user.user_id)
-    )
-    return [str(row) for row in result.scalars()]
-
-
-@router.post("/recommend", response_model=List[KBRecommendationResponse])
-async def recommend_knowledge_bases(
-    request: KBRecommendationRequest,
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    基于问题自动推荐相关知识库（候选范围限定为当前用户拥有的知识库）
-
-    Args:
-        request: 请求数据（问题、返回数量）
-        current_user: 当前认证用户
-        db: 数据库会话
-
-    Returns:
-        list: 推荐的知识库列表，按相关性排序
-    """
-    # 候选知识库由服务端按 owner 解析，不接受客户端指定
-    owned_kb_ids = await _owned_kb_ids(db, current_user)
-    if not owned_kb_ids:
-        return []
-
-    vector_store = await VectorStoreManager.get_instance()
-    rag_chain = await RAGChain.get_instance(vector_store)
-
-    try:
-        recommendations = await rag_chain.recommend_knowledge_bases(
-            request.question, request.top_k, kb_ids=owned_kb_ids
-        )
-        return recommendations
-    except Exception as e:
-        logger.error(f"知识库推荐失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="知识库推荐失败，请稍后重试")
-
-
-class KnowledgeGraphRequest(BaseModel):
-    """知识图谱生成请求模型。"""
-    kb_ids: Optional[List[str]] = None
-
-
-@router.post("/knowledge_graph", response_model=KnowledgeGraphResponse)
-async def generate_knowledge_graph(
-    request: KnowledgeGraphRequest = Body(...),
-    current_user: CurrentUser = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """
-    生成知识库关系图谱（范围限定为当前用户拥有的知识库）
-
-    Args:
-        request: 包含知识库ID列表的请求体（可选；不传则取当前用户全部知识库）
-        current_user: 当前认证用户
-        db: 数据库会话
-
-    Returns:
-        dict: 知识图谱数据
-    """
-    if request.kb_ids:
-        # 显式指定时校验归属：含非本人知识库则整体拒绝（403）
-        kb_ids = parse_uuid_list(request.kb_ids, name="kb_id")
-        await validate_kb_ownership(db, kb_ids, current_user)
-    else:
-        kb_ids = await _owned_kb_ids(db, current_user)
-
-    # 空列表必须短路：检索层对空 kb_ids 不加过滤条件，等价于全量检索
-    if not kb_ids:
-        return {"nodes": [], "edges": [], "summary": "没有可用的知识库"}
-
-    vector_store = await VectorStoreManager.get_instance()
-    rag_chain = await RAGChain.get_instance(vector_store)
-
-    try:
-        result = await rag_chain.generate_knowledge_graph(kb_ids)
-        return result
-    except Exception as e:
-        logger.error(f"生成知识图谱失败: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="生成知识图谱失败，请稍后重试")
