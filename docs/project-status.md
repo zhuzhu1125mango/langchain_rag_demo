@@ -78,7 +78,7 @@
 | 级别 | 项 | 内容 | 依赖 / 归属 |
 |---|---|---|---|
 | ✅ | PUSH | 积压提交已全部推送（2026-10-16 ~ 2026-10-28，最新 HEAD `f76f90f`）：MODEL-REGISTRY P1/P2/P2.1/P3、SEC P1~P3、OPS-1/2/3/5、Dependabot 依赖收口；工作区干净 | 无 |
-| **P0** | **DEPLOY** | **生产栈未对齐源码（2026-10-28 核实）**：`backend-prod` 镜像构建于 2026-10-13，OpenAPI 仅 **91** 路由（源码 141），缺 `/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`；生产库停在 `d4e5f6a7b8c9`，落后 4 个迁移，`strategy_executions` **无 `user_id` 列（SEC-1 未生效）**、无 `model_*` 表。**代码 ✅ ≠ 生产生效**，详见「生产部署对齐」 | 部署 / owner |
+| ✅ | **DEPLOY** | **生产栈已对齐源码（2026-10-28 11:18~11:26 执行）**：重建 `rag-prod-backend` 镜像（`35f296e0f338`）→ `alembic upgrade head` 补齐 4 个迁移 → 切换容器。实测：`/health/ready` 200 且 DB/Redis/Milvus/MinIO 全 ok、OpenAPI **91→112** 路由（含 `/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`）、`alembic check` 无漂移、`strategy_executions.user_id` 就位（64 行全部回填 `__legacy__`）、`model_*` 5 表已建、11 个容器全 healthy、启动日志 0 ERROR。备份：`backups/app_prod_pre_deploy_20261028_1118.dump`（pg_restore 校验 22 表）。详见「生产部署对齐」 | 已完成 |
 | P1 | E1V ✅ | E-1 收口**完成**：离线 A/B（10-19/10-20，编译覆盖已修 → C 臂 0.188→0.938）+ L1 图边 47 条含跨档 13 + **Agent e2e 双臂（2026-10-21，8/8 ok）**。e2e 结论：hit/recall/mrr 持平，步数与 P95 翻倍，仅 1/8 题使用 `wiki_lookup` → **无增益，W1 保持默认关闭** | 无 |
 | P1 | W1 ✅ | 索引页优先入口（PG 直读 `page_type=index` 作第一跳）——已实施 2026-10-15 | 无 |
 | P1 | W3 ✅ | 导航埋点 + Agent 工具策略——已实施 2026-10-15 | 无 |
@@ -95,7 +95,7 @@
 | **P1** | **完善专项** | **UX / VIS / CODE / OPS（2026-10-22 全项目审计新增）**：停止生成、移动端、可访问性、设计 token、异常治理、巨型文件拆分、运维手册、供应链扫描。详见「全项目完善与演进专项」与 [evolution-roadmap-2026-10.md](design/evolution-roadmap-2026-10.md) | 开发 |
 | ✅ | D-U / DEV / W0 / HG | 覆盖率已达标（D-U）；DEV 已清；W0/HG 为 owner 手动项与挂起触发器项 | 见各条 |
 
-> **一句话执行序**（2026-10-28 核实后刷新）：**P0 生产部署对齐**（重建 prod 镜像 + `alembic upgrade head`，补齐 SEC-1 隔离列与 `model_*` 表）→ **MODEL-REGISTRY P1/P2/P2.1/P3 已完成并推送**（`da1f0cf` + `b5ac070`）→ **SEC P1/P2/P3 全部完成** → **OPS-1/2/3/5 已完成**（运维 Runbook、供应链收口、结构化日志、覆盖率）→ 完善专项剩余 CODE-1/CODE-2/UX-5~7/AGT-2~7 → AM-3 MCP 客户端 → **OPS-4 nightly/演练** → MODEL-P4（按需）→ SA/AM-4~7 视排期。
+> **一句话执行序**（2026-10-28 核实后刷新）：~~P0 生产部署对齐~~ **已完成（2026-10-28 11:26，镜像重建 + 4 个迁移 + 冒烟通过）** → **MODEL-REGISTRY P1/P2/P2.1/P3 已完成并推送**（`da1f0cf` + `b5ac070`）→ **SEC P1/P2/P3 全部完成** → **OPS-1/2/3/5 已完成**（运维 Runbook、供应链收口、结构化日志、覆盖率）→ 完善专项剩余 CODE-1/CODE-2/UX-5~7/AGT-2~7 → AM-3 MCP 客户端 → **OPS-4 nightly/演练** → MODEL-P4（按需）→ SA/AM-4~7 视排期。
 
 ### E-1 导航式 wiki_lookup（阶段一，已收口）
 
@@ -230,18 +230,28 @@
 
 **红线**：SEC-1~5、SEC-6~15、SEC-16~21 已完成；公网多租户仍按「受控网络 + 最小权限」运营，TLS/HSTS 需按 [deployment.md](guide/deployment.md) §6.8.1 由前置反代实际启用后方可宣称完整企业级多租户安全。
 
-### 生产部署对齐（P0 · 2026-10-28 核实）
+### 生产部署对齐（P0 · 2026-10-28 已执行完成）
 
-> 结论：**代码完成 ≠ 生产生效**。台账中 SEC-1~21、MODEL-P1~P3 的 ✅ 均为「代码 + 测试完成」，生产栈仍运行 2026-10-13 构建的镜像。
+> 前置结论：**代码完成 ≠ 生产生效**。执行前台账中 SEC-1~21、MODEL-P1~P3 的 ✅ 均为「代码 + 测试完成」，生产栈仍运行 2026-10-13 构建的镜像；本节记录对齐前后的差异与执行结果。
 
-| 维度 | 源码 / main | 生产实际 | 影响 |
+| 维度 | 源码 / main | 执行前生产 | 执行后（2026-10-28 11:26） |
 |---|---|---|---|
-| 后端镜像 | `f76f90f`（141 路由） | 构建于 2026-10-13，OpenAPI **91** 路由 | 无 `/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`；compose 已把 healthcheck 指向 `/health/ready`，重建前容器会因 404 变 unhealthy |
-| DB 迁移 | 10 个版本，head `c4d5e6f7a8b9` | `d4e5f6a7b8c9`（落后 4 格） | 缺 `e5f6a7b8c9d0`（`strategy_executions.user_id`）、`f2b3c4d5e6f7`（model registry 三表）、`b3c4d5e6f7a8`（用量/计价）、`c4d5e6f7a8b9`（索引画像） |
-| 学习模块隔离 | `strategy_executions.user_id` 已建 | 该表**无 `user_id` 列** | **SEC-1 在生产未生效**：多用户下学习样本仍跨用户可见/可写 |
-| 模型治理 | `model_providers` / `model_deployments` / `model_routes` / `model_usage_daily` | 表不存在 | MODEL-REGISTRY P1/P2.1/P3 全部未上线，设置页「模型服务」在生产不可用 |
+| 后端镜像 | `f76f90f` | 构建于 2026-10-13，OpenAPI **91** 路由 | 镜像 `35f296e0f338`，OpenAPI **112** 路由；`/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`、`/api/chat/approvals/{id}` 全部就位 |
+| DB 迁移 | head `c4d5e6f7a8b9`（10 版本） | `d4e5f6a7b8c9`（落后 4 格） | `c4d5e6f7a8b9`，`alembic check` 无漂移 |
+| 学习模块隔离 | `strategy_executions.user_id` | 该表无 `user_id` 列，SEC-1 未生效 | 列 + 索引就位，64 行历史样本全部置 `__legacy__`（无 `sessions.user_id` 可回填，仅后台训练可见） |
+| 模型治理 | 5 张 `model_*` 表 | 不存在 | `model_providers`/`model_deployments`/`model_routes`/`model_usage_daily`/`model_index_profile` 已建 |
 
-**对齐步骤**：① 备份（按 `guide/backup-restore.md`）→ ② `docker compose build backend && docker compose up -d backend`（必须重建镜像，`restart` 无效）→ ③ 容器内 `alembic upgrade head` → ④ `alembic check` 无漂移 → ⑤ 冒烟：`/health/ready`、登录/登出、`/api/admin/models/providers`、学习页跨用户隔离。**风险**：迁移与应用版本需同时切换，建议安排停机窗口（非 expand-contract 迁移）。
+**执行步骤与实证**：
+
+1. **备份**：`pg_dump -Fc` → `backups/app_prod_pre_deploy_20261028_1118.dump`（119 KB，`pg_restore -l` 校验 22 张表可读）。
+2. **构建**：`docker compose --env-file .env.prod build backend` → `rag-prod-backend:latest`（5m47s，5.41 GB；构建期间旧容器持续服务）。
+3. **迁移**：`docker compose run --rm --no-deps backend alembic upgrade head` → `d4e5f6a7b8c9 → e5f6a7b8c9d0 → f2b3c4d5e6f7 → b3c4d5e6f7a8 → c4d5e6f7a8b9`（全部为增量 DDL + 一次 `sessions` 回填，未删改业务数据）。
+4. **切换**：`up -d backend`（依赖等待 healthy 后启动，约 60s 完成预热：意图路由向量 / LLM(direct) / 学习任务 / Wiki lint 调度）。
+5. **验证**：`/health/ready` → `{"status":"ready","checks":{"database":"ok","redis":"ok","milvus":"ok","minio":"ok"}}`；未授权访问 `/api/learning/misclassification`、`/api/admin/models/usage`、`/api/chat/stream` 均 **401**；前端 8080 **200**；11 个容器全 healthy；`docker logs backend-prod | grep -c "ERROR|Traceback"` = **0**；数据行数执行前后一致（strategy_executions 64 / sessions 64 / users 2）。
+
+**回滚预案（如需）**：① 应用回滚 `docker compose up -d backend` 前先 `docker tag` 旧镜像（旧镜像层仍在本机）；② 数据回滚 `pg_restore -d $POSTGRES_DB --clean backups/app_prod_pre_deploy_20261028_1118.dump`；③ 迁移可降级：`alembic downgrade d4e5f6a7b8c9`（4 个迁移的 `downgrade()` 均已实现）。**注意**：降到旧迁移后旧代码可继续运行（新表/列不会被旧代码引用），但 `model_*` 数据会随降级丢失。
+
+**遗留**：生产未配置 `API_KEY`（仅 JWT 鉴权），因此本次无法做「登录 → 提问」的端到端冒烟（生产注册关闭、无现成凭据）；已用未授权 401 + 健康探针 + 迁移一致性覆盖。功能级冒烟需 owner 提供测试账号后补做。
 
 ### 待办台账核实记录（2026-10-28）
 
@@ -276,7 +286,11 @@
 
 ## 五、提交与推送状态
 
-- 当前工作区（2026-10-28）：**干净**；origin/main HEAD = **`f76f90f`**，最近 CI 7/7 + security-scan 全绿。
+- 当前工作区（2026-10-28）：**干净**；origin/main HEAD = **`6d71479`**，最近 CI 7/7 + security-scan 全绿。
+- 本轮推送（2026-10-28）：
+  - `6faccd9`（docs）：核实剩余待办并回写台账（P0 部署偏差 / E2 已实现 / CODE 实测数字）
+  - `6d71479`（fix(ui)）：axios 重试仅限幂等方法（+ `axios.spec.ts` 6 例；前端 137 例全通过、覆盖率 36.7/42.64/26.15/35.51）
+- **同日完成生产部署对齐**：`rag-prod-backend` 重建至 `35f296e0f338`，DB 升至 `c4d5e6f7a8b9`，11 容器 healthy，备份 `backups/app_prod_pre_deploy_20261028_1118.dump`（详见「生产部署对齐」）。
 - 本轮已推送批次：
   - `b5ac070`（2026-10-27）：MODEL-P2.1 + MODEL-P3 + SEC P2/P3（98 文件，含迁移 `b3c4d5e6f7a8`/`c4d5e6f7a8b9`）
   - `191ba0f`：CI 漂移修复（`model_usage_daily.usage_date` 索引）→ `79e36d0`：trivy 观察模式 → `9cbf63d`：OPS-6 依赖升级 + Trivy 恢复阻断
