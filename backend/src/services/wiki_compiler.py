@@ -1,74 +1,41 @@
-"""LLM-Wiki 编译器（P2 前置编译增强，Phase 1 MVP）。
+"""LLM-Wiki 编译器（CODE-1 拆分后为组合类）。"""
 
-将新摄入文档的 chunks「编译」为该知识库的 Wiki 页面（实体页/主题页），
-作为补充语料入向量库参与混合检索（source_kind="wiki"）。raw 层不可变，
-编译失败不影响原始检索链路。
-
-结构分两层便于单测与 A/B 评估：
-- compile_pages：纯 LLM 编译（抽取 → 页面匹配 → 生成/增量合并），无 IO 依赖
-- persist_pages：MinIO 正文持久化 + wiki_pages 表 upsert + 向量入库 + 索引页维护
-"""
-
-import json
 import logging
-import re
-import uuid
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Sequence, Union
+from typing import List, Optional, Sequence, Union
 
 from src.config import settings
 from src.services.wiki_lock import kb_wiki_lock as _kb_wiki_lock
 
+from src.services.wiki_pages import PageCompileMixin
+from src.services.wiki_persist import PagePersistMixin
+from src.services.wiki_text import (  # noqa: F401  兼容历史导入路径
+    _cosine,
+    _parse_json_dict,
+    _split_sentences,
+    _strip_think,
+    build_material,
+    derive_links_from_titles,
+    extract_links,
+    normalize_doc_ids,
+    normalize_title,
+)
+from src.services.wiki_types import (  # noqa: F401  兼容历史导入路径
+    _THINK_RE,
+    _WIKI_LINK_RE,
+    COMPILE_MAX_OUTPUT_TOKENS,
+    FACT_RETENTION_TARGET,
+    FACT_RETENTION_THRESHOLD,
+    FACT_RETENTION_WARN,
+    MAX_MATERIAL_CHARS,
+    TITLE_MATCH_THRESHOLD,
+    CompiledPage,
+    ExistingPage,
+    WikiCompileResult,
+)
+
 logger = logging.getLogger("wiki_compiler")
 
-# 标题匹配的 embedding 余弦阈值（低于则视为新页）
-TITLE_MATCH_THRESHOLD = 0.85
-# 送入 LLM 的来源材料上限（字符），防止超出本地模型上下文
-MAX_MATERIAL_CHARS = 8000
-# 诊断探针：key_fact 与页面句子的余弦达到该值视为「事实保留」
-FACT_RETENTION_THRESHOLD = 0.75
-# 诊断探针：事实保留率低于该值记 warning（对齐评估上线门槛 0.9）
-FACT_RETENTION_WARN = 0.9
-# P4 迭代精炼：页面事实保留率低于该值视为弱页，触发重生成
-FACT_RETENTION_TARGET = 0.9
-# 编译输出 token 上限：本地小模型偶发重复生成（无上限时 Ollama 默认无限生成），
-# 单槽被占满会拖垮全链路，故强制截断。
-COMPILE_MAX_OUTPUT_TOKENS = 2048
-_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-
-
-@dataclass
-class ExistingPage:
-    """既有 Wiki 页（编译时用于标题匹配与增量合并）。"""
-
-    page_id: str
-    title: str
-    page_type: str
-    content: str
-
-
-@dataclass
-class CompiledPage:
-    """编译产出的页面（待持久化）。"""
-
-    title: str
-    page_type: str  # entity / topic
-    content: str
-    # 命中的既有页（None = 新建页）
-    matched: Optional[ExistingPage] = None
-    key_facts: List[str] = field(default_factory=list)
-
-
-@dataclass
-class WikiCompileResult:
-    pages_created: int = 0
-    pages_updated: int = 0
-    chunks_indexed: int = 0
-    # 诊断探针（WIKI_DIAGNOSTIC_PROBES 开启时）：key_facts 事实保留率，None=未探测
-    fact_retention_rate: Optional[float] = None
-
-
-class WikiCompiler:
+class WikiCompiler(PageCompileMixin, PagePersistMixin):
     """单知识库 Wiki 编译器（无状态，方法内自持 LLM/Embedding 懒加载）。"""
 
     def __init__(self):
@@ -79,6 +46,7 @@ class WikiCompiler:
     # ------------------------------------------------------------------
     # 模型懒加载
     # ------------------------------------------------------------------
+
     async def _get_llm(self):
         from src.services.model_manager import model_manager
 
@@ -120,6 +88,7 @@ class WikiCompiler:
     # ------------------------------------------------------------------
     # 主流程
     # ------------------------------------------------------------------
+
     async def compile_document(
         self,
         db,
@@ -201,6 +170,7 @@ class WikiCompiler:
     # ------------------------------------------------------------------
     # 纯编译层（LLM only，供单测/A/B 评估独立调用）
     # ------------------------------------------------------------------
+
     async def compile_pages(self, chunks, existing_pages: List[ExistingPage]) -> List[CompiledPage]:
         """从 chunks 抽取候选页，与既有页匹配后生成/增量合并页面内容。"""
         material = build_material(chunks, MAX_MATERIAL_CHARS)
@@ -234,775 +204,26 @@ class WikiCompiler:
             )
         return compiled
 
-    async def _extract_candidates(self, material: str) -> List[dict]:
-        """LLM 抽取候选实体/主题页，返回 [{"title","type","key_facts"}]；解析失败返回空。"""
-        prompt = (
-            "你是知识库编译助手。从以下文档内容中提取值得建立独立 Wiki 页面的"
-            "实体（产品/系统/概念/人物/组织）与主题（跨章节议题）。\n"
-            "要求：\n"
-            "- 只提取文档中有实质内容支撑的条目，最多 8 个\n"
-            "- title 为简短名词（不超过 20 字），type 取 entity 或 topic\n"
-            "- key_facts 为该条目下用一句话陈述的关键事实\n\n"
-            f"文档内容：\n{material}\n\n"
-            '严格输出 JSON，不要输出任何其他文字：\n'
-            '{"pages": [{"title": "...", "type": "entity", "key_facts": ["..."]}]}'
-        )
-        pages: list = []
-        for attempt in range(2):
-            # LLM JSON 输出偶发畸变（截断/未转义引号），失败重试一次；
-            # 仍失败才放弃（该文档零页面，仅损失编译覆盖，不阻断上传管线）
-            try:
-                resp = await self._ainvoke(prompt)
-                pages = _parse_json_dict(_strip_think(resp.content)).get("pages", [])
-                break
-            except Exception as e:
-                if attempt == 1:
-                    logger.warning(f"Wiki 候选抽取失败: {e}")
-
-        valid = []
-        for p in pages if isinstance(pages, list) else []:
-            title = str(p.get("title", "")).strip()
-            if not title:
-                continue
-            valid.append(
-                {
-                    "title": title[:256],
-                    "type": p.get("type") if p.get("type") in ("entity", "topic") else "topic",
-                    "key_facts": [str(f) for f in (p.get("key_facts") or [])][:10],
-                }
-            )
-        return valid
-
-    async def _match_pages(
-        self, candidates: List[dict], existing_pages: List[ExistingPage]
-    ) -> List[Optional[ExistingPage]]:
-        """候选页与既有页匹配：归一化标题精确命中优先，其余按 embedding 余弦。
-
-        embedding 失败时降级为仅精确匹配（未匹配一律按新页处理）。
-        """
-        matched: List[Optional[ExistingPage]] = []
-        remaining = list(existing_pages)
-        pending_idx: List[int] = []
-
-        for i, cand in enumerate(candidates):
-            norm = normalize_title(cand["title"])
-            hit = next((p for p in remaining if normalize_title(p.title) == norm), None)
-            if hit:
-                matched.append(hit)
-                remaining.remove(hit)
-            else:
-                matched.append(None)
-                pending_idx.append(i)
-
-        if pending_idx and remaining:
-            try:
-                matched = await self._match_by_embedding(
-                    candidates, pending_idx, remaining, matched
-                )
-            except Exception as e:
-                logger.warning(f"Wiki 页标题 embedding 匹配失败，按新页处理: {e}")
-        return matched
-
-    async def _match_by_embedding(
-        self,
-        candidates: List[dict],
-        pending_idx: List[int],
-        remaining: List[ExistingPage],
-        matched: List[Optional[ExistingPage]],
-    ) -> List[Optional[ExistingPage]]:
-        """对未精确命中的候选用 embedding 余弦匹配余下既有页（贪心取最高分）。"""
-        texts = [candidates[i]["title"] for i in pending_idx] + [p.title for p in remaining]
-        vectors = await self._get_embeddings().aembed_documents(texts)
-        cand_vecs = vectors[: len(pending_idx)]
-        page_vecs = vectors[len(pending_idx):]
-        # 页面与向量配对成元组列表，消费时同步删除，保证下标不错位
-        pairs = list(zip(remaining, page_vecs))
-
-        for pos, i in enumerate(pending_idx):
-            best_score, best = 0.0, None
-            best_idx = -1
-            # 关键：page_vecs 在循环外按 remaining 的初始顺序一次性算出。
-            # 必须把「页面」与「向量」配对成元组列表一起消费、一起删除，
-            # 否则循环内 remaining.remove(best) 改变列表下标后，后续候选的
-            # page_vecs[j] 会与错位的向量比较——命中一次后余下候选都在跟
-            # "别人的向量"比相似度，匹配到错误既有页并静默合并。
-            for idx, (page, vec) in enumerate(pairs):
-                score = _cosine(cand_vecs[pos], vec)
-                if score > best_score:
-                    best_score = score
-                    best = page
-                    best_idx = idx
-            if best is not None and best_score >= TITLE_MATCH_THRESHOLD:
-                matched[i] = best
-                remaining.remove(best)
-                pairs.pop(best_idx)  # 同步移除向量，保持配对不错位
-        return matched
-
-    async def _generate_page(
-        self, cand: dict, existing: Optional[ExistingPage], material: str
-    ) -> str:
-        """生成新页或增量合并既有页（约束：保留既有事实，矛盾显式标注）。
-
-        注（2026-09-23）：曾试验在 prompt 中注入既有页标题要求 [[互链]]，
-        多跳 A/B 证伪（链接文本混入正文使 B/C 臂与 D 臂同步退化），已回退；
-        跨文档桥接的正规建法（图结构/独立链接元数据）待重新设计。
-        """
-        title = cand["title"]
-        facts = "\n".join(f"- {f}" for f in cand.get("key_facts", [])) or "（无）"
-        if existing is not None:
-            prompt = (
-                "你是 Wiki 编辑。请基于既有页面与新增材料，输出更新后的完整 Markdown 页面。\n"
-                "规则：\n"
-                "- 保留既有页面中的全部事实，不得删除\n"
-                "- 用新增材料补充新事实、修正过时表述\n"
-                "- 若新旧信息矛盾，用引用块「> ⚠️ 矛盾提示：...」显式标注，不要静默覆盖\n"
-                "- 只使用给定材料中的信息，不要编造；输出正文，不要解释\n\n"
-                f"页面标题：{title}\n\n"
-                f"既有页面内容：\n{existing.content or '（空）'}\n\n"
-                f"新增材料关键事实：\n{facts}\n\n"
-                f"新增材料原文（节选）：\n{material}\n"
-            )
-        else:
-            prompt = (
-                "你是 Wiki 编辑。请根据来源材料为指定条目编写一个 Markdown Wiki 页面。\n"
-                "规则：\n"
-                "- 以「# 标题」开头，分小节陈述事实\n"
-                "- 只使用来源材料中的信息，不要编造\n"
-                "- 末尾加「## 来源」小节，说明信息来自本次编译的文档\n\n"
-                f"页面标题：{title}\n\n"
-                f"关键事实：\n{facts}\n\n"
-                f"来源材料（节选）：\n{material}\n"
-            )
-        resp = await self._ainvoke(prompt)
-        content = _strip_think(resp.content).strip()
-        return content or f"# {title}\n\n（内容生成失败）"
-
-    async def compile_synthesis_page(
-        self,
-        question: str,
-        answer: str,
-        cited_texts: List[str],
-        existing_titles: List[str],
-    ) -> Optional[CompiledPage]:
-        """D3 答案回流：把「问题 + 已验证答案 + 引用片段」合成为 synthesis 页。
-
-        与 compile_pages 的实体/主题抽取不同，synthesis 页直接以本次问答为
-        材料（答案已经过引用补全与事实校验），LLM 负责蒸馏成可复用的知识页
-        并用 [[既有页标题]] 与既有页面互链。失败返回 None（best-effort）。
-        """
-        try:
-            material_parts = [f"用户问题：{question}", f"已验证答案：{answer}"]
-            if cited_texts:
-                joined = "\n---\n".join(t[:2000] for t in cited_texts[:6])
-                material_parts.append(f"引用片段原文：\n{joined}")
-            existing = "、".join(existing_titles[:30]) if existing_titles else "（暂无）"
-            prompt = (
-                "你是 Wiki 编辑。请把下面这次问答沉淀为一篇 Markdown 综合知识页，"
-                "供后续直接回答同类问题使用。\n"
-                "规则：\n"
-                "- 第一行以「# 标题」开头，标题为该知识的主题名（不超过 20 字，不加书名号）\n"
-                "- 只使用材料中的信息，不要编造；分小节陈述，保留关键数值与结论\n"
-                "- 提到既有页面覆盖的概念时，用 [[既有页标题]] 引用\n"
-                "- 末尾加「## 来源」小节，注明来自用户问答沉淀\n\n"
-                f"既有页面标题（可用于 [[链接]]）：{existing}\n\n"
-                + "\n\n".join(material_parts)
-            )
-            resp = await self._ainvoke(prompt)
-            content = _strip_think(resp.content).strip()
-            if not content:
-                return None
-            title = None
-            for line in content.splitlines():
-                if line.startswith("#"):
-                    title = line.lstrip("#").strip()
-                    break
-            if not title:
-                title = f"综合：{question[:24]}"
-                content = f"# {title}\n\n{content}"
-            title = title[:80]
-            return CompiledPage(title=title, page_type="synthesis", content=content)
-        except Exception as e:
-            logger.warning(f"synthesis 页合成失败（忽略）: {e}")
-            return None
-
-    # ------------------------------------------------------------------
-    # 持久化层
-    # ------------------------------------------------------------------
-    async def persist_pages(
-        self,
-        db,
-        kb_id: str,
-        doc_ids: Union[str, Sequence[str]],
-        compiled: List[CompiledPage],
-    ) -> WikiCompileResult:
-        """MinIO 正文 + wiki_pages upsert + 向量入库 + 索引页维护。
-
-        doc_ids 支持单值 str（兼容）或多值（P5 去抖合并编译），source_doc_ids 归属全部。
-        """
-        doc_id_list = normalize_doc_ids(doc_ids)
-
-        from src.models.wiki_page import WikiPage
-        from src.services.minio_service import MinioService
-
-        minio = await MinioService.get_instance()
-        result = WikiCompileResult()
-
-        owner_id = await self._get_kb_owner(db, kb_id)
-        upserted_rows: List[WikiPage] = []
-        was_existing: List[bool] = []
-
-        for page in compiled:
-            # 既有页按 (kb_id, page_type, title) 幂等查找，未命中则新建
-            from sqlalchemy import select
-
-            row = (
-                await db.execute(
-                    select(WikiPage).filter(
-                        WikiPage.kb_id == str(kb_id),
-                        WikiPage.page_type == page.page_type,
-                        WikiPage.title == page.title,
-                        WikiPage.status == "active",
-                    )
-                )
-            ).scalars().first()
-
-            if row is None:
-                is_existing = False
-                row = WikiPage(
-                    id=str(uuid.uuid4()),
-                    kb_id=str(kb_id),
-                    page_type=page.page_type,
-                    title=page.title,
-                    content_path=f"wiki/{kb_id}/{str(uuid.uuid4())}.md",
-                    # 显式初始化（Column default 仅在 INSERT 时生效，内存对象读不到）
-                    source_doc_ids=list(doc_id_list),
-                    revision=1,
-                    owner_id=owner_id,
-                )
-                db.add(row)
-                result.pages_created += 1
-            else:
-                is_existing = True
-                row.revision = (row.revision or 1) + 1
-                missing_docs = [d for d in doc_id_list if d not in (row.source_doc_ids or [])]
-                if missing_docs:
-                    # JSONB 原位变更不触发 UPDATE，须重新赋值
-                    row.source_doc_ids = [*(row.source_doc_ids or []), *missing_docs]
-                result.pages_updated += 1
-
-            await minio.upload_text_async(row.content_path, page.content)
-            upserted_rows.append(row)
-            was_existing.append(is_existing)
-
-        await db.commit()
-        await self._fill_links(db, kb_id, upserted_rows, [p.content for p in compiled])
-
-        # 页面正文分块入向量库（source_kind=wiki，参与混合检索）；
-        # 既有页先删旧向量再入库，避免多 revision 重复累积
-        n_indexed = 0
-        for row, page, is_existing in zip(upserted_rows, compiled, was_existing):
-            n_indexed += await self._index_page(kb_id, row, page, delete_old=is_existing)
-        result.chunks_indexed = n_indexed
-
-        await self._upsert_index_page(db, kb_id, minio, owner_id)
-        return result
-
-    async def _fill_links(self, db, kb_id: str, rows: List, contents: List[str]) -> None:
-        """为页面写 links 列（校验目标页存在），两种建边口径：
-
-        - `WIKI_LINK_METADATA_ENABLED=true`：E-1 L1 元数据建边——按「其他页标题
-          出现在本页正文」生成图边（`derive_links_from_titles`），**正文零改动**；
-        - 默认（false）：P3 正文 `[[Title]]` 语法提取（`extract_links`）。
-
-        在页面 upsert 提交后执行，保证批次内互链可见；失败仅告警（links 缺失
-        只影响导航/检索扩展，不影响编译产物）。
-        """
-        from sqlalchemy import select
-
-        from src.models.wiki_page import WikiPage
-
-        try:
-            active_titles = (
-                await db.execute(
-                    select(WikiPage.title).filter(
-                        WikiPage.kb_id == str(kb_id),
-                        WikiPage.status == "active",
-                    )
-                )
-            ).scalars().all()
-            title_set = {normalize_title(t): t for t in active_titles}
-            metadata_edges = settings.wiki_compile.WIKI_LINK_METADATA_ENABLED
-            for row, content in zip(rows, contents):
-                if metadata_edges:
-                    row.links = derive_links_from_titles(content, row.title, title_set)
-                else:
-                    row.links = extract_links(content, row.title, title_set)
-            await db.commit()
-        except Exception as e:
-            logger.warning(f"Wiki 页链接提取失败（不影响编译产物）: {e}")
-
-    async def _index_page(self, kb_id: str, row, page: CompiledPage, delete_old: bool = False) -> int:
-        """将单个页面正文分块写入向量库；失败仅告警（raw 层兜底）。
-
-        delete_old=True（既有页更新）时先删旧向量，避免多 revision 重复累积。
-        """
-        try:
-            from langchain_core.documents import Document
-            from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-            from src.services.vector_store import VectorStoreManager
-
-            vector_store = await VectorStoreManager.get_instance()
-            if delete_old:
-                await vector_store.milvus_service.delete_by_document_id(row.id)
-            splitter = RecursiveCharacterTextSplitter(
-                chunk_size=1000,
-                chunk_overlap=100,
-                separators=["\n## ", "\n### ", "\n\n", "\n", "，", "。", ""],
-            )
-            pieces = splitter.split_text(page.content) or [page.content]
-            # synthesis 页标记独立 source_kind（wiki_syn）：不参与主检索混入，
-            # 仅经 wiki_lookup 导航入口触达（阶段一 D3，见 wiki-navigable-workspace.md）
-            source_kind = "wiki_syn" if page.page_type == "synthesis" else "wiki"
-            docs = [
-                Document(
-                    page_content=text,
-                    metadata={
-                        "document_id": row.id,
-                        "source": f"wiki://{page.title}",
-                        "chunk_index": i,
-                        "heading_path": page.title,
-                        "source_kind": source_kind,
-                    },
-                )
-                for i, text in enumerate(pieces)
-            ]
-            # add_documents 无返回值（insert 语义），入库数即分块数
-            await vector_store.add_documents(docs, str(kb_id))
-            return len(docs)
-        except Exception as e:
-            logger.warning(f"Wiki 页「{page.title}」向量入库失败（raw 层兜底不受影响）: {e}")
-            return 0
-
-    async def rebuild_index_page(self, db, kb_id: str) -> None:
-        """公开封装：按当前 active 页重建索引页（级联删除后由 wiki_cascade 调用）。"""
-        from src.services.minio_service import MinioService
-
-        minio = await MinioService.get_instance()
-        await self._upsert_index_page(db, kb_id, minio, await self._get_kb_owner(db, kb_id))
-
-    async def _check_fact_retention(
-        self, compiled: List[CompiledPage]
-    ) -> Optional[Dict[str, tuple]]:
-        """诊断探针（WiCER 思路）：逐页计算 key_facts 事实保留率，零额外 LLM 调用。
-
-        每条 key_fact 与本页句子的 embedding 余弦 max ≥ FACT_RETENTION_THRESHOLD
-        视为保留；探针与精炼均未启用、无 key_facts 或 embedding 失败时返回 None。
-
-        Returns:
-            {title: (该页保留率, 缺失事实列表)}；整体保留率由 _aggregate_retention 聚合。
-        """
-        if (
-            not settings.wiki_compile.WIKI_DIAGNOSTIC_PROBES
-            and settings.wiki_compile.WIKI_COMPILE_REFINEMENT_ITERATIONS <= 0
-        ):
-            return None
-        if not any(p.key_facts for p in compiled):
-            return None
-        try:
-            probe: Dict[str, tuple] = {}
-            for page in compiled:
-                if not page.key_facts:
-                    continue
-                sentences = _split_sentences(page.content)
-                if not sentences:
-                    probe[page.title] = (0.0, list(page.key_facts))
-                    continue
-                vectors = await self._get_embeddings().aembed_documents(
-                    page.key_facts + sentences
-                )
-                fact_vecs, sent_vecs = vectors[: len(page.key_facts)], vectors[len(page.key_facts):]
-                missing = []
-                for i, fact_vec in enumerate(fact_vecs):
-                    best = max((_cosine(fact_vec, s) for s in sent_vecs), default=0.0)
-                    if best < FACT_RETENTION_THRESHOLD:
-                        missing.append(page.key_facts[i])
-                probe[page.title] = (1.0 - len(missing) / len(page.key_facts), missing)
-
-            overall = self._aggregate_retention(probe, compiled)
-            if overall is not None:
-                if overall < FACT_RETENTION_WARN:
-                    logger.warning(
-                        f"Wiki 编译事实保留率偏低: {overall:.2f}（阈值 {FACT_RETENTION_WARN}），"
-                        "建议迭代 prompt 或换模型"
-                    )
-                else:
-                    logger.info(f"Wiki 编译事实保留率: {overall:.2f}")
-            return probe
-        except Exception as e:
-            logger.warning(f"Wiki 诊断探针执行失败（不影响编译产物）: {e}")
-            return None
-
-    async def _refinement_loop(self, compiled: List[CompiledPage]) -> Optional[Dict[str, tuple]]:
-        """P4 迭代精炼：探针定位弱页（保留率 < FACT_RETENTION_TARGET）→ 注入缺失事实重生成。
-
-        轮次上限 WIKI_COMPILE_REFINEMENT_ITERATIONS（0 时仅探针一次，兼容仅日志语义）；
-        精炼抛错时该页保留当前内容继续（结果绝不比精炼前差）；探针失败无法定位
-        弱页时立即返回。返回最终一轮探针结果（供 result 记录）。
-
-        Returns:
-            最终探针结果 dict（可能为 None=探针未产出），由 compile_document 聚合。
-        """
-        iterations = max(0, settings.wiki_compile.WIKI_COMPILE_REFINEMENT_ITERATIONS)
-        probe_map = await self._check_fact_retention(compiled)
-        for _ in range(iterations):
-            if not probe_map:
-                return None
-            weak = [
-                (page, probe_map[page.title][1])
-                for page in compiled
-                if page.title in probe_map and probe_map[page.title][0] < FACT_RETENTION_TARGET
-            ]
-            if not weak:
-                return probe_map
-            for page, missing in weak:
-                try:
-                    page.content = await self.refine_pages(page, missing)
-                except Exception as e:
-                    logger.warning(f"Wiki 页「{page.title}」精炼失败，保留当前内容: {e}")
-            probe_map = await self._check_fact_retention(compiled)
-        return probe_map
-
-    async def refine_pages(self, page: CompiledPage, missing_facts: List[str]) -> str:
-        """P4 精炼单个弱页：注入缺失事实清单重生成完整正文（纯 LLM 无 IO，可单测 mock）。
-
-        失败/空输出抛异常，由 _refinement_loop 兜底保留当前内容。
-        """
-        facts = "\n".join(f"- {f}" for f in missing_facts) or "（无）"
-        prompt = (
-            "你是 Wiki 编辑。以下页面经事实保留率诊断，发现部分关键事实未在正文中体现。\n"
-            "规则：\n"
-            "- 保留既有页面全部内容与结构，不得删除既有事实\n"
-            "- 将缺失的关键事实自然融入正文（可新增小节）\n"
-            "- 不引入既有内容与缺失事实之外的新信息，不要编造\n"
-            "- 输出完整 Markdown 页面正文，不要解释\n\n"
-            f"页面标题：{page.title}\n\n"
-            f"当前页面内容：\n{page.content}\n\n"
-            f"缺失的关键事实（须补充）：\n{facts}\n"
-        )
-        resp = await self._ainvoke(prompt)
-        content = _strip_think(resp.content).strip()
-        if not content:
-            raise ValueError("精炼输出为空")
-        return content
-
-    async def regenerate_page(self, title: str, page_type: str, material: str) -> str:
-        """P5 级联重写：仅基于剩余来源材料重推导整页（纯 LLM 无 IO，可单测 mock）。
-
-        材料按 WIKI_REWRITE_MATERIAL_CHARS 截断（重写低频，上限独立于编译放宽）；
-        空输出抛异常，由级联重写任务兜底保留当前内容。
-        """
-        material = (material or "")[: settings.wiki_compile.WIKI_REWRITE_MATERIAL_CHARS]
-        prompt = (
-            "你是 Wiki 编辑。该页面此前引用的部分来源文档已被删除，"
-            "请仅基于剩余来源材料重新生成本页完整 Markdown 内容。\n"
-            "规则：\n"
-            "- 只使用剩余来源材料中的信息，已删除来源相关的内容一律不要保留\n"
-            "- 以「# 标题」开头；原有小节结构与剩余材料匹配时保持，不匹配时允许缩减小节\n"
-            "- 不要编造；末尾加「## 来源」小节，说明信息来自剩余来源文档\n"
-            "- 输出正文，不要解释\n\n"
-            f"页面标题：{title}\n\n"
-            f"剩余来源材料（节选）：\n{material}\n"
-        )
-        resp = await self._ainvoke(prompt)
-        content = _strip_think(resp.content).strip()
-        if not content:
-            raise ValueError("重写输出为空")
-        return content
-
-    async def _check_contradictions(self, compiled: List[CompiledPage], material: str) -> None:
-        """P5 矛盾抽查（仅诊断）：增量更新页的新旧版本比对，warning + 指标。
-
-        不修改页面内容（矛盾标注仍由生成期 prompt 承担）；LLM 抛错/解析失败
-        视为无矛盾仅记日志；新页（matched=None）无「新旧矛盾」语义，跳过。
-        """
-        from src.middleware.prometheus import record_wiki_contradictions
-
-        for page in compiled:
-            if page.matched is None:
-                continue
-            prompt = (
-                "你是 Wiki 审校。比较同一页面的更新前后两个版本，"
-                "找出新增或修改的内容与既有事实之间的矛盾"
-                "（数值冲突、状态冲突、时间线冲突等）。\n"
-                "规则：\n"
-                "- 有意补充、细化既有内容不算矛盾\n"
-                "- 只报告真正的逻辑冲突，没有则输出空数组\n\n"
-                "严格输出 JSON，不要输出任何其他文字：\n"
-                '{"contradictions": ["矛盾描述1", "..."]}\n\n'
-                f"页面标题：{page.title}\n\n"
-                f"更新前（既有版本）：\n{page.matched.content or '（空）'}\n\n"
-                f"更新后（当前版本）：\n{page.content}\n\n"
-                f"新增材料（供参考判断，不要输出修改建议）：\n{material}\n"
-            )
-            try:
-                resp = await self._ainvoke(prompt)
-                data = _parse_json_dict(_strip_think(resp.content))
-                contradictions = [
-                    str(c).strip()
-                    for c in (data.get("contradictions") or [])
-                    if str(c).strip()
-                ]
-            except Exception as e:
-                logger.warning(f"Wiki 矛盾抽查失败（视为无矛盾）: 页「{page.title}」: {e}")
-                continue
-            if contradictions:
-                record_wiki_contradictions(len(contradictions))
-                for item in contradictions:
-                    logger.warning(f"Wiki 矛盾抽查发现矛盾: 页「{page.title}」: {item}")
-
-    @staticmethod
-    def _aggregate_retention(
-        probe_map: Optional[Dict[str, tuple]], compiled: List[CompiledPage]
-    ) -> Optional[float]:
-        """由逐页探针结果聚合整体事实保留率（口径与 Phase 2 一致：保留数/总数）。"""
-        if not probe_map:
-            return None
-        retained = total = 0
-        for page in compiled:
-            if not page.key_facts or page.title not in probe_map:
-                continue
-            rate, _ = probe_map[page.title]
-            total += len(page.key_facts)
-            retained += round(rate * len(page.key_facts))
-        return retained / total if total else None
-
-    async def _upsert_index_page(self, db, kb_id: str, minio, owner_id: Optional[str]) -> None:
-        """维护索引页（目录，不进向量库）：每次编译后按全部 active 页重建。"""
-        from sqlalchemy import select
-
-        from src.models.wiki_page import WikiPage
-
-        try:
-            # 先取/建索引行，再查全量页面构建目录（调用序稳定，便于测试对齐）
-            index_row = (
-                await db.execute(
-                    select(WikiPage).filter(
-                        WikiPage.kb_id == str(kb_id),
-                        WikiPage.page_type == "index",
-                    )
-                )
-            ).scalars().first()
-            if index_row is None:
-                index_row = WikiPage(
-                    id=str(uuid.uuid4()),
-                    kb_id=str(kb_id),
-                    page_type="index",
-                    title="索引",
-                    content_path=f"wiki/{kb_id}/{str(uuid.uuid4())}.md",
-                    source_doc_ids=[],
-                    revision=1,
-                    owner_id=owner_id,
-                )
-                db.add(index_row)
-            else:
-                index_row.revision = (index_row.revision or 1) + 1
-
-            rows = (
-                await db.execute(
-                    select(WikiPage)
-                    .filter(
-                        WikiPage.kb_id == str(kb_id),
-                        WikiPage.status == "active",
-                        WikiPage.page_type.in_(("entity", "topic", "synthesis")),
-                    )
-                    .order_by(WikiPage.page_type, WikiPage.title)
-                )
-            ).scalars().all()
-
-            lines = ["# 知识库索引", ""]
-            current_type = None
-            type_labels = {"entity": "实体", "topic": "主题", "synthesis": "综合"}
-            for row in rows:
-                if row.page_type != current_type:
-                    label = type_labels.get(row.page_type, "主题")
-                    lines += [f"## {label}页", ""]
-                    current_type = row.page_type
-                lines.append(f"- [[{row.title}]]（revision {row.revision}）")
-            lines += ["", f"共 {len(rows)} 个页面。"]
-            content = "\n".join(lines)
-
-            await minio.upload_text_async(index_row.content_path, content)
-            await db.commit()
-        except Exception as e:
-            logger.warning(f"Wiki 索引页维护失败: {e}")
-
-    async def _get_kb_owner(self, db, kb_id: str) -> Optional[str]:
-        from sqlalchemy import select
-
-        from src.models.knowledge_base import KnowledgeBase
-
-        try:
-            kb_uuid = uuid.UUID(str(kb_id))  # KB 主键为 UUID 列，字符串主键场景直接跳过
-        except ValueError:
-            return None
-        try:
-            row = (
-                await db.execute(
-                    select(KnowledgeBase).filter(KnowledgeBase.id == kb_uuid)
-                )
-            ).scalars().first()
-            return row.owner_id if row else None
-        except Exception:
-            return None
-
-
-# ----------------------------------------------------------------------
-# 模块级工具函数
-# ----------------------------------------------------------------------
-
-
-def normalize_doc_ids(doc_ids: Union[str, Sequence[str]]) -> List[str]:
-    """doc_ids 归一化：单值 str / 单元素集合统一为去重后的字符串列表（保持顺序）。"""
-    if isinstance(doc_ids, str):
-        return [doc_ids]
-    seen: List[str] = []
-    for d in doc_ids:
-        s = str(d)
-        if s not in seen:
-            seen.append(s)
-    return seen
-
-
-def build_material(chunks, max_chars: int) -> str:
-    """拼接 chunks 正文为编译材料并按 max_chars 截断（compile_pages 与矛盾抽查共用）。"""
-    return "\n\n".join(
-        chunk.page_content for chunk in chunks if getattr(chunk, "page_content", "")
-    )[:max_chars]
-
-
-# Wiki 正文交叉链接语法：[[Title]]
-_WIKI_LINK_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
-
-
-def extract_links(content: str, self_title: str, valid_titles) -> List[str]:
-    """提取正文 [[Title]] 链接：去重、排除自引用与不存在页。
-
-    Args:
-        content: 页面正文
-        self_title: 本页标题（自引用排除，归一化比较）
-        valid_titles: 有效目标标题集合/映射（归一化 key → 原标题）；
-                      存在性校验后的链接写回原标题
-
-    Returns:
-        去重后的目标标题列表（保留首次出现顺序）
-    """
-    valid = (
-        valid_titles
-        if isinstance(valid_titles, dict)
-        else {normalize_title(t): t for t in (valid_titles or [])}
-    )
-    self_norm = normalize_title(self_title)
-    seen = set()
-    links = []
-    for raw in _WIKI_LINK_RE.findall(content or ""):
-        title = raw.strip()[:256]
-        norm = normalize_title(title)
-        if not norm or norm == self_norm or norm in seen:
-            continue
-        target = valid.get(norm)
-        if target is None:
-            continue
-        seen.add(norm)
-        links.append(target)
-    return links
-
-
-def normalize_title(title: str) -> str:
-    """标题归一化：去空白转小写（精确匹配快路径）。"""
-    return re.sub(r"\s+", "", (title or "")).lower()
-
-
-def derive_links_from_titles(
-    content: str, self_title: str, valid_titles, max_links: int = 8
-) -> List[str]:
-    """E-1 图边元数据化（L1）：按「其他页标题出现在本页正文」建边。
-
-    与 `extract_links` 的「正文 `[[Title]]` 语法」不同，本函数**不改正文**——
-    直接把正文里出现的既有页标题识别为图边（红线：互链严禁内联正文）。生成
-    的标题列表写入 `wiki_pages.links` JSONB，供 navigator 的 Related 导航。
-
-    Args:
-        content: 本页正文
-        self_title: 本页标题（自引用排除，归一化比较）
-        valid_titles: 有效目标标题映射（归一化 key → 原标题），或标题集合
-        max_links: 单页图边数量上限
-
-    Returns:
-        去重后的目标标题列表（按目标标题在正文中的首次出现位置排序）
-    """
-    valid = (
-        valid_titles
-        if isinstance(valid_titles, dict)
-        else {normalize_title(t): t for t in (valid_titles or [])}
-    )
-    self_norm = normalize_title(self_title)
-    haystack = normalize_title(content or "")
-    if not haystack:
-        return []
-    found = []
-    for norm, title in valid.items():
-        # 单字标题噪声大，跳过（如「会」「卡」）
-        if not norm or norm == self_norm or len(norm) < 2:
-            continue
-        pos = haystack.find(norm)
-        if pos >= 0:
-            found.append((pos, title))
-    found.sort(key=lambda item: item[0])
-    return [title for _, title in found[:max_links]]
-
-
-def _split_sentences(text: str) -> List[str]:
-    """按中英文句末标点与换行切句（诊断探针用），去空句。"""
-    parts = re.split(r"(?<=[。！？!?；;])|\n", text or "")
-    return [p.strip() for p in parts if p and p.strip()]
-
-
-def _strip_think(text: str) -> str:
-    """剥离混合思考模型可能输出的 <think> 块。"""
-    return _THINK_RE.sub("", text or "")
-
-
-def _parse_json_dict(text: str) -> dict:
-    """从 LLM 输出中解析 JSON 对象；容忍代码围栏、包裹文字与**尾随多余内容**。
-
-    尾随多余内容（如 JSON 之后又续了说明/第二个对象）曾使贪心 `\\{.*\\}` 匹配
-    把整段喂给 `json.loads` → `Extra data` 报错 → 该文档零页面。此处改用
-    `raw_decode` 只消费**一个** JSON 值，忽略其后内容。
-    """
-    text = (text or "").strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", text, flags=re.DOTALL)
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        if start == -1:
-            raise
-        data, _ = json.JSONDecoder().raw_decode(text[start:])
-    return data if isinstance(data, dict) else {}
-
-
-def _cosine(vec_a: List[float], vec_b: List[float]) -> float:
-    """余弦相似度；非法输入返回 0（对齐 semantic_cache_service 语义）。"""
-    try:
-        if not vec_a or not vec_b or len(vec_a) != len(vec_b):
-            return 0.0
-        dot = sum(a * b for a, b in zip(vec_a, vec_b))
-        na = sum(a * a for a in vec_a) ** 0.5
-        nb = sum(b * b for b in vec_b) ** 0.5
-        if na == 0 or nb == 0:
-            return 0.0
-        return dot / (na * nb)
-    except TypeError:
-        return 0.0
+__all__ = [
+    "WikiCompiler",
+    "CompiledPage",
+    "ExistingPage",
+    "WikiCompileResult",
+    "build_material",
+    "normalize_doc_ids",
+    "extract_links",
+    "normalize_title",
+    "derive_links_from_titles",
+    "_cosine",
+    "_parse_json_dict",
+    "_split_sentences",
+    "_strip_think",
+    "_THINK_RE",
+    "_WIKI_LINK_RE",
+    "TITLE_MATCH_THRESHOLD",
+    "MAX_MATERIAL_CHARS",
+    "FACT_RETENTION_THRESHOLD",
+    "FACT_RETENTION_WARN",
+    "FACT_RETENTION_TARGET",
+    "COMPILE_MAX_OUTPUT_TOKENS",
+]
