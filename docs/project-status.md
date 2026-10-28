@@ -78,7 +78,7 @@
 | 级别 | 项 | 内容 | 依赖 / 归属 |
 |---|---|---|---|
 | ✅ | PUSH | 积压提交已全部推送（2026-10-16 ~ 2026-10-28，最新 HEAD `f76f90f`）：MODEL-REGISTRY P1/P2/P2.1/P3、SEC P1~P3、OPS-1/2/3/5、Dependabot 依赖收口；工作区干净 | 无 |
-| ✅ | **DEPLOY** | **生产栈已对齐源码（2026-10-28 11:18~11:26 执行）**：重建 `rag-prod-backend` 镜像（`35f296e0f338`）→ `alembic upgrade head` 补齐 4 个迁移 → 切换容器。实测：`/health/ready` 200 且 DB/Redis/Milvus/MinIO 全 ok、OpenAPI **91→112** 路由（含 `/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`）、`alembic check` 无漂移、`strategy_executions.user_id` 就位（64 行全部回填 `__legacy__`）、`model_*` 5 表已建、11 个容器全 healthy、启动日志 0 ERROR。备份：`backups/app_prod_pre_deploy_20261028_1118.dump`（pg_restore 校验 22 表）。详见「生产部署对齐」 | 已完成 |
+| ✅ | **DEPLOY** | **生产栈已对齐源码（2026-10-28 11:18~11:36 执行）**：重建 `rag-prod-backend` 镜像（`35f296e0f338`）→ `alembic upgrade head` 补齐 4 个迁移 → 切换容器 → 登录态端到端冒烟。实测：`/health/ready` 200 且 DB/Redis/Milvus/MinIO 全 ok、OpenAPI **91→112** 路由（含 `/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`）、`alembic check` 无漂移、`strategy_executions.user_id` 就位（64 行全部回填 `__legacy__`）、`model_*` 5 表已建、11 个容器全 healthy、启动日志 0 ERROR；冒烟覆盖登录/资源隔离/流式问答/多轮/落库/登出吊牌 401。备份：`backups/app_prod_pre_deploy_20261028_1118.dump`（pg_restore 校验 22 表）。详见「生产部署对齐」 | 已完成 |
 | P1 | E1V ✅ | E-1 收口**完成**：离线 A/B（10-19/10-20，编译覆盖已修 → C 臂 0.188→0.938）+ L1 图边 47 条含跨档 13 + **Agent e2e 双臂（2026-10-21，8/8 ok）**。e2e 结论：hit/recall/mrr 持平，步数与 P95 翻倍，仅 1/8 题使用 `wiki_lookup` → **无增益，W1 保持默认关闭** | 无 |
 | P1 | W1 ✅ | 索引页优先入口（PG 直读 `page_type=index` 作第一跳）——已实施 2026-10-15 | 无 |
 | P1 | W3 ✅ | 导航埋点 + Agent 工具策略——已实施 2026-10-15 | 无 |
@@ -251,7 +251,20 @@
 
 **回滚预案（如需）**：① 应用回滚 `docker compose up -d backend` 前先 `docker tag` 旧镜像（旧镜像层仍在本机）；② 数据回滚 `pg_restore -d $POSTGRES_DB --clean backups/app_prod_pre_deploy_20261028_1118.dump`；③ 迁移可降级：`alembic downgrade d4e5f6a7b8c9`（4 个迁移的 `downgrade()` 均已实现）。**注意**：降到旧迁移后旧代码可继续运行（新表/列不会被旧代码引用），但 `model_*` 数据会随降级丢失。
 
-**遗留**：生产未配置 `API_KEY`（仅 JWT 鉴权），因此本次无法做「登录 → 提问」的端到端冒烟（生产注册关闭、无现成凭据）；已用未授权 401 + 健康探针 + 迁移一致性覆盖。功能级冒烟需 owner 提供测试账号后补做。
+**登录态端到端冒烟（2026-10-28 11:31~11:36，prod 8001）**：
+
+| 环节 | 结果 |
+|---|---|
+| 账号 | 生产注册关闭，故走应用自身 bcrypt 在库内建 `smoke_deploy`（`eda8a8fc-…`，密码不入库本文档；验收后建议删除或改密） |
+| 登录 / 鉴权 | `POST /api/auth/login` → bearer token；`GET /api/auth/me` 返回 `user_id` + `username` |
+| 资源隔离 | 新账号 KB 列表 `total=0`、会话列表 `[]`（看不到既有 2 个用户的资源） |
+| 流式问答（3B 直答） | `POST /api/chat/stream` → `reasoning`×3（意图路由→生成回答）+ `content`×13 + `end`，`answer_type=llm_direct`，答案正常 |
+| 多轮上下文 | 同会话追问「我刚才问了你什么？」，3B 直答未答对（泛化为自我介绍）；换 4B `deep_thinking=on` 后**正确复述上一问**（57s，含 3B→4B 显存换载）→ 历史注入链路正常，差异属小模型能力 |
+| 落库 | 会话 `message_count=6`（3 轮问答完整、顺序正确），标题自动生成；trace 3 条可查（`/api/traces/`） |
+| 令牌吊销（SEC-10） | `POST /api/auth/logout` → 204；同一 token 再访问 `/api/auth/me`、`/api/auth/refresh` 均 **401** |
+| 数据归属 | 会话 `user_id` = 冒烟账号，验证 `owner_id` 隔离生效 |
+
+**遗留**：① `smoke_deploy` 账号与其 1 个会话（6 条消息）、3 条 trace 留在生产，验收后建议删除（`DELETE /api/account` 或直接删库记录）；② 生产未配置全局 `API_KEY`，脚本/CI 集成需走用户级 API Key（E.6）；③ 3B 直答对「元问题」（问历史本身）能力弱，若线上重视多轮回忆，建议该场景默认 `deep_thinking=on` 或加历史显式提示——已登记为体验观察，非部署缺陷。
 
 ### 待办台账核实记录（2026-10-28）
 
