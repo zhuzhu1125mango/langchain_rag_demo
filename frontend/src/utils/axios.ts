@@ -7,6 +7,36 @@ const MAX_RETRIES = 3
 const RETRY_DELAY = 2000
 
 /**
+ * 幂等方法（HTTP 语义）：重复执行结果等价，可安全重试。
+ *
+ * POST/PATCH 不在其中——服务端可能已处理但响应丢失（超时/5xx），重放会造成
+ * 重复创建、重复删除或重复扣费（如 `/api/chat/stream` 建会话、批量删除）。
+ */
+const IDEMPOTENT_METHODS = new Set(['get', 'head', 'options', 'put', 'delete'])
+
+/**
+ * 是否重试一次失败请求（纯函数，便于单测）。
+ *
+ * 分流依据是「服务端是否可能已处理」：
+ * - `ECONNREFUSED`：连接被拒绝，请求根本没到达服务端 → 任何方法都可重试；
+ * - `ETIMEDOUT` / 5xx：服务端可能已受理，只有幂等方法才允许重试；
+ * - 其余错误（4xx、业务错误）一律不重试。
+ */
+export function isRetryableRequest(params: {
+  method?: string
+  status?: number
+  code?: string
+  retryCount: number
+}): boolean {
+  const { method = 'get', status, code, retryCount } = params
+  if (retryCount >= MAX_RETRIES) return false
+  if (code === 'ECONNREFUSED') return true
+  const ambiguousFailure = code === 'ETIMEDOUT' || (typeof status === 'number' && status >= 500)
+  if (!ambiguousFailure) return false
+  return IDEMPOTENT_METHODS.has(String(method).toLowerCase())
+}
+
+/**
  * 401 兜底跳转登录页（W6 #39）。
  *
  * 用动态 import 取 router 实例：axios 与 router 存在静态导入环
@@ -138,13 +168,22 @@ api.interceptors.response.use(
       return Promise.reject(error)
     }
 
-    // 重试条件：连接被拒绝（ECONNREFUSED）、连接超时（ETIMEDOUT）或服务端 5xx。
+    // 重试条件：连接被拒绝（ECONNREFUSED，请求未到达服务端）任何方法都可重试；
+    // 连接超时（ETIMEDOUT）或服务端 5xx 存在「已处理但响应丢失」的可能，仅幂等方法
+    // 重试，避免 POST/PATCH 重复写入（CODE 残项：axios 5xx 非幂等重试）。
     // 重试次数上限由 _retryCount 与 MAX_RETRIES 共同控制：首次失败时 _retryCount
     // 为 0/undefined，仍在限定次数内即可重试（D7 修正：此前用 !config._retryCount
     // 导致首次重试后即为 1，后续失败恒不重试，MAX_RETRIES=3 不可达）。
     const currentRetry = (config as { _retryCount?: number } | undefined)?._retryCount ?? 0
-    const isRetryable = code === 'ECONNREFUSED' || code === 'ETIMEDOUT' || (response?.status && response.status >= 500)
-    const shouldRetry = Boolean(config && isRetryable && currentRetry < MAX_RETRIES)
+    const shouldRetry = Boolean(
+      config &&
+        isRetryableRequest({
+          method: config.method,
+          status: response?.status,
+          code,
+          retryCount: currentRetry,
+        })
+    )
 
     if (shouldRetry) {
       // 延迟递增策略：第 n 次重试等待 RETRY_DELAY * n 毫秒（2s/4s/6s），
