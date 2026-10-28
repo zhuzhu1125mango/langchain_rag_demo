@@ -10,6 +10,8 @@ from typing import List
 from pymilvus.exceptions import MilvusException
 
 from src.config import DATA_DIR, settings
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 from src.services.milvus_common import (
     BM25EmbeddingFunction,
     build_default_analyzer,
@@ -134,10 +136,15 @@ class WriteMixin:
             self.bm25_ef.load(path)
             logger.info(f"BM25 词表已从磁盘加载: {path}")
             return True
-        except Exception as e:
-            logger.warning(
-                f"加载 BM25 词表失败，将回退为首次插入时 fit；"
-                f"若集合内已有历史 sparse 向量，建议重建以保证编码空间一致: {e}"
+        except Exception as exc:
+            # 降级路径：词表加载失败不影响本次插入，属「可恢复」——只记 warning 并保留上下文
+            log_exception(
+                logger,
+                exc,
+                action="milvus.bm25_vocab.load",
+                message="加载 BM25 词表失败，将回退为首次插入时 fit（建议重建以保证编码空间一致）",
+                path=path,
+                severity=ErrorSeverity.RECOVERABLE,
             )
             self.bm25_ef = None
             return False
@@ -150,8 +157,14 @@ class WriteMixin:
             os.makedirs(os.path.dirname(path), exist_ok=True)
             self.bm25_ef.save(tmp_path)
             os.replace(tmp_path, path)
-        except Exception as e:
-            logger.warning(f"BM25 词表持久化失败（不影响本次插入，重启后将重新 fit）: {e}")
+        except Exception as exc:
+            log_exception(
+                logger,
+                exc,
+                action="milvus.bm25_vocab.save",
+                message="BM25 词表持久化失败（不影响本次插入，重启后将重新 fit）",
+                severity=ErrorSeverity.RECOVERABLE,
+            )
 
     def _remove_bm25_vocabulary(self) -> None:
         """删除磁盘上的持久化 BM25 词表（集合重建时词表随之重置）。"""

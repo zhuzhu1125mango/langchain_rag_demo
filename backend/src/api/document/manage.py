@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import uuid
-from typing import List, Literal, Optional
+from typing import List, Literal
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException
 from sqlalchemy import select
@@ -35,6 +35,7 @@ from src.services.document_tasks import (
 from src.services.notification_service import notify_doc_list_changed
 from src.services.progress_manager import create_upload_progress, update_upload_progress
 from src.services.vector_store import VectorStoreManager
+from src.utils.error_handling import log_exception
 from src.utils.validators import validate_kb_ownership
 
 from .common import (
@@ -42,7 +43,6 @@ from .common import (
     DocumentUpdate,
     DuplicateDetectionResult,
     get_owned_document as _get_owned_document,
-    serialize_document,
 )
 
 logger = logging.getLogger("rag_system")
@@ -96,8 +96,15 @@ async def reprocess_document(
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_document_id(doc_id)
             logger.info(f"已删除文档旧向量: {doc_id}")
-        except Exception as e:
-            logger.warning(f"删除旧向量失败（可能不存在）: {doc_id}, 错误: {str(e)}")
+        except Exception as exc:
+            # best-effort：删旧向量失败不阻断重处理；可恢复的瞬时故障只记 warning
+            log_exception(
+                logger,
+                exc,
+                action="document.reprocess.vector_cleanup",
+                message="删除旧向量失败（可能不存在，继续重处理）",
+                doc_id=doc_id,
+            )
 
         # 更新文档状态为处理中
         doc.processing_status = "processing"
@@ -137,8 +144,8 @@ async def reprocess_document(
         # _get_owned_document 抛 400/404/403，必须原样上抛，不能被下面的
         # except Exception 吞成 500（否则越权/不存在语义丢失，前端无法区分）
         raise
-    except Exception as e:
-        logger.error(f"重新处理文档失败: {str(e)}", exc_info=True)
+    except Exception as exc:
+        log_exception(logger, exc, action="document.reprocess", message="重新处理文档失败", doc_id=doc_id)
         raise HTTPException(status_code=500, detail="重新处理文档失败，请稍后重试")
 
 
@@ -185,8 +192,8 @@ async def classify_document(
     except HTTPException:
         # _get_owned_document 抛 400/404/403，原样上抛，避免被吞成 500
         raise
-    except Exception as e:
-        logger.error(f"文档分类失败: {str(e)}", exc_info=True)
+    except Exception as exc:
+        log_exception(logger, exc, action="document.classify", message="文档分类失败", doc_id=doc_id)
         raise HTTPException(status_code=500, detail="文档分类失败，请稍后重试")
 
 
@@ -219,8 +226,8 @@ async def evaluate_document_quality(
     except HTTPException:
         # _get_owned_document 抛 400/404/403，原样上抛，避免被吞成 500
         raise
-    except Exception as e:
-        logger.error(f"文档质量评估失败: {str(e)}", exc_info=True)
+    except Exception as exc:
+        log_exception(logger, exc, action="document.quality", message="文档质量评估失败", doc_id=doc_id)
         raise HTTPException(status_code=500, detail="文档质量评估失败，请稍后重试")
 
 
@@ -536,7 +543,14 @@ async def detect_duplicates(
                         kb_id=str(candidate.kb_id) if candidate.kb_id else "",
                         kb_name=kb_name
                     ))
-            except Exception:
+            except Exception as exc:
+                log_exception(
+                    logger,
+                    exc,
+                    action="document.duplicate_detect.candidate",
+                    message="候选文档解析失败，已跳过",
+                    doc_id=getattr(candidate, "id", None),
+                )
                 continue
         
         results.sort(key=lambda x: x.similarity, reverse=True)
@@ -547,6 +561,6 @@ async def detect_duplicates(
     except HTTPException:
         # _get_owned_document 抛 400/404/403，原样上抛，避免被吞成 500
         raise
-    except Exception as e:
-        logger.error(f"重复检测失败: {str(e)}", exc_info=True)
+    except Exception as exc:
+        log_exception(logger, exc, action="document.duplicate_detect", message="重复检测失败", doc_id=request.doc_id)
         raise HTTPException(status_code=500, detail="重复检测失败，请稍后重试")
