@@ -134,6 +134,7 @@
 | `services/model_usage_store.py` | 用量增量周期落库、最近 N 天聚合查询、持久化与进程内数据合并 |
 | `services/embedding_migration.py` | Embedding 索引画像、apply 安全闸门、影子集合重建/原子切换/回滚、缓存失效编排 |
 | `services/milvus_*.py` | 向量层（CODE-1 拆分自 `milvus_service.py`）：`milvus_schema` 集合结构与增量升级、`milvus_migration` 影子集合重建/切换、`milvus_writer` 插入与 BM25 词表/限速 flush、`milvus_search` dense/sparse/混合检索、`milvus_admin` 删除与计数、`milvus_common` BM25 可选后端与 A/B rerank 参数；`milvus_service` 仅保留连接与 Embedding 生命周期并组合各 mixin，对外 `MilvusService` 接口不变 |
+| `services/web_search_*.py` | 联网搜索（CODE-1 拆分自 `web_search_service.py`）：`web_search_types` 类型与关键词常量、`web_search_rewriter` Query 改写、`web_search_reranker` 正文重排、`web_search_engines` 多引擎（SearXNG/Tavily/DuckDuckGo/mock）、`web_search_content` 安全抓取与正文预处理；`web_search_service` 组合为缓存 + 上下文编排层，对外 `WebSearchService` 接口不变 |
 | `services/model_config_service.py` | P2 DB↔registry 转换、Provider/模型/路由 CRUD、连接测试/模型发现、校验并应用 |
 | `services/model_secret_cipher.py` | Provider API Key Fernet 加解密（`MODEL_SECRET_ENC_KEY`，缺省从 `SECRET_KEY` 派生） |
 | `services/account_service.py` | 账号数据导出与注销级联清理（SEC-14） |
