@@ -94,7 +94,7 @@ dependencies = [
     "Pygments==2.21.0",
     "typer==0.27.3",
     "tqdm==4.70.1",
-    "pandas==3.0.3",
+    "pandas==3.1.0",
     "joblib==1.6.0",
     "packaging==26.3",
     "dataclasses-json==0.6.7",
@@ -131,7 +131,7 @@ demo = [
 # 未安装时 OCR 分流自动回退内置 PyPDF 解析，不影响其他功能。
 ocr-mineru = [
     # 用 [pipeline] 而非 [core]：[core] 附带 gradio（要求 aiofiles<25），与主依赖冲突
-    # >=3.2.0：3.1.x 及更早要求 pandas<3，与主依赖 pandas==3.0.3 冲突
+    # >=3.2.0：3.1.x 及更早要求 pandas<3，与主依赖 pandas==3.1.0 冲突
     # OPS-6：4.x 要求 gradio>=6.8（与主依赖冲突），且仅支持 transformers 5.x；
     # 保持 3.x。transformers 4.x 的 3 条 CVE 在 .trivyignore 登记（详见该文件注释）
     "mineru[pipeline]>=3.2.0,<4",
