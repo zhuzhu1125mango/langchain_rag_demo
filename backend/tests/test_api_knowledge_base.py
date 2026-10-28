@@ -31,7 +31,7 @@ def mock_kb_cleanup(monkeypatch):
     async def fake_get_instance():
         return fake_instance
 
-    monkeypatch.setattr("src.api.knowledge_base.VectorStoreManager.get_instance", fake_get_instance)
+    monkeypatch.setattr("src.api.knowledge_base.manage.VectorStoreManager.get_instance", fake_get_instance)
 
     class FakeMinioService:
         def delete_file(self, file_path):  # noqa: ANN001

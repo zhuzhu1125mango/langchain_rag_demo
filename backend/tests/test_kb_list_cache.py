@@ -43,7 +43,7 @@ def mock_cache(monkeypatch):
     async def fake_get_instance():
         return fake
 
-    monkeypatch.setattr("src.api.knowledge_base.CacheService.get_instance", fake_get_instance)
+    monkeypatch.setattr("src.api.knowledge_base.query.CacheService.get_instance", fake_get_instance)
     return fake
 
 
@@ -113,7 +113,7 @@ class TestKnowledgeBaseListCache:
             return FakeVectorStoreManager()
 
         monkeypatch.setattr(
-            "src.api.knowledge_base.VectorStoreManager.get_instance",
+            "src.api.knowledge_base.manage.VectorStoreManager.get_instance",
             fake_get_instance,
         )
 
