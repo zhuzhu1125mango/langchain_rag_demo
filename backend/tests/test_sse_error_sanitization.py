@@ -18,7 +18,15 @@ API_DIR = Path(__file__).resolve().parent.parent / "src" / "api"
 
 
 def _read_api_source(name: str) -> str:
-    return (API_DIR / name).read_text(encoding="utf-8")
+    """读取 API 模块源码；CODE-1 拆分后同名模块可能是包，按目录聚合。"""
+    path = API_DIR / name
+    if not path.exists():
+        path = API_DIR / Path(name).stem
+    if path.is_dir():
+        return "\n".join(
+            p.read_text(encoding="utf-8") for p in sorted(path.rglob("*.py"))
+        )
+    return path.read_text(encoding="utf-8")
 
 
 class TestChatSSEErrorSanitization:
