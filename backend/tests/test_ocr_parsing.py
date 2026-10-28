@@ -1,5 +1,8 @@
 """OCR 深度解析单元测试（P0-2b）。
 
+CODE-1 拆分后：load_document 位于 document_loader，直接调用的用例打桩目标随之迁移；
+process_document 仍在 document_processor（入口层）。
+
 全部基于 mock，不依赖真实 OCR 后端（mineru / paddleocr 未安装也可跑），
 覆盖：扫描版检测、后端选择与调用、未安装报错、分流与回退、
 Markdown 分块策略自动切换与 ocr_backend 元数据传播。
@@ -12,7 +15,7 @@ import pytest
 from langchain_core.documents import Document
 
 from src.config import settings
-from src.services import document_processor
+from src.services import document_loader, document_processor
 from src.services import ocr_parser
 
 
@@ -164,12 +167,12 @@ def enable_deep_parsing(monkeypatch):
 def test_load_document_scanned_pdf_routes_to_ocr(mocker, enable_deep_parsing, tmp_path):
     pdf = tmp_path / "scan.pdf"
     pdf.write_bytes(b"%PDF-fake")
-    mocker.patch.object(document_processor, "is_scanned_pdf", return_value=True)
+    mocker.patch.object(document_loader, "is_scanned_pdf", return_value=True)
     mocker.patch.object(
-        document_processor, "parse_pdf_ocr",
+        document_loader, "parse_pdf_ocr",
         return_value=("# 员工手册\n\n## 请假制度\n\n年假五天。", "mineru"),
     )
-    docs = document_processor.load_document(str(pdf))
+    docs = document_loader.load_document(str(pdf))
     assert len(docs) == 1
     assert docs[0].metadata["ocr_backend"] == "mineru"
     assert "员工手册" in docs[0].page_content
@@ -178,13 +181,13 @@ def test_load_document_scanned_pdf_routes_to_ocr(mocker, enable_deep_parsing, tm
 def test_load_document_text_pdf_skips_ocr(mocker, enable_deep_parsing, tmp_path):
     pdf = tmp_path / "text.pdf"
     pdf.write_bytes(b"%PDF-fake")
-    mocker.patch.object(document_processor, "is_scanned_pdf", return_value=False)
-    mock_parse = mocker.patch.object(document_processor, "parse_pdf_ocr")
-    fake_loader = mocker.patch.object(document_processor, "PdfFileLoader")
+    mocker.patch.object(document_loader, "is_scanned_pdf", return_value=False)
+    mock_parse = mocker.patch.object(document_loader, "parse_pdf_ocr")
+    fake_loader = mocker.patch.object(document_loader, "PdfFileLoader")
     fake_loader.return_value.load.return_value = [
         Document(page_content="正常文本", metadata={"source": str(pdf)})
     ]
-    docs = document_processor.load_document(str(pdf))
+    docs = document_loader.load_document(str(pdf))
     mock_parse.assert_not_called()
     assert docs[0].page_content == "正常文本"
     assert "ocr_backend" not in docs[0].metadata
@@ -194,13 +197,13 @@ def test_load_document_disabled_skips_ocr(mocker, monkeypatch, tmp_path):
     monkeypatch.setattr(settings.ocr, "DEEP_PARSING_ENABLED", False)
     pdf = tmp_path / "scan.pdf"
     pdf.write_bytes(b"%PDF-fake")
-    mock_detect = mocker.patch.object(document_processor, "is_scanned_pdf")
-    mock_parse = mocker.patch.object(document_processor, "parse_pdf_ocr")
-    fake_loader = mocker.patch.object(document_processor, "PdfFileLoader")
+    mock_detect = mocker.patch.object(document_loader, "is_scanned_pdf")
+    mock_parse = mocker.patch.object(document_loader, "parse_pdf_ocr")
+    fake_loader = mocker.patch.object(document_loader, "PdfFileLoader")
     fake_loader.return_value.load.return_value = [
         Document(page_content="fallback", metadata={"source": str(pdf)})
     ]
-    docs = document_processor.load_document(str(pdf))
+    docs = document_loader.load_document(str(pdf))
     mock_detect.assert_not_called()
     mock_parse.assert_not_called()
     assert docs[0].page_content == "fallback"
@@ -209,16 +212,16 @@ def test_load_document_disabled_skips_ocr(mocker, monkeypatch, tmp_path):
 def test_load_document_ocr_failure_falls_back(mocker, enable_deep_parsing, tmp_path):
     pdf = tmp_path / "scan.pdf"
     pdf.write_bytes(b"%PDF-fake")
-    mocker.patch.object(document_processor, "is_scanned_pdf", return_value=True)
+    mocker.patch.object(document_loader, "is_scanned_pdf", return_value=True)
     mocker.patch.object(
-        document_processor, "parse_pdf_ocr",
+        document_loader, "parse_pdf_ocr",
         side_effect=ocr_parser.OcrParseError("boom"),
     )
-    fake_loader = mocker.patch.object(document_processor, "PdfFileLoader")
+    fake_loader = mocker.patch.object(document_loader, "PdfFileLoader")
     fake_loader.return_value.load.return_value = [
         Document(page_content="fallback page", metadata={"source": str(pdf)})
     ]
-    docs = document_processor.load_document(str(pdf))
+    docs = document_loader.load_document(str(pdf))
     assert docs[0].page_content == "fallback page"
     assert "ocr_backend" not in docs[0].metadata
 
