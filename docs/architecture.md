@@ -123,7 +123,8 @@
 
 | 目录/模块 | 职责 |
 |---|---|
-| `api/` | 路由层（18 个模块，不写业务逻辑）：auth、chat、knowledge_base、wiki、document、session、trace、audit、category、tag、feedback、badcase、learning、experiment、config、evaluation、notification、admin_models |
+| `api/` | 路由层（18 个模块，不写业务逻辑）：auth、chat、knowledge_base、wiki、document、session、trace、audit、category、tag、feedback、badcase、learning、experiment、config、evaluation、notification、admin_models。`document` 已拆为包（CODE-1）：`common`（模型/归属校验/序列化，无路由）、`upload`、`query`、`manage`，装配顺序 upload→query→manage（静态路径先于 `/{doc_id}`） |
+| `services/document_tasks.py` | 文档后台任务与索引一致性（自 `api/document.py` 抽出）：处理/删除任务、SEC-4 上下架向量一致性、Wiki 编译阶段、文本相似度 |
 | `services/` | 业务核心：决策管线、检索、生成、搜索、工具、评估、学习引擎、模型注册/健康/用量 |
 | `services/model_registry.py` | Provider/Model/Route Pydantic 配置、legacy Ollama bootstrap、JSON 加载、能力/路由/维度校验、跨 Provider fallback 过滤 |
 | `services/model_adapters.py` | Ollama / OpenAI-Compatible 的 Chat 与 Embedding 适配器；`ChatModelGroup` 按序 fallback（跳过熔断 Provider）、记录用量并保留 `bind_tools` |
