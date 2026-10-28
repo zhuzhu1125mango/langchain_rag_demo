@@ -77,13 +77,14 @@
 
 | 级别 | 项 | 内容 | 依赖 / 归属 |
 |---|---|---|---|
-| ✅ | PUSH | 积压提交已全部推送（2026-10-16 ~ 2026-10-28，最新 HEAD `17a837b`）：MODEL-REGISTRY P1/P2/P2.1/P3、SEC P1~P3、OPS-1/2/3/5、Dependabot 依赖收口；工作区干净 | 无 |
+| ✅ | PUSH | 积压提交已全部推送（2026-10-16 ~ 2026-10-28，最新 HEAD `f76f90f`）：MODEL-REGISTRY P1/P2/P2.1/P3、SEC P1~P3、OPS-1/2/3/5、Dependabot 依赖收口；工作区干净 | 无 |
+| **P0** | **DEPLOY** | **生产栈未对齐源码（2026-10-28 核实）**：`backend-prod` 镜像构建于 2026-10-13，OpenAPI 仅 **91** 路由（源码 141），缺 `/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`；生产库停在 `d4e5f6a7b8c9`，落后 4 个迁移，`strategy_executions` **无 `user_id` 列（SEC-1 未生效）**、无 `model_*` 表。**代码 ✅ ≠ 生产生效**，详见「生产部署对齐」 | 部署 / owner |
 | P1 | E1V ✅ | E-1 收口**完成**：离线 A/B（10-19/10-20，编译覆盖已修 → C 臂 0.188→0.938）+ L1 图边 47 条含跨档 13 + **Agent e2e 双臂（2026-10-21，8/8 ok）**。e2e 结论：hit/recall/mrr 持平，步数与 P95 翻倍，仅 1/8 题使用 `wiki_lookup` → **无增益，W1 保持默认关闭** | 无 |
 | P1 | W1 ✅ | 索引页优先入口（PG 直读 `page_type=index` 作第一跳）——已实施 2026-10-15 | 无 |
 | P1 | W3 ✅ | 导航埋点 + Agent 工具策略——已实施 2026-10-15 | 无 |
 | P1 | W2 ✅ | entity/topic 退主池 A/B——已实施 2026-10-15（证据采纳退池，默认 exclude `wiki,wiki_syn`） | W3 |
 | P2 | LEARN | 学习闭环 / 实验接入——**W-A/W-B/W-C 已实施 2026-10-16 并经 dev 端到端验证**（三开关灰度默认关），见 [learning-loop-wiring.md](design/learning-loop-wiring.md) ✅ | 开发 |
-| P2 | E2 | Query 回流沉淀 synthesis 页 | W3 |
+| ✅ | E2 | Query 回流沉淀 synthesis 页——**已实现（2026-10-28 核实）**：`wiki_synthesis_service.py`（per-KB 去抖 + 0.92 语义去重防噪声页 + best-effort）+ `pipeline/stages.py:820` 已接线，`WIKI_SYNTHESIS_ENABLED=false` 灰度；待验收后再决定开启 | W3 |
 | P2 | SA | 专项 A 巨型文件拆分决策 | owner |
 | ✅ | ENV | `.env.dev` rerank 模型漂移——**经核实为虚警**（三份 env 均已是 `bge-reranker-base`），无需修正 | 无 |
 | ✅ | SCHEMA | prod 库 schema 漂移**已修复**（`upgrade head` 后 `alembic check` 无漂移，2026-10-19）；详见 §二 SCHEMA 行 | 无 |
@@ -94,7 +95,7 @@
 | **P1** | **完善专项** | **UX / VIS / CODE / OPS（2026-10-22 全项目审计新增）**：停止生成、移动端、可访问性、设计 token、异常治理、巨型文件拆分、运维手册、供应链扫描。详见「全项目完善与演进专项」与 [evolution-roadmap-2026-10.md](design/evolution-roadmap-2026-10.md) | 开发 |
 | ✅ | D-U / DEV / W0 / HG | 覆盖率已达标（D-U）；DEV 已清；W0/HG 为 owner 手动项与挂起触发器项 | 见各条 |
 
-> **一句话执行序**（2026-10-28 刷新）：**MODEL-REGISTRY P1/P2/P2.1/P3 已完成并推送**（`da1f0cf` + `b5ac070`）→ **SEC P1/P2/P3 全部完成** → **OPS-1/2/3/5 已完成**（运维 Runbook、供应链收口、结构化日志、覆盖率）→ 完善专项剩余 CODE-1/CODE-2/UX/VIS/AGT → AM-3 MCP 客户端 → **OPS-4 nightly/演练** → MODEL-P4（按需）→ E2/SA/AM-4~7 视排期。
+> **一句话执行序**（2026-10-28 核实后刷新）：**P0 生产部署对齐**（重建 prod 镜像 + `alembic upgrade head`，补齐 SEC-1 隔离列与 `model_*` 表）→ **MODEL-REGISTRY P1/P2/P2.1/P3 已完成并推送**（`da1f0cf` + `b5ac070`）→ **SEC P1/P2/P3 全部完成** → **OPS-1/2/3/5 已完成**（运维 Runbook、供应链收口、结构化日志、覆盖率）→ 完善专项剩余 CODE-1/CODE-2/UX-5~7/AGT-2~7 → AM-3 MCP 客户端 → **OPS-4 nightly/演练** → MODEL-P4（按需）→ SA/AM-4~7 视排期。
 
 ### E-1 导航式 wiki_lookup（阶段一，已收口）
 
@@ -128,11 +129,11 @@
 
 | # | 任务 | 说明 | 优先级 | 归属 |
 |---|---|---|---|---|
-| E2 | Query 回流沉淀 synthesis 页 | 复用 L1-a 记忆通道 + D3 synthesis 机制；回流阈值需防噪声页 | 中（依赖 W3） | 开发 |
+| E2 | Query 回流沉淀 synthesis 页 | ✅ **已实现（2026-10-28 核实，原列为待办系重复记账）**：复用 D3 synthesis 机制——`wiki_synthesis_service.py` 判定纯函数 + per-KB 去抖 + 0.92 语义去重（防噪声页）+ `WikiCompiler.persist_pages` 落 `source_kind="wiki_syn"`，`pipeline/stages.py:820` 在终态副作用中调用；`WIKI_SYNTHESIS_ENABLED=false` 灰度。**待办收敛为「灰度验收 + 是否开启决策」** | 中（依赖 W3） | 开发 |
 | LEARN | 学习闭环 / 实验接入 | ✅ 三断链（权重无回载 / KB 短路 strategy_results 恒空 / A/B 未接入问答链路）已修复并经 dev 端到端验证：W-A 单例+权重回载 / W-B 短路补采 / W-C A/B 接入 chat，三开关灰度默认关，见 [learning-loop-wiring.md](design/learning-loop-wiring.md) | 中 | 开发 |
-| SA | 专项 A 巨型文件拆分决策 | 最新审计（2026-10-22）行数：`document.py` **1679** / `web_search_service.py` **1040** / `chat.py` **1026** / `wiki_compiler.py` **1000** / `stages.py` 783 / `agent_orchestrator.py` 740；按 A.4「触碰即先拆」需 owner 决策拆分优先级 | 中 | owner |
-| W0 | 批次二手动项 | Tavily API Key 轮换；`configs/license/minio.license` 处置决策 | 低 | owner |
-| HG | 挂起区 | 专项 B 触发监控（消息>200/节点>300）；L3 critic 反思灰度时点；MCP 分发边界（局域网多用户形态）最终确认；Office/HTML/EPUB loader 迁移、axios 5xx 非幂等重试等 P2 残项 | 低（触发器） | 开发 |
+| SA | 专项 A 巨型文件拆分决策 | 最新实测（**2026-10-28**）：`document.py` **1912** / `milvus_service.py` **1108** / `web_search_service.py` **1095** / `chat.py` **1092** / `wiki_compiler.py` **1008** / `stages.py` **850** / `agent_orchestrator.py` **751**（前端 `queries/kb.ts` 948）；按 A.4「触碰即先拆」需 owner 决策拆分优先级——**建议先 `document.py`**（行数最大且 `except Exception` 26 处最多） | 中 | owner |
+| W0 | 批次二手动项 | Tavily API Key 轮换；~~`configs/license/minio.license` 处置决策~~ **已消解（2026-10-28 核实：文件不存在，`configs/license/` 为空且未纳入 git）** | 低 | owner |
+| HG | 挂起区 | 专项 B 触发监控（消息>200/节点>300）；L3 critic 反思灰度时点；MCP 分发边界（局域网多用户形态）最终确认；Office/HTML/EPUB loader 迁移（`document_loaders.py` 仍走 community，已确认）、~~axios 5xx 非幂等重试~~ **已修（2026-10-28）**：`utils/axios.ts` 抽出 `isRetryableRequest` 纯函数，仅 `ECONNREFUSED` 允许任意方法重试，超时/5xx 仅幂等方法（GET/HEAD/OPTIONS/PUT/DELETE），POST/PATCH 不再重试；+6 单测 | 低（触发器） | 开发 |
 | ENV | `.env.dev` rerank 模型漂移（**已核实：不存在**） | 2026-10-18 复核：`.env.dev` / `.env.prod` / `.env.example` 三份的 `KB_RERANK_MODEL` 与 `SEARCH_RERANK_MODEL` 均为 `BAAI/bge-reranker-base`，`config.py` 两处默认均为 `None`（无硬编码）→ **无漂移**；原台账条目标述有误（陈旧），本条作废，无需改动 | 无 | 开发 |
 | D-U | 覆盖率阈值继续上调 | ✅ 完成（SEC-15）：后端 `fail_under` 60→**65**（最新实测 67.37%，1326 passed）；前端 thresholds 32/35/24/31→**35/40/25/34**（实测 36.17/41.2/25.96/35.11，131 passed）；继续按「只升不降」推进 | 低 | 开发 |
 | DEV | dev 栈与验证残留（已清） | LEARN 验证用 dev 栈（rag-dev）已 `down`（保留卷），`.env.dev` 三开关复位默认 false；验证残留已清理：删除 E2E 实验及其级联、删除匿名测试会话与执行样本、KB/文档归属归还 `smoketest`。dev 库 schema 已迁移至 head（见 SCHEMA 行）；prod 未触及 | 低 | 开发 |
@@ -163,10 +164,10 @@
 | VIS-1 | 设计 token 层 | ✅ **已实施（2026-10-24）**：`style.css` 建立语义化 token（page/surface/content/line/status + radius + shadow），浅色为默认值、`.dark` 统一覆盖；全局组件类（card/btn/input/badge/markdown/scrollbar）改用 `var()`；35 个前端文件将 `bg-white dark:bg-dark-800` 等成对类迁移为 `bg-surface` / `text-content` / `border-line`；KnowledgeGraph SVG 与 MarkdownRenderer 硬编码色改走 token；lint / vue-tsc / 110 单测 / build / E2E 5 项全绿 | 已完成 | 前端 |
 | VIS-2 | 组件 primitive | ✅ **已实施（2026-10-24）**：新增 `src/components/ui/`（AppButton / AppCard / AppBadge / AppInput / AppSelect / AppDialog）+ 11 项单测；Button 变体覆盖 primary/soft/ghost/outline/danger/success，Card/Badge/Input/Dialog 统一 token 与暗色；**手写 `<button>` 127→38**（剩余为开关/星级/标签胶囊/手风琴等专用控件），卡片与 11 个弹窗完成迁移；删除未使用的全局 btn/card/input/badge 类；lint / vue-tsc / **121 单测** / build / E2E 5 项全绿 + 浅深色截图复核 | 已完成 | 前端 |
 | VIS-3 | 页面视觉收口 | ✅ **已实施（2026-10-24）**：全局 EP 弹窗/下拉/输入/表格 token 化（16px 弹窗、选中 soft、遮罩模糊、移动端不溢出）；侧栏 active/字号/主题按钮统一；聊天消息与输入区 768px 居中 + 欢迎态/气泡/来源卡打磨；知识库页头/工具栏移动端换行 + 表格横向滚动 + 表头 sticky；设置页统一 `max-w-4xl` 与菜单宽度。lint 0 / typecheck / 126 单测 / build / E2E 5/5 + 浅深色与移动端截图 | 已完成 | 前端 |
-| CODE-1 | 巨型文件拆分 | `document.py` 1679 / `web_search_service.py` 1040 / `chat.py` 1026 / `wiki_compiler.py` 1000 / `stages.py` 783 / `agent_orchestrator.py` 740；前端 `queries/kb.ts` 967 | P1 | 开发 |
-| CODE-2 | 异常分级治理 | 334 处 `except Exception`；缺「可恢复 / 需上报 / 编程错误」分级与统一上下文 | P1 | 开发 |
+| CODE-1 | 巨型文件拆分 | **2026-10-28 实测**：`document.py` **1912** / `milvus_service.py` **1108** / `web_search_service.py` **1095** / `chat.py` **1092** / `wiki_compiler.py` **1008** / `stages.py` **850** / `agent_orchestrator.py` **751**；前端 `queries/kb.ts` **948**（较 10-22 普遍增长，且 `milvus_service.py` 此前漏记） | P1 | 开发 |
+| CODE-2 | 异常分级治理 | **2026-10-28 实测 405 处 `except Exception`**（10-22 为 334，反向增加 71 处；Top：`document.py` 26 / `chat.py` 23 / `milvus_service.py` 19 / `web_search_service.py` 18）；`exceptions.py` 仅有 6 个 HTTP 异常类，缺「可恢复 / 需上报 / 编程错误」分级与统一上下文 | P1 | 开发 |
 | CODE-3 | eslint warning 清零 | ✅ **已修复（2026-10-23）**：43 处非空断言全量清零（生产代码改真值守卫/空值兜底，测试改类型化捕获 + 运行时断言），规则由 `warn` 升 `error` 防回归；eslint 0 warning、vue-tsc 0、109 前端单测通过 | 已完成 | 前端 |
-| CODE-4 | API / 类型分层 | `queries/kb.ts` 967 行混合请求、类型与转换 | P2 | 前端 |
+| CODE-4 | API / 类型分层 | `queries/kb.ts` **948** 行混合请求、类型与转换 | P2 | 前端 |
 | OPS-1 | 运维手册补全 | ✅ **已完成（2026-10-27）**：`guide/backup-restore.md` 扩为运维 Runbook——对象级 RPO/RTO、备份产物校验与 cron、恢复顺序与恢复后必做（schema 对齐/缓存失效/维度核对）、回滚决策矩阵（应用/迁移/索引/配置/凭据）、容量模型（切片数→Milvus/PG/备份盘）与 70%/85% 扩容阈值、季度恢复+回滚演练记录模板；`docs/README` 与 deployment/monitoring 交叉引用 | 已完成 | 开发 |
 | OPS-2 | 供应链安全 | ✅ **已完成（2026-10-27）**：dependabot + Trivy/SBOM CI；依赖升级后 Trivy 恢复阻断（HIGH/CRITICAL），仅 `.trivyignore` 登记 filelock/transformers 各 1/3 条上游约束豁免（复核 2026-11-30）。**第二批（Dependabot 积压收口）**：GitHub Actions 升 checkout 7 / setup-node 7 / upload-artifact 7 / setup-uv 10.3.2，bcrypt `<6`、huggingface_hub `<3`、isort 9.0.2（uv.lock 同步）；12 个积压 PR 全部关闭，`dependabot.yml` 增加 ignore（filelock/transformers 大版本 + tokenizers 全量 + 前端 markdown-it/@vueuse/core/@types/node/pinia major；mineru/sentence-transformers major 因 transformers 5 约束与 OCR 组绑定）；pip 组保持 minor+patch 同组（排除 fastapi/sqlalchemy/langchain/pymilvus 等核心框架，避免 47 项大杂烩；拆组会导致 lxml/trafilatura 跨组不兼容），CI 增加 `UV_HTTP_TIMEOUT=120` 抑制清华镜像超时抖动；sentence-transformers 5.7.0 已单独合入。**第三批（2026-10-28 依赖落地）**：临时验证后合入/手工落地 pymilvus 3.0.2、pandas 3.1.0、alembic 1.20.1、unstructured 0.27.34，并全量重算 `uv.lock`（nltk 3.10.4 修复 GHSA-j456-xh4h-cpf2，解除 main 上 security-scan 阻断）；全部积压 PR 清零，最近 CI 7/7 + security-scan 全绿 | P1 | 开发 |
 | OPS-3 | 结构化日志 | ✅ **已完成（2026-10-27）**：`utils/log_context.py` 统一注入 `request_id`/`user_id`/`stage`，中间件请求级作用域 + 认证依赖绑定用户 + `@log_stage` 覆盖 8 个管道阶段；`LOG_FORMAT=json` 可切单行 JSON（默认 text 追加 `[rid/user/stage]`），`LOG_LEVEL` 可配；新增 `test_log_context.py` 10 例 | P2 | 开发 |
@@ -229,6 +230,27 @@
 
 **红线**：SEC-1~5、SEC-6~15、SEC-16~21 已完成；公网多租户仍按「受控网络 + 最小权限」运营，TLS/HSTS 需按 [deployment.md](guide/deployment.md) §6.8.1 由前置反代实际启用后方可宣称完整企业级多租户安全。
 
+### 生产部署对齐（P0 · 2026-10-28 核实）
+
+> 结论：**代码完成 ≠ 生产生效**。台账中 SEC-1~21、MODEL-P1~P3 的 ✅ 均为「代码 + 测试完成」，生产栈仍运行 2026-10-13 构建的镜像。
+
+| 维度 | 源码 / main | 生产实际 | 影响 |
+|---|---|---|---|
+| 后端镜像 | `f76f90f`（141 路由） | 构建于 2026-10-13，OpenAPI **91** 路由 | 无 `/health/live`、`/health/ready`、`/api/auth/logout`、`/api/admin/models/*`；compose 已把 healthcheck 指向 `/health/ready`，重建前容器会因 404 变 unhealthy |
+| DB 迁移 | 10 个版本，head `c4d5e6f7a8b9` | `d4e5f6a7b8c9`（落后 4 格） | 缺 `e5f6a7b8c9d0`（`strategy_executions.user_id`）、`f2b3c4d5e6f7`（model registry 三表）、`b3c4d5e6f7a8`（用量/计价）、`c4d5e6f7a8b9`（索引画像） |
+| 学习模块隔离 | `strategy_executions.user_id` 已建 | 该表**无 `user_id` 列** | **SEC-1 在生产未生效**：多用户下学习样本仍跨用户可见/可写 |
+| 模型治理 | `model_providers` / `model_deployments` / `model_routes` / `model_usage_daily` | 表不存在 | MODEL-REGISTRY P1/P2.1/P3 全部未上线，设置页「模型服务」在生产不可用 |
+
+**对齐步骤**：① 备份（按 `guide/backup-restore.md`）→ ② `docker compose build backend && docker compose up -d backend`（必须重建镜像，`restart` 无效）→ ③ 容器内 `alembic upgrade head` → ④ `alembic check` 无漂移 → ⑤ 冒烟：`/health/ready`、登录/登出、`/api/admin/models/providers`、学习页跨用户隔离。**风险**：迁移与应用版本需同时切换，建议安排停机窗口（非 expand-contract 迁移）。
+
+### 待办台账核实记录（2026-10-28）
+
+- **方法**：逐条读码/grep + `pytest -m "not e2e"` 全量 + `docker inspect` / `openapi.json` / `alembic_version` 对照。
+- **测试基线**：后端 **1326 passed / 87 skipped**（与台账一致）。首次跑出 9 failed 系本机 shell 注入 `IN_DOCKER=1` → `IS_PRODUCTION=True` 污染；`env -u IN_DOCKER` 后 9/9 通过，**非代码回归**。
+- **本次核实后闭环（从待办移除）**：E2（已实现，仅剩灰度验收）、W0 的 minio license（文件已不存在）、HG 的 axios 非幂等重试（已修 + 6 单测）。
+- **数字漂移（已按实测更新）**：CODE-1/SA 行数、CODE-2 334→**405**、CODE-4 967→948、§五 HEAD。
+- **确认仍未动**：AGT-1 编辑重发、AGT-2 在线抽样/回归门禁、AGT-3 双源硬保证与 `hybrid_04` 复核、AGT-4 Artifacts、AGT-5/AM-3 MCP、AGT-6/AM-5 记忆、AGT-7 多模态、UX-5/6/7、OPS-4 nightly 与迁移回滚演练、MODEL-P4 成本上限/429、AM-6 工具治理、AM-7 同名跨档页合并、Office/HTML/EPUB loader 迁移。
+
 ---
 
 ## 三、阻塞项
@@ -254,7 +276,7 @@
 
 ## 五、提交与推送状态
 
-- 当前工作区（2026-10-28）：**干净**；origin/main HEAD = **`17a837b`**，最近 CI 7/7 + security-scan 全绿。
+- 当前工作区（2026-10-28）：**干净**；origin/main HEAD = **`f76f90f`**，最近 CI 7/7 + security-scan 全绿。
 - 本轮已推送批次：
   - `b5ac070`（2026-10-27）：MODEL-P2.1 + MODEL-P3 + SEC P2/P3（98 文件，含迁移 `b3c4d5e6f7a8`/`c4d5e6f7a8b9`）
   - `191ba0f`：CI 漂移修复（`model_usage_daily.usage_date` 索引）→ `79e36d0`：trivy 观察模式 → `9cbf63d`：OPS-6 依赖升级 + Trivy 恢复阻断
