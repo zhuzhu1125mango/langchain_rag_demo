@@ -15,12 +15,11 @@ from pydantic import ValidationError
 
 from src.api.chat import MessageRequest, _parse_session_id  # noqa: F401 (_parse_session_id 供 fixture 复用断言)
 from src.api.document import (
-    analyze_document_with_llm,
-    calculate_similarity,
     get_chunk_config,
     get_status_display,
     serialize_document,
 )
+from src.services.document_tasks import analyze_document_with_llm, calculate_similarity
 from src.config import settings
 
 
@@ -203,8 +202,8 @@ class _FakeRAGChain:
 
 def test_analyze_document_with_llm_failure_sentinel_returns_none(monkeypatch):
     _FakeRAGChain.result = {"summary": "评估失败", "overall_score": 0}
-    monkeypatch.setattr("src.api.document.VectorStoreManager", _FakeVectorStoreManager)
-    monkeypatch.setattr("src.api.document.RAGChain", _FakeRAGChain)
+    monkeypatch.setattr("src.services.document_tasks.VectorStoreManager", _FakeVectorStoreManager)
+    monkeypatch.setattr("src.services.document_tasks.RAGChain", _FakeRAGChain)
 
     import asyncio
 
@@ -213,8 +212,8 @@ def test_analyze_document_with_llm_failure_sentinel_returns_none(monkeypatch):
 
 def test_analyze_document_with_llm_normal_result_passthrough(monkeypatch):
     _FakeRAGChain.result = {"summary": "正常摘要", "overall_score": 92, "grade": "优秀"}
-    monkeypatch.setattr("src.api.document.VectorStoreManager", _FakeVectorStoreManager)
-    monkeypatch.setattr("src.api.document.RAGChain", _FakeRAGChain)
+    monkeypatch.setattr("src.services.document_tasks.VectorStoreManager", _FakeVectorStoreManager)
+    monkeypatch.setattr("src.services.document_tasks.RAGChain", _FakeRAGChain)
 
     import asyncio
 

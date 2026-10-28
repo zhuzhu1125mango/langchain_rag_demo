@@ -878,7 +878,7 @@ class TestWikiCompileMetrics:
 
         monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", OkCompiler)
 
-        from src.api.document import process_document_async
+        from src.services.document_tasks import process_document_async
 
         await process_document_async(str(doc.id), "f.pdf", "kb-1", "task-1", None, None)
 
@@ -905,7 +905,7 @@ class TestWikiCompileMetrics:
 
         monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", BoomCompiler)
 
-        from src.api.document import process_document_async
+        from src.services.document_tasks import process_document_async
 
         await process_document_async(str(doc.id), "f.pdf", "kb-1", "task-1", None, None)
 
@@ -928,7 +928,7 @@ class TestWikiCompileMetrics:
 
         monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", SlowCompiler)
 
-        from src.api.document import process_document_async
+        from src.services.document_tasks import process_document_async
 
         await process_document_async(str(doc.id), "f.pdf", "kb-1", "task-1", None, None)
 
@@ -1014,29 +1014,29 @@ def patched_pipeline(monkeypatch):
 
     db = FakeCtxDB(select_queue=[[doc], [doc]])  # 正常路径 doc 查询 + 异常兜底查询
 
-    monkeypatch.setattr("src.api.document.async_session_maker", lambda: db)
+    monkeypatch.setattr("src.services.document_tasks.async_session_maker", lambda: db)
     monkeypatch.setattr(
-        "src.api.document.process_document",
+        "src.services.document_tasks.process_document",
         lambda *a, **k: [SimpleNamespace(page_content="RAG 内容", metadata={})],
     )
 
     async def fake_get_instance():
         return FakeVectorStore()
 
-    monkeypatch.setattr("src.api.document.VectorStoreManager.get_instance", fake_get_instance)
+    monkeypatch.setattr("src.services.document_tasks.VectorStoreManager.get_instance", fake_get_instance)
     monkeypatch.setattr(
-        "src.api.document.DocumentAnalyzer.analyze_document_content",
+        "src.services.document_tasks.DocumentAnalyzer.analyze_document_content",
         staticmethod(lambda *a: ("technical", [], "it")),
     )
     monkeypatch.setattr(
-        "src.api.document.DocumentAnalyzer.evaluate_quality",
+        "src.services.document_tasks.DocumentAnalyzer.evaluate_quality",
         staticmethod(lambda *a: {"overall_score": 80, "overall_grade": "B"}),
     )
 
     async def fake_llm_classify(*a):
         return None
 
-    monkeypatch.setattr("src.api.document.analyze_document_with_llm", fake_llm_classify)
+    monkeypatch.setattr("src.services.document_tasks.analyze_document_with_llm", fake_llm_classify)
 
     async def noop(*a, **k):
         return None
@@ -1045,10 +1045,12 @@ def patched_pipeline(monkeypatch):
         "notify_task_progress",
         "notify_task_completed",
         "notify_doc_list_changed",
-        "invalidate_kb_list_cache",
     ):
-        monkeypatch.setattr(f"src.api.document.{name}", noop)
-    monkeypatch.setattr("src.api.document.update_upload_progress", lambda *a, **k: None)
+        monkeypatch.setattr(f"src.services.document_tasks.{name}", noop)
+    # 知识库缓存失效在任务内为延迟导入（避免 api ↔ services 循环），
+    # 因此打桩在定义处而非任务模块上。
+    monkeypatch.setattr("src.api.knowledge_base.invalidate_kb_list_cache", noop)
+    monkeypatch.setattr("src.services.document_tasks.update_upload_progress", lambda *a, **k: None)
     return doc
 
 
@@ -1065,7 +1067,7 @@ class TestPipelineStageMount:
 
         monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", BoomCompiler)
 
-        from src.api.document import process_document_async
+        from src.services.document_tasks import process_document_async
 
         await process_document_async(str(doc.id), "f.pdf", "kb-1", "task-1", None, None)
 
@@ -1082,7 +1084,7 @@ class TestPipelineStageMount:
         async def fake_notify(task_id, progress, message=None, data=None):
             progress_messages.append((progress, message))
 
-        monkeypatch.setattr("src.api.document.notify_task_progress", fake_notify)
+        monkeypatch.setattr("src.services.document_tasks.notify_task_progress", fake_notify)
 
         class OkCompiler:
             async def compile_document(self, *a, **k):
@@ -1090,7 +1092,7 @@ class TestPipelineStageMount:
 
         monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", OkCompiler)
 
-        from src.api.document import process_document_async
+        from src.services.document_tasks import process_document_async
 
         await process_document_async(str(doc.id), "f.pdf", "kb-1", "task-1", None, None)
 
@@ -1109,7 +1111,7 @@ class TestPipelineStageMount:
 
         monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", AssertNotUsed)
 
-        from src.api.document import process_document_async
+        from src.services.document_tasks import process_document_async
 
         await process_document_async(str(doc.id), "f.pdf", "kb-1", "task-1", None, None)
         assert doc.processing_status == "completed"

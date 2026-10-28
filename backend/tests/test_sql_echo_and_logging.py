@@ -14,9 +14,9 @@ from pathlib import Path
 import src.database as database  # noqa: F401  引擎随模块导入创建
 from src.config import DatabaseSettings, settings
 
-DOCUMENT_API = (
-    Path(__file__).resolve().parent.parent / "src" / "api" / "document.py"
-)
+# CODE-1 拆分后 document API 为包（common/upload/query/manage），
+# 日志副作用检查覆盖包内全部源文件。
+DOCUMENT_API_DIR = Path(__file__).resolve().parent.parent / "src" / "api" / "document"
 
 
 class TestSqlEchoConfig:
@@ -46,10 +46,13 @@ class TestDocumentLoggerSideEffects:
     """document.py 模块级日志副作用清理。"""
 
     def test_source_has_no_module_level_logging_side_effects(self):
-        """源码不得包含模块级 setLevel/addHandler。"""
-        source = DOCUMENT_API.read_text(encoding="utf-8")
-        assert "addHandler" not in source
-        assert "setLevel" not in source
+        """包内源码不得包含模块级 setLevel/addHandler。"""
+        sources = sorted(DOCUMENT_API_DIR.rglob("*.py"))
+        assert sources, "未找到 document API 包源文件"
+        for path in sources:
+            source = path.read_text(encoding="utf-8")
+            assert "addHandler" not in source, f"{path} 含模块级 addHandler"
+            assert "setLevel" not in source, f"{path} 含模块级 setLevel"
 
     def test_global_logger_has_no_extra_handlers(self):
         """导入 document 模块不得为全局 "rag_system" logger 追加 handler。
