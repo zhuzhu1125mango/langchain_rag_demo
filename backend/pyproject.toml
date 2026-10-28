@@ -28,7 +28,7 @@ dependencies = [
     "langchain-text-splitters==1.1.2",
     "langchain-ollama==1.1.0",
     "langsmith==0.14.12",
-    "pymilvus==3.0.0",
+    "pymilvus==3.0.2",
     "pymilvus-model==0.3.2",
     "minio==7.2.20",
     "pypdf==6.21.2",
