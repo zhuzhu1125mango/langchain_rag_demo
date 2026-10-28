@@ -18,7 +18,7 @@
 | 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
 | 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启，多工具/多步推理）＋原生 Function Calling / ReAct 作为回退路径 | ✅ |
 | 🛡️ **Agent 安全护栏** | 输入（提示注入/越权/超长）拦截、工具参数与 URL 安全校验、输出凭证/系统提示脱敏；高危工具可开启人工审批（SSE 审批卡片 + 回执 API，`AGENT_APPROVAL_MODE` 默认 off）；SEC-5：检索/网页内容按不可信上下文隔离、工具域名/DLP 策略、`fetch_webpage` 默认关闭 | ✅ |
-| 🔐 **多租户安全与配额** | SEC-1~5：学习样本按 owner 隔离；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致。SEC P2：实验/通知隔离、分类标签 admin 写、SSRF fail-closed、JWT 登出吊销、语义缓存按 KB 索引失效、live/ready 探针、账号导出/注销与日志脱敏 | ◐ 9/14/15 部分 |
+| 🔐 **多租户安全与配额** | SEC-1~5：学习样本按 owner 隔离；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致。SEC P2/P3：实验/通知隔离、分类标签 admin 写、SSRF fail-closed + 连接层固定 IP、JWT 登出吊销、语义缓存按 KB 索引失效、live/ready 探针、账号导出/注销与日志脱敏、评估配额、会话分页/批量上限、CSP/HSTS、ToolGuard DNS | ✅ |
 | 📊 **Agent 评测** | 轨迹级四维确定性评测 + 答案级判分器 + A/B 门槛与离线 harness（`AGENT_TRAJ_EVAL_ENABLED` 默认关；在线抽样待办） | ✅ |
 | 💬 **流式输出** | 实时打字效果，提升用户体验 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
@@ -54,15 +54,15 @@
 | 后端框架 | FastAPI | 0.136.3 | 现代高性能 API 框架 |
 | ORM | SQLAlchemy | 2.0.50 | 异步数据库操作 |
 | 向量数据库 | Milvus（服务端） | v2.6.17（镜像 tag） | 分布式向量存储 |
-| 向量数据库客户端 | pymilvus | 3.0.0 | 与上者版本号不同步，注意区分 |
-| LLM 集成 | Ollama（Python 客户端） | 0.6.2 | 本地模型运行 |
+| 向量数据库客户端 | pymilvus | 3.0.2 | 与上者版本号不同步，注意区分 |
+| LLM 集成 | Ollama（Python 客户端） | 0.6.3 | 本地模型运行 |
 | 嵌入模型 | bge-m3 | latest | 离线多语言向量嵌入，1024 维 |
 | 对象存储 | MinIO（pgsty/minio 社区 fork） | RELEASE.2026-06-18T00-00-00Z（镜像 tag） | 官方 2025-10 停发镜像并归档仓库，改用仍在维护的 drop-in 兼容 fork |
-| 前端框架 | Vue 3 | ^3.5.35 | 现代前端框架 |
+| 前端框架 | Vue 3 | ^3.5.44 | 现代前端框架 |
 | 状态管理 | Pinia | ^3.0.4 | 状态管理 |
-| 数据缓存 | Vue Query | ^5.100.14 | 客户端数据缓存 |
-| UI 组件 | Element Plus | ^2.14.1 | 企业级组件库 |
-| 缓存服务 | Redis（Python 客户端） | 8.0.0 | 缓存与语义缓存 |
+| 数据缓存 | Vue Query | ^5.104.5 | 客户端数据缓存 |
+| UI 组件 | Element Plus | ^2.14.7 | 企业级组件库 |
+| 缓存服务 | Redis（Python 客户端） | 8.1.0 | 缓存与语义缓存 |
 | 监控系统 | Prometheus | v3.5.0（镜像 tag） | 监控指标采集 |
 | 可视化 | Grafana | v12.0.2（镜像 tag） | 监控仪表盘 |
 
@@ -949,7 +949,7 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 | 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](docs/project-status.md) |
 | 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
 | 全项目演进路线 | 2026-10 对标审计：标配/差异化/避免、UX/视觉/代码/运维差距与三批执行序 | [docs/design/evolution-roadmap-2026-10.md](docs/design/evolution-roadmap-2026-10.md) |
-| 安全与多租户加固 | SEC-1~5 实施方案、验收与任务清单（公网多租户前置） | [docs/design/security-multitenancy-hardening-2026-10.md](docs/design/security-multitenancy-hardening-2026-10.md) |
+| 安全与多租户加固 | SEC-1~21 加固方案、验收与实施记录（P1/P2/P3 全部完成） | [docs/design/security-multitenancy-hardening-2026-10.md](docs/design/security-multitenancy-hardening-2026-10.md) |
 | UI 视觉收口 | VIS-3 调研结论、设计方向与实施记录（8px 网格/聊天主列/弹窗下拉） | [docs/design/ui-visual-polish-2026-10.md](docs/design/ui-visual-polish-2026-10.md) |
 | 专项设计文档 | 检索增强/意图路由/搜索优化等设计 | `docs/design/` |
 | 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](docs/archive/code-review-2026-08.md) |

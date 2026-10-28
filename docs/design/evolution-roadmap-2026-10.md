@@ -96,11 +96,11 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 
 | # | 方向 | 现状 / 证据 | 优先级 |
 |---|---|---|---|
-| OPS-1 | 运维手册补全 | 无备份 / 恢复 / 回滚 / 容量规划文档 | P1 |
-| OPS-2 | 供应链安全 | 无 dependabot / trivy / SBOM | P1 |
-| OPS-3 | 结构化日志 | stdlib 文本日志，未统一注入请求上下文 | P2 |
-| OPS-4 | 回归与演练 | 无 nightly 性能回归、无迁移回滚演练 | P2 |
-| OPS-5 | 覆盖率上调 | 62.12% → 65%（只升不降） | P3 |
+| OPS-1 | 运维手册补全 | ✅ 已完成（2026-10-27）：`guide/backup-restore.md` 覆盖备份/恢复/回滚矩阵/容量模型/季度演练 | P1 |
+| OPS-2 | 供应链安全 | ✅ 已完成（2026-10-27）：dependabot + Trivy/SBOM CI + Actions v7 + 依赖约束收口；积压 PR 清零 | P1 |
+| OPS-3 | 结构化日志 | ✅ 已完成（2026-10-27）：`utils/log_context.py` 统一注入 request_id/user_id/stage，支持 JSON 输出 | P2 |
+| OPS-4 | 回归与演练 | 待办：nightly 性能回归未建；恢复/回滚演练步骤与记录模板已就绪（backup-restore.md §7） | P2 |
+| OPS-5 | 覆盖率上调 | ✅ 已完成（2026-10-28）：后端 `fail_under=65`、实测 67.37%（1326 passed）；前端阈值 35/40/25/34 | P3 |
 
 ### 3.6 安全与多租户（SEC，2026-10-24 对抗性审查）
 
@@ -113,20 +113,20 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 | SEC-3 | 代理感知限流 | ✅ 已实施（2026-10-24）：受信代理 IP + Redis 滑动窗口 + 降级 | P1 |
 | SEC-4 | 状态/索引一致性 | ✅ 已实施（2026-10-24）：下架删向量/上架重建 + KB 移动重建 + 缓存失效 | P1 |
 | SEC-5 | Agent 注入与出站 | ✅ 已实施（2026-10-24）：不可信上下文 + 工具域名/DLP + fetch 默认关 + 红队回归 | P1 |
-| SEC-6~15 | 企业级加固 | 待办；建议序：SEC-6 实验 → SEC-8 通知 → SEC-7 分类标签 → SEC-9 SSRF → SEC-10 JWT → SEC-11 缓存索引 → SEC-12 健康 → SEC-13 运维/供应链 → SEC-14 隐私 → SEC-15 测试 | P2 |
-| SEC-16~21 | 纵深与体验 | SEC-20/21 已完成；SEC-18 部分完成（status Literal）；剩余建议序：SEC-19 → SEC-16 → SEC-17 → SEC-18 分页/上限 | P3 |
+| SEC-6~15 | 企业级加固 | ✅ 已实施（2026-10-27）：实验/通知/分类标签归属、SSRF fail-closed + IP 固定、JWT 吊销、缓存索引、live/ready、备份/供应链、隐私日志、覆盖率 | P2 |
+| SEC-16~21 | 纵深与体验 | ✅ 已实施（2026-10-27）：CSP/HSTS、评估配额、会话分页/批量上限、ToolGuard DNS、secrets 预检、文档边界 | P3 |
 
-**上线红线**：SEC-1~5 已完成；SEC-6~15 未完成前，公网多租户仍按受控网络运营。
+**上线红线**：SEC-1~5、SEC-6~15、SEC-16~21 均已完成；公网多租户仍按「受控网络 + 最小权限 + 前置反代 TLS/HSTS」运营（§ 见 [security-multitenancy-hardening-2026-10.md](security-multitenancy-hardening-2026-10.md)）。
 
 ## 4. 执行批次
 
 **批次 0：安全加固（公网前置，P1）——✅ 已完成（2026-10-24）**
 - SEC-1 学习隔离 → SEC-3 代理限流 → SEC-2 注册/配额 → SEC-4 状态/索引 → SEC-5 Agent 出站
 
-**批次 0.5：安全 P2（企业级）**
+**批次 0.5：安全 P2（企业级）——✅ 已完成（2026-10-27）**
 - SEC-6 实验 → SEC-8 通知 → SEC-7 分类标签 → SEC-9 SSRF → SEC-10 JWT → SEC-11 缓存索引 → SEC-12 健康 → SEC-13 运维/供应链 → SEC-14 隐私 → SEC-15 测试
 
-**批次 0.6：安全 P3（纵深）**
+**批次 0.6：安全 P3（纵深）——✅ 已完成（2026-10-27）**
 - SEC-19 ToolGuard DNS → SEC-16 CSP/TLS → SEC-17 评估配额 → SEC-18 分页/上限（SEC-20/21 已完成）
 
 **批次 1：体感与观感（P1，优先）**
@@ -135,13 +135,13 @@ MCP 2026-07 规范，以及 ChatGPT / Claude / Manus / Devin / Cursor / Perplexi
 - AGT-2 在线抽样脚本（trace → badcase）
 
 **批次 2：可靠性与代码观感**
-- AGT-1 / AM-4 轻量 checkpoint + 断线恢复
-- CODE-1 拆分 `document.py` / `web_search_service.py` / `chat.py`
-- CODE-2 异常分级；OPS-1 运维手册；OPS-2 供应链扫描；OPS-3 结构化日志
+- AGT-1 / AM-4 轻量 checkpoint + 断线恢复（待办）
+- CODE-1 拆分 `document.py` / `web_search_service.py` / `chat.py`（待办）
+- CODE-2 异常分级（待办）；OPS-1 运维手册 / OPS-2 供应链扫描 / OPS-3 结构化日志（✅ 2026-10-27）
 
 **批次 3：差异化能力**
-- AGT-4 Artifacts 工作区；AGT-5 MCP 客户端；AGT-6 记忆 / 上下文工程
-- OPS-4 nightly 与恢复演练；OPS-5 覆盖率上调
+- AGT-4 Artifacts 工作区；AGT-5 MCP 客户端；AGT-6 记忆 / 上下文工程（待办）
+- OPS-4 nightly 与恢复演练（待办）；OPS-5 覆盖率上调（✅ 2026-10-28）
 
 ## 5. 非目标（明确不做）
 

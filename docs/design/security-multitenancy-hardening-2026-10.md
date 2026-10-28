@@ -1,6 +1,6 @@
 # 安全与多租户加固（SEC）
 
-> 状态：已实施（2026-10-24，P1 SEC-1~5 完成；P2/P3 待办）
+> 状态：已实施（P1 SEC-1~5 2026-10-24；P2 SEC-6~15 与 P3 SEC-16~21 均于 2026-10-27 完成，实施记录见 §10/§11）
 > 关联：[project-status.md](../project-status.md)（唯一任务台账）、[agent-guardrails-hitl.md](agent-guardrails-hitl.md)（现有输入/工具/输出护栏）、[agent-eval-trace.md](agent-eval-trace.md)（评测与回归）、[evolution-roadmap-2026-10.md](evolution-roadmap-2026-10.md)
 > 定位：2026-10-24 对抗性审查后的收口方案。**公网多租户上线前必须先完成 P1（SEC-1 ~ SEC-5）**；私有化单租户/LAN 部署可按 P2/P3 排期。
 > 审查方式：静态代码审查 + 测试/CI/部署配置核对，未做真实渗透测试；部分结论依赖部署方式（是否公网、是否开放注册、是否启用联网/Agent）。
@@ -283,10 +283,10 @@
 
 | ID | 任务 | 状态 | 验收 |
 |---|---|---|---|
-| SEC-16 | CSP 收紧 + TLS/HSTS 部署说明 | 待办 | 安全头符合基线 |
-| SEC-17 | 评估 API 配额 | 待办 | 超限 429 |
-| SEC-18 | 会话分页 + 批量上限（status Literal 已完成） | 部分完成 | 分页/上限生效 |
-| SEC-19 | ToolGuard DNS 解析统一 | 待办 | 新增 URL 工具默认安全 |
+| SEC-16 | CSP 收紧 + TLS/HSTS 部署说明 | ✅ 已完成 | 安全头符合基线 |
+| SEC-17 | 评估 API 配额 | ✅ 已完成 | 超限 429 |
+| SEC-18 | 会话分页 + 批量上限（含 status Literal） | ✅ 已完成 | 分页/上限生效 |
+| SEC-19 | ToolGuard DNS 解析统一 | ✅ 已完成 | 新增 URL 工具默认安全 |
 | SEC-20 | secrets 预检与生成文档 | ✅ 已完成 | start-prod 给出明确缺失清单 |
 | SEC-21 | 文档明确上线边界 | ✅ 已完成 | README/部署指南与实现一致 |
 
@@ -318,8 +318,8 @@
 
 ### 9.3 残留与后续
 
-- **P2 待办（10 项）**：SEC-6~15（实验空 owner、分类/标签归属、通知频道、SSRF fail-closed/响应上限、JWT 吊销、缓存索引、ready 探针、备份/供应链、隐私/日志、真实后端 E2E）。
-- **P3 状态**：SEC-20（secrets 预检）与 SEC-21（文档边界）已完成；SEC-18 部分完成（`DocumentUpdate.status` Literal）；SEC-16/17/19 待办。
+- **P2 状态（2026-10-27 完成）**：SEC-6~15 全部完成，记录见 §10。
+- **P3 状态（2026-10-27 完成）**：SEC-16~21 全部完成，记录见 §11。
 - **SEC-5 边界**：提示注入无法被规则完全消灭；当前为“不可信包裹 + 工具出站策略 + 审批 + 红队回归”的纵深防御，仍需持续扩充红队样本。
 - **SEC-4 选型**：本轮采用“下架删向量/上架重建”MVP；Milvus `doc_status` 字段与全量 reindex 留作 P2 优化。
 - **部署提醒**：生产 `.env.prod` 需设置 `AUTH_ALLOW_REGISTRATION=false`（本地已补充，其他机器需同步）；Docker 下 `TRUSTED_PROXY_CIDRS` 已由 compose 覆盖为 `172.16.0.0/12`，若后端端口直接暴露给宿主/局域网，应改为精确的 Nginx 容器 IP 或专用代理网段，避免 XFF 伪造。

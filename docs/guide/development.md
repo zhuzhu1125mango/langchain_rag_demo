@@ -41,7 +41,7 @@ uv run pytest tests/test_security_p2.py tests/test_jwt_auth.py \
   tests/test_security_utils.py tests/test_experiment.py -q
 ```
 
-基线：本机（Windows）`uv run pytest -q` **1316 passed / 105 skipped**（2026-10-27，含模型 registry P1/P2、P2.1、P3 与 SEC P1~P3）；Linux CI 跑全量。
+基线：本机（Windows）`uv run pytest -q` **1326 passed / 105 skipped、覆盖率 67.37%**（2026-10-28，含模型 registry P1/P2/P2.1/P3、SEC P1~P3、OPS-1/2/3 与 Dependabot 依赖收口）；Linux CI 跑全量。
 单测默认在 `tests/conftest.py` 设置 `QUOTA_ENFORCEMENT_ENABLED=false`，避免跨用例累计触发 429；配额逻辑由 `test_quota.py` 直接覆盖。
 
 ### 2.2 集成测试（需容器）
@@ -91,7 +91,7 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 - 注意：不带 `--group` 的 `uv sync --frozen` 会把 OCR 后端从本地环境清除，需重新带组安装；`uv run` 为非精确同步不会清除
 - 关键配置（`.env`，完整见 `.env.example`）：`DEEP_PARSING_ENABLED`（总开关，关闭即整体回退旧管线）、`OCR_BACKEND=auto|mineru|paddle`、`OCR_DEVICE=auto|cpu|cuda`
 - e2e 对比测试：`uv run pytest tests/evaluation/test_ocr_backend_comparison.py -m e2e`（需双后端，否则跳过）
-- 已知依赖取舍：`huggingface_hub` 放宽至 `>=0.34,<2`（mineru 需 transformers 4.x → hub<1.0）、`PyYAML>=6.0.2`（paddlex 锁定 6.0.2）；两包均在 ST 5.5.1 声明兼容范围内
+- 已知依赖取舍：`huggingface_hub` 放宽至 `>=0.34,<3`（mineru 组另锁 transformers 4.x，实际解析到 0.36.2）、`PyYAML>=6.0.2`（paddlex 锁定 6.0.2）；两包均在 ST 5.x 声明兼容范围内
 - paddle 后端注意：`paddleocr` 3.x 不自带 paddle 框架（组内显式声明 `paddlepaddle`），PP-StructureV3 需 `paddlex[ocr]` 附加依赖（组内已含）；paddle 3.x Windows CPU 推理必须禁用 MKLDNN（`enable_mkldnn=False`，否则 `NotImplementedError: ConvertPirAttribute2RuntimeAttribute not support`，代码已处理）
 - 模型缓存默认写用户主目录（`~/.modelscope`、`~/.paddlex`），可用环境变量重定向：`MODELSCOPE_HOME` / `MODELSCOPE_CACHE` / `PADDLE_PDX_CACHE_HOME`
 - 样例实测（1 页中文扫描件，CPU）：mineru 90.1s（相似度 0.8235，表格还原 2 行）、paddle 110.6s（相似度 0.8375，无表格还原），耗时主要为模型初始化；正式选型结论需用真实扫描件复测
@@ -109,16 +109,16 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 | env-consistency | 用 `.env.example` 生成占位 env 校验键集合一致 | `.env.dev/.env.prod` 被 gitignore 不入库；脚本对缺失文件容错跳过 |
 | lint | backend ruff（`uvx ruff --select E9,F63,F7,F82`）+ 前端 eslint / typecheck | 真错误级规则集，零风格噪音；runner 无预装 uvx，须先 setup-uv |
 | secrets-scan | gitleaks `detect --no-git --redact` | 只扫工作树不扫历史；误报按 fingerprint 登记到 `.gitleaksignore` 并注明原因 |
-| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | 阈值已收敛至 `backend/pyproject.toml` `[tool.coverage.report]` `fail_under=65`（实测 67.02%），CI 命令仅 `--cov=src`；干净安装暴露隐性依赖缺失 |
+| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | 阈值已收敛至 `backend/pyproject.toml` `[tool.coverage.report]` `fail_under=65`（实测 67.37%），CI 命令仅 `--cov=src`；干净安装暴露隐性依赖缺失 |
 | backend-integration | docker run 启动 MinIO(pgsty fork)/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码；pytest-timeout 120s 防挂死 + step timeout-minutes 40 |
 | rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json；另有信息性多查询 A/B 步骤（continue-on-error，非卡点） |
 | frontend | `vitest run --coverage`（阈值 35/40/25/34 卡点）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
 
-全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限。
+全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限；backend 各 job 另设 `UV_HTTP_TIMEOUT=120`——清华 PyPI 镜像在托管 runner 上偶发解析/下载超时（2026-10-27 复盘，曾致 Dependabot PR 假红）。
 
 ## 4. 已知踩坑记录（改代码前先看）
 
-1. **隐性依赖**：pymilvus-model 的 BM25 tokenizers 模块级依赖 nltk 但未声明，必须显式保留 `nltk==3.10.3`；本地残留环境会掩盖缺失，验证依赖以 `uv sync --frozen` 干净安装为准
+1. **隐性依赖**：pymilvus-model 的 BM25 tokenizers 模块级依赖 nltk 但未声明，必须显式保留 `nltk==3.10.4`（3.10.4 修复 GHSA-j456-xh4h-cpf2）；本地残留环境会掩盖缺失，验证依赖以 `uv sync --frozen` 干净安装为准
 2. **pymilvus-model 0.3.2 导入路径**：`from pymilvus.model.sparse import BM25EmbeddingFunction, build_default_analyzer`（类名 Tokenizer 是单数），不是 `pymilvus_model` 顶层模块
 3. **Windows 编码**：测试临时文件必须显式 `encoding='utf-8'`（默认 GBK 会导致文档解析失败）
 4. **content-type 断言**：Starlette 会给 text/* 追加 `'; charset=utf-8'`，断言用 `startswith`

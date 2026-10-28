@@ -94,15 +94,15 @@ docs/
 | [agent-maturity-gap-analysis.md](design/agent-maturity-gap-analysis.md) | 已确认 | Agent 成熟度对标与差距分析（2026-10-20）：对标业界做法与主流产品，给出能力矩阵/差距清单/优先级；落地项见 [project-status.md](project-status.md) §二「Agent 成熟度差距」 |
 | [agent-eval-trace.md](design/agent-eval-trace.md) | 部分实施 | Agent 轨迹级评测（AM-1）：①②③ 已实施（2026-10-20，单测 +16；`AGENT_TRAJ_EVAL_ENABLED` 默认关）；④ 在线抽样待办 |
 | [agent-guardrails-hitl.md](design/agent-guardrails-hitl.md) | 已实施 | Agent 护栏与 HITL（AM-2，2026-10-22）：输入/工具/输出三层确定性护栏 + 审批闸门（`AGENT_APPROVAL_MODE` 默认 off，审批名单为空时不触发）；端到端 SSE `approval_required` + 回执 API + 前端审批卡片 |
-| [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) | 部分实施 | 安全与多租户加固（2026-10-24 对抗性审查）：P1×5 已完成；P2 中 SEC-6/7/8/10/11/12 完成、SEC-9/13/14/15 部分完成；P3×6 中 SEC-20/21 已完成、SEC-18 部分完成。任务拆分见 [project-status.md](project-status.md)「安全与多租户加固专项」 |
+| [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) | 已实施 | 安全与多租户加固（2026-10-24 对抗性审查）：P1×5、P2×10、P3×6 全部完成（2026-10-27，实施记录见 §10/§11）；公网多租户仍受 TLS/HSTS 与最小权限边界约束。任务台账见 [project-status.md](project-status.md)「安全与多租户加固专项」 |
 | [ui-visual-polish-2026-10.md](design/ui-visual-polish-2026-10.md) | 已实施 | 前端视觉收口（VIS-3，2026-10-24）：8px 网格/768px 聊天主列、EP 弹窗/下拉/表单/表格 token 化、侧栏与知识库/设置页密度收口；浅深色与移动端截图验证 |
 | [model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) | 部分实施 | 模型 Provider/Model/Route 三层：P1/P2/P2.1/P3 已完成（2026-10-26）；含熔断、用量/成本持久化、设置页展示、Embedding 影子集合重建/回滚与可选 rerank 路由；剩余 P4（Anthropic/Gemini/Azure、租户/成本策略） |
 | [evolution-roadmap-2026-10.md](design/evolution-roadmap-2026-10.md) | 已确认 | 全项目演进与完善路线（2026-10-22 审计）：业界「标配/差异化/避免」对标 + 代码/UX/视觉/运维差距证据 + 三批次执行序；任务条目见 [project-status.md](project-status.md) §二「全项目完善与演进专项」 |
 | [evolution-research-2026-09.md](design/evolution-research-2026-09.md) | 已确认 | 演进方向调研（2026-09-23）：从 RAG 问答到自进化知识运行时，四阶段路线于 2026-09-29 owner 拍板转正，立项见 special-projects-2026-09.md |
 | [wiki-navigable-workspace.md](design/wiki-navigable-workspace.md) | 已实施 | 阶段一：Wiki 升级为 Agent 可导航工作空间（D1/D3/D4 落地；D2/D5 经 A/B 证伪后回退默认值，见 §10） |
-| [special-projects-2026-09.md](design/special-projects-2026-09.md) | 部分实施 | 技术债与演进专项立项 A~E；C / D / E.6 已完成、E-1 差距盘点完成待实施（进展与证据见文末「实施进展回写」）；A/B 按触发器挂起 |
-| [e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md) | 部分实施 | E-1 导航式 wiki_lookup：W1/W2/W3 已实施（2026-10-15）；E1V 离线**两轮**（10-19/10-20）——**主瓶颈为编译覆盖**（`_parse_json_dict` 已修），修后 C 臂 0.188→0.938、图边 47 含跨档 13；**仅 Agent e2e 待办** |
-| [wiki-link-metadata-edges.md](design/wiki-link-metadata-edges.md) | 部分实施 | Wiki 图边「仅元数据建边」（L1 已实施 + 编译覆盖修复 + 离线验证，2026-10-20）；L2 暂缓，导航须 Agent e2e |
+| [special-projects-2026-09.md](design/special-projects-2026-09.md) | 部分实施 | 技术债与演进专项立项 A~E；C / D / E.6 已完成；E-1 的 W1/W2/W3 与 Agent e2e 验收已完成（无增益，W1 保持默认关闭，见 e1-navigable-lookup-gap.md）；A/B 按触发器挂起 |
+| [e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md) | 已实施 | E-1 导航式 wiki_lookup：W1/W2/W3 已实施（2026-10-15）；E1V 离线两轮修编译覆盖后 C 臂 0.188→0.938；**Agent e2e 已于 2026-10-21 完成：无增益，W1 保持默认关闭** |
+| [wiki-link-metadata-edges.md](design/wiki-link-metadata-edges.md) | 部分实施 | Wiki 图边「仅元数据建边」（L1 已实施 + 编译覆盖修复 + 离线验证，2026-10-20）；Agent e2e 已完成且无增益，L2 暂缓 |
 | [learning-loop-wiring.md](design/learning-loop-wiring.md) | 已实施 | 学习闭环接入（LEARN）：W-A 权重回载 / W-B 样本补采 / W-C A/B 接入 chat（2026-10-16 单测 + dev 端到端验证通过），三开关灰度默认关 |
 | [prod-schema-drift-repair.md](design/prod-schema-drift-repair.md) | 已实施 | 生产库 schema 漂移修复：代码侧（幂等对账迁移 + 去 start-prod stamp + CI `alembic check` 卡点）+ prod 窗口执行（`upgrade head` 后 `alembic check` 无漂移）全部完成（2026-10-19） |
 | [fix-plan-2026-09-24.md](archive/fix-plan-2026-09-24.md) | 已归档 | 四份评审综合修复计划（2026-09-29 收官：W0-2 完成、W1~W5 全部完成、W6 八个批次完成，78 项 P2 全部落账）；剩余仅用户侧操作 W0-1/W0-3，见文档头部状态 |

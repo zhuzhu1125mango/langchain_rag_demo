@@ -490,7 +490,7 @@ services:
 | `EVAL_RATE_LIMIT_PER_MINUTE` / `EVAL_DAILY_QUOTA` / `EVAL_BATCH_MAX_SAMPLES` | 按容量校准 | SEC-17：评估 API 用户级 RPM / 日样本单元 / 单批样本上限 |
 | `BATCH_DELETE_MAX_IDS` | 200 | SEC-18：会话/文档批量删除单次 ID 上限 |
 | `LOG_RETENTION_DAYS` / `TRACE_RETENTION_DAYS` / `AUDIT_RETENTION_DAYS` | 30 / 30 / 365 | SEC-14：应用日志文件、trace、审计日志保留期 |
-| `LOG_LEVEL` / `LOG_FORMAT` | INFO / json（容器） | OPS-3：日志级别；`json` 输出单行结构化日志，便于采集端按 `request_id`/`user_id`/`stage` 检索 |
+| `LOG_LEVEL` / `LOG_FORMAT` | INFO / text（容器建议 json） | OPS-3：日志级别；`json` 输出单行结构化日志，便于采集端按 `request_id`/`user_id`/`stage` 检索 |
 | `ADMIN_KEY` | 强随机值 | 学习写入/系统配置/指标重置等管理接口必需 |
 
 ### 6.3.2 模型 Provider 注册与切换（P1/P2）
