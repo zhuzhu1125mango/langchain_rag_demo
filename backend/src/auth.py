@@ -22,6 +22,7 @@ from starlette.exceptions import WebSocketException
 from pydantic import BaseModel
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.log_context import bind_user
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,13 @@ def _get_revocation_redis():
             decode_responses=True,
         )
     except Exception as exc:
-        logger.warning("JWT 吊销 Redis 客户端初始化失败，降级进程内名单: %s", exc)
+        # 吊销名单是安全增强：Redis 不可用时降级为进程内名单（多副本下弱化为尽力吊销）
+        log_exception(
+            logger, exc,
+            action="auth.jwt.revocation_redis_init",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="JWT 吊销 Redis 客户端初始化失败，降级进程内名单",
+        )
         _revocation_redis = None
     return _revocation_redis
 
@@ -85,7 +92,12 @@ def _revoke_jti(jti: Optional[str], exp: Optional[int]) -> None:
     try:
         client.set(f"{_JWT_REVOKED_PREFIX}{jti}", "1", ex=max(1, expires_at - now))
     except Exception as exc:
-        logger.warning("JWT 吊销写入 Redis 失败（仅本进程生效）: %s", exc)
+        log_exception(
+            logger, exc,
+            action="auth.jwt.revocation_write",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="JWT 吊销写入 Redis 失败，仅本进程生效",
+        )
 
 
 def _is_jti_revoked(jti: Optional[str]) -> bool:
@@ -103,9 +115,16 @@ def _is_jti_revoked(jti: Optional[str]) -> bool:
         return False
     try:
         return bool(client.exists(f"{_JWT_REVOKED_PREFIX}{jti}"))
-    except Exception:
-        # Redis 故障时 30s 内不再重试，避免每个请求都阻塞到超时
+    except Exception as exc:
+        # Redis 故障时 30s 内不再重试，避免每个请求都阻塞到超时。
+        # 注意这是"吊销检查不可用 → 按未吊销放行"的 fail-open 分支，必须留痕。
         _revocation_retry_at = time.monotonic() + 30
+        log_exception(
+            logger, exc,
+            action="auth.jwt.revocation_check",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="JWT 吊销状态查询失败，30s 内跳过吊销检查（fail-open）",
+        )
         return False
 
 # 认证方式声明
@@ -170,7 +189,13 @@ async def _resolve_api_key(api_key: str) -> Optional[CurrentUser]:
         try:
             key_row = await db.scalar(select(UserApiKey).where(UserApiKey.key_hash == key_hash))
         except Exception as e:  # noqa: BLE001 —— 认证链 DB 故障按未命中处理，不向调用方扩散
-            logger.warning(f"用户级 API Key 查询失败（按未命中处理）: {e}")
+            # fail-closed：查不到有效 Key 即按未认证处理（不泄露 DB 故障给调用方）
+            log_exception(
+                logger, e,
+                action="auth.api_key.lookup",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="用户级 API Key 查询失败，按未命中处理（返回 401）",
+            )
             return None
         if key_row is None or not key_row.is_valid(now):
             return None
@@ -184,7 +209,12 @@ async def _resolve_api_key(api_key: str) -> Optional[CurrentUser]:
                 await db.commit()
             except Exception as e:  # noqa: BLE001
                 await db.rollback()
-                logger.warning(f"API Key last_used_at 更新失败（已忽略）: {e}")
+                log_exception(
+                    logger, e,
+                    action="auth.api_key.touch_last_used",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="API Key last_used_at 更新失败，已忽略（下次请求再试）",
+                )
         return CurrentUser(user_id=str(key_row.user_id), is_authenticated=True)
 
 

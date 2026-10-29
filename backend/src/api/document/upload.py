@@ -35,6 +35,7 @@ from src.services.progress_manager import (
     unregister_ws_connection,
     update_upload_progress,
 )
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.quota import consume_upload_quota, refund_upload_quota
 
 from .common import ensure_upload_size as _ensure_upload_size, resolve_target_kb as _resolve_target_kb
@@ -159,7 +160,12 @@ async def upload_document(
         try:
             await invalidate_kb_list_cache(current_user.user_id)
         except Exception as exc:
-            logger.warning(f"文档上传后刷新知识库列表缓存失败: {exc}")
+            log_exception(
+                logger, exc,
+                action="document.upload.invalidate_kb_list_cache",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="文档上传后刷新知识库列表缓存失败，计数可能短暂滞后",
+            )
 
         return {
             "id": str(doc_id),
@@ -173,7 +179,12 @@ async def upload_document(
             await refund_upload_quota(current_user.user_id, actual_size)
         raise
     except Exception as e:
-        logger.error(f"上传文件失败: {str(e)}", exc_info=True)
+        log_exception(
+            logger, e,
+            action="document.upload.single",
+            message="上传文件失败，已回滚并退回配额",
+            filename=getattr(file, "filename", ""),
+        )
         update_upload_progress(task_upload_id, status="failed", message="上传失败，请稍后重试")
         await notify_task_failed(task_upload_id, "文件处理失败")
         await db.rollback()
@@ -293,7 +304,12 @@ async def batch_upload(
                 batch_total -= quota_reserved
             results.append({"filename": file.filename, "status": "failed", "reason": str(e.detail)})
         except Exception as e:
-            logger.error(f"批量上传单文件失败: {file.filename}: {e}", exc_info=True)
+            log_exception(
+                logger, e,
+                action="document.upload.batch_item",
+                message="批量上传单文件失败，已退回该文件配额",
+                filename=file.filename,
+            )
             if quota_reserved:
                 await refund_upload_quota(current_user.user_id, quota_reserved)
                 batch_total -= quota_reserved
@@ -303,7 +319,12 @@ async def batch_upload(
     try:
         await invalidate_kb_list_cache(current_user.user_id)
     except Exception as exc:
-        logger.warning(f"批量上传后刷新知识库列表缓存失败: {exc}")
+        log_exception(
+            logger, exc,
+            action="document.upload.invalidate_kb_list_cache_batch",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="批量上传后刷新知识库列表缓存失败，计数可能短暂滞后",
+        )
 
     return {"results": results}
 
@@ -375,5 +396,12 @@ async def upload_progress_ws(websocket: WebSocket, upload_id: str):
         # 连接断开，注销
         unregister_ws_connection(upload_id, websocket)
     except Exception as e:
-        logger.error(f"WebSocket error: {str(e)}")
+        # WS 连接异常通常是客户端行为（提前断开/协议错误），保留上下文便于区分
+        log_exception(
+            logger, e,
+            action="document.upload.ws_progress",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="上传进度 WS 连接异常，已注销连接",
+            upload_id=upload_id,
+        )
         unregister_ws_connection(upload_id, websocket)

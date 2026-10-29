@@ -27,6 +27,7 @@ KB_CACHE_OPERATION_TIMEOUT = 2.0
 
 from src.services.vector_store import VectorStoreManager
 from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 from .common import (
     BatchDeleteKnowledgeBasesRequest,
@@ -197,7 +198,14 @@ async def delete_knowledge_base(
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_kb_ids([str(kb.id)])
         except Exception as exc:
-            logger.warning("删除知识库时向量存储清理失败，继续删除数据库记录: %s", exc)
+            # 向量清理失败不阻塞 DB 删除，但会留下孤儿向量（检索仍可命中）
+            log_exception(
+                logger, exc,
+                action="knowledge_base.delete.vectors",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="删除知识库时向量存储清理失败，继续删除数据库记录",
+                kb_id=str(kb.id),
+            )
 
         # 删除 MinIO 中的原始文件（并发执行），失败仅告警不阻塞。
         minio_service = await MinioService.get_instance()
@@ -208,7 +216,13 @@ async def delete_knowledge_base(
             try:
                 await minio_service.delete_file_async(doc.file_path)
             except Exception as exc:
-                logger.warning("删除 MinIO 文件 %s 失败: %s", doc.file_path, exc)
+                log_exception(
+                    logger, exc,
+                    action="knowledge_base.delete.object",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="删除 MinIO 文件失败，继续删除数据库记录",
+                    doc_id=str(doc.id),
+                )
 
         await asyncio.gather(*(cleanup_minio_file(doc) for doc in docs))
 
@@ -260,7 +274,13 @@ async def _cleanup_kb_artifacts(
                     )
                 )
         except Exception as exc:
-            logger.warning("批量删除知识库后台 MinIO 清理失败: %s", exc)
+            log_exception(
+                logger, exc,
+                action="knowledge_base.batch_delete.objects",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="批量删除知识库后台 MinIO 清理失败",
+                kb_count=len(kb_ids),
+            )
 
     if kb_ids:
         try:
@@ -268,7 +288,13 @@ async def _cleanup_kb_artifacts(
                 for kb_id in kb_ids:
                     await on_kb_deleted(db, kb_id)
         except Exception as exc:
-            logger.warning("批量删除知识库后台 Wiki 级联清理失败: %s", exc)
+            log_exception(
+                logger, exc,
+                action="knowledge_base.batch_delete.wiki_cascade",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="批量删除知识库后台 Wiki 级联清理失败",
+                kb_count=len(kb_ids),
+            )
 
     logger.info(
         "批量删除知识库后台清理完成: MinIO文件=%d KB=%d",
@@ -350,8 +376,12 @@ async def batch_delete_knowledge_bases(
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_kb_ids([str(kb_id) for kb_id in found_ids])
         except Exception as exc:
-            logger.warning(
-                "批量删除知识库时向量存储清理失败，继续删除数据库记录: %s", exc
+            log_exception(
+                logger, exc,
+                action="knowledge_base.batch_delete.vectors",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="批量删除知识库时向量存储清理失败，继续删除数据库记录",
+                kb_count=len(found_ids),
             )
 
     # 删除 MinIO 中的原始文件：W6 #78b 下沉到后台任务（独立会话 + 分批并发），

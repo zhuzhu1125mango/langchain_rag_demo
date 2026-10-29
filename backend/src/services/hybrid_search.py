@@ -9,6 +9,7 @@ import logging
 from typing import Dict, List, Optional
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("hybrid_search")
 
@@ -91,7 +92,14 @@ class KBReranker:
             resolved = model_manager.get_reranker_model()
             if resolved is not None and resolved.provider.type == "ollama":
                 return resolved.model.model
-        except Exception:
+        except Exception as exc:
+            # 解决失败会让 rerank 悄悄退回 env 配置或关闭，需可见
+            log_exception(
+                logger, exc,
+                action="hybrid_search.resolve_registry_reranker",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="registry rerank 路由解析失败，回退 env 配置",
+            )
             return None
         return None
 
@@ -116,6 +124,7 @@ class KBReranker:
 
             generation = model_manager.registry_generation
         except Exception:
+            # 探测 registry 版本失败只影响单例是否重建，按"未知版本"继续用现有实例
             generation = ""
         if cls._resolved_generation is not None and generation != cls._resolved_generation:
             cls._instance = None
@@ -151,7 +160,13 @@ class KBReranker:
                     KBReranker._model_loaded = True
                     logger.info("Ollama 知识库重排序模型加载完成")
                 except Exception as e:
-                    logger.warning(f"Ollama 知识库重排序模型加载失败，将按 RRF 分数直接截断: {e}")
+                    log_exception(
+                        logger, e,
+                        action="hybrid_search.load_ollama_reranker",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="Ollama 知识库重排序模型加载失败，按 RRF 分数直接截断",
+                        model=self.model_name,
+                    )
                     KBReranker._model_failed = True
                     KBReranker._ollama_reranker = None
                 return
@@ -170,7 +185,13 @@ class KBReranker:
                 KBReranker._model_loaded = True
                 logger.info("知识库重排序模型加载完成")
             except Exception as e:
-                logger.warning(f"知识库重排序模型加载失败，将按 RRF 分数直接截断: {e}")
+                log_exception(
+                    logger, e,
+                    action="hybrid_search.load_cross_encoder",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="知识库重排序模型加载失败，按 RRF 分数直接截断",
+                    model=self.model_name,
+                )
                 KBReranker._model_failed = True
                 KBReranker._model = None
 
@@ -211,7 +232,13 @@ class KBReranker:
             )
             return ranked[:top_k]
         except Exception as e:
-            logger.warning(f"知识库重排序失败，降级为 RRF 截断: {e}")
+            log_exception(
+                logger, e,
+                action="hybrid_search.rerank",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="知识库重排序失败，降级为 RRF 截断",
+                candidates=len(results),
+            )
             sorted_results = sorted(results, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
             return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in sorted_results[:top_k]]
 

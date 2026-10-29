@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from src.config import settings
 from src.services.model_adapters import build_embeddings, build_route_models
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.services.model_registry import (
     DEFAULT_REGISTRY_PATH,
     ModelRegistry,
@@ -86,6 +87,7 @@ class ModelManager:
 
             provider_health.reset()
         except Exception:
+            # 熔断状态只是进程内缓存，重置失败不会影响路由正确性
             logger.debug("重置 Provider 健康状态失败", exc_info=True)
 
     # ------------------------------------------------------------------
@@ -102,10 +104,15 @@ class ModelManager:
     def _load_registry(self, path: Path) -> None:
         try:
             registry = ModelRegistry.load(str(path))
-        except Exception:
+        except Exception as exc:
             # 热加载失败时保留旧快照，避免一个坏文件把在线服务打挂
             if self._registry is not None:
-                logger.exception("模型注册表重载失败，继续使用上一版配置: %s", path)
+                log_exception(
+                    logger, exc,
+                    action="model_manager.registry.reload",
+                    message="模型注册表重载失败，继续使用上一版配置",
+                    registry_path=str(path),
+                )
                 return
             raise
         self._registry = registry
@@ -176,7 +183,13 @@ class ModelManager:
             self.apply_registry_config(config, source="database")
             return True
         except Exception as exc:
-            logger.warning("DB 模型 registry 加载失败，回退文件/env 配置: %s", exc)
+            # DB 未初始化/无配置是正常启动路径，回退文件与 env 即可
+            log_exception(
+                logger, exc,
+                action="model_manager.registry.load_from_db",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="DB 模型 registry 加载失败，回退文件/env 配置",
+            )
             return False
 
     @property
@@ -219,7 +232,14 @@ class ModelManager:
                     logger.warning("模型 %s 未在本地 Ollama 中找到", model_name)
                 return available
         except Exception as exc:
-            logger.warning("检查模型可用性失败: %s", exc)
+            # 探测失败不能误判为"模型不可用"（会阻断请求），按可用继续
+            log_exception(
+                logger, exc,
+                action="model_manager.availability_check",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="检查模型可用性失败，按可用处理",
+                model=model_name,
+            )
             return True
 
     def clear_availability_cache(self) -> None:
@@ -316,7 +336,15 @@ class ModelManager:
             return None
         try:
             resolved = registry.get_model(route.primary)
-        except Exception:
+        except Exception as exc:
+            # 路由指向的模型被删除/停用时静默关闭 rerank，需可见否则质量悄悄下降
+            log_exception(
+                logger, exc,
+                action="model_manager.rerank_route",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="rerank 路由目标模型不可解析，本次不启用 rerank",
+                primary=route.primary,
+            )
             return None
         if not resolved.provider.enabled or not resolved.model.has("rerank"):
             return None

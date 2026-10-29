@@ -16,6 +16,7 @@ from src.database import get_db
 from src.models import Document, KnowledgeBase
 from src.services.document_processor import get_document_chunks, preview_document
 from src.services.vector_store import VectorStoreManager
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 from .common import (
     DocumentResponse,
@@ -129,7 +130,12 @@ async def search_documents(
         
         return search_results
     except Exception as e:
-        logger.error(f"搜索失败: {str(e)}", exc_info=True)
+        log_exception(
+            logger, e,
+            action="document.search",
+            message="文档检索失败",
+            query_length=len(query or ""),
+        )
         raise HTTPException(status_code=500, detail="搜索失败，请稍后重试")
 
 
@@ -214,7 +220,12 @@ async def list_documents(
         return result
         
     except Exception as e:
-        logger.error(f"Error in list_documents: {type(e).__name__} - {str(e)}", exc_info=True)
+        # 原样上抛（交由全局异常处理），此处仅补齐结构化记录
+        log_exception(
+            logger, e,
+            action="document.list",
+            message="文档列表查询失败",
+        )
         raise
 
 
@@ -245,6 +256,13 @@ async def preview_doc(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # 预览失败原先完全静默（直接 500），排障时无迹可寻
+        log_exception(
+            logger, e,
+            action="document.preview",
+            message="文档预览失败",
+            doc_id=doc_id,
+        )
         raise HTTPException(status_code=500, detail="预览文档失败，请稍后重试")
 
 
@@ -267,6 +285,13 @@ async def get_doc_chunks(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        # 同上：原先静默返回 500
+        log_exception(
+            logger, e,
+            action="document.chunks",
+            message="获取文档文本块失败",
+            doc_id=doc_id,
+        )
         raise HTTPException(status_code=500, detail="获取文本块失败，请稍后重试")
 
 
@@ -327,7 +352,13 @@ async def get_document_source(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"获取文档来源失败: {str(e)}", exc_info=True)
+        log_exception(
+            logger, e,
+            action="document.source",
+            message="获取文档来源失败",
+            doc_id=doc_id,
+            chunk_index=chunk_index,
+        )
         raise HTTPException(status_code=500, detail="获取文档来源失败，请稍后重试")
 
 

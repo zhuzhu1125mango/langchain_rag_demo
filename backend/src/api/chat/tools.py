@@ -11,6 +11,7 @@ from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, KnowledgeBase
 from src.services.rag_chain import RAGChain
 from src.services.vector_store import VectorStoreManager
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.validators import parse_uuid_list, validate_kb_ownership
 
 from .common import (
@@ -105,7 +106,13 @@ async def get_suggestions(
         logger.warning("生成推荐问题超时，跳过本次推荐")
         return {"suggestions": []}
     except Exception as e:
-        logger.error(f"生成推荐问题失败: {str(e)}", exc_info=True)
+        # 推荐问题是辅助能力，失败返回空列表即可
+        log_exception(
+            logger, e,
+            action="chat.tools.suggestions",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="生成推荐问题失败，返回空列表",
+        )
         return {"suggestions": []}
 
 @router.post("/enhance_context")
@@ -140,7 +147,7 @@ async def enhance_context(
         result = await rag_chain.enhance_context(request.question, history, request.session_id)
         return result
     except Exception as e:
-        logger.error(f"上下文增强失败: {str(e)}", exc_info=True)
+        log_exception(logger, e, action="chat.tools.enhance_context", message="上下文增强失败")
         raise HTTPException(status_code=500, detail="上下文增强失败，请稍后重试")
 
 @router.post("/rewrite")
@@ -161,7 +168,7 @@ async def rewrite_question(request: RewriteRequest):
         result = await rag_chain.rewrite_question(request.question)
         return result
     except Exception as e:
-        logger.error(f"问题重写失败: {str(e)}", exc_info=True)
+        log_exception(logger, e, action="chat.tools.rewrite", message="问题重写失败")
         raise HTTPException(status_code=500, detail="问题重写失败，请稍后重试")
 
 @router.post("/classify")
@@ -182,7 +189,7 @@ async def classify_question(request: ClassifyRequest):
         result = await rag_chain.classify_question(request.question)
         return result
     except Exception as e:
-        logger.error(f"问题分类失败: {str(e)}", exc_info=True)
+        log_exception(logger, e, action="chat.tools.classify", message="问题分类失败")
         raise HTTPException(status_code=500, detail="问题分类失败，请稍后重试")
 
 @router.post("/compare")
@@ -226,5 +233,5 @@ async def compare_knowledge_bases(
         )
         return {"comparison": result, "question": request.question}
     except Exception as e:
-        logger.error(f"答案对比失败: {str(e)}", exc_info=True)
+        log_exception(logger, e, action="chat.tools.compare", message="答案对比失败")
         raise HTTPException(status_code=500, detail="答案对比失败，请稍后重试")

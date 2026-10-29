@@ -15,6 +15,7 @@ from typing import Dict, Tuple
 from fastapi import HTTPException, status
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.rate_limit import check_rate_limit_async, get_redis_client_if_initialized
 
 logger = logging.getLogger("rag_system")
@@ -112,7 +113,19 @@ async def _consume_counter(key: str, amount: int, limit: int, ttl: int) -> bool:
             result = await client.eval(_COUNTER_LUA, 1, key, amount, limit, ttl)
             return bool(int(result))
         except Exception as exc:
-            logger.warning("Redis 配额计数失败: %s", exc)
+            # 生产环境此处会 fail-closed 拒绝请求（计数不可信即不放行），
+            # 属于配额后端故障需上报；开发环境降级进程内计数，仅提示。
+            log_exception(
+                logger, exc,
+                action="utils.quota.counter",
+                severity=(
+                    ErrorSeverity.REPORTABLE
+                    if settings.IS_PRODUCTION
+                    else ErrorSeverity.RECOVERABLE
+                ),
+                message="Redis 配额计数失败",
+                counter_key=key,
+            )
             if settings.IS_PRODUCTION:
                 raise QuotaUnavailable("配额后端不可用") from exc
     elif settings.IS_PRODUCTION:
@@ -148,6 +161,7 @@ async def acquire_chat_slot(user_id: str) -> None:
         ):
             _raise_quota("聊天每日消息")
     except Exception:
+        # 占位失败要把已拿到的并发槽还回去，再原样上抛给调用方（429/503）
         await release_chat_slot(user_id)
         raise
 
@@ -163,7 +177,13 @@ async def release_chat_slot(user_id: str) -> None:
             await client.eval(_RELEASE_CONCURRENCY_LUA, 1, key)
             return
         except Exception as exc:
-            logger.warning("Redis 释放聊天并发槽失败: %s", exc)
+            log_exception(
+                logger, exc,
+                action="utils.quota.release_concurrency",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Redis 释放聊天并发槽失败，降级进程内计数",
+                counter_key=key,
+            )
     current = _memory_concurrency.get(key, 0)
     _memory_concurrency[key] = max(0, current - 1)
 
@@ -177,7 +197,18 @@ async def _acquire_concurrency(key: str, limit: int, ttl: int) -> bool:
             result = await client.eval(_ACQUIRE_CONCURRENCY_LUA, 1, key, limit, ttl)
             return bool(int(result))
         except Exception as exc:
-            logger.warning("Redis 聊天并发计数失败: %s", exc)
+            # 与计数同一口径：生产 fail-closed（并发不可控即拒绝），开发降级进程内
+            log_exception(
+                logger, exc,
+                action="utils.quota.acquire_concurrency",
+                severity=(
+                    ErrorSeverity.REPORTABLE
+                    if settings.IS_PRODUCTION
+                    else ErrorSeverity.RECOVERABLE
+                ),
+                message="Redis 聊天并发计数失败",
+                counter_key=key,
+            )
             if settings.IS_PRODUCTION:
                 raise QuotaUnavailable("配额后端不可用") from exc
     elif settings.IS_PRODUCTION:
@@ -210,7 +241,13 @@ async def refund_upload_quota(user_id: str, size_bytes: int) -> None:
             await client.decrby(key, size_bytes)
             return
         except Exception as exc:
-            logger.warning("Redis 退回上传配额失败: %s", exc)
+            log_exception(
+                logger, exc,
+                action="utils.quota.refund_upload",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Redis 退回上传配额失败，降级进程内计数",
+                counter_key=key,
+            )
     _memory_counters[key] = (
         _memory_counters.get(key, (time.monotonic() + 86400, 0))[0],
         max(0, _memory_counters.get(key, (0, 0))[1] - size_bytes),
