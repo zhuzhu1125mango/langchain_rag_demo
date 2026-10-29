@@ -63,14 +63,15 @@ except Exception as exc:
 | 六（10-29） | `auth.py` 5、`utils/quota.py` 5、`model_manager.py` 4、`hybrid_search.py` 4、`document/upload.py` 5、`document/query.py` 5、`knowledge_base/manage.py` 5、`chat/tools.py` 5 | 认证链（吊销/Key 查询）标注 fail-open/fail-closed 语义；配额后端故障按环境分流（**生产 REPORTABLE，开发 RECOVERABLE**）；**补上两个完全静默的 500**（文档预览、取文本块原先连日志都没有） |
 | 七（10-29） | `model_adapters.py` 4、`tool_manager.py` 4、`kb_retrieval_service.py` 4、`wiki_persist.py` 4、`wiki_lock.py` 4、`knowledge_base/query.py` 4、`chat/message.py` 4 | Provider fallback 链按「换模型属正常降级」记 `RECOVERABLE`，**流式已下发分片后中断改记 `REPORTABLE`**（回答被截断必须可见）；检索「混合失败→dense 兜底」分级，两级皆失败先留痕再上抛；Wiki 归属查询失败不再静默返回空；工具执行失败按需上报（以 `success=False` 回给 Agent 属可见降级） |
 | 八（10-29） | `notification.py` 5、`wiki_rebuild.py` 3、`wiki_compiler.py` 3、`question_processor.py` 3、`kb_comparator.py` 3、`intent_router/{__init__,embedding_classifier}` 3+3、`wiki_lookup_tool.py` 3、`ocr_parser.py` 3、`search_postprocessor.py` 3 | **`notification.py` 此前没有 logger**：三处 WS 主循环兜底、单播失败、归属校验全部静默；归属校验改为 `HTTPException`（正常拒绝）与其它异常（需上报）分流，DB 故障不再伪装成「无权限」。Wiki 空白基线失败**显式抬到 `REPORTABLE`**（底层是连接异常，但后果是 revision 归零、需人工核对产物）。`search_postprocessor` 三处 URL 解析容错判定为预期控制流，保留静默并注明 |
+| 九（10-29） | `context_enhancer.py` 3、`badcase/feedback_handler.py` 3、`api/badcase.py` 1 | 上下文三处降级（压缩→截断、消解→保留原问题、摘要→沿用旧摘要）全部标可恢复并带上 `context_len`/`session_id` 等定位键；badcase 三处按后果分层：**落库失败显式 `REPORTABLE`**（接口仍返回 200，但反馈实际丢了，属数据损失，且 commit 失败后补 `rollback()` 避免同一会话后续查询直接报错）、在线学习初始化/执行失败按异常性质自动判定（依赖缺失→需上报，模型服务抖动→可恢复）、`api/badcase.py` 里吞掉的 `except ValueError: pass`（自身主键解析失败）改为编程错误留痕 |
 
-累计 **235 处调用点 / 覆盖约 262 个 `except` 分支**（助手合并的端点按一次调用计）。保留静默的点全部就地写明理由（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、非法金额/时间戳/数值解析、`json.loads` 兜底、SSE 中断指标计数、provider 健康状态重置、registry 版本探测、检索失败埋点、Redis 锁操作的 `ConnectionError` 包装上抛、`search_postprocessor` 三处 URL 解析容错、各引擎 `raise WebSearchError(...)` 包装上抛）。
+累计 **243 处调用点 / 覆盖约 269 个 `except` 分支**（助手合并的端点按一次调用计）。保留静默的点全部就地写明理由（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、非法金额/时间戳/数值解析、`json.loads` 兜底、SSE 中断指标计数、provider 健康状态重置、registry 版本探测、检索失败埋点、Redis 锁操作的 `ConnectionError` 包装上抛、`search_postprocessor` 三处 URL 解析容错、各引擎 `raise WebSearchError(...)` 包装上抛）。
 
 ## 4. 推广顺序（建议）
 
 1. ~~**已拆小的高频路由**：`api/document/{upload,query}.py`、`api/admin_models.py`~~（admin_models 已完成；document 两文件待办）；
 2. ~~**外部依赖边界**：`services/milvus_*.py`、`services/web_search_*.py`~~（已完成）；
-3. **下一批**：`services/evaluation/retrieval_evaluator.py`（3）、`services/context_enhancer.py`（3）、`services/badcase/feedback_handler.py`（3）等各 3 处的小文件，再往下进入 1~2 处/文件的长尾；`main.py`（9）判定保持现状（应用装配，异常即启动失败）；
+3. ~~**各 3 处的小文件**：`services/context_enhancer.py`、`services/badcase/feedback_handler.py`~~（已完成，`evaluation/retrieval_evaluator.py` 已在早前批次处理）；下一批转 1~2 处/文件的**长尾**；`main.py`（9）判定保持现状（应用装配，异常即启动失败）；
 4. **长尾**：其余 ~235 处随日常改动顺带迁移，避免二次触碰同一文件；
 5. **收敛规则**：迁移时逐点判断「能否处理」——能处理（重试/降级/跳过）→ 保留 `except` + 分级记录；不能处理（应继续抛）→ 删掉本地 `except`，交给上层。
 
