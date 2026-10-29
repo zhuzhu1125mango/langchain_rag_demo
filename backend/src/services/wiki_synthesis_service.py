@@ -18,6 +18,7 @@ import logging
 from typing import Dict, List, Optional
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -132,7 +133,16 @@ class WikiSynthesisService:
                 except (TypeError, ValueError):
                     continue
         except Exception as e:
-            logger.warning(f"synthesis 去重检索失败（按不存在处理）: {e}")
+            # fail-open：去重检索失败按「不存在」处理，代价是可能重复沉淀一页；
+            # 但若检索层长期故障，会出现大量重复综合页，必须能看到故障本身
+            log_exception(
+                logger,
+                e,
+                action="wiki.synthesis.dedupe",
+                message="synthesis 去重检索失败，按不存在处理",
+                kb_scope=len(kb_ids or []),
+                question_len=len(question or ""),
+            )
         return False
 
     # ------------------------------------------------------------------
@@ -183,7 +193,17 @@ class WikiSynthesisService:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning(f"synthesis 回流写入失败（忽略）: {e}")
+            # 本批条目全部丢失（后台任务对用户不可见）；写入失败属数据丢失，
+            # 即便底层是连接类异常也按需上报，否则知识回流会长期静默为零
+            log_exception(
+                logger,
+                e,
+                action="wiki.synthesis.flush",
+                severity=ErrorSeverity.REPORTABLE,
+                message="synthesis 回流写入失败，本批问答未沉淀",
+                kb_id=kb_id,
+                items=len(items or []),
+            )
 
     async def _existing_titles(self, db, kb_id: str) -> List[str]:
         from sqlalchemy import select

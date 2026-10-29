@@ -5,11 +5,16 @@
 支持误分类检测和模式归纳
 """
 
+import logging
 from typing import List, Dict, Optional, Any, Tuple
 import numpy as np
 from collections import defaultdict
 import re
+
+from src.utils.error_handling import ErrorSeverity, log_exception
 from .sample_store import sample_store
+
+logger = logging.getLogger("rag_system")
 
 
 class RuleLearner:
@@ -343,17 +348,29 @@ class RuleLearner:
 
         # LEARN W-A：阈值随权重一并持久化（存于 __decision__ 行的 config.threshold），
         # 供启动回载；此前仅改内存、重启即丢
+        threshold_persisted = True
         try:
             await sample_store.update_strategy_config(
                 "__decision__", {"config": {"threshold": new_threshold}}
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # 阈值只改到了内存：重启回载的是旧值，而接口仍报 success。
+            # 这是「静默丢失学习成果」，显式上报并在返回值里如实标注
+            threshold_persisted = False
+            log_exception(
+                logger,
+                exc,
+                action="rule_learner.threshold.persist",
+                severity=ErrorSeverity.REPORTABLE,
+                message="决策阈值持久化失败，重启后将回到旧阈值",
+                threshold=new_threshold,
+            )
 
         return {
             "status": "success",
             "old_threshold": old_threshold,
             "new_threshold": new_threshold,
+            "threshold_persisted": threshold_persisted,
             "samples_analyzed": len(samples)
         }
     
@@ -405,6 +422,14 @@ class RuleLearner:
                 confidence = result.confidence
             except Exception as e:
                 skipped += 1
+                # 逐个样本跳过，最终结果里只有计数；补上失败原因才能判断是模型侧问题还是数据脏
+                log_exception(
+                    logger,
+                    e,
+                    action="rule_learner.classify",
+                    message="分类器预测失败，跳过该样本",
+                    skipped=skipped,
+                )
                 continue
             
             learn_result = await classifier.learn_from_feedback(

@@ -709,3 +709,63 @@ class TestConversationAndProgressGrading:
         assert "upload_id=up-1" in hits[0].getMessage()
         pm.progress_store.clear()
         pm.ws_connections.clear()
+
+
+class TestLearningAndSynthesisGrading:
+    """学习成果与知识回流：失败不阻断主流程，但不能「静默丢失」。"""
+
+    def test_threshold_persist_failure_is_honest(self, caplog, monkeypatch):
+        """阈值只写进内存时接口仍报 success：必须上报并在返回值里如实标注。"""
+        from src.services import rule_learner as rl
+
+        class _BrokenStore:
+            async def update_strategy_config(self, *args, **kwargs):
+                raise ConnectionError("db down")
+
+        class _SM:
+            def __init__(self):
+                self.threshold = 0.5
+
+            def set_threshold(self, value):
+                self.threshold = value
+
+        learner = rl.RuleLearner()
+        learner.min_samples_for_training = 1
+
+        async def _samples(limit=1000, owner_id=None):
+            return [{"confidence": 0.8, "label": 1}]
+
+        monkeypatch.setattr(learner, "extract_training_samples", _samples)
+        monkeypatch.setattr(rl, "sample_store", _BrokenStore())
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(learner.update_threshold_based_on_feedback(_SM()))
+
+        assert result["status"] == "success"
+        assert result["threshold_persisted"] is False, "写库失败不能假装持久化成功"
+        hits = [r for r in caplog.records if "action=rule_learner.threshold.persist" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+
+    def test_synthesis_dedupe_failure_is_fail_open_but_visible(self, caplog, monkeypatch):
+        """去重检索失败按「不存在」处理（可能重复建页），故障本身要能看到。"""
+        from src.services import kb_retrieval_service as krs
+        from src.services.wiki_synthesis_service import WikiSynthesisService
+
+        class _BrokenRetrieval:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def retrieve(self, *args, **kwargs):
+                raise ConnectionError("milvus down")
+
+        monkeypatch.setattr(krs, "KBRetrievalService", _BrokenRetrieval)
+        service = WikiSynthesisService()
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            exists = asyncio.run(service._similar_synthesis_exists(["kb-1", "kb-2"], "报销流程"))
+
+        assert exists is False, "fail-open：检索不可用时不许阻断回流"
+        hits = [r for r in caplog.records if "action=wiki.synthesis.dedupe" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "kb_scope=2" in hits[0].getMessage()
