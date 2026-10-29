@@ -8,6 +8,7 @@ from collections import OrderedDict
 
 from src.config import settings
 from src.services.intent_router.constants import PRONOUN_PATTERN
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -105,7 +106,14 @@ class ContextEnhancer:
             response = await self.llm.ainvoke(prompt)
             return response.content.strip()[:self.max_summary_length]
         except Exception as e:
-            logger.error(f"上下文压缩失败: {str(e)}", exc_info=True)
+            # 压缩失败只是质量降级（截断后继续），不影响本轮能否回答
+            log_exception(
+                logger,
+                e,
+                action="context.compress",
+                message="上下文压缩失败，降级为截断",
+                context_len=len(context),
+            )
             return context[:self.max_summary_length]
 
     async def _resolve_references(self, question: str, history: list) -> str:
@@ -153,7 +161,14 @@ class ContextEnhancer:
             result = response.content.strip()
             return result if result else question
         except Exception as e:
-            logger.error(f"指代消解失败: {str(e)}", exc_info=True)
+            # 消解失败保留原问题：历史已随提示词携带，不改写不会丢信息
+            log_exception(
+                logger,
+                e,
+                action="context.resolve_references",
+                message="指代消解失败，保留原问题",
+                question_len=len(question),
+            )
             return question
 
     async def _update_conversation_summary(self, history: list, session_id: str = "") -> str:
@@ -197,7 +212,15 @@ class ContextEnhancer:
             self._set_summary(session_id, new_summary)
             return new_summary
         except Exception as e:
-            logger.error(f"更新对话摘要失败: {str(e)}", exc_info=True)
+            # 摘要更新失败沿用旧摘要：只影响下一轮上下文长度，本轮回答不受影响
+            log_exception(
+                logger,
+                e,
+                action="context.update_summary",
+                message="对话摘要更新失败，沿用旧摘要",
+                session_id=session_id or None,
+                history_len=len(history),
+            )
             return previous_summary
 
     async def enhance_context(self, question: str, history: list, session_id: str = "") -> dict:

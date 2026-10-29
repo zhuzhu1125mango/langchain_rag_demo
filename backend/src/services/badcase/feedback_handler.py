@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 logger = logging.getLogger(__name__)
 
 
@@ -53,7 +55,14 @@ class BadcaseFeedbackHandler:
 
                 self.embedding_classifier = EmbeddingIntentClassifier()
             except Exception as e:
-                logger.warning(f"Badcase 在线学习初始化失败: {e}")
+                # 在线学习是可选增强：初始化失败按异常性质分级，
+                # 依赖缺失属需上报（能力静默失效），模型服务抖动属可恢复
+                log_exception(
+                    logger,
+                    e,
+                    action="badcase.learning.init",
+                    message="Badcase 在线学习初始化失败，本次跳过学习",
+                )
         return self.embedding_classifier
 
     @staticmethod
@@ -142,7 +151,15 @@ class BadcaseFeedbackHandler:
             logger.info(f"Badcase 触发在线学习: {learn_result}")
             return learn_result
         except Exception as e:
-            logger.warning(f"Badcase 在线学习失败: {e}")
+            # 学习失败不阻断反馈入库，只损失这一次的样本收益
+            log_exception(
+                logger,
+                e,
+                action="badcase.learning.apply",
+                message="Badcase 在线学习失败，反馈仍会入库",
+                session_id=badcase.get("session_id"),
+                category=badcase.get("category"),
+            )
             return None
 
     async def handle(
@@ -196,7 +213,28 @@ class BadcaseFeedbackHandler:
                 await db_session.refresh(record)
                 badcase_id = str(record.id)
             except Exception as e:
-                logger.error(f"Badcase 持久化失败: {e}", exc_info=True)
+                # 后果优先：接口照旧返回简化响应，但用户反馈实际未入库属数据损失，
+                # 即便底层是连接类抖动也按需上报处理，否则会长期无人发现样本在丢
+                log_exception(
+                    logger,
+                    e,
+                    action="badcase.persist",
+                    severity=ErrorSeverity.REPORTABLE,
+                    message="Badcase 持久化失败，反馈未入库",
+                    session_id=request.session_id,
+                    category=classification["category"],
+                )
+                # commit 失败后会话处于待回滚状态，不回滚会让同一请求后续查询直接报错
+                try:
+                    await db_session.rollback()
+                except Exception as rollback_exc:
+                    log_exception(
+                        logger,
+                        rollback_exc,
+                        action="badcase.persist.rollback",
+                        severity=ErrorSeverity.REPORTABLE,
+                        message="Badcase 持久化失败后回滚亦失败，数据库会话可能不可用",
+                    )
 
         return {
             "badcase_id": badcase_id,

@@ -3,6 +3,7 @@
 提供 badcase 提交、查询、统计接口，用于收集问题样本并触发在线学习。
 """
 
+import logging
 import uuid
 from typing import List, Optional
 
@@ -16,6 +17,9 @@ from src.database import get_db
 from src.models import Badcase
 from src.services.badcase import BadcaseFeedbackHandler, BadcaseCategory
 from src.services.badcase.feedback_handler import BadcaseCreateRequest
+from src.utils.error_handling import log_exception
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/badcases", tags=["badcases"])
 
@@ -108,8 +112,15 @@ async def create_badcase(
                     learning_applied=record.learning_applied,
                     created_at=record.created_at.isoformat() if record.created_at else "",
                 )
-        except ValueError:
-            pass
+        except ValueError as exc:
+            # 记录自身主键解析失败是代码缺陷（编程错误），不该静默
+            log_exception(
+                logger,
+                exc,
+                action="badcase.create.parse_id",
+                message="Badcase 记录 ID 无法解析，返回简化响应",
+                badcase_id=result.get("badcase_id"),
+            )
 
     # 持久化失败但分类与学习仍完成时，返回简化响应
     return BadcaseResponse(

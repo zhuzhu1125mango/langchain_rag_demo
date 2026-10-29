@@ -373,3 +373,119 @@ class TestNotificationAndWikiGrading:
         assert hits and hits[0].levelno == logging.ERROR
         assert "severity=reportable" in hits[0].getMessage()
         assert "kb_id=kb-1" in hits[0].getMessage()
+
+
+class TestContextAndBadcaseGrading:
+    """上下文增强与 badcase 闭环的分级：降级要留痕，数据丢失要升级。"""
+
+    def test_compress_failure_degrades_with_warning(self, caplog):
+        """压缩失败降级为截断：可恢复，记 warning 且不刷堆栈。"""
+        from src.services.context_enhancer import ContextEnhancer
+
+        class _BrokenLLM:
+            async def ainvoke(self, prompt):
+                raise TimeoutError("upstream timeout")
+
+        enhancer = ContextEnhancer(_BrokenLLM(), max_summary_length=20)
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(enhancer._compress_context("x" * 100))
+
+        assert result == "x" * 20, "降级必须真的截断到上限"
+        hits = [r for r in caplog.records if "action=context.compress" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        text = hits[0].getMessage()
+        assert "severity=recoverable" in text
+        assert "context_len=100" in text
+
+    def test_summary_failure_keeps_previous(self, caplog):
+        """摘要更新失败沿用旧摘要：不丢历史，且能按 session 定位。"""
+        from src.services.context_enhancer import ContextEnhancer
+
+        class _BrokenLLM:
+            async def ainvoke(self, prompt):
+                raise ConnectionResetError("llm down")
+
+        enhancer = ContextEnhancer(_BrokenLLM())
+        enhancer._set_summary("s-42", "旧摘要")
+
+        history = [{"role": "user", "content": "你好"}, {"role": "assistant", "content": "在"}]
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            summary = asyncio.run(enhancer._update_conversation_summary(history, "s-42"))
+
+        assert summary == "旧摘要"
+        assert enhancer._get_summary("s-42") == "旧摘要", "失败不得覆盖已有摘要"
+        hits = [r for r in caplog.records if "action=context.update_summary" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "session_id=s-42" in hits[0].getMessage()
+
+    def test_badcase_persist_loss_is_reportable_and_rolls_back(self, caplog):
+        """反馈未入库属数据损失：即便底层是连接抖动也要按需上报并回滚会话。"""
+        from src.services.badcase.feedback_handler import (
+            BadcaseCreateRequest,
+            BadcaseFeedbackHandler,
+        )
+
+        class _StubClassifier:
+            async def learn_from_feedback(self, **kwargs):
+                return {"applied": True}
+
+        class _BrokenSession:
+            def __init__(self):
+                self.rollback_called = False
+
+            def add(self, record):
+                pass
+
+            async def commit(self):
+                raise ConnectionError("db down")
+
+            async def refresh(self, record):
+                raise AssertionError("commit 失败后不应再 refresh")
+
+            async def rollback(self):
+                self.rollback_called = True
+
+        handler = BadcaseFeedbackHandler()
+        handler.embedding_classifier = _StubClassifier()
+        session = _BrokenSession()
+        request = BadcaseCreateRequest(question="报销流程怎么走", user_id="u1")
+
+        with caplog.at_level(logging.WARNING, logger="src.services.badcase.feedback_handler"):
+            result = asyncio.run(handler.handle(request, db_session=session))
+
+        assert result["badcase_id"] is None
+        assert result["category"] == "retrieval_failure", "分类结果仍要返回，不能因落库失败而丢"
+        assert session.rollback_called, "commit 失败后必须回滚，否则同一会话后续查询会报错"
+        hits = [r for r in caplog.records if "action=badcase.persist" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        text = hits[0].getMessage()
+        assert "severity=reportable" in text, "连接类异常也要因数据损失升级为 reportable"
+        assert "category=retrieval_failure" in text
+
+    def test_learning_failure_does_not_block_feedback(self, caplog):
+        """在线学习失败只损失样本收益，反馈本身仍要处理完成。"""
+        from src.services.badcase.feedback_handler import (
+            BadcaseCreateRequest,
+            BadcaseFeedbackHandler,
+        )
+
+        class _BrokenClassifier:
+            async def learn_from_feedback(self, **kwargs):
+                raise ConnectionError("embedding service down")
+
+        handler = BadcaseFeedbackHandler()
+        handler.embedding_classifier = _BrokenClassifier()
+        request = BadcaseCreateRequest(
+            question="你们的服务时间是？",
+            retrieved_sources=[{"doc": "a"}],
+            reason="回答错误",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="src.services.badcase.feedback_handler"):
+            result = asyncio.run(handler.handle(request, db_session=None))
+
+        assert result["category"] == "wrong_answer", "学习失败不影响分类"
+        assert result["learning_result"] is None
+        hits = [r for r in caplog.records if "action=badcase.learning.apply" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "severity=recoverable" in hits[0].getMessage()
