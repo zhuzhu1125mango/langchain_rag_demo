@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional
 
 from src.config import settings
 from src.utils.async_singleton import AsyncSingleton
+from src.utils.error_handling import ErrorSeverity, log_exception
 from .agent_orchestrator import AgentOrchestrator
 from .answer_generator import AnswerGenerator
 from .context_builder import ContextBuilder
@@ -155,7 +156,13 @@ class RAGChain(
             from src.services.cache_service import CacheService
             cache_service = await CacheService.get_instance()
         except Exception as e:
-            logger.warning(f"缓存服务初始化失败，联网搜索将不使用缓存: {e}")
+            # 缓存是可选依赖（本地/降级环境常无 Redis），失败即"无缓存搜索"
+            log_exception(
+                logger, e,
+                action="rag_chain.init.cache_service",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="缓存服务初始化失败，联网搜索将不使用缓存",
+            )
         self.web_search_service = WebSearchService(llm=agent_llm, cache_service=cache_service)
 
         # 初始化 Phase 3 Agent（按需延迟创建 handler，但先创建 toolkit）
@@ -184,7 +191,12 @@ class RAGChain(
                 metadata_converter=self._web_sources_to_metadata,
             )
         except Exception as e:
-            logger.warning(f"AgentOrchestrator 初始化失败，回退旧 Agent 路径: {e}")
+            # 编排器初始化失败会让 Agent 走不回旧路径可观测性更低的分支，需上报
+            log_exception(
+                logger, e,
+                action="rag_chain.init.agent_orchestrator",
+                message="AgentOrchestrator 初始化失败，回退旧 Agent 路径",
+            )
             self.agent_orchestrator = None
 
         # P0-f：初始化引用补全器与答案校验器（复用 Milvus 服务的 embeddings）
@@ -193,7 +205,12 @@ class RAGChain(
             if self._has_vector_store() and self.vector_store.milvus_service is not None:
                 embeddings = self.vector_store.milvus_service.embeddings
         except Exception as e:
-            logger.warning(f"获取 embeddings 失败，引用补全将降级为仅校验模式: {e}")
+            log_exception(
+                logger, e,
+                action="rag_chain.init.embeddings_probe",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="获取 embeddings 失败，引用补全降级为仅校验模式",
+            )
         self.citation_backfiller = None
         self.answer_verifier = None
         try:
@@ -204,7 +221,12 @@ class RAGChain(
             # 若注入 4B 主模型，每次校验都会拉起 4B 驱逐 3B 直答模型（同 ContextEnhancer 换载拉锯根因）
             self.answer_verifier = AnswerVerifier(embeddings=embeddings, llm=fast_llm)
         except Exception as e:
-            logger.warning(f"引用补全器/答案校验器初始化失败，将跳过后处理: {e}")
+            log_exception(
+                logger, e,
+                action="rag_chain.init.postprocessors",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="引用补全器/答案校验器初始化失败，将跳过后处理",
+            )
 
         # 初始化各独立服务（按职责拆分）
         # debug-multiround-generate-slow 最小修复：ContextEnhancer 改用 fast llm。
@@ -312,6 +334,7 @@ class RAGChain(
             try:
                 record_sse_interrupted()
             except Exception:
+                # 指标计数失败绝不能影响断连语义（还得继续 raise 出去）
                 pass
             raise
 
@@ -371,7 +394,12 @@ class RAGChain(
                 citation_sources = self._build_citation_sources(state.web_sources_for_citation)
                 answer = await self.citation_backfiller.backfill(answer, citation_sources)
             except Exception as e:
-                logger.warning(f"引用补全失败，保留原始答案: {e}")
+                log_exception(
+                    logger, e,
+                    action="rag_chain.citation_backfill",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="引用补全失败，保留原始答案",
+                )
 
         return answer, source_texts, source_metadata, answer_type
 

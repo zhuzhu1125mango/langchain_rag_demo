@@ -23,6 +23,7 @@ from src.services.tools.price_data_models import (
     freshness_score,
 )
 from src.services.tools.tool_manager import BaseTool, ToolResult
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -111,6 +112,7 @@ class ExchangeRateTool(BaseTool):
         try:
             amount_decimal = Decimal(str(amount))
         except Exception:
+            # 非法金额（"abc"/None）按 1 处理，查询汇率本身仍有效
             amount_decimal = Decimal("1")
 
         # 1. 免费数据源 frankfurter.app
@@ -248,11 +250,13 @@ def _parse_iso_timestamp(value: Any) -> Optional[datetime]:
         try:
             return datetime.utcfromtimestamp(value)
         except Exception:
+            # 越界时间戳属脏数据，返回 None 由调用方按"无时间"处理
             return None
     text = str(value).replace("Z", "+00:00")
     try:
         return datetime.fromisoformat(text)
     except Exception:
+        # 上游时间格式不统一，解析失败即视为无时间
         return None
 
 
@@ -263,6 +267,7 @@ def _to_decimal(value: Any) -> Optional[Decimal]:
     try:
         return Decimal(str(value))
     except Exception:
+        # 上游数值可能是 "N/A"/""，按缺失值处理
         return None
 
 
@@ -295,7 +300,14 @@ async def _fetch_frankfurter(from_currency: str, to_currency: str) -> Optional[P
             raw_data=data,
         )
     except Exception as e:
-        logger.warning(f"frankfurter.app 汇率获取失败 [{from_currency}/{to_currency}]: {e}")
+        # 多源查询：单源失败由其余来源补齐，属可恢复
+        log_exception(
+            logger, e,
+            action="tools.exchange_rate.fetch_frankfurter",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="frankfurter.app 汇率获取失败，尝试其他来源",
+            pair=f"{from_currency}/{to_currency}",
+        )
         return None
 
 
@@ -329,7 +341,13 @@ async def _fetch_exchangerate_api(
             raw_data=data,
         )
     except Exception as e:
-        logger.warning(f"exchangerate-api.com 汇率获取失败 [{from_currency}/{to_currency}]: {e}")
+        log_exception(
+            logger, e,
+            action="tools.exchange_rate.fetch_exchangerate_api",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="exchangerate-api.com 汇率获取失败，降级为其他来源",
+            pair=f"{from_currency}/{to_currency}",
+        )
         return None
 
 

@@ -24,6 +24,7 @@ from src.services.tools.price_data_models import (
     freshness_score,
 )
 from src.services.tools.tool_manager import BaseTool, ToolResult
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -270,11 +271,13 @@ def _parse_iso_timestamp(value: Any) -> Optional[datetime]:
         try:
             return datetime.fromtimestamp(value, tz=timezone.utc)
         except Exception:
+            # 越界时间戳属脏数据，按无时间处理
             return None
     text = str(value).replace("Z", "+00:00")
     try:
         return datetime.fromisoformat(text)
     except Exception:
+        # 上游时间格式不统一，解析失败即视为无时间
         return None
 
 
@@ -285,6 +288,7 @@ def _to_decimal(value: Any) -> Optional[Decimal]:
     try:
         return Decimal(str(value))
     except Exception:
+        # 上游数值可能是 "N/A"/""，按缺失值处理
         return None
 
 
@@ -354,7 +358,13 @@ async def _fetch_xaus(currency: str, unit: str) -> Optional[PriceDataPoint]:
             raw_data=data,
         )
     except Exception as e:
-        logger.warning(f"xaus.com 金价获取失败: {e}")
+        # 多源查询：单源失败由其余来源补齐，属可恢复
+        log_exception(
+            logger, e,
+            action="tools.gold_price.fetch_xaus",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="xaus.com 金价获取失败，尝试其他来源",
+        )
         return None
 
 
@@ -392,7 +402,13 @@ async def _fetch_goldapi(
             raw_data=data,
         )
     except Exception as e:
-        logger.warning(f"GoldAPI.io 贵金属获取失败 [{metal_code}/{currency}]: {e}")
+        log_exception(
+            logger, e,
+            action="tools.gold_price.fetch_goldapi",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="GoldAPI.io 贵金属获取失败，降级为其他来源",
+            pair=f"{metal_code}/{currency}",
+        )
         return None
 
 

@@ -20,6 +20,7 @@ from src.services.wiki_text import (
     _strip_think,
     normalize_title,
 )
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("wiki_compiler")
 
@@ -49,7 +50,12 @@ class PageCompileMixin:
                 break
             except Exception as e:
                 if attempt == 1:
-                    logger.warning(f"Wiki 候选抽取失败: {e}")
+                    log_exception(
+                        logger, e,
+                        action="wiki_compile.extract_candidates",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="Wiki 候选抽取失败，重试一次",
+                    )
 
         valid = []
         for p in pages if isinstance(pages, list) else []:
@@ -92,7 +98,12 @@ class PageCompileMixin:
                     candidates, pending_idx, remaining, matched
                 )
             except Exception as e:
-                logger.warning(f"Wiki 页标题 embedding 匹配失败，按新页处理: {e}")
+                log_exception(
+                    logger, e,
+                    action="wiki_compile.match_by_embedding",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="Wiki 页标题 embedding 匹配失败，剩余候选按新页处理",
+                )
         return matched
 
     async def _match_by_embedding(
@@ -214,7 +225,12 @@ class PageCompileMixin:
             title = title[:80]
             return CompiledPage(title=title, page_type="synthesis", content=content)
         except Exception as e:
-            logger.warning(f"synthesis 页合成失败（忽略）: {e}")
+            log_exception(
+                logger, e,
+                action="wiki_compile.synthesis_page",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="synthesis 页合成失败，本次跳过该页",
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -270,7 +286,12 @@ class PageCompileMixin:
                     logger.info(f"Wiki 编译事实保留率: {overall:.2f}")
             return probe
         except Exception as e:
-            logger.warning(f"Wiki 诊断探针执行失败（不影响编译产物）: {e}")
+            log_exception(
+                logger, e,
+                action="wiki_compile.fact_retention_probe",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 诊断探针执行失败，不影响编译产物",
+            )
             return None
 
     async def _refinement_loop(self, compiled: List[CompiledPage]) -> Optional[Dict[str, tuple]]:
@@ -299,7 +320,13 @@ class PageCompileMixin:
                 try:
                     page.content = await self.refine_pages(page, missing)
                 except Exception as e:
-                    logger.warning(f"Wiki 页「{page.title}」精炼失败，保留当前内容: {e}")
+                    log_exception(
+                        logger, e,
+                        action="wiki_compile.refine_page",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="Wiki 页精炼失败，保留当前内容",
+                        page_title=page.title,
+                    )
             probe_map = await self._check_fact_retention(compiled)
         return probe_map
 
@@ -384,7 +411,13 @@ class PageCompileMixin:
                     if str(c).strip()
                 ]
             except Exception as e:
-                logger.warning(f"Wiki 矛盾抽查失败（视为无矛盾）: 页「{page.title}」: {e}")
+                log_exception(
+                    logger, e,
+                    action="wiki_compile.contradiction_probe",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="Wiki 矛盾抽查失败，该页按无矛盾处理",
+                    page_title=page.title,
+                )
                 continue
             if contradictions:
                 record_wiki_contradictions(len(contradictions))

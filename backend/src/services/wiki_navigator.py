@@ -16,6 +16,7 @@ import logging
 from typing import Dict, List, Optional
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -74,7 +75,14 @@ class WikiNavigator:
                 if len(merged) >= top_k * len(kinds):
                     break
             except Exception as e:
-                logger.warning(f"Wiki 入口检索失败（kind={kind}，忽略）: {e}")
+                # 导航全部 fail-soft：单类入口检索失败不阻断其余 kind
+                log_exception(
+                    logger, e,
+                    action="wiki_navigator.search_entry_kind",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="Wiki 入口检索失败，跳过该类 kind",
+                    source_kind=kind,
+                )
         merged = merged[: top_k * 2]
         await self._attach_page_links(merged)
         return merged
@@ -112,9 +120,15 @@ class WikiNavigator:
                     try:
                         meta["page_links"] = links
                     except Exception:
-                        pass  # metadata 只读等异常场景直接跳过
+                        # metadata 可能是只读映射，跳过附加即可，不影响检索结果
+                        pass
         except Exception as e:
-            logger.warning(f"Wiki Related 链接附加失败（不影响入口结果）: {e}")
+            log_exception(
+                logger, e,
+                action="wiki_navigator.attach_links",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki Related 链接附加失败，不影响入口结果",
+            )
 
     # ------------------------------------------------------------------
     # 按页取读
@@ -162,7 +176,12 @@ class WikiNavigator:
                 "links": list(row.links or []),
             }
         except Exception as e:
-            logger.warning(f"Wiki 索引页直读失败: {e}")
+            log_exception(
+                logger, e,
+                action="wiki_navigator.read_index_page",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 索引页直读失败，返回空结果",
+            )
             return None
 
     async def get_page_by_title(self, kb_ids: List[str], title: str) -> Optional[Dict]:
@@ -209,7 +228,13 @@ class WikiNavigator:
                 "links": list(row.links or []),
             }
         except Exception as e:
-            logger.warning(f"Wiki 按页取读失败（title={title}）: {e}")
+            log_exception(
+                logger, e,
+                action="wiki_navigator.get_page_by_title",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 按页取读失败，返回空结果",
+                title=title,
+            )
             return None
 
     async def _read_page_content(self, row) -> str:
@@ -238,7 +263,13 @@ class WikiNavigator:
             minio = await MinioService.get_instance()
             return await minio.download_text_async(content_path) or ""
         except Exception as e:
-            logger.warning(f"Wiki 页 MinIO 直读失败（path={content_path}）: {e}")
+            log_exception(
+                logger, e,
+                action="wiki_navigator.read_page_content",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 页 MinIO 直读失败，返回空正文",
+                content_path=content_path,
+            )
             return ""
 
 

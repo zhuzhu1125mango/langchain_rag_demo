@@ -19,6 +19,7 @@ from src.services.search_agent import (
     SearchAgentResult,
     SearchToolkit,
 )
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.security import redact_for_log
 
 logger = logging.getLogger("rag_system")
@@ -52,7 +53,14 @@ class AgentMixin:
             mems = [d.page_content for d in results if getattr(d, "page_content", "")]
             return "\n\n".join(mems[::-1]) if mems else ""
         except Exception as e:
-            logger.warning(f"加载 Agent 记忆失败（忽略）: {e}")
+            # 记忆是增强项：检索失败按无记忆继续，不影响本轮回答
+            log_exception(
+                logger, e,
+                action="pipeline.agent_memory.load",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="加载 Agent 记忆失败，本轮不带历史记忆",
+                session_id=session_id,
+            )
             return ""
 
     async def _save_agent_memory(self, session_id: str, summary: str) -> None:
@@ -80,7 +88,13 @@ class AgentMixin:
                 [doc], kb_id=f"memory"
             )
         except Exception as e:
-            logger.warning(f"写入 Agent 记忆失败（忽略）: {e}")
+            log_exception(
+                logger, e,
+                action="pipeline.agent_memory.save",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="写入 Agent 记忆失败，本轮记忆缺失",
+                session_id=session_id,
+            )
 
     # ------------------------------------------------------------------
     # Phase 3: Agent 搜索辅助方法
@@ -151,7 +165,13 @@ class AgentMixin:
             if mode == QAMode.AGENT_SEARCH:
                 return await self.react_agent.run(question, history_context)
         except Exception as e:
-            logger.warning(f"Agent 执行失败 [{mode.value}]: {e}")
+            # Agent 执行失败会退化为空答案并触发上层降级，属功能降级而非预期控制流
+            log_exception(
+                logger, e,
+                action="pipeline.agent.run",
+                message="Agent 执行失败，将降级到 Phase 2",
+                agent_mode=mode.value,
+            )
         return SearchAgentResult(answer="")
 
     async def _stream_agent(self, question: str, history_context: str, mode: QAMode):
@@ -167,7 +187,12 @@ class AgentMixin:
                     yield chunk, sources
                 return
         except Exception as e:
-            logger.warning(f"Agent 流式执行失败 [{mode.value}]: {e}")
+            log_exception(
+                logger, e,
+                action="pipeline.agent.stream",
+                message="Agent 流式执行失败，将降级到 Phase 2",
+                agent_mode=mode.value,
+            )
         yield "", []
 
     async def _stage_agent(self, state: _PipelineState):
@@ -326,7 +351,13 @@ class AgentMixin:
                 try:
                     await self._save_agent_memory(state.session_id, summary)
                 except Exception as e:
-                    logger.warning(f"Agent 记忆写入（兜底）失败（忽略）: {e}")
+                    log_exception(
+                        logger, e,
+                        action="pipeline.agent_memory.save_fallback",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="Agent 记忆写入（兜底）失败，本轮记忆缺失",
+                        session_id=state.session_id,
+                    )
 
         if not state.use_kb:
             # 纯 Agent 模式：空答案或污染 → 降级 Phase 2
@@ -413,7 +444,13 @@ class AgentMixin:
                     duration_ms=web_search_duration,
                 ))
         except Exception as e:
-            logger.warning(f"Agent 降级搜索失败: {e}")
+            # 联网搜索是可选增强：失败时本轮按无网络上下文回答
+            log_exception(
+                logger, e,
+                action="pipeline.web_search.agent_fallback",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Agent 降级搜索失败，本轮不使用网络上下文",
+            )
             yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_WEB_SEARCH,
                 "failed",
@@ -466,7 +503,13 @@ class AgentMixin:
                 f"context_length={len(state.search_context)}, sources={len(web_sources)}"
             )
         except Exception as e:
-            logger.warning(f"联网搜索失败: {e}")
+            log_exception(
+                logger, e,
+                action="pipeline.web_search.search",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="联网搜索失败，本轮不使用网络上下文",
+                query=redact_for_log(state.resolved_question or ""),
+            )
             yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_WEB_SEARCH,
                 "failed",
