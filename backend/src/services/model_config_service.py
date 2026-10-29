@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.model_registry import ModelDeployment, ModelProvider, ModelRoute
+from src.utils.error_handling import log_exception
 from src.services.model_registry import (
     ModelConfig,
     ModelRegistry,
@@ -119,6 +120,14 @@ async def apply_registry_from_db(db: AsyncSession) -> ModelRegistry:
     try:
         registry = ModelRegistry(config, source="database")
     except Exception as exc:
+        # 包成 ModelConfigError 是为了给管理员可读提示，但原始异常类型就此丢失
+        # （调用方只能看到「配置不合法」）；先按原始异常分级留痕再上抛
+        log_exception(
+            logger,
+            exc,
+            action="model.registry.build",
+            message="DB 模型配置构建在线 registry 失败",
+        )
         raise ModelConfigError(str(exc)) from exc
     from src.services.model_manager import model_manager
 
@@ -414,4 +423,6 @@ async def test_provider(provider: ProviderConfig) -> Dict[str, Any]:
     except ModelConfigError:
         raise
     except Exception as exc:
+        # 预期控制流：管理员点「连接测试」，网络/鉴权失败就是要告诉他哪里不对，
+        # 返回值里带 error 文案，不需要额外留痕（否则每次误配都刷一条告警）
         return {"ok": False, "models": [], "error": str(exc)[:300]}

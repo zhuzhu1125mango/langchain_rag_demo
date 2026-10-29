@@ -12,8 +12,15 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.config import settings
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger(__name__)
+
+# 逐句 embedding 失败按句记录：一条长答案可能几十句，全记会淹没日志。
+# 只记前几次，之后每 50 次记一条（避免「引用全变 [?]」时完全无迹可寻）。
+_SENTENCE_FAIL_LOG_FIRST = 3
+_SENTENCE_FAIL_LOG_EVERY = 50
+_sentence_embed_failures = 0
 
 # 句子分隔符：中英文句号、问号、感叹号
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？!?])")
@@ -220,6 +227,8 @@ class CitationBackfiller:
         Returns:
             补全引用后的句子。无法匹配时追加 [?]。
         """
+        global _sentence_embed_failures
+
         # 无可用 embeddings 或无来源 → 追加 [?]
         if not self.embeddings or not source_embeddings:
             return self._append_citation(sentence, "?")
@@ -228,7 +237,20 @@ class CitationBackfiller:
         try:
             query_embedding = await self.embeddings.aembed_query(sentence.strip())
         except Exception as e:
-            logger.warning("embedding 查询失败，降级为 [?]：%s", e)
+            # 该句降级为 [?]：引用变少是用户可见的质量下降，但逐句记录会刷屏
+            _sentence_embed_failures += 1
+            if (
+                _sentence_embed_failures <= _SENTENCE_FAIL_LOG_FIRST
+                or _sentence_embed_failures % _SENTENCE_FAIL_LOG_EVERY == 0
+            ):
+                log_exception(
+                    logger,
+                    e,
+                    action="citation.backfill.sentence_embedding",
+                    message="句子 embedding 失败，该句引用降级为 [?]",
+                    failures=_sentence_embed_failures,
+                    sentence_len=len(sentence or ""),
+                )
             return self._append_citation(sentence, "?")
 
         # 计算与各 source 的余弦相似度，取最高分
@@ -267,7 +289,14 @@ class CitationBackfiller:
         try:
             embeddings = await self.embeddings.aembed_documents(texts)
         except Exception as e:
-            logger.warning("批量计算 source embedding 失败，引用补全降级：%s", e)
+            # 来源向量算不出来 → 全部句子只能标 [?]，等于引用补全整体失效
+            log_exception(
+                logger,
+                e,
+                action="citation.backfill.source_embedding",
+                message="来源 embedding 计算失败，引用补全整体降级为 [?]",
+                sources=len(valid_sources),
+            )
             return []
 
         return [

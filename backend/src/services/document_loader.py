@@ -21,6 +21,7 @@ from src.services.ocr_parser import is_scanned_pdf, parse_pdf_ocr
 from src.services.document_types import FILE_TYPE_MAPPING, SUPPORTED_EXTENSIONS
 from src.services.chunking import ChunkingFactory
 from src.services.document_types import ChunkingStrategy
+from src.utils.error_handling import log_exception
 
 def get_local_file_path(file_path):
     """
@@ -111,7 +112,15 @@ def load_document(file_path):
                         )
                     ]
                 except Exception as e:
-                    logger.warning(f"OCR 解析失败，回退内置 PDF 解析器: {local_path}, 错误: {e}")
+                    # 回退内置解析器是设计好的降级，但扫描件长期走不到 OCR 会直接体现为
+                    # 「表格/图片内容全丢」，所以要留下后端名与文件，便于判断是哪类失败
+                    log_exception(
+                        logger,
+                        e,
+                        action="document.load.ocr_fallback",
+                        message="OCR 解析失败，回退内置 PDF 解析器",
+                        file=os.path.basename(local_path),
+                    )
             loader = PdfFileLoader(local_path)
         elif ext == ".csv":
             loader = loader_class(local_path, encoding="utf-8")

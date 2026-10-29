@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Sequence
 
 from src.config import settings
 from src.services.model_manager import model_manager
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,14 @@ class RetrievalEvaluator:
                 self.embeddings = model_manager.get_embeddings()
                 self._embedding_model_name = current_model
             except Exception as e:
-                logger.warning(f"检索评估器 embedding 模型初始化失败: {e}")
+                # 返回 None 后所有相似度指标都会算成 0，评测结论会变成「检索很差」
+                log_exception(
+                    logger,
+                    e,
+                    action="retrieval_eval.embedding.init",
+                    message="检索评估器 embedding 模型初始化失败，相似度指标将不可用",
+                    model=self._embedding_model_name,
+                )
                 self.embeddings = None
         return self.embeddings
 
@@ -102,7 +110,14 @@ class RetrievalEvaluator:
         try:
             return await embeddings.aembed_documents(list(texts))
         except Exception as e:
-            logger.warning(f"检索评估 embedding 计算失败: {e}")
+            # 空列表会让 context_precision/recall 直接变成 0，评测报告不可当真
+            log_exception(
+                logger,
+                e,
+                action="retrieval_eval.embedding.encode",
+                message="检索评估 embedding 计算失败，相关指标记为 0",
+                texts=len(texts),
+            )
             return []
 
     async def evaluate(
@@ -192,7 +207,16 @@ class RetrievalEvaluator:
             ]
             return sum(similarities) / len(similarities)
         except Exception as e:
-            logger.warning(f"检索相似度评估失败: {e}")
+            # 这里返回 0.0 与「真的毫不相关」同分：评测门禁会误判为检索质量下降，
+            # 必须按需上报，否则只能看到指标掉、看不到是评估器自身故障
+            log_exception(
+                logger,
+                e,
+                action="retrieval_eval.similarity",
+                severity=ErrorSeverity.REPORTABLE,
+                message="检索相似度评估失败，按 0 分计入（与「毫不相关」同分）",
+                docs=len(retrieved_docs or []),
+            )
             return 0.0
 
     async def evaluate_batch(

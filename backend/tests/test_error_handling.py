@@ -769,3 +769,118 @@ class TestLearningAndSynthesisGrading:
         hits = [r for r in caplog.records if "action=wiki.synthesis.dedupe" in r.getMessage()]
         assert hits and hits[0].levelno == logging.WARNING
         assert "kb_scope=2" in hits[0].getMessage()
+
+
+class TestDocumentAndEvalGrading:
+    """文档链路与评估器：降级要留痕，结论错误要升级。"""
+
+    def test_preview_does_not_mask_parse_failure_as_client_error(self, monkeypatch, tmp_path):
+        """解析/IO 失败曾被包成 ValueError，路由据此回 400：服务端故障被说成「请求有问题」。"""
+        from src.services import document_processor as dp
+
+        target = tmp_path / "a.txt"
+        target.write_text("内容", encoding="utf-8")
+
+        def _broken_load(path):
+            raise OSError("minio object unreadable")
+
+        monkeypatch.setattr(dp, "load_document", _broken_load)
+
+        with pytest.raises(OSError):
+            dp.preview_document(str(target))
+
+    def test_preview_keeps_user_fixable_error_as_valueerror(self, tmp_path):
+        """文件不存在等调用方可纠正的问题仍抛 ValueError（路由映射 400）。"""
+        from src.services import document_processor as dp
+
+        with pytest.raises(ValueError):
+            dp.preview_document(str(tmp_path / "missing.txt"))
+
+    def test_duplicate_detection_failure_is_reportable(self, caplog):
+        """返回空列表 = 「没有重复」，上传流程据此放行：结论错了，不能只记一条 error。"""
+        from src.services.document_analyzer import DocumentAnalyzer
+
+        class _BrokenChain:
+            sentence_transformer = object()
+
+            def _has_vector_store(self):
+                return True
+
+            def _init_similarity_model(self):
+                pass
+
+            async def _retrieve_documents(self, *args, **kwargs):
+                raise ConnectionError("milvus down")
+
+        analyzer = DocumentAnalyzer(llm=None, rag_chain=_BrokenChain())
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(analyzer.detect_duplicates("报销制度正文", kb_id="kb-1"))
+
+        assert result == []
+        hits = [r for r in caplog.records if "action=document.detect_duplicates" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        text = hits[0].getMessage()
+        assert "severity=reportable" in text, "重复检测误判会让重复文档持续入库"
+        assert "kb_id=kb-1" in text
+
+    def test_citation_source_embedding_failure_is_visible(self, caplog):
+        """来源向量算不出来 → 全句只能标 [?]，等于引用补全整体失效。"""
+        from src.services.citation_backfiller import CitationBackfiller
+
+        class _BrokenEmb:
+            async def aembed_documents(self, texts):
+                raise ConnectionError("embedding down")
+
+        filler = CitationBackfiller(embeddings=_BrokenEmb())
+        sources = [{"source_index": 1, "title": "制度", "content": "报销流程"}]
+
+        with caplog.at_level(logging.WARNING, logger="src.services.citation_backfiller"):
+            result = asyncio.run(filler._compute_source_embeddings(sources))
+
+        assert result == []
+        hits = [r for r in caplog.records if "action=citation.backfill.source_embedding" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "sources=1" in hits[0].getMessage()
+
+    def test_sentence_embedding_failures_are_throttled(self, caplog, monkeypatch):
+        """逐句失败按句发生：前几次记录，之后按间隔记录，避免一条长答案刷几十行。"""
+        from src.services import citation_backfiller as cb
+
+        class _BrokenEmb:
+            async def aembed_query(self, text):
+                raise TimeoutError("embedding timeout")
+
+        monkeypatch.setattr(cb, "_sentence_embed_failures", 0)
+        filler = cb.CitationBackfiller(embeddings=_BrokenEmb())
+        source_embeddings = [(1, [0.1, 0.2])]
+
+        with caplog.at_level(logging.WARNING, logger="src.services.citation_backfiller"):
+            for i in range(5):
+                out = asyncio.run(
+                    filler._backfill_citation(f"第{i}句是足够长的事实陈述。", source_embeddings)
+                )
+
+        assert "[?]" in out
+        hits = [r for r in caplog.records if "action=citation.backfill.sentence_embedding" in r.getMessage()]
+        assert len(hits) == 3, "只记前 3 次，其余按 50 次间隔"
+        assert "failures=1" in hits[0].getMessage()
+
+    def test_retrieval_similarity_zero_is_reportable(self, caplog, monkeypatch):
+        """评估器自身故障算出的 0 分，与「真的毫不相关」同分，必须上报。"""
+        from src.services.evaluation.retrieval_evaluator import RetrievalEvaluator
+
+        class _BrokenEmb:
+            async def aembed_query(self, question):
+                raise RuntimeError("embedding model crashed")
+
+        evaluator = RetrievalEvaluator()
+        monkeypatch.setattr(evaluator, "_get_embeddings", lambda: _BrokenEmb())
+
+        with caplog.at_level(logging.WARNING, logger="src.services.evaluation.retrieval_evaluator"):
+            score = asyncio.run(evaluator._evaluate_similarity("报销流程怎么走", ["doc-a"]))
+
+        assert score == 0.0
+        hits = [r for r in caplog.records if "action=retrieval_eval.similarity" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "docs=1" in hits[0].getMessage()

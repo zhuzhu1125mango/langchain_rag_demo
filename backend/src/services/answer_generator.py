@@ -13,6 +13,7 @@ from src.services.prompts.prompt_loader import PromptLoader
 from src.services.context_builder import ContextBuilder
 from src.services.identity import IDENTITY_PROMPT_RULE
 from src.services.numerical_validator import NumericalValidator
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +171,15 @@ class AnswerGenerator:
                 warning = self.numerical_validator.format_warning(result)
                 return answer + warning
         except Exception as e:
-            logger.warning("数值交叉验证失败，跳过警告追加：%s", e)
+            # 少一条「数值可能不一致」的提示，答案照常返回；
+            # 但多源数值冲突没被提示是有风险的，至少要看得到该项校验整体失效
+            log_exception(
+                logger,
+                e,
+                action="answer.numerical_verify",
+                message="数值交叉验证失败，跳过一致性警告",
+                sources=len(sources),
+            )
         return answer
 
     async def generate(
@@ -299,8 +308,15 @@ class AnswerGenerator:
         try:
             answer = await citation_backfiller.backfill(answer, backfill_sources)
         except Exception as e:
-            # 引用补全失败不应阻塞主流程，保留原始答案
-            logger.warning("引用补全失败，保留原始答案：%s", e)
+            # 引用补全失败不阻塞主流程，保留原始答案；
+            # 但用户看到的是「LLM 没有标引用」，与「补全器坏了」在日志里要能区分
+            log_exception(
+                logger,
+                e,
+                action="answer.citation_backfill",
+                message="引用补全失败，保留原始答案",
+                search_sources=len(backfill_sources),
+            )
 
         # 基于全部来源（KB + 工具 + 搜索）进行数值交叉验证
         all_sources = list(sources)

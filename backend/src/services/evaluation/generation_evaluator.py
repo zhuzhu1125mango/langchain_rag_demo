@@ -19,6 +19,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
 
+from src.utils.error_handling import log_exception
+
 logger = logging.getLogger(__name__)
 
 # 相关性：语义相似度映射区间（bge-m3 实测：无关≈0.45，真实答案 0.80+）
@@ -138,7 +140,15 @@ class GenerationEvaluator:
         try:
             sims = await self._clause_support_similarity(clauses, ctx_text)
         except Exception as e:
-            logger.warning(f"忠实度 embedding 计算失败，降级为词面覆盖: {e}")
+            # 降级到词面 bigram 覆盖会改变指标口径（通常偏低），报告里必须能看出
+            # 「这次 faithfulness 是兜底算的」而不是模型答得差
+            log_exception(
+                logger,
+                e,
+                action="generation_eval.faithfulness",
+                message="忠实度 embedding 计算失败，降级为词面覆盖",
+                clauses=len(clauses),
+            )
             return self._faithfulness_fallback(clauses, ctx_text)
 
         ctx_numbers = set(_NUMBER_RE.findall(ctx_text))
@@ -207,7 +217,14 @@ class GenerationEvaluator:
         try:
             vectors = await self._get_embeddings().aembed_documents([question] + sentences)
         except Exception as e:
-            logger.warning(f"相关度 embedding 计算失败，降级为词面覆盖: {e}")
+            # 同上：词面兜底会让 relevance 系统性偏低，评测趋势分析时会误判为退化
+            log_exception(
+                logger,
+                e,
+                action="generation_eval.relevance",
+                message="相关度 embedding 计算失败，降级为词面覆盖",
+                sentences=len(sentences),
+            )
             return self._relevance_fallback(question, clean)
 
         q_vec, sent_vecs = vectors[0], vectors[1:]

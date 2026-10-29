@@ -254,6 +254,7 @@ async def preview_doc(
             **result
         }
     except ValueError as e:
+        # 文件不存在 / 类型不支持 / 超限：service 层刻意保留的 ValueError，属调用方可纠正
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         # 预览失败原先完全静默（直接 500），排障时无迹可寻
@@ -262,6 +263,8 @@ async def preview_doc(
             action="document.preview",
             message="文档预览失败",
             doc_id=doc_id,
+            filename=doc.filename,
+            page=page,
         )
         raise HTTPException(status_code=500, detail="预览文档失败，请稍后重试")
 
@@ -291,6 +294,7 @@ async def get_doc_chunks(
             action="document.chunks",
             message="获取文档文本块失败",
             doc_id=doc_id,
+            filename=doc.filename,
         )
         raise HTTPException(status_code=500, detail="获取文本块失败，请稍后重试")
 

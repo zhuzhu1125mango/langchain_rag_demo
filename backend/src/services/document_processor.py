@@ -27,6 +27,7 @@ from src.services.chunking import (  # noqa: F401  兼容历史导入路径
     _split_word_structured,
 )
 from src.services.document_types import ChunkingStrategy, FILE_TYPE_MAPPING, SUPPORTED_EXTENSIONS
+from src.utils.error_handling import log_exception
 
 def process_document(file_path, chunk_size=None, chunk_overlap=None, chunk_strategy=ChunkingStrategy.AUTO):
     """
@@ -100,7 +101,15 @@ def process_folder(folder_path, chunk_strategy=ChunkingStrategy.AUTO):
                     all_chunks.extend(chunks)
                     logger.info(f"已处理: {file_path}")
                 except Exception as e:
-                    logger.error(f"处理失败: {file_path}, 错误: {e}")
+                    # 批量导入里单篇失败只跳过该文件，但「某类文档一直没进库」必须能追到具体文件
+                    log_exception(
+                        logger,
+                        e,
+                        action="document.process_folder.file",
+                        message="批量处理单个文档失败，已跳过",
+                        file=os.path.basename(file_path),
+                        ext=ext,
+                    )
             else:
                 logger.debug(f"跳过不支持的格式: {file_path}")
 
@@ -183,28 +192,29 @@ def preview_document(file_path, max_length=1000, page=1, page_size=500):
     if ext not in FILE_TYPE_MAPPING:
         raise ValueError(f"不支持的文件类型: {ext}")
     
-    try:
-        documents = load_document(file_path)
-        full_content = "\n\n".join(doc.page_content for doc in documents)
-        total_length = len(full_content)
-        
-        # 计算分页
-        start_idx = (page - 1) * page_size
-        end_idx = start_idx + page_size
-        preview_content = full_content[start_idx:end_idx]
-        
-        total_pages = max(1, (total_length + page_size - 1) // page_size)
-        
-        return {
-            "content": preview_content,
-            "total_length": total_length,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-            "truncated": end_idx < total_length
-        }
-    except Exception as e:
-        raise ValueError(f"预览文档失败: {str(e)}")
+    # 注意：这里**不再**把异常统一包成 ValueError。
+    # 路由层以 ValueError 判 400，包装会让「MinIO/OCR/解析器故障」伪装成「请求有问题」：
+    # 既不触发 5xx 告警，也看不到原始异常类型，只剩一句被吞掉的文案。
+    # 文件不存在、类型不支持、超限等调用方可纠正的问题已在上面直接抛 ValueError。
+    documents = load_document(file_path)
+    full_content = "\n\n".join(doc.page_content for doc in documents)
+    total_length = len(full_content)
+
+    # 计算分页
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    preview_content = full_content[start_idx:end_idx]
+
+    total_pages = max(1, (total_length + page_size - 1) // page_size)
+
+    return {
+        "content": preview_content,
+        "total_length": total_length,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+        "truncated": end_idx < total_length
+    }
 
 
 def get_document_chunks(file_path, chunk_strategy=ChunkingStrategy.AUTO):

@@ -12,6 +12,8 @@ import json
 import logging
 import re
 
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -92,7 +94,17 @@ class DocumentAnalyzer:
             duplicates.sort(key=lambda x: x['similarity'], reverse=True)
             return duplicates
         except Exception as e:
-            logger.error(f"重复检测失败: {str(e)}", exc_info=True)
+            # 返回空列表 = 「没有重复」，上传流程据此放行：检索/编码故障会被静默解读成
+            # 「这篇文档是全新的」，导致重复文档持续入库。属结论错误而非降级，按需上报。
+            log_exception(
+                logger,
+                e,
+                action="document.detect_duplicates",
+                severity=ErrorSeverity.REPORTABLE,
+                message="重复检测失败，已按「无重复」放行（结论不可信）",
+                kb_id=kb_id,
+                threshold=threshold,
+            )
             return []
 
     async def analyze_document(self, content: str) -> dict:
@@ -151,6 +163,8 @@ class DocumentAnalyzer:
 """
         prompt = template.format(content=content[:2000])
 
+        # 先记住原始长度：except 分支里 content 可能已被 LLM 返回内容覆盖
+        input_len = len(content or "")
         try:
             llm = await self._get_aux_llm()
             response = await llm.ainvoke(prompt)
@@ -163,7 +177,15 @@ class DocumentAnalyzer:
             else:
                 return self._fallback_analyze("无法解析评估结果")
         except Exception as e:
-            logger.error(f"文档智能分析合并失败: {str(e)}", exc_info=True)
+            # 分析只是上传后的增强信息（分类/评分），失败降级为默认值即可，
+            # 但要能看出「智能分析」这一段整体在失败，而不是用户上传的文档质量差
+            log_exception(
+                logger,
+                e,
+                action="document.analyze",
+                message="文档智能分析失败，已降级为默认评分",
+                content_len=input_len,
+            )
             return self._fallback_analyze("评估失败")
 
     @staticmethod
