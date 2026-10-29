@@ -22,6 +22,7 @@ from src.services.pipeline.state import set_ab_config, reset_ab_config
 from src.services.title_generator import TitleGenerator
 from src.utils.sensitive_words import sensitive_filter
 from src.utils.validators import parse_uuid_list, validate_kb_ownership
+from src.utils.error_handling import log_exception
 
 from .common import (
     MessageRequest,
@@ -173,7 +174,13 @@ async def stream_answer(
                         user_id=current_user.user_id,
                     )
             except Exception as exec_err:
-                logger.error(f"记录策略执行失败: {exec_err}", exc_info=True)
+                log_exception(
+                    logger,
+                    exec_err,
+                    action="chat.stream.learning_record",
+                    message="记录策略执行失败",
+                    session_id=current_session_id,
+                )
 
         async with async_session() as db:
             result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(current_session_id)))
@@ -233,7 +240,13 @@ async def stream_answer(
                 session.title = new_title
                 logger.info(f"会话标题已生成(流式后台): session={current_session_id}, title={new_title}")
             except Exception as title_err:
-                logger.warning(f"生成会话标题失败(流式后台): {title_err}")
+                log_exception(
+                    logger,
+                    title_err,
+                    action="chat.stream.title_background",
+                    message="生成会话标题失败(流式后台)",
+                    session_id=current_session_id,
+                )
                 return None
             await db.commit()
             return new_title
@@ -272,6 +285,7 @@ async def stream_answer(
                     try:
                         reasoning_data = json.loads(chunk) if chunk else {}
                     except Exception:
+                        # 解析失败即视为「非结构化 reasoning 事件」，属判定语义，无需记录
                         reasoning_data = {}
                     if reasoning_data and reasoning_data.get("type") == "reasoning":
                         reasoning_steps.append(reasoning_data)
@@ -349,7 +363,13 @@ async def stream_answer(
             partial_task.add_done_callback(_stream_finalize_tasks.discard)
             raise
         except Exception as e:
-            logger.error(f"流式生成异常: {str(e)}", exc_info=True)
+            log_exception(
+                logger,
+                e,
+                action="chat.stream.generate",
+                message="流式生成异常",
+                request_id=request_id,
+            )
             # 同样保证助手消息落库：即使一个 token 都没产出，也把失败状态
             # 写进历史，避免刷新后“问题还在、回答消失”。
             error_text = "生成回答失败，请稍后重试"
@@ -363,7 +383,13 @@ async def stream_answer(
                 )
                 await asyncio.shield(save_task)
             except Exception as save_err:
-                logger.error(f"异常时保存助手消息失败: {save_err}", exc_info=True)
+                log_exception(
+                    logger,
+                    save_err,
+                    action="chat.stream.save_on_error",
+                    message="异常时保存助手消息失败",
+                    request_id=request_id,
+                )
             # 详细错误仅进日志（上方 logger.error 已带 exc_info），客户端只收通用文案 + request_id
             error_payload = {'type': 'error', 'error': '生成回答失败，请稍后重试', 'request_id': request_id}
             logger.debug(f"SSE error payload: {error_payload}")
@@ -418,13 +444,25 @@ async def stream_answer(
                         verify_holder.get("cross_source_data"),
                     ) or ""
                 except Exception as e:
-                    logger.warning(f"答案校验失败，跳过警告追加: {e}")
+                    log_exception(
+                        logger,
+                        e,
+                        action="chat.stream.verify",
+                        message="答案校验失败，跳过警告追加",
+                        request_id=request_id,
+                    )
             try:
                 needs = await save_assistant_message(
                     full_answer + suffix, sources, source_metadata, final_reasoning, thinking_text
                 )
             except Exception as e:
-                logger.error(f"保存助手消息失败: {str(e)}", exc_info=True)
+                log_exception(
+                    logger,
+                    e,
+                    action="chat.stream.save",
+                    message="保存助手消息失败",
+                    request_id=request_id,
+                )
                 needs = False
             return suffix, needs
 
@@ -447,7 +485,16 @@ async def stream_answer(
         # 校验完成：补发警告 content 事件（前端 end 后仍会追加显示）
         try:
             suffix, needs_title = await asyncio.shield(finalize_task)
-        except Exception:
+        except Exception as finalize_err:
+            # 落库/校验任务本身已在上游记录；此处只记录「等待期间」的异常，
+            # 避免此前完全静默导致真实缺陷无迹可寻
+            log_exception(
+                logger,
+                finalize_err,
+                action="chat.stream.finalize_join",
+                message="等待落库/校验任务时异常，跳过补发",
+                request_id=request_id,
+            )
             suffix, needs_title = "", False
         if suffix:
             logger.debug(f"SSE late verification suffix: {suffix!r}")
@@ -464,6 +511,12 @@ async def stream_answer(
                     logger.debug(f"SSE title payload: {title_payload}")
                     yield f"data: {json.dumps(title_payload)}\n\n"
             except Exception as title_err:
-                logger.warning(f"流式后台标题生成失败: {title_err}")
+                log_exception(
+                    logger,
+                    title_err,
+                    action="chat.stream.title",
+                    message="流式后台标题生成失败",
+                    session_id=current_session_id,
+                )
 
     return StreamingResponse(generate(), media_type="text/event-stream")

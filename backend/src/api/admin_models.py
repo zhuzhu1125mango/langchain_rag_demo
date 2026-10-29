@@ -7,7 +7,7 @@ GET 响应仅返回 ``has_api_key`` / ``api_key_hint``。
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -39,6 +39,7 @@ from src.services.model_config_service import (
 from src.services.model_health import provider_health
 from src.services.model_registry import ProviderConfig
 from src.services.model_usage import model_usage
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -88,12 +89,23 @@ class RouteUpsert(BaseModel):
     allow_external_fallback: bool = False
 
 
-def _http_error(exc: Exception) -> HTTPException:
+def _fail(exc: Exception, action: str) -> HTTPException:
+    """把服务层异常映射为 HTTP 响应，并对未预期异常做分级记录。
+
+    - 业务异常（NotFound / Conflict / 校验失败）→ 对应 4xx，原样透出业务文案；
+    - 未预期异常（DB 故障、编程错误）→ 记 error 日志（带 action 与堆栈）后返回 500。
+
+    此前一律映射为 400，会把「服务端故障」伪装成「客户端参数错误」，
+    既误导调用方，也让真正的问题在日志里无迹可寻（CODE-2）。
+    """
     if isinstance(exc, ModelConfigNotFound):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, ModelConfigConflict):
         return HTTPException(status_code=409, detail=str(exc))
-    return HTTPException(status_code=400, detail=str(exc))
+    if isinstance(exc, ModelConfigError):
+        return HTTPException(status_code=400, detail=str(exc))
+    log_exception(logger, exc, action=action, message="模型配置接口未预期异常")
+    return HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 async def _audit(action: str, resource_id: str, detail: Optional[dict], user: CurrentUser) -> None:
@@ -111,7 +123,7 @@ async def get_snapshot(db: AsyncSession = Depends(get_db)):
     try:
         return await registry_snapshot(db)
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.snapshot")
 
 
 @router.get("/usage")
@@ -123,7 +135,15 @@ async def get_model_usage(days: int = Query(7, ge=1, le=90), db: AsyncSession = 
     try:
         persisted = await query_usage_totals(db, days=days)
     except Exception as exc:
-        logger.warning("读取模型用量聚合失败，仅返回进程内增量: %s", exc)
+        # 聚合读取失败不影响本接口（回落到进程内增量），按分级记录：
+        # 数据库瞬时故障记 warning，编程错误会升级为 error 并附堆栈
+        log_exception(
+            logger,
+            exc,
+            action="admin_models.usage.aggregate",
+            message="读取模型用量聚合失败，仅返回进程内增量",
+            days=days,
+        )
     return {
         "usage": merge_usage_rows(persisted, model_usage.pending_snapshot()),
         "health": provider_health.snapshot(),
@@ -139,7 +159,8 @@ async def get_embedding_index_status(db: AsyncSession = Depends(get_db)):
     try:
         return await get_index_status(db)
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"读取索引状态失败: {exc}")
+        log_exception(logger, exc, action="admin_models.index.status", message="读取索引状态失败")
+        raise HTTPException(status_code=503, detail="读取索引状态失败，请稍后重试")
 
 
 @router.post("/index/rebuild")
@@ -197,7 +218,7 @@ async def list_providers(db: AsyncSession = Depends(get_db)):
         rows = (await db.execute(select(ModelProvider).order_by(ModelProvider.name))).scalars().all()
         return [await safe_provider(row) for row in rows]
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.providers.list")
 
 
 @router.post("/providers", status_code=status.HTTP_201_CREATED)
@@ -209,7 +230,7 @@ async def add_provider(
     try:
         row = await create_provider(db, payload.model_dump(exclude_unset=True))
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.providers.create")
     await _audit("model.provider.create", row.id, {"name": row.name, "type": row.provider_type}, current_user)
     return await safe_provider(row)
 
@@ -224,7 +245,7 @@ async def edit_provider(
     try:
         row = await update_provider(db, provider_id, payload.model_dump(exclude_unset=True))
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.providers.update")
     await _audit("model.provider.update", row.id, {"name": row.name}, current_user)
     return await safe_provider(row)
 
@@ -238,7 +259,7 @@ async def remove_provider(
     try:
         await delete_provider(db, provider_id)
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.providers.delete")
     await _audit("model.provider.delete", provider_id, {}, current_user)
 
 
@@ -259,7 +280,7 @@ async def test_provider_draft(payload: ProviderUpsert):
         )
         return await test_provider(provider)
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.providers.test_draft")
 
 
 @router.post("/providers/{provider_id}/test")
@@ -272,7 +293,7 @@ async def test_saved_provider(provider_id: str, db: AsyncSession = Depends(get_d
     try:
         return await test_provider(_provider_config(row))
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.providers.test_saved")
 
 
 @router.get("/providers/{provider_id}/models")
@@ -285,7 +306,7 @@ async def discover_models(provider_id: str, db: AsyncSession = Depends(get_db)):
     try:
         return await test_provider(_provider_config(row))
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.models.discover")
 
 
 @router.get("/deployments")
@@ -303,7 +324,7 @@ async def add_model(
     try:
         row = await create_model(db, payload.model_dump(exclude_unset=True))
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.models.create")
     await _audit("model.deployment.create", row.id, {"model": row.model_name}, current_user)
     return safe_model(row)
 
@@ -318,7 +339,7 @@ async def edit_model(
     try:
         row = await update_model(db, model_id, payload.model_dump(exclude_unset=True))
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.models.update")
     await _audit("model.deployment.update", row.id, {"model": row.model_name}, current_user)
     return safe_model(row)
 
@@ -332,7 +353,7 @@ async def remove_model(
     try:
         await delete_model(db, model_id)
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.models.delete")
     await _audit("model.deployment.delete", model_id, {}, current_user)
 
 
@@ -350,7 +371,7 @@ async def save_routes(
     try:
         await upsert_routes(db, [item.model_dump() for item in routes])
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.routes.save")
     await _audit("model.routes.update", "routes", {"tasks": [item.task for item in routes]}, current_user)
     return await registry_snapshot(db)
 
@@ -369,7 +390,7 @@ async def apply_registry(
     try:
         registry = await apply_registry_from_db(db)
     except Exception as exc:
-        raise _http_error(exc)
+        raise _fail(exc, "admin_models.registry.apply")
     await _audit("model.registry.apply", registry.source, {}, current_user)
     return {
         "source": registry.source,

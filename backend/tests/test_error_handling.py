@@ -145,3 +145,43 @@ class TestLogException:
         assert "doc_id=d-1" in text
         assert "kb_id" not in text
         assert text.startswith("action=document.delete")
+
+
+class TestFailMapping:
+    """CODE-2 边界映射：业务异常→4xx 且不打 error 日志；未预期→500 且记录。"""
+
+    def test_not_found_maps_404(self):
+        from src.api.admin_models import _fail
+        from src.services.model_config_service import ModelConfigNotFound
+
+        resp = _fail(ModelConfigNotFound("provider 不存在"), "admin_models.test")
+        assert resp.status_code == 404
+        assert "provider 不存在" in str(resp.detail)
+
+    def test_conflict_maps_409(self):
+        from src.api.admin_models import _fail
+        from src.services.model_config_service import ModelConfigConflict
+
+        assert _fail(ModelConfigConflict("已存在"), "admin_models.test").status_code == 409
+
+    def test_business_validation_maps_400(self):
+        from src.api.admin_models import _fail
+        from src.services.model_config_service import ModelConfigError
+
+        assert _fail(ModelConfigError("参数非法"), "admin_models.test").status_code == 400
+
+    def test_unexpected_maps_500_and_logs(self, caplog):
+        import logging as _logging
+
+        from src.api.admin_models import _fail
+
+        logger = _logging.getLogger("rag_system")
+        with caplog.at_level(_logging.DEBUG, logger="rag_system"):
+            resp = _fail(RuntimeError("db down"), "admin_models.registry.apply")
+
+        assert resp.status_code == 500
+        assert "db down" not in str(resp.detail), "对外文案不应泄漏内部异常"
+        record = caplog.records[-1]
+        assert record.levelno == _logging.ERROR
+        assert "action=admin_models.registry.apply" in record.getMessage()
+        assert "severity=reportable" in record.getMessage()
