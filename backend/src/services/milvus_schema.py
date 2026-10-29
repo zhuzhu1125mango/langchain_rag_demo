@@ -10,6 +10,7 @@ from src.config import settings
 
 logger = logging.getLogger("milvus_service")
 
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 class SchemaMixin:
     """集合生命周期中的 schema/索引部分，由 MilvusService 组合。"""
@@ -89,7 +90,10 @@ class SchemaMixin:
             logger.info("已为现有集合在线补加 heading_path 字段")
         except Exception as e:
             self._has_heading_path = False
-            logger.warning(f"在线补加 heading_path 字段失败，插入/查询将不携带该字段: {e}")
+            log_exception(
+                logger, e, action="milvus.schema.heading_path",
+                message="在线补加 heading_path 字段失败，插入/查询将不携带该字段",
+            )
 
     async def _add_source_kind_field_if_missing(self):
         """兼容旧集合：source_kind 字段缺失时在线补加（同 heading_path 路径）。
@@ -115,7 +119,10 @@ class SchemaMixin:
             logger.info("已为现有集合在线补加 source_kind 字段")
         except Exception as e:
             self._has_source_kind = False
-            logger.warning(f"在线补加 source_kind 字段失败，插入将不携带该字段: {e}")
+            log_exception(
+                logger, e, action="milvus.schema.source_kind",
+                message="在线补加 source_kind 字段失败，插入将不携带该字段",
+            )
 
     def _base_output_fields(self) -> list:
         """检索/查询的基础 output_fields，heading_path 视 schema 能力动态附加。"""
@@ -256,7 +263,12 @@ class SchemaMixin:
             # schema 兼容检查失败不能静默：无法确认字段存在性会使降级判断失效。
             # 此处不阻塞启动（保持 _sparse_enabled 不变），后续插入/检索路径
             # 对 sparse 字段缺失已有独立降级兜底。
-            logger.error(f"检查集合 sparse_embedding 字段时失败: {e}", exc_info=True)
+            # 启动期自检/索引创建失败需人关注：即使直接原因是连接故障也不降级为 warning
+            log_exception(
+                logger, e, action="milvus.schema.sparse_check",
+                message="检查集合 sparse_embedding 字段时失败",
+                severity=ErrorSeverity.REPORTABLE,
+            )
 
     async def _ensure_index(self):
         """确保 dense HNSW 索引存在；若不存在则创建。"""
@@ -279,7 +291,12 @@ class SchemaMixin:
                 )
         except Exception as e:
             # 索引创建失败会显著劣化检索性能，不能静默吞掉
-            logger.error(f"确保 dense HNSW 索引存在时失败: {e}", exc_info=True)
+            # 启动期自检/索引创建失败需人关注：即使直接原因是连接故障也不降级为 warning
+            log_exception(
+                logger, e, action="milvus.schema.index_dense",
+                message="确保 dense HNSW 索引存在时失败",
+                severity=ErrorSeverity.REPORTABLE,
+            )
 
     async def _ensure_sparse_index(self):
         """确保 sparse BM25 索引存在；若不存在则创建。"""
@@ -301,4 +318,9 @@ class SchemaMixin:
                     index_params=sparse_index_params
                 )
         except Exception as e:
-            logger.error(f"确保 sparse BM25 索引存在时失败: {e}", exc_info=True)
+            # 启动期自检/索引创建失败需人关注：即使直接原因是连接故障也不降级为 warning
+            log_exception(
+                logger, e, action="milvus.schema.index_sparse",
+                message="确保 sparse BM25 索引存在时失败",
+                severity=ErrorSeverity.REPORTABLE,
+            )

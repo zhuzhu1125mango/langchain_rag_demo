@@ -11,6 +11,7 @@ from src.config import settings
 
 logger = logging.getLogger("milvus_service")
 
+from src.utils.error_handling import log_exception
 
 class MigrationMixin:
     """Embedding 迁移相关的集合重建与切换，由 MilvusService 组合。"""
@@ -114,7 +115,10 @@ class MigrationMixin:
             raw = await asyncio.to_thread(self.bm25_ef.encode_documents, texts)
             return await asyncio.to_thread(self._convert_sparse_embeddings, raw)
         except Exception as exc:
-            logger.warning("重建集合时 BM25 编码失败，跳过 sparse: %s", exc)
+            log_exception(
+                logger, exc, action="milvus.rebuild.bm25_encode",
+                message="重建集合时 BM25 编码失败，跳过 sparse",
+            )
             return None
 
     async def swap_collection(self, shadow_collection: str) -> str:
@@ -125,12 +129,22 @@ class MigrationMixin:
         try:
             await self.client.rename_collection(shadow_collection, live)
             await self.client.load_collection(live)
-        except Exception:
+        except Exception as swap_exc:
+            # 交换失败是要人工关注的严重事件：先记录主失败（含堆栈），再尝试回滚
+            log_exception(
+                logger, swap_exc, action="milvus.swap",
+                message="集合交换失败，尝试回滚到备份集合",
+                backup=backup,
+            )
             try:
                 await self.client.rename_collection(backup, live)
                 await self.client.load_collection(live)
             except Exception as restore_exc:  # pragma: no cover - 极端故障路径
-                logger.error("索引交换失败且自动还原失败，需人工介入: %s", restore_exc)
+                log_exception(
+                    logger, restore_exc, action="milvus.swap.rollback",
+                    message="索引交换失败且自动还原失败，需人工介入",
+                    backup=backup,
+                )
             raise
         return backup
 

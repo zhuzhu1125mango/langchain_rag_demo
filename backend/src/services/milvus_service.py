@@ -38,6 +38,7 @@ from src.utils.async_singleton import AsyncSingleton
 
 logger = logging.getLogger("milvus_service")
 
+from src.utils.error_handling import log_exception
 
 class MilvusService(
     AsyncSingleton["MilvusService"],
@@ -71,6 +72,8 @@ class MilvusService(
             model = model_manager.registry.get_embedding_model().model
             return int(model.embedding_dimension or settings.model.EMBEDDING_DIMENSION)
         except Exception:
+            # registry 不可用时回落配置值：这是有意的兼容兜底，每次调用都会走到，
+            # 记录会淹没日志，故保持静默（registry 自身异常在其内部已有记录）
             return int(settings.model.EMBEDDING_DIMENSION)
 
     def _get_embeddings(self):
@@ -78,7 +81,7 @@ class MilvusService(
         try:
             key = model_manager.embedding_model_key
         except Exception:
-            key = ""
+            key = ""  # 同上：模型标识仅用于判断是否需刷新，缺失时按「未变化」处理
         if self.embeddings is None or (key and key != self._embeddings_key):
             self.embeddings = model_manager.get_embeddings()
             self._embeddings_key = key
@@ -109,7 +112,10 @@ class MilvusService(
             try:
                 await self.client.close()
             except Exception as e:
-                logger.warning(f"关闭 Milvus 客户端失败: {e}")
+                log_exception(
+                    logger, e, action="milvus.client.close",
+                    message="关闭 Milvus 客户端失败",
+                )
             finally:
                 self.client = None
                 self.embeddings = None

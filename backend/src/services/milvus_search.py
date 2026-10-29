@@ -14,6 +14,7 @@ from src.services.milvus_common import (
 
 logger = logging.getLogger("milvus_service")
 
+from src.utils.error_handling import log_exception
 
 class SearchMixin:
     """向量检索与过滤表达式构造，由 MilvusService 组合。"""
@@ -73,7 +74,10 @@ class SearchMixin:
             if not query_sparse:
                 return []
         except Exception as e:
-            logger.warning(f"BM25 查询编码失败: {e}")
+            log_exception(
+                logger, e, action="milvus.search.bm25_encode",
+                message="BM25 查询编码失败，混合检索降级为纯向量",
+            )
             return []
 
         search_params = {
@@ -94,7 +98,10 @@ class SearchMixin:
             )
             return self._parse_search_results(results)
         except Exception as e:
-            logger.warning(f"Sparse 检索失败: {e}")
+            log_exception(
+                logger, e, action="milvus.search.sparse",
+                message="Sparse 检索失败，返回空结果",
+            )
             return []
 
     async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):

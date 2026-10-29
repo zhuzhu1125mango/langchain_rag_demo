@@ -174,7 +174,11 @@ class WriteMixin:
                 os.remove(path)
                 logger.info(f"集合新建，已重置持久化 BM25 词表: {path}")
         except Exception as e:
-            logger.warning(f"重置 BM25 词表文件失败: {e}")
+            log_exception(
+                logger, e, action="milvus.bm25_vocab.remove",
+                message="重置 BM25 词表文件失败",
+                path=path,
+            )
 
     @staticmethod
     def _convert_sparse_embeddings(sparse_matrix):

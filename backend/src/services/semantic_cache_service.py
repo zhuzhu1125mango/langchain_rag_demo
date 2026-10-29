@@ -36,6 +36,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+from src.utils.error_handling import log_exception
 # 缓存 key 前缀：rag:semcache:{user_id}:{kb_scope}
 KEY_PREFIX = "rag:semcache"
 # SEC-11：kb_id → scope keys 反向索引（Redis Set），避免失效时全库 SCAN
@@ -135,7 +136,11 @@ class SemanticCacheService:
 
                 self._embeddings = model_manager.get_embeddings()
             except Exception as e:
-                logger.warning(f"语义缓存 Embedding 模型初始化失败: {e}")
+                # 缓存不可用不影响主链路（fail-open）：瞬时故障记 warning，编程错误升级为 error
+                log_exception(
+                    logger, e, action="semantic_cache.embeddings_init",
+                    message="语义缓存 Embedding 模型初始化失败",
+                )
                 self._embeddings = None
         return self._embeddings
 
@@ -150,7 +155,10 @@ class SemanticCacheService:
                 embeddings.aembed_query(question), timeout=EMBEDDING_TIMEOUT_SECONDS
             )
         except Exception as e:
-            logger.warning(f"语义缓存问题 embedding 计算失败: {e}")
+            log_exception(
+                logger, e, action="semantic_cache.embed_question",
+                message="语义缓存问题 embedding 计算失败",
+            )
             return None
 
     # ------------------------------------------------------------------
@@ -272,7 +280,10 @@ class SemanticCacheService:
             self._record_hit(start, "semantic")
             return self._to_hit(best[1], best[2], "semantic"), query_embedding
         except Exception as exc:
-            logger.warning(f"语义缓存查找失败（fail-open）: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.lookup",
+                message="语义缓存查找失败（fail-open）",
+            )
             return None, None
 
     async def lookup_exact(
@@ -310,7 +321,10 @@ class SemanticCacheService:
             self._record_hit(start, "exact")
             return self._to_hit(entry, 1.0, "exact")
         except Exception as exc:
-            logger.warning(f"语义缓存精确查找失败（fail-open）: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.lookup_exact",
+                message="语义缓存精确查找失败（fail-open）",
+            )
             return None
 
     def _to_hit(self, entry: Dict[str, Any], score: float, match_type: str) -> SemanticCacheHit:
@@ -385,7 +399,11 @@ class SemanticCacheService:
                 record_semantic_cache_store("success")
             return True
         except Exception as exc:
-            logger.warning(f"语义缓存写入失败（fail-open）: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.store",
+                message="语义缓存写入失败（fail-open）",
+                kb_ids=kb_ids,
+            )
             if _METRICS_AVAILABLE:
                 record_semantic_cache_store("failed")
             return False
@@ -432,7 +450,10 @@ class SemanticCacheService:
                 await self._execute(cache, cache.client.sadd(INDEX_ALL, scope_key))
                 await self._execute(cache, cache.client.expire(INDEX_ALL, ttl))
         except Exception as exc:
-            logger.warning(f"语义缓存索引写入失败（fail-open）: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.index_scope",
+                message="语义缓存索引写入失败（fail-open）",
+            )
 
     async def _candidate_scopes(self, cache, kb_id: str) -> List[str]:
         scopes: set[str] = set()
@@ -440,7 +461,13 @@ class SemanticCacheService:
             try:
                 members = await self._execute(cache, cache.client.smembers(index_key))
                 scopes.update(members or [])
-            except Exception:
+            except Exception as exc:
+                # 单个索引读失败不影响其它 scope 的候选聚合
+                log_exception(
+                    logger, exc, action="semantic_cache.candidate_scopes",
+                    message="读取缓存 scope 索引失败，跳过该索引",
+                    index_key=index_key,
+                )
                 continue
         return sorted(scopes)
 
@@ -486,7 +513,10 @@ class SemanticCacheService:
                 logger.info(f"语义缓存失效 [kb_id={kb_id}]: 删除 {deleted} 条")
             return deleted
         except Exception as exc:
-            logger.warning(f"语义缓存失效失败 [kb_id={kb_id}]（fail-open）: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.invalidate_kb",
+                message="语义缓存失效失败（fail-open）", kb_id=kb_id,
+            )
             return 0
 
 
@@ -513,7 +543,10 @@ class SemanticCacheService:
                 logger.info("语义缓存全量失效: 删除 %d 个 scope", deleted)
             return deleted
         except Exception as exc:
-            logger.warning(f"语义缓存全量失效失败（fail-open）: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.invalidate_all",
+                message="语义缓存全量失效失败（fail-open）",
+            )
             return 0
 
 
@@ -530,7 +563,10 @@ def schedule_invalidation(kb_id: str) -> None:
         try:
             await SemanticCacheService().invalidate_kb(kb_id)
         except Exception as exc:
-            logger.warning(f"语义缓存失效失败 [kb_id={kb_id}]: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.invalidate_async",
+                message="后台语义缓存失效失败", kb_id=kb_id,
+            )
 
     task = asyncio.create_task(_invalidate())
     _invalidation_tasks.add(task)
@@ -543,7 +579,10 @@ def schedule_global_invalidation() -> None:
         try:
             await SemanticCacheService().invalidate_all()
         except Exception as exc:
-            logger.warning(f"语义缓存全量失效失败: {exc}")
+            log_exception(
+                logger, exc, action="semantic_cache.invalidate_all_async",
+                message="后台语义缓存全量失效失败",
+            )
 
     task = asyncio.create_task(_invalidate())
     _invalidation_tasks.add(task)
