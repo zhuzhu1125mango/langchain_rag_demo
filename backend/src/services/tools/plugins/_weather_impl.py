@@ -14,6 +14,8 @@ import httpx
 import jieba.posseg as pseg
 import logging
 
+from src.utils.error_handling import log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -161,7 +163,15 @@ async def _geocode_city(city: str) -> Optional[Dict[str, Any]]:
             return None
         return results[0]
     except Exception as e:
-        logger.warning(f"Open-Meteo 地理编码失败 [{city}]: {e}")
+        # 返回 None 后调用方会告诉用户「未找到城市」：网络/限流故障被说成「你拼错了地名」，
+        # 这条日志是唯一能区分两者的地方
+        log_exception(
+            logger,
+            e,
+            action="weather.geocode",
+            message="Open-Meteo 地理编码失败，按未找到城市处理",
+            city=city,
+        )
         return None
 
 
@@ -226,7 +236,14 @@ async def get_weather_by_city(city: str) -> Optional[Dict[str, Any]]:
             "fetched_at": datetime.now().isoformat(),
         }
     except Exception as e:
-        logger.warning(f"Open-Meteo 天气查询失败 [{city}]: {e}")
+        # 同理：失败返回 None，工具层只会说「天气查询失败」，具体是超时还是解析错误在这里
+        log_exception(
+            logger,
+            e,
+            action="weather.query",
+            message="Open-Meteo 天气查询失败，返回空结果",
+            city=city,
+        )
         return None
 
 

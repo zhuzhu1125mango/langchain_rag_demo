@@ -3,10 +3,14 @@
 集成 Open-Meteo 免费天气 API，提供比网页搜索更可靠、实时的天气数据。
 """
 
+import logging
 from typing import Any, Optional
 
 from src.services.tools.tool_manager import BaseTool, ToolResult
 from src.services.tools.plugins import _weather_impl as weather_tool_module
+from src.utils.error_handling import log_exception
+
+logger = logging.getLogger("rag_system")
 
 
 class WeatherTool(BaseTool):
@@ -53,6 +57,15 @@ class WeatherTool(BaseTool):
         try:
             data = await weather_tool_module.get_weather_by_city(city)
         except Exception as e:
+            # 实现层已把异常吞成 None，能走到这里说明是未预期的失败（如格式化前的结构变了）；
+            # 错误文案会进 LLM 的上下文，日志则是给运维看的那一份
+            log_exception(
+                logger,
+                e,
+                action="tool.weather.execute",
+                message="天气工具执行异常，返回失败结果给模型",
+                city=city,
+            )
             return ToolResult(
                 tool_name=self.name,
                 input_arguments=kwargs,

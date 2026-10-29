@@ -884,3 +884,105 @@ class TestDocumentAndEvalGrading:
         assert hits and hits[0].levelno == logging.ERROR
         assert "severity=reportable" in hits[0].getMessage()
         assert "docs=1" in hits[0].getMessage()
+
+
+class TestStrategyAndToolGrading:
+    """路由策略与外部工具：弃权/降级都有语义，日志要能区分「模型说 NO」与「模型挂了」。"""
+
+    def test_semantic_strategy_init_failure_is_visible(self, caplog, monkeypatch):
+        """示例向量算不出来 → 该策略从此永久弃权，等同语义路由失效。"""
+        from src.services import strategies
+        from src.services.strategies import semantic as semantic_mod
+
+        def _broken_get_embeddings():
+            raise ConnectionError("embedding service down")
+
+        monkeypatch.setattr(semantic_mod.model_manager, "get_embeddings", _broken_get_embeddings)
+
+        strategy = strategies.semantic.SemanticStrategy()
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            asyncio.run(strategy.initialize())
+
+        assert strategy._greeting_embeddings is None
+        assert strategy._knowledge_embeddings is None
+        hits = [r for r in caplog.records if "action=strategy.semantic.init" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        text = hits[0].getMessage()
+        assert "severity=recoverable" in text
+        assert "examples=" in text
+
+    def test_llm_strategy_timeout_counts_as_abstention(self, caplog):
+        """调用失败时置信度 0.3 会低于弃权阈值：不是「判定不需要知识库」，日志要说清。"""
+        from src.services.strategies.llm_inference import LLMInferenceStrategy
+
+        class _BrokenLLM:
+            async def ainvoke(self, prompt):
+                raise TimeoutError("fast model timeout")
+
+        strategy = LLMInferenceStrategy()
+        strategy.llm = _BrokenLLM()
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            decision = asyncio.run(strategy.should_use_knowledge_base("季度营收目标是多少"))
+
+        assert decision is False
+        assert strategy.get_confidence() == 0.3
+        hits = [r for r in caplog.records if "action=strategy.llm_inference.decide" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "弃权" in hits[0].getMessage()
+
+    def test_llm_strategy_init_failure_is_visible(self, caplog, monkeypatch):
+        """拿不到模型时策略整场弃权，要能对上「重启后路由变少一票」。"""
+        from src.services.strategies import llm_inference as li_mod
+
+        async def _broken_get_chat_llm(*args, **kwargs):
+            raise RuntimeError("registry 未配置 fast 模型")
+
+        monkeypatch.setattr(li_mod.model_manager, "get_chat_llm", _broken_get_chat_llm)
+
+        strategy = li_mod.LLMInferenceStrategy()
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            asyncio.run(strategy.initialize())
+
+        assert strategy.llm is None
+        hits = [r for r in caplog.records if "action=strategy.llm_inference.init" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR, "配置类错误应判为需上报"
+
+    def test_weather_geocode_failure_is_distinguishable(self, caplog, monkeypatch):
+        """地理编码失败会被上层说成「未找到城市」，只有这条日志能区分网络故障与地名拼错。"""
+        from src.services.tools.plugins import _weather_impl as impl
+
+        def _broken_client():
+            raise ConnectionError("open-meteo unreachable")
+
+        monkeypatch.setattr(impl, "_get_http_client", _broken_client)
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(impl._geocode_city("吕梁"))
+
+        assert result is None
+        hits = [r for r in caplog.records if "action=weather.geocode" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "city=吕梁" in hits[0].getMessage()
+
+    def test_singleton_cleanup_failure_names_the_class(self, caplog):
+        """清理失败仍强制重置，代价是旧连接可能残留：必须能指出是哪个单例。"""
+        from src.utils.async_singleton import AsyncSingleton
+
+        class _LeakySingleton(AsyncSingleton["_LeakySingleton"]):
+            async def _async_init(self):
+                return None
+
+            async def _async_cleanup(self):
+                raise ConnectionResetError("close failed")
+
+        async def _scenario():
+            await _LeakySingleton.get_instance()
+            with caplog.at_level(logging.WARNING, logger="src.utils.async_singleton"):
+                await _LeakySingleton.reset_instance()
+
+        asyncio.run(_scenario())
+
+        hits = [r for r in caplog.records if "action=singleton.cleanup" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "singleton=_LeakySingleton" in hits[0].getMessage()

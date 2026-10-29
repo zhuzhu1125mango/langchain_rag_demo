@@ -10,6 +10,8 @@ import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Generic, Optional, TypeVar
 
+from src.utils.error_handling import log_exception
+
 T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
@@ -77,6 +79,8 @@ class AsyncSingleton(Generic[T]):
             except Exception:
                 # B5：初始化失败时从缓存中剔除半成品实例并重置状态，
                 # 下次 get_instance 会重建，避免复用未初始化/泄漏连接的实例。
+                # 此处**不记录**：异常原样上抛，调用方会带着请求上下文记录一次；
+                # 在这里再记会重复，且拿不到 doc_id / user 之类的定位信息。
                 cls._instances.pop(cls, None)
                 cls._initialized[cls] = False
                 raise
@@ -104,7 +108,15 @@ class AsyncSingleton(Generic[T]):
                     if asyncio.iscoroutinefunction(cleanup):
                         await cleanup()
             except Exception as e:
-                logger.warning(f"{cls.__name__} 单例清理失败: {e}", exc_info=True)
+                # 清理失败仍会重置实例（否则卡住无法重连），代价是旧连接可能泄漏；
+                # 记上具体类名，否则「重启后端口占用/连接数涨」查不到是谁没关干净
+                log_exception(
+                    logger,
+                    e,
+                    action="singleton.cleanup",
+                    message="单例清理失败，仍强制重置（可能残留连接）",
+                    singleton=cls.__name__,
+                )
             finally:
                 del cls._instances[cls]
                 cls._initialized[cls] = False

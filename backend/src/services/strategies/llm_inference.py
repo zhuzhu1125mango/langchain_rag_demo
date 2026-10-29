@@ -1,8 +1,12 @@
 import asyncio
+import logging
 from typing import List, Dict, Optional
 from src.config import settings
 from src.services.model_manager import model_manager
+from src.utils.error_handling import log_exception
 from .base import Strategy
+
+logger = logging.getLogger("rag_system")
 
 
 class LLMInferenceStrategy(Strategy):
@@ -36,7 +40,15 @@ class LLMInferenceStrategy(Strategy):
         try:
             # B1 工厂：fast 模型 + think=False（YES/NO 结构化小任务无需思考链）
             self.llm = await model_manager.get_chat_llm("fast", think=False)
-        except Exception:
+        except Exception as e:
+            # 模型拿不到 → 后续每次判断都按弃权（置信度 0.3），决策链少一票；
+            # 不记日志时表现为「路由策略数量莫名变少」，无法与重启时机对上
+            log_exception(
+                logger,
+                e,
+                action="strategy.llm_inference.init",
+                message="LLM 推理策略初始化失败，本策略将弃权",
+            )
             self.llm = None
     
     def _is_system_question(self, question: str) -> bool:
@@ -94,7 +106,16 @@ class LLMInferenceStrategy(Strategy):
             else:
                 self.confidence = 0.4
                 return True
-        except Exception:
+        except Exception as e:
+            # 置信度 0.3 低于弃权阈值 → 本策略不参与投票（并非「判定不需要知识库」），
+            # 但要能看出是模型超时/报错导致的弃权，而不是模型真的回答了 NO
+            log_exception(
+                logger,
+                e,
+                action="strategy.llm_inference.decide",
+                message="LLM 推理策略判断失败，本策略按弃权处理",
+                question_len=len(question or ""),
+            )
             self.confidence = 0.3
             return False
 

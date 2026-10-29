@@ -1,8 +1,12 @@
+import logging
 import math
 from typing import List, Dict, Optional
 from .base import Strategy
 from .constants import GREETING_KEYWORDS
 from src.services.model_manager import model_manager
+from src.utils.error_handling import log_exception
+
+logger = logging.getLogger("rag_system")
 
 
 class SemanticStrategy(Strategy):
@@ -44,7 +48,16 @@ class SemanticStrategy(Strategy):
             embeddings = model_manager.get_embeddings()
             self._greeting_embeddings = await embeddings.aembed_documents(self.greeting_examples)
             self._knowledge_embeddings = await embeddings.aembed_documents(self.knowledge_examples)
-        except Exception:
+        except Exception as e:
+            # 失败后本策略永久按弃权处理（置信度 0.3）：表面上只是「少了一个策略投票」，
+            # 实际是语义路由从此失效，不记日志就只能看到「闲聊也开始检索」这种现象
+            log_exception(
+                logger,
+                e,
+                action="strategy.semantic.init",
+                message="语义策略示例向量预计算失败，本策略将弃权",
+                examples=len(self.greeting_examples) + len(self.knowledge_examples),
+            )
             self._greeting_embeddings = None
             self._knowledge_embeddings = None
 
@@ -108,6 +121,13 @@ class SemanticStrategy(Strategy):
                 embeddings = model_manager.get_embeddings()
                 self._greeting_embeddings = await embeddings.aembed_documents(self.greeting_examples)
                 self._knowledge_embeddings = await embeddings.aembed_documents(self.knowledge_examples)
-            except Exception:
+            except Exception as e:
+                # 增量学习后重算失败：新示例没进向量、旧向量也丢了，策略回落到弃权
+                log_exception(
+                    logger,
+                    e,
+                    action="strategy.semantic.reload_examples",
+                    message="语义策略示例向量重算失败，本策略将弃权",
+                )
                 self._greeting_embeddings = None
                 self._knowledge_embeddings = None

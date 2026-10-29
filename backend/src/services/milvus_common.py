@@ -30,5 +30,7 @@ def _ab_rerank_top_k() -> int:
         if override is not None:
             return int(override)
     except Exception:
+        # 预期控制流：无 A/B 上下文 / 覆盖值不是数字时回落默认值，
+        # 结果与「没有实验」等价，不需要在检索热路径上记日志
         pass
     return settings.processing.KB_HYBRID_RERANK_TOP_K
