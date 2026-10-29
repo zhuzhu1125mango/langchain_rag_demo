@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import List
 
 from src.services.wiki_compiler import _WIKI_LINK_RE, normalize_title
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("wiki_lint")
 
@@ -95,7 +96,16 @@ async def lint_kb_wiki(db, kb_id: str) -> LintReport:
         try:
             contents[str(row.id)] = await minio.download_text_async(row.content_path) or ""
         except Exception as e:
-            logger.warning(f"Wiki 体检读正文失败 page={row.id}: {e}")
+            # 读不到正文按空串参与体检 → 该页会被报成「体量过短/空源页」，产生假阳性；
+            # 必须能区分「真的没写内容」与「MinIO 读失败」
+            log_exception(
+                logger,
+                e,
+                action="wiki.lint.read_page",
+                message="Wiki 体检读正文失败，按空页参与检查（可能产生假阳性）",
+                page_id=str(row.id),
+                title=row.title,
+            )
             contents[str(row.id)] = ""
 
     # index 页目录收录的标题（正文 [[Title]] 链接即目录条目）

@@ -11,6 +11,7 @@ from typing import List
 
 from src.config import settings
 from src.services.wiki_compiler import normalize_title
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("wiki_link_expansion")
 
@@ -107,5 +108,12 @@ async def expand_wiki_links(docs: List) -> List:
             logger.info(f"Wiki 链接扩展: 追加 {len(expanded)} 块（来源页 {len(wiki_doc_ids)} 个）")
             return list(docs) + expanded[:MAX_EXPANDED_CHUNKS]
     except Exception as e:
-        logger.warning(f"Wiki 链接扩展失败，返回原结果: {e}")
+        # 扩展失败退回原结果，用户无感；但「开了开关却一直没扩展」只能靠这条日志发现
+        log_exception(
+            logger,
+            e,
+            action="wiki.link_expansion",
+            message="Wiki 链接扩展失败，返回原检索结果",
+            docs=len(docs or []),
+        )
         return docs

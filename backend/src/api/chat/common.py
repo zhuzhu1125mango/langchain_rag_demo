@@ -9,8 +9,13 @@ from src.config import settings
 from src.auth import get_current_user, CurrentUser
 from src.services.experiment_manager import experiment_manager
 from src.utils.quota import QuotaUnavailable, acquire_chat_slot, release_chat_slot
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("src.api.chat")
+
+# 指标写入在每个响应上都会执行：实验服务长时间不可用时会每请求一条，
+# 只记前几次与每 100 次，既不丢信号也不刷屏
+_ab_metric_failures = 0
 
 router = APIRouter(tags=["chat"])
 
@@ -85,7 +90,14 @@ async def _resolve_ab_config(user_id: str, session_id: Optional[str]) -> Optiona
             experiment_id=experiment_id, user_id=user_id, session_id=session_id
         )
     except Exception as e:
-        logger.warning(f"A/B 分流失败，跳过本次分流: {e}")
+        # 跳过分流本身无害（退回默认配置），但「实验组流量一直为 0」只能从这里解释
+        log_exception(
+            logger,
+            e,
+            action="ab.allocate",
+            message="A/B 分流失败，本次按默认配置处理",
+            experiment_id=experiment_id,
+        )
         return None
     if not allocation:
         return None
@@ -112,7 +124,17 @@ async def _record_ab_metric(ab_config: Optional[dict], elapsed_ms: float) -> Non
             metric_value=elapsed_ms,
         )
     except Exception as e:
-        logger.warning(f"记录 A/B 指标失败: {e}")
+        global _ab_metric_failures
+        _ab_metric_failures += 1
+        if _ab_metric_failures <= 3 or _ab_metric_failures % 100 == 0:
+            log_exception(
+                logger,
+                e,
+                action="ab.record_metric",
+                message="记录 A/B 指标失败，该请求指标丢失",
+                failures=_ab_metric_failures,
+                experiment_id=experiment_id,
+            )
 
 class ApprovalResolveRequest(BaseModel):
     """HITL 审批回执（AM-2）。"""

@@ -23,6 +23,7 @@ from src.auth import CurrentUser, get_current_user, require_owner
 from src.database import get_db
 from src.models import KnowledgeBase
 from src.models.wiki_page import WikiPage
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("wiki_api")
 
@@ -117,7 +118,15 @@ async def _run_wiki_rebuild(kb_id: str, task_id: str) -> None:
             update_upload_progress(task_id, status="completed", message=message)
             await notify_task_completed(task_id, {"kb_id": kb_id, "status": "wiki_rebuilt", **stats})
         except Exception as e:
-            logger.error(f"Wiki 全量重编译失败: kb={kb_id}: {e}", exc_info=True)
+            # 任务是后台跑的：用户只在进度条上看到「失败」两个字，原因只有这里能留
+            log_exception(
+                logger,
+                e,
+                action="wiki.rebuild_background",
+                message="Wiki 全量重编译失败（后台任务）",
+                kb_id=kb_id,
+                task_id=task_id,
+            )
             update_upload_progress(task_id, status="failed", message="Wiki 全量重编译失败")
             await notify_task_failed(task_id, "Wiki 全量重编译失败")
 
@@ -180,7 +189,15 @@ async def get_wiki_page_content(
         minio = await MinioService.get_instance()
         content = await minio.download_text_async(row.content_path) or ""
     except Exception as e:
-        logger.warning(f"Wiki 页正文读取失败: page={row.id}: {e}")
+        # 接口仍返回 200 + 空正文：用户看到的是「这页是空的」，必须能反查是存储读数失败
+        log_exception(
+            logger,
+            e,
+            action="wiki.page_content",
+            message="Wiki 页正文读取失败，返回空正文",
+            page_id=str(row.id),
+            kb_id=kb_id,
+        )
     return WikiPageContentResponse(
         id=row.id, title=row.title, page_type=row.page_type, content=content
     )

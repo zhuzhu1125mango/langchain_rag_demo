@@ -22,6 +22,7 @@ from src.services.intent_router.models import (
     PrimaryMode,
     SearchPipeline,
 )
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("intent_router.llm")
 
@@ -108,7 +109,15 @@ class LLMRouter:
                 )
                 self._model_name = generation
             except Exception as e:
-                logger.warning(f"意图路由 LLM 初始化失败: {e}")
+                # 拿不到模型时整层回落到规则/embedding 路由：意图口径变了但不报错，
+                # 只能靠这条日志对上「同一句话路由结果为何变了」
+                log_exception(
+                    logger,
+                    e,
+                    action="intent_router.llm.init",
+                    message="意图路由 LLM 初始化失败，本次回落到非 LLM 路由",
+                    generation=generation,
+                )
                 self._llm = None
         return self._llm
 
@@ -238,9 +247,24 @@ class LLMRouter:
             if not decision.context_rewrite:
                 decision.context_rewrite = resolved_question
             return decision
-        except asyncio.TimeoutError:
-            logger.warning("意图路由 LLM 调用超时")
-            raise RuntimeError("LLM 路由超时")
+        except asyncio.TimeoutError as e:
+            # 包成 RuntimeError 是为了让上层走统一兜底，但原始类型就此丢失，
+            # 在这里先按超时（可恢复）记一次
+            log_exception(
+                logger,
+                e,
+                action="intent_router.llm.timeout",
+                message="意图路由 LLM 调用超时",
+                timeout=settings.intent_router.INTENT_ROUTER_LLM_TIMEOUT,
+            )
+            raise RuntimeError("LLM 路由超时") from e
         except Exception as e:
-            logger.warning(f"意图路由 LLM 调用失败: {e}")
-            raise RuntimeError(f"LLM 路由失败: {e}")
+            # 解析失败也走这里（模型返回非法 JSON），所以按原始异常性质分级比一律 warning 准确
+            log_exception(
+                logger,
+                e,
+                action="intent_router.llm.infer",
+                message="意图路由 LLM 调用失败，交由上层兜底",
+                question_len=len(resolved_question or ""),
+            )
+            raise RuntimeError(f"LLM 路由失败: {e}") from e

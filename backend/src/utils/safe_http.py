@@ -126,6 +126,8 @@ class PinnedHTTPTransport(httpx.AsyncBaseTransport):
         except UnsafeUrlError:
             raise
         except Exception as exc:
+            # 不在此处记录：包装后继续上抛，由调用方带请求上下文记录一次；
+            # 这里只负责把底层异常统一成 httpx.TransportError（保留 cause）
             raise httpx.TransportError(str(exc)) from exc
 
         return httpx.Response(

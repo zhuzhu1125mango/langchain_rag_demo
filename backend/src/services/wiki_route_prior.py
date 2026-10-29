@@ -15,6 +15,7 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 from src.config import settings
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("wiki_route_prior")
 
@@ -54,7 +55,14 @@ class WikiRoutePrior:
             async with async_session_maker() as db:
                 return await self.compute_priors(db, question, kb_ids)
         except Exception as e:
-            logger.warning(f"Wiki 覆盖先验计算失败，回退纯 chunk 分: {e}")
+            # 返回 {} 即「不做融合」：检索结果悄悄退回纯 chunk 分，排序变化无人知晓
+            log_exception(
+                logger,
+                e,
+                action="wiki.route_prior.compute",
+                message="Wiki 覆盖先验计算失败，回退纯 chunk 分",
+                kb_scope=len(kb_ids or []),
+            )
             return {}
 
     async def compute_priors(self, db, question: str, kb_ids: List[str]) -> Dict[str, float]:

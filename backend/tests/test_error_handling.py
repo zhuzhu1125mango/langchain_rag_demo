@@ -986,3 +986,98 @@ class TestStrategyAndToolGrading:
         hits = [r for r in caplog.records if "action=singleton.cleanup" in r.getMessage()]
         assert hits and hits[0].levelno == logging.WARNING
         assert "singleton=_LeakySingleton" in hits[0].getMessage()
+
+
+class TestWikiGraphAndABGrading:
+    """Wiki 侧链路、知识图谱与 A/B 埋点：降级往往「看起来正常」，日志要能反查。"""
+
+    def test_route_prior_failure_falls_back_visibly(self, caplog, monkeypatch):
+        """先验算不出来 → 检索悄悄退回纯 chunk 分，排序变化无人知晓。"""
+        from src import database as db_mod
+        from src.services import wiki_route_prior as wrp
+
+        def _broken_maker():
+            raise ConnectionError("db down")
+
+        monkeypatch.setattr(db_mod, "async_session_maker", _broken_maker)
+
+        with caplog.at_level(logging.WARNING, logger="wiki_route_prior"):
+            result = asyncio.run(wrp.WikiRoutePrior().get_priors("报销流程", ["kb-1", "kb-2"]))
+
+        assert result == {}
+        hits = [r for r in caplog.records if "action=wiki.route_prior.compute" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "kb_scope=2" in hits[0].getMessage()
+
+    def test_graph_generate_failure_is_logged_with_scope(self, caplog):
+        """空图 + 「生成失败」文案用户可见，失败原因只在服务端日志里。"""
+        from src.services.knowledge_graph_generator import KnowledgeGraphGenerator
+
+        class _BrokenChain:
+            def _has_vector_store(self):
+                return True
+
+            async def _retrieve_documents(self, *args, **kwargs):
+                raise ConnectionError("milvus down")
+
+        generator = KnowledgeGraphGenerator(llm=None, rag_chain=_BrokenChain())
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(generator.generate_knowledge_graph(kb_ids=["kb-1"]))
+
+        assert result["nodes"] == [] and result["edges"] == []
+        assert "生成失败" in result["summary"]
+        hits = [r for r in caplog.records if "action=graph.generate" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "kb_scope=1" in hits[0].getMessage()
+
+    def test_intent_router_timeout_keeps_original_type(self, caplog, monkeypatch):
+        """包成 RuntimeError 交给上层兜底，但超时（可恢复）与解析失败要能分开统计。"""
+        from src.services.intent_router.llm_router import LLMRouter
+
+        class _BrokenLLM:
+            def invoke(self, prompt):
+                raise TimeoutError("router model timeout")
+
+        class _FakeCtx:
+            resolved_question = "季度营收目标是多少"
+            compressed_history = "无"
+
+        class _FakeBuilder:
+            def build(self, question, history=None):
+                return _FakeCtx()
+
+        async def _stub_get_llm():
+            return _BrokenLLM()
+
+        router = LLMRouter()
+        monkeypatch.setattr(router, "_get_llm", _stub_get_llm)
+        monkeypatch.setattr(router, "_get_context_builder", lambda: _FakeBuilder())
+
+        with caplog.at_level(logging.WARNING, logger="intent_router.llm"):
+            with pytest.raises(RuntimeError):
+                asyncio.run(router.route("季度营收目标是多少"))
+
+        hits = [r for r in caplog.records if "action=intent_router.llm.timeout" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "severity=recoverable" in hits[0].getMessage()
+
+    def test_ab_metric_failures_are_throttled(self, caplog, monkeypatch):
+        """该埋点每个响应都会写：实验服务挂了也不能变成每请求一条日志。"""
+        from src.api.chat import common as chat_common
+
+        class _BrokenExperiment:
+            async def record_metric_for_chat(self, **kwargs):
+                raise ConnectionError("experiment db down")
+
+        monkeypatch.setattr(chat_common, "experiment_manager", _BrokenExperiment())
+        monkeypatch.setattr(chat_common, "_ab_metric_failures", 0)
+
+        cfg = {"experiment_id": "exp-1", "variant_id": "v-a"}
+        with caplog.at_level(logging.WARNING, logger="src.api.chat"):
+            for _ in range(5):
+                asyncio.run(chat_common._record_ab_metric(cfg, 123.0))
+
+        hits = [r for r in caplog.records if "action=ab.record_metric" in r.getMessage()]
+        assert len(hits) == 3, "前 3 次记录，之后每 100 次一条"
+        assert "failures=1" in hits[0].getMessage()
+        assert "experiment_id=exp-1" in hits[0].getMessage()

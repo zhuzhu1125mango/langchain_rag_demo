@@ -6,6 +6,8 @@
 import asyncio
 import logging
 
+from src.utils.error_handling import log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -90,6 +92,8 @@ class KnowledgeGraphGenerator:
             self.rag_chain._init_similarity_model()
             if self.rag_chain.sentence_transformer is not None:
                 doc_list = list(doc_nodes.values())
+                # 两两比较，失败按条记录会随文档数平方增长：只记前 3 条，后续只计数
+                pair_failures = 0
                 for i in range(len(doc_list)):
                     for j in range(i + 1, len(doc_list)):
                         doc1 = documents[i]
@@ -109,8 +113,20 @@ class KnowledgeGraphGenerator:
                                     "label": f"相似({similarity:.2f})",
                                     "weight": similarity
                                 })
-                        except Exception:
-                            # 单对相似度计算失败仅跳过该边（嵌入模型偶发异常），不中断整图构建
+                        except Exception as e:
+                            # 单对相似度计算失败仅跳过该边（嵌入模型偶发异常），不中断整图构建；
+                            # 但静默跳过等于「这几篇文档没有关系」，图谱会莫名为空
+                            pair_failures += 1
+                            if pair_failures <= 3:
+                                log_exception(
+                                    logger,
+                                    e,
+                                    action="graph.pair_similarity",
+                                    message="文档对相似度计算失败，跳过该边",
+                                    failures=pair_failures,
+                                    left=doc_list[i].get('id'),
+                                    right=doc_list[j].get('id'),
+                                )
                             continue
 
             return {
@@ -119,5 +135,13 @@ class KnowledgeGraphGenerator:
                 "summary": f"共{len(nodes)}个节点，{len(edges)}条关系"
             }
         except Exception as e:
-            logger.error(f"生成知识图谱失败: {str(e)}", exc_info=True)
+            # 返回值里的 summary 会直接显示给用户（「生成失败: ...」），
+            # 但用户看不到的是失败了哪一步、哪个 KB，所以仍要留结构化日志
+            log_exception(
+                logger,
+                e,
+                action="graph.generate",
+                message="生成知识图谱失败，返回空图",
+                kb_scope=len(kb_ids or []),
+            )
             return {"nodes": [], "edges": [], "summary": f"生成失败: {str(e)}"}
