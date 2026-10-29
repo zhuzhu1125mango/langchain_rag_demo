@@ -16,6 +16,7 @@ from src.services.session_service import append_session_message
 from src.services.learning_engine import learning_engine
 from src.services.pipeline.state import set_ab_config, reset_ab_config
 from src.services.title_generator import TitleGenerator
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.sensitive_words import sensitive_filter
 from src.utils.validators import parse_uuid_list, validate_kb_ownership
 
@@ -138,7 +139,13 @@ async def send_message(
                 user_id=current_user.user_id,
             )
     except Exception as e:
-        logger.error(f"记录策略执行失败: {e}", exc_info=True)
+        # 记录失败不影响本次回答，但会丢失一条学习样本（用于后续策略训练）
+        log_exception(
+            logger, e,
+            action="chat.message.record_execution",
+            message="记录策略执行失败，本次执行无法关联反馈",
+            session_id=str(session_uuid),
+        )
 
     # 保存助手消息（附带 execution_id 用于后续反馈关联）+ 生成会话标题（短会话 2）
     # 原子追加，理由同用户消息
@@ -169,7 +176,13 @@ async def send_message(
                     generated_title = session.title
                     logger.info(f"会话标题已生成(非流式): session={session_uuid}, title={session.title}")
                 except Exception as title_err:
-                    logger.warning(f"生成会话标题失败(非流式): {title_err}")
+                    log_exception(
+                        logger, title_err,
+                        action="chat.message.title",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="生成会话标题失败，保留默认标题",
+                        session_id=str(session_uuid),
+                    )
 
             await db.commit()
     logger.info(f"助手消息保存成功(非流式): session={session_uuid}, message_id={assistant_message_id}, messages_count={assistant_msg_count}")
@@ -262,7 +275,14 @@ async def submit_message_feedback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"解析反馈关联会话失败: {e}", exc_info=True)
+        # 解析失败只影响 execution_id 关联，评价本身仍会落库
+        log_exception(
+            logger, e,
+            action="chat.message.feedback_context",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="解析反馈关联会话失败，评价将不带 execution_id",
+            message_id=message_id,
+        )
 
     feedback = Feedback(
         session_id=_parse_session_id(request.session_id),
@@ -289,6 +309,12 @@ async def submit_message_feedback(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"记录学习反馈失败: {e}", exc_info=True)
+        # 评价已落库，但学习引擎没收到 → 该反馈不会参与策略学习
+        log_exception(
+            logger, e,
+            action="chat.message.feedback_learn",
+            message="学习反馈记录失败，该评价未进入学习样本",
+            execution_id=execution_id, score=feedback_score,
+        )
 
     return {"id": str(feedback.id), "message": "评价提交成功"}

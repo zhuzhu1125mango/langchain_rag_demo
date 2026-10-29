@@ -5,6 +5,7 @@ import uuid
 from typing import List, Optional, Sequence, Union
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 from src.services.wiki_types import CompiledPage, WikiCompileResult
 from src.services.wiki_text import (
@@ -130,7 +131,13 @@ class PagePersistMixin:
                     row.links = extract_links(content, row.title, title_set)
             await db.commit()
         except Exception as e:
-            logger.warning(f"Wiki 页链接提取失败（不影响编译产物）: {e}")
+            log_exception(
+                logger, e,
+                action="wiki.persist.links",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 页链接提取失败（不影响编译产物）",
+                kb_id=str(kb_id), pages=len(rows),
+            )
 
     async def _index_page(self, kb_id: str, row, page: CompiledPage, delete_old: bool = False) -> int:
         """将单个页面正文分块写入向量库；失败仅告警（raw 层兜底）。
@@ -172,7 +179,13 @@ class PagePersistMixin:
             await vector_store.add_documents(docs, str(kb_id))
             return len(docs)
         except Exception as e:
-            logger.warning(f"Wiki 页「{page.title}」向量入库失败（raw 层兜底不受影响）: {e}")
+            log_exception(
+                logger, e,
+                action="wiki.persist.index_page",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 页向量入库失败（raw 层兜底不受影响）",
+                kb_id=str(kb_id), page=page.title,
+            )
             return 0
 
     async def rebuild_index_page(self, db, kb_id: str) -> None:
@@ -240,7 +253,13 @@ class PagePersistMixin:
             await minio.upload_text_async(index_row.content_path, content)
             await db.commit()
         except Exception as e:
-            logger.warning(f"Wiki 索引页维护失败: {e}")
+            log_exception(
+                logger, e,
+                action="wiki.persist.index_page_rebuild",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 索引页维护失败（目录可能滞后于页面集合）",
+                kb_id=str(kb_id),
+            )
 
     async def _get_kb_owner(self, db, kb_id: str) -> Optional[str]:
         from sqlalchemy import select
@@ -258,5 +277,12 @@ class PagePersistMixin:
                 )
             ).scalars().first()
             return row.owner_id if row else None
-        except Exception:
+        except Exception as e:
+            # owner 查不到会让页面归属为空，后续权限过滤按「无主」处理
+            log_exception(
+                logger, e,
+                action="wiki.persist.kb_owner",
+                message="查询知识库归属失败，页面归属降级为空",
+                kb_id=str(kb_id),
+            )
             return None

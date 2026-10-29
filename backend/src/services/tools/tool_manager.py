@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional, Type
 
 import logging
 
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -175,7 +177,14 @@ class ToolManager:
                 module = importlib.import_module(module_name)
                 self._register_tools_from_module(module)
             except Exception as e:
-                logger.warning(f"加载工具模块 {module_name} 失败: {e}")
+                # 单个插件模块坏掉不应拖垮整个工具注册表
+                log_exception(
+                    logger, e,
+                    action="tools.discover.module",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="加载工具模块失败，跳过该模块",
+                    module=module_name,
+                )
 
     def _register_tools_from_module(self, module: Any) -> None:
         """从模块中查找并注册 BaseTool 子类实例。"""
@@ -191,7 +200,13 @@ class ToolManager:
                     instance = obj()
                     self.registry.register(instance)
                 except Exception as e:
-                    logger.warning(f"实例化工具 {obj.__name__} 失败: {e}")
+                    log_exception(
+                        logger, e,
+                        action="tools.discover.instantiate",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="实例化工具失败，跳过该工具",
+                        tool_class=obj.__name__,
+                    )
 
     async def execute(self, tool_name: str, **kwargs) -> ToolResult:
         """执行指定工具，带护栏校验、超时和异常捕获。"""
@@ -232,7 +247,13 @@ class ToolManager:
                 latency_ms=int((time.time() - start) * 1000),
             )
         except Exception as e:
-            logger.warning(f"工具 {tool_name} 执行失败: {e}")
+            # 工具失败会以 success=False 回给 Agent，属于用户可见的能力降级
+            log_exception(
+                logger, e,
+                action="tools.execute",
+                message="工具执行失败",
+                tool=tool_name,
+            )
             return ToolResult(
                 tool_name=tool_name,
                 input_arguments=kwargs,
@@ -290,5 +311,10 @@ def get_tool_manager() -> ToolManager:
                 {t.name: t.description for t in default_tool_manager.registry.list_tools()}
             )
         except Exception as e:
-            logger.warning(f"工具元数据自动同步失败（不影响执行）: {e}")
+            log_exception(
+                logger, e,
+                action="tools.meta_sync",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="工具元数据自动同步失败（不影响执行）",
+            )
     return default_tool_manager

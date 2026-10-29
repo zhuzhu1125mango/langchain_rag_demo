@@ -21,6 +21,7 @@ from src.services.model_registry import (
     _normalize_ollama_base_url,
 )
 from src.services.model_usage import model_usage
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -130,9 +131,12 @@ class ChatModelGroup:
             except Exception as exc:
                 self._failure(index, started, exc)
                 last_exc = exc
-                logger.warning(
-                    "模型调用失败，尝试 fallback: task=%s, model=%s, error=%s",
-                    self.task, self.labels[index], exc,
+                log_exception(
+                    logger, exc,
+                    action="model.route.ainvoke",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="模型调用失败，尝试 fallback",
+                    task=self.task, model=self.labels[index],
                 )
                 continue
             self._success(index, started, _token_usage(result))
@@ -154,9 +158,12 @@ class ChatModelGroup:
             except Exception as exc:
                 self._failure(index, started, exc)
                 last_exc = exc
-                logger.warning(
-                    "模型调用失败，尝试 fallback: task=%s, model=%s, error=%s",
-                    self.task, self.labels[index], exc,
+                log_exception(
+                    logger, exc,
+                    action="model.route.invoke",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="模型调用失败，尝试 fallback",
+                    task=self.task, model=self.labels[index],
                 )
                 continue
             self._success(index, started, _token_usage(result))
@@ -185,12 +192,22 @@ class ChatModelGroup:
             except Exception as exc:
                 self._failure(index, started, exc)
                 if yielded:
-                    # 已经向客户端输出内容，不能再切换模型
+                    # 已经向客户端输出内容，不能再切换模型：本次回答必然被截断
+                    log_exception(
+                        logger, exc,
+                        action="model.route.astream.interrupted",
+                        severity=ErrorSeverity.REPORTABLE,
+                        message="流式输出中途中断，已下发内容无法回退",
+                        task=self.task, model=self.labels[index],
+                    )
                     raise
                 last_exc = exc
-                logger.warning(
-                    "模型流式调用失败，尝试 fallback: task=%s, model=%s, error=%s",
-                    self.task, self.labels[index], exc,
+                log_exception(
+                    logger, exc,
+                    action="model.route.astream",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="模型流式调用失败，尝试 fallback",
+                    task=self.task, model=self.labels[index],
                 )
                 continue
             self._success(index, started, (input_tokens, output_tokens))
@@ -219,11 +236,22 @@ class ChatModelGroup:
             except Exception as exc:
                 self._failure(index, started, exc)
                 if yielded:
+                    # 同上：已产出分片，切换模型会导致内容错乱
+                    log_exception(
+                        logger, exc,
+                        action="model.route.stream.interrupted",
+                        severity=ErrorSeverity.REPORTABLE,
+                        message="流式输出中途中断，已下发内容无法回退",
+                        task=self.task, model=self.labels[index],
+                    )
                     raise
                 last_exc = exc
-                logger.warning(
-                    "模型流式调用失败，尝试 fallback: task=%s, model=%s, error=%s",
-                    self.task, self.labels[index], exc,
+                log_exception(
+                    logger, exc,
+                    action="model.route.stream",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="模型流式调用失败，尝试 fallback",
+                    task=self.task, model=self.labels[index],
                 )
                 continue
             self._success(index, started, (input_tokens, output_tokens))

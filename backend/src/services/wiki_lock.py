@@ -17,6 +17,7 @@ import uuid
 from contextlib import asynccontextmanager
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("wiki_lock")
 
@@ -62,7 +63,13 @@ async def kb_wiki_lock(kb_id: str):
             try:
                 client = await _get_redis_client()
             except Exception as e:
-                logger.warning(f"Redis 客户端获取失败，分布式锁降级为进程内锁: {e}")
+                log_exception(
+                    logger, e,
+                    action="wiki.lock.redis_client",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="Redis 客户端获取失败，分布式锁降级为进程内锁",
+                    kb_id=str(kb_id),
+                )
                 record_wiki_lock(result="redis_unavailable")
                 client = None
             if client is not None:
@@ -72,7 +79,13 @@ async def kb_wiki_lock(kb_id: str):
                     # 获取超时：向上抛出（编译场景由外层 wait_for 兜底语义一致）
                     raise
                 except Exception as e:
-                    logger.warning(f"Redis 分布式锁不可用，降级为进程内锁: {e}")
+                    log_exception(
+                        logger, e,
+                        action="wiki.lock.redis_acquire",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="Redis 分布式锁不可用，降级为进程内锁",
+                        kb_id=str(kb_id),
+                    )
                     record_wiki_lock(result="redis_unavailable")
                     token, client = None, None
         else:
@@ -85,7 +98,13 @@ async def kb_wiki_lock(kb_id: str):
                     await client.eval(_RELEASE_LUA, 1, LOCK_KEY_PREFIX + str(kb_id), token)
                 except Exception as e:
                     # 释放失败只留锁至 TTL 过期，不影响业务结果
-                    logger.warning(f"Redis 分布式锁释放失败（等 TTL 过期）: kb={kb_id}: {e}")
+                    log_exception(
+                        logger, e,
+                        action="wiki.lock.redis_release",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="Redis 分布式锁释放失败，等 TTL 自然过期",
+                        kb_id=str(kb_id),
+                    )
 
 
 async def _get_redis_client():
@@ -112,6 +131,7 @@ async def _acquire_redis_lock(client, kb_id: str) -> str:
         try:
             acquired = await client.set(key, token, nx=True, px=ttl_ms)
         except Exception as e:
+            # 包装为 ConnectionError 由调用方降级（会记 wiki.lock.redis_acquire），此处不重复记录
             raise ConnectionError(f"Redis 锁操作失败: {e}") from e
         if acquired:
             record_wiki_lock(result="ok")

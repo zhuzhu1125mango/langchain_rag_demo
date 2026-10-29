@@ -15,6 +15,7 @@ from src.models import KnowledgeBase, Document
 from src.services.vector_store import VectorStoreManager
 from src.services.cache_service import CacheService
 from src.services.rag_chain import RAGChain
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("knowledge_base_api")
 
@@ -26,8 +27,6 @@ BATCH_DELETE_CHUNK_SIZE = 800
 # 缓存操作兜底超时（秒）。即使 Redis 客户端自身已配置超时，
 # 这里再加一层保护，确保任何情况下知识库列表接口都不会被缓存阻塞。
 KB_CACHE_OPERATION_TIMEOUT = 2.0
-
-from src.services.cache_service import CacheService
 from src.services.vector_store import VectorStoreManager
 from src.services.rag_chain import RAGChain
 
@@ -62,7 +61,12 @@ async def list_knowledge_bases(
             cache.get(cache_key), timeout=KB_CACHE_OPERATION_TIMEOUT
         )
     except Exception as exc:
-        logger.warning("读取知识库列表缓存失败: %s", exc)
+        log_exception(
+            logger, exc,
+            action="knowledge_base.list.cache_read",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="读取知识库列表缓存失败，回源查询",
+        )
 
     if cached is not None:
         return KnowledgeBaseListResponse(**cached)
@@ -119,7 +123,12 @@ async def list_knowledge_bases(
                 timeout=KB_CACHE_OPERATION_TIMEOUT,
             )
         except Exception as exc:
-            logger.warning("写入知识库列表缓存失败: %s", exc)
+            log_exception(
+                logger, exc,
+                action="knowledge_base.list.cache_write",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="写入知识库列表缓存失败（不影响本次响应）",
+            )
 
     return response
 
@@ -229,7 +238,12 @@ async def recommend_knowledge_bases(
         )
         return recommendations
     except Exception as e:
-        logger.error(f"知识库推荐失败: {e}", exc_info=True)
+        log_exception(
+            logger, e,
+            action="knowledge_base.recommend",
+            message="知识库推荐失败",
+            kb_count=len(owned_kb_ids or []),
+        )
         raise HTTPException(status_code=500, detail="知识库推荐失败，请稍后重试")
 
 @router.post("/knowledge_graph", response_model=KnowledgeGraphResponse)
@@ -267,5 +281,10 @@ async def generate_knowledge_graph(
         result = await rag_chain.generate_knowledge_graph(kb_ids)
         return result
     except Exception as e:
-        logger.error(f"生成知识图谱失败: {e}", exc_info=True)
+        log_exception(
+            logger, e,
+            action="knowledge_base.knowledge_graph",
+            message="生成知识图谱失败",
+            kb_count=len(kb_ids),
+        )
         raise HTTPException(status_code=500, detail="生成知识图谱失败，请稍后重试")

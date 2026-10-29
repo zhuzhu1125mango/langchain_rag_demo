@@ -226,3 +226,105 @@ class TestApiFailHelpers:
         record = caplog.records[-1]
         assert record.levelno == logging.WARNING
         assert "action=learning.stats.misclassification" in record.getMessage()
+
+
+class TestObservedDegradation:
+    """第七批：模型 fallback 与检索降级路径的日志语义回归。
+
+    这几条路径此前要么只打一句 warning（丢失 action/severity），
+    要么在流式已经下发内容后静默中断，导致「回答被截断」无从定位。
+    """
+
+    def test_route_fallback_records_recoverable(self, caplog):
+        """主模型失败切换备用模型属正常降级：warning + recoverable，且带 model 定位。"""
+        from src.services.model_adapters import ChatModelGroup
+
+        class _Boom:
+            async def ainvoke(self, *args, **kwargs):
+                raise ConnectionError("provider down")
+
+        class _Ok:
+            async def ainvoke(self, *args, **kwargs):
+                return "answer"
+
+        group = ChatModelGroup([_Boom(), _Ok()], labels=["primary", "backup"], task="chat")
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            assert asyncio.run(group.ainvoke("q")) == "answer"
+
+        hits = [r for r in caplog.records if "action=model.route.ainvoke" in r.getMessage()]
+        assert hits, "fallback 必须留下带 action 的记录"
+        message = hits[0].getMessage()
+        assert hits[0].levelno == logging.WARNING
+        assert "severity=recoverable" in message
+        assert "task=chat" in message and "model=primary" in message
+
+    def test_stream_interruption_is_reportable(self, caplog):
+        """流式已下发分片后中断：不能切模型，必须按需上报并继续上抛。"""
+        from src.services.model_adapters import ChatModelGroup
+
+        class _Flaky:
+            def astream(self, *args, **kwargs):
+                async def gen():
+                    yield "chunk-1"
+                    raise RuntimeError("mid-stream boom")
+
+                return gen()
+
+        group = ChatModelGroup([_Flaky()], labels=["primary"], task="chat")
+
+        async def _drain():
+            seen = []
+            async for chunk in group.astream("q"):
+                seen.append(chunk)
+            return seen
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            with pytest.raises(RuntimeError):
+                asyncio.run(_drain())
+
+        hits = [r for r in caplog.records if "action=model.route.astream.interrupted" in r.getMessage()]
+        assert hits, "流式中断必须留痕"
+        assert hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+
+    def test_hybrid_failure_falls_back_to_dense(self, caplog):
+        """混合检索挂掉但 dense 可用：只记可恢复级，结果照常返回。"""
+        from src.services.kb_retrieval_service import KBRetrievalService
+
+        class _Store:
+            async def search_hybrid(self, *args, **kwargs):
+                raise ConnectionError("milvus down")
+
+            async def search_dense(self, *args, **kwargs):
+                return ["doc-1", "doc-2"]
+
+        service = KBRetrievalService(vector_store=_Store())
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            docs = asyncio.run(service.retrieve("q", kb_ids=["kb-1"]))
+
+        assert docs == ["doc-1", "doc-2"]
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("action=kb.retrieval.hybrid" in m and "severity=recoverable" in m for m in messages)
+        assert not any("action=kb.retrieval.dense_fallback" in m for m in messages)
+
+    def test_dense_fallback_failure_is_logged_before_raise(self, caplog):
+        """两级检索都失败：必须能在日志里看到是哪一层挂的，再上抛。"""
+        from src.services.kb_retrieval_service import KBRetrievalService
+
+        class _Store:
+            async def search_hybrid(self, *args, **kwargs):
+                raise ConnectionError("milvus down")
+
+            async def search_dense(self, *args, **kwargs):
+                raise RuntimeError("dense down")
+
+        service = KBRetrievalService(vector_store=_Store())
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            with pytest.raises(RuntimeError):
+                asyncio.run(service.retrieve("q", kb_ids=["kb-1"]))
+
+        messages = [r.getMessage() for r in caplog.records]
+        assert any("action=kb.retrieval.hybrid" in m for m in messages)
+        fatal = [r for r in caplog.records if "action=kb.retrieval.dense_fallback" in r.getMessage()]
+        assert fatal and fatal[0].levelno == logging.ERROR
+        assert "severity=reportable" in fatal[0].getMessage()

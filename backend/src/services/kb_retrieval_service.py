@@ -15,6 +15,7 @@ import logging
 from typing import List, Optional
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -53,7 +54,12 @@ class KBRetrievalService:
             try:
                 self._vector_store = await VectorStoreManager.get_instance()
             except Exception as e:
-                logger.warning(f"向量存储初始化失败，检索返回空: {e}")
+                # 检索返回空会让上游把「服务挂了」误判成「知识库没内容」
+                log_exception(
+                    logger, e,
+                    action="kb.retrieval.vector_store",
+                    message="向量存储初始化失败，本次检索返回空结果",
+                )
         return self._vector_store
 
     async def retrieve(
@@ -111,16 +117,28 @@ class KBRetrievalService:
                     else:
                         docs = await vector_store.search_hybrid(question, **search_kwargs)
                 except Exception as e:
-                    logger.warning(f"混合检索失败，回退到 dense 检索: {e}")
+                    log_exception(
+                        logger, e,
+                        action="kb.retrieval.hybrid",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="混合检索失败，回退到 dense 检索",
+                        top_k=search_kwargs.get("k"),
+                    )
                     try:
                         docs = await vector_store.search_dense(question, **search_kwargs)
                     except Exception as e2:
-                        # P2-5：dense 兜底也失败 -> 检索失败埋点（best-effort，不阻断）
+                        # 两级检索都失败：本次问答必然无命中，必须留痕后上抛
+                        log_exception(
+                            logger, e2,
+                            action="kb.retrieval.dense_fallback",
+                            message="dense 兜底检索同样失败，本次检索无结果",
+                        )
+                        # P2-5：检索失败埋点（best-effort，埋点自身失败不阻断上抛）
                         from src.middleware.prometheus import record_retrieval_error
                         try:
                             record_retrieval_error()
                         except Exception:
-                            pass
+                            pass  # 指标计数失败不影响错误上抛语义
                         raise e2 from e
             else:
                 docs = await vector_store.search_dense(question, **search_kwargs)
