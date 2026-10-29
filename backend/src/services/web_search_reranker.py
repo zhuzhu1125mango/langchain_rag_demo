@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from src.config import settings
 from src.services.model_manager import model_manager
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +37,13 @@ class WebReranker:
                 self._ollama_reranker = OllamaReranker(self.model_name)
                 logger.info("Ollama 重排模型加载完成")
             except Exception as e:
-                logger.warning(f"Ollama 重排模型加载失败: {e}，将使用嵌入兜底")
+                log_exception(
+                    logger, e,
+                    action="web_search.reranker.load_ollama",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="Ollama 重排模型加载失败，将使用嵌入兜底",
+                    model=self.model_name,
+                )
                 self._ollama_reranker = None
             return
 
@@ -52,7 +59,13 @@ class WebReranker:
                 logger.warning("sentence-transformers 未安装，重排将使用嵌入兜底")
                 self._model = None
             except Exception as e:
-                logger.warning(f"重排模型加载失败: {e}，将使用嵌入兜底")
+                log_exception(
+                    logger, e,
+                    action="web_search.reranker.load_cross_encoder",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="CrossEncoder 重排模型加载失败，将使用嵌入兜底",
+                    model=self.model_name,
+                )
                 self._model = None
 
     async def _load_model_async(self):
@@ -82,6 +95,7 @@ class WebReranker:
         try:
             current_key = model_manager.embedding_model_key
         except Exception:
+            # 探测模型键失败只影响兜底缓存是否复用，不影响重排本身，静默降级
             current_key = ""
         if self._fallback_loaded and current_key == getattr(self, "_embeddings_key", ""):
             return
@@ -92,7 +106,12 @@ class WebReranker:
             self._embeddings_key = current_key
             logger.info("rerank 嵌入兜底已加载")
         except Exception as e:
-            logger.warning(f"rerank 嵌入兜底加载失败: {e}")
+            log_exception(
+                logger, e,
+                action="web_search.reranker.load_embeddings_fallback",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="rerank 嵌入兜底加载失败，本次按原顺序截断",
+            )
             self._embeddings = None
 
     async def _rerank_by_embeddings(
@@ -115,7 +134,13 @@ class WebReranker:
             ranked = sorted(contents, key=lambda x: x.score, reverse=True)
             return ranked[:top_k]
         except Exception as e:
-            logger.warning(f"嵌入兜底重排失败: {e}")
+            log_exception(
+                logger, e,
+                action="web_search.reranker.embeddings_score",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="嵌入兜底重排失败，按原顺序截断返回",
+                documents=len(contents),
+            )
             return contents[:top_k]
 
     async def rerank(self, query: str, contents: List[WebContent], top_k: int = 5) -> List[WebContent]:
@@ -146,7 +171,14 @@ class WebReranker:
             ranked = sorted(candidates, key=lambda x: x.score, reverse=True)
             return ranked[:top_k]
         except Exception as e:
-            logger.warning(f"语义重排失败: {e}，降级为嵌入兜底")
+            log_exception(
+                logger, e,
+                action="web_search.reranker.predict",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="语义重排失败，降级为嵌入兜底",
+                provider=self.provider,
+                candidates=len(candidates),
+            )
 
         # 增强4：主重排模型不可用时，用 OllamaEmbeddings 嵌入兜底
         return await self._rerank_by_embeddings(query, candidates, top_k)

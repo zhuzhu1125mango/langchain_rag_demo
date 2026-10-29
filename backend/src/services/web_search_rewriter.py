@@ -8,6 +8,7 @@ from typing import List
 
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,13 @@ class SearchQueryRewriter:
                 if isinstance(queries, list) and queries:
                     return [str(q).strip() for q in queries if str(q).strip()]
         except Exception as e:
-            logger.warning(f"LLM Query 改写失败: {e}")
+            # LLM 改写只是扩召回手段，失败时仍有基础改写兜底，按可恢复处理
+            log_exception(
+                logger, e,
+                action="web_search.rewriter.llm_rewrite",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="LLM Query 改写失败，回退基础改写",
+            )
         return []
 
     def _detect_domain(self, query: str) -> str:

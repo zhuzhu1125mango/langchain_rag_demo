@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import httpx
 from bs4 import BeautifulSoup
 
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.security import UnsafeUrlError, is_public_ip, validate_url_safe
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ class ContentMixin:
         try:
             peer = stream.get_extra_info("server_addr")
         except Exception:
+            # 非 socket 传输（测试替身、内存流）不实现 get_extra_info，属于预期控制流：
+            # 此时没有对端 IP 可比，跳过复核即可，不是错误。
             return
         if not peer:
             return
@@ -107,7 +110,13 @@ class ContentMixin:
             logger.debug(f"拒绝抓取重定向至不安全地址的 URL {url}: {e}")
             return None
         except Exception as e:
-            logger.debug(f"抓取页面失败 {url}: {e}")
+            log_exception(
+                logger, e,
+                action="web_search.fetch_content.fetch_html",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="抓取网页正文失败，跳过该结果",
+                url=url,
+            )
             return None
 
         content = self._extract_text(html, url)
@@ -141,7 +150,14 @@ class ContentMixin:
         except ImportError:
             logger.debug("trafilatura 未安装，使用 BeautifulSoup 降级")
         except Exception as e:
-            logger.debug(f"trafilatura 提取失败 {url}: {e}")
+            # 提取器对畸形 HTML 报错很常见，可降级到 BeautifulSoup，按可恢复处理
+            log_exception(
+                logger, e,
+                action="web_search.extract_text.trafilatura",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="trafilatura 正文提取失败，降级 BeautifulSoup",
+                url=url,
+            )
 
         try:
             soup = BeautifulSoup(html, "lxml")
@@ -151,7 +167,13 @@ class ContentMixin:
             lines = [line.strip() for line in text.splitlines() if line.strip()]
             return "\n".join(lines)
         except Exception as e:
-            logger.debug(f"BeautifulSoup 提取失败 {url}: {e}")
+            log_exception(
+                logger, e,
+                action="web_search.extract_text.beautifulsoup",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="BeautifulSoup 正文提取失败，返回空正文",
+                url=url,
+            )
             return ""
 
     def _chunk_content(self, content: str, chunk_size: int = 500, chunk_overlap: int = 50) -> List[str]:
@@ -210,6 +232,7 @@ class ContentMixin:
         try:
             return urlparse(url).netloc.lower().lstrip("www.")
         except Exception:
+            # urlparse 仅在极端畸形输入上抛错，返回空域名即可，不影响主流程
             return ""
 
     def _is_low_quality_domain(self, url: str) -> bool:

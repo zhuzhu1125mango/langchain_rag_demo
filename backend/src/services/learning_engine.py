@@ -14,6 +14,8 @@ from src.database import async_session
 from .sample_store import sample_store
 from .rule_learner import rule_learner
 
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -109,7 +111,13 @@ class LearningEngine:
             _, _, strategy_results = await strategy_manager.should_use_knowledge_base(question, history)
             return strategy_results or {}
         except Exception as e:
-            logger.warning(f"策略结果补采失败: {e}")
+            # 补采只是丰富学习样本，失败返回空 dict，不影响本次问答决策
+            log_exception(
+                logger, e,
+                action="learning_engine.collect_strategy_results",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="策略结果补采失败，本次样本不含策略置信度",
+            )
             return {}
 
     async def record_chat_execution(self, *, session_id, question, decision,

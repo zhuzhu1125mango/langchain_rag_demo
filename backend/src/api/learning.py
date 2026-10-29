@@ -15,10 +15,21 @@ from src.database import async_session
 from src.models import Session as SessionModel
 from src.services.learning_engine import learning_engine
 from src.services.strategy_manager import get_strategy_manager
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 router = APIRouter(prefix="/learning", tags=["learning"])
 
 logger = logging.getLogger("rag_system")
+
+
+def _fail(exc: Exception, action: str) -> HTTPException:
+    """学习引擎接口兜底：记结构化异常后统一返回 500。"""
+    log_exception(
+        logger, exc,
+        action=action,
+        message="学习引擎接口未预期异常",
+    )
+    return HTTPException(status_code=500, detail="内部错误，请稍后重试")
 
 
 class LearningConfigUpdate(BaseModel):
@@ -41,8 +52,15 @@ async def get_learning_stats(current_user: CurrentUser = Depends(get_current_use
                 50, owner_id=current_user.user_id
             )
             misclassification_count = len(misclassified.get("misclassified_cases", []))
-        except Exception:
-            pass
+        except Exception as e:
+            # 误分类统计只是附加指标，失败时计数归零，不影响主统计返回；
+            # 但不能静默：归零会让前端误以为"没有误分类"。
+            log_exception(
+                logger, e,
+                action="learning.stats.misclassification",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="误分类样本统计失败，计数降级为 0",
+            )
 
         # 适配前端期望的数据结构
         adapted_stats = {
@@ -53,8 +71,7 @@ async def get_learning_stats(current_user: CurrentUser = Depends(get_current_use
         }
         return {"success": True, "data": adapted_stats}
     except Exception as e:
-        logger.error("学习引擎操作失败", exc_info=True)
-        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
+        raise _fail(e, "learning.stats")
 
 
 @router.get("/misclassification", summary="获取误分类分析")
@@ -82,8 +99,7 @@ async def get_misclassification_analysis(
             })
         return {"success": True, "data": adapted_cases}
     except Exception as e:
-        logger.error("学习引擎操作失败", exc_info=True)
-        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
+        raise _fail(e, "learning.misclassification")
 
 
 @router.post("/trigger", summary="触发学习")
@@ -95,8 +111,7 @@ async def trigger_learning(current_user: CurrentUser = Depends(require_admin)):
         result = await learning_engine.trigger_learning(strategy_manager)
         return {"success": True, "data": result}
     except Exception as e:
-        logger.error("学习引擎操作失败", exc_info=True)
-        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
+        raise _fail(e, "learning.trigger")
 
 
 async def _session_owner_id(session_id: str) -> str:
@@ -138,8 +153,7 @@ async def record_execution(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("学习引擎操作失败", exc_info=True)
-        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
+        raise _fail(e, "learning.record_execution")
 
 
 @router.post("/record-feedback", summary="记录反馈")
@@ -158,8 +172,7 @@ async def record_feedback(
         )
         return {"success": True}
     except Exception as e:
-        logger.error("学习引擎操作失败", exc_info=True)
-        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
+        raise _fail(e, "learning.record_feedback")
 
 
 @router.put("/config", summary="更新学习引擎配置")
@@ -189,8 +202,7 @@ async def update_learning_config(
             }
         }
     except Exception as e:
-        logger.error("学习引擎操作失败", exc_info=True)
-        raise HTTPException(status_code=500, detail="内部错误，请稍后重试")
+        raise _fail(e, "learning.config.update")
 
 
 @router.get("/config", summary="获取学习引擎配置")

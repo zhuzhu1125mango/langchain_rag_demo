@@ -1,8 +1,12 @@
 """联网搜索工具插件。"""
 
+import logging
 from typing import Any, Dict, Optional
 
 from src.services.tools.tool_manager import BaseTool, ToolResult
+from src.utils.error_handling import ErrorSeverity, log_exception
+
+logger = logging.getLogger(__name__)
 
 
 class WebSearchTool(BaseTool):
@@ -45,6 +49,15 @@ class WebSearchTool(BaseTool):
         try:
             results = await service.search_multi(query)
         except Exception as e:
+            # 工具失败会作为错误结果回传给 LLM，agent 可换用其他信息源继续，
+            # 属可恢复：不应中断整轮对话。
+            log_exception(
+                logger, e,
+                action="tools.web_search.execute",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="联网搜索工具执行失败，将错误回传给模型",
+                query=query,
+            )
             return ToolResult(
                 tool_name=self.name,
                 input_arguments=kwargs,

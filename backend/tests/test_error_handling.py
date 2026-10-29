@@ -185,3 +185,44 @@ class TestFailMapping:
         assert record.levelno == _logging.ERROR
         assert "action=admin_models.registry.apply" in record.getMessage()
         assert "severity=reportable" in record.getMessage()
+
+
+class TestApiFailHelpers:
+    """CODE-2 第三批：experiment / learning 接口兜底统一为"记录 + 500"，不泄漏内部细节。"""
+
+    @pytest.mark.parametrize(
+        "module,action",
+        [
+            ("src.api.experiment", "experiment.analyze"),
+            ("src.api.learning", "learning.trigger"),
+        ],
+    )
+    def test_unexpected_maps_500_and_records_action(self, module, action, caplog):
+        import importlib
+        import logging as _logging
+
+        _fail = importlib.import_module(module)._fail
+        logger = _logging.getLogger("rag_system")
+        with caplog.at_level(_logging.DEBUG, logger="rag_system"):
+            resp = _fail(ValueError("内部细节 db=rag"), action)
+
+        assert resp.status_code == 500
+        assert "内部细节" not in str(resp.detail)
+        record = caplog.records[-1]
+        assert record.levelno == _logging.ERROR
+        assert f"action={action}" in record.getMessage()
+        assert "severity=reportable" in record.getMessage()
+
+    def test_learning_stats_degrades_without_silence(self, caplog):
+        """误分类统计失败应保留主统计，但必须留下可恢复级日志（不能静默归零）。"""
+        logger = logging.getLogger("rag_system")
+        with caplog.at_level(logging.DEBUG, logger="rag_system"):
+            log_exception(
+                logger, RuntimeError("rule learner down"),
+                action="learning.stats.misclassification",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="误分类样本统计失败，计数降级为 0",
+            )
+        record = caplog.records[-1]
+        assert record.levelno == logging.WARNING
+        assert "action=learning.stats.misclassification" in record.getMessage()

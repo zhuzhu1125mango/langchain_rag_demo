@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 import httpx
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.safe_http import create_safe_async_client
 from .search_postprocessor import SearchPostprocessor
 from .search_types import SearchResult
@@ -49,7 +50,12 @@ class WebSearchService(EngineMixin, ContentMixin):
             # 未显式传入 LLM 时使用配置中的 FAST_LLM_MODEL_NAME 默认模型
             self.query_rewriter_v2 = QueryRewriter(llm=llm) if llm else QueryRewriter()
         except Exception as e:
-            logger.warning("QueryRewriter v2 加载失败，回退到旧版改写器：%s", e)
+            log_exception(
+                logger, e,
+                action="web_search.init.query_rewriter_v2",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="QueryRewriter v2 加载失败，回退到旧版改写器",
+            )
         self.reranker = WebReranker()
         self.postprocessor = SearchPostprocessor()
 
@@ -89,7 +95,13 @@ class WebSearchService(EngineMixin, ContentMixin):
         try:
             return await self.cache_service.get(key)
         except Exception as e:
-            logger.debug(f"读取缓存失败 {key}: {e}")
+            log_exception(
+                logger, e,
+                action="web_search.cache.get",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="读取搜索缓存失败，降级为无缓存",
+                cache_key=key,
+            )
             return None
 
     async def _set_cache(self, key: str, value, expire: int):
@@ -98,7 +110,13 @@ class WebSearchService(EngineMixin, ContentMixin):
         try:
             await self.cache_service.set(key, value, expire=expire)
         except Exception as e:
-            logger.debug(f"写入缓存失败 {key}: {e}")
+            log_exception(
+                logger, e,
+                action="web_search.cache.set",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="写入搜索缓存失败，不影响本次结果",
+                cache_key=key,
+            )
 
     async def search(self, query: str, max_results: Optional[int] = None) -> List[SearchResult]:
         """执行单 Query 搜索，按配置路由到对应搜索引擎。"""
@@ -151,6 +169,16 @@ class WebSearchService(EngineMixin, ContentMixin):
         for q, result in zip(queries, results_list):
             if isinstance(result, Exception):
                 errors.append(f"query='{q}': {result}")
+                # 单路 query 失败不影响其余查询，按可恢复处理：多 Query 并行时
+                # 部分引擎反爬/超时是常态，只有全部失败才升级为错误。
+                log_exception(
+                    logger, result,
+                    action="web_search.search_multi.query",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="单路搜索查询失败，结果合并将跳过该路",
+                    query=q,
+                    engine=self.search_provider,
+                )
                 continue
             for r in result:
                 if r.url in seen:
@@ -163,8 +191,6 @@ class WebSearchService(EngineMixin, ContentMixin):
                 "所有搜索查询均失败: " + "; ".join(errors),
                 engine=self.search_provider,
             )
-        if errors:
-            logger.warning(f"部分搜索查询失败: {'; '.join(errors)}")
 
         # 阶段二：搜索后处理（去重、评分、重排序）
         processed = self.postprocessor.process(merged, top_k=self.context_results)

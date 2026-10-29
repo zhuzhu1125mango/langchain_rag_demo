@@ -71,6 +71,8 @@ class EngineMixin:
             response.raise_for_status()
             data = response.json()
         except Exception as e:
+            # 统一包装为 WebSearchError 向上抛：此处不另行记日志，避免与
+            # search_multi 的分路失败记录重复；cause 保留原始异常供上层判断。
             raise WebSearchError(f"SearXNG 请求失败: {e}", engine="searxng", cause=e)
 
         results = []
@@ -100,6 +102,7 @@ class EngineMixin:
                 self._tavily_client.search, query, max_results=max_results
             )
         except Exception as e:
+            # 同 SearXNG：包装后上抛，由 search_multi 统一记录分路失败
             raise WebSearchError(f"Tavily 请求失败: {e}", engine="tavily", cause=e)
 
         results = []
@@ -129,6 +132,7 @@ class EngineMixin:
                 lambda: list(self._ddgs_client.text(query, max_results=max_results))
             )
         except Exception as e:
+            # 同 SearXNG：包装后上抛，由 search_multi 统一记录分路失败
             raise WebSearchError(f"DuckDuckGo 请求失败: {e}", engine="duckduckgo", cause=e)
 
         results = []
