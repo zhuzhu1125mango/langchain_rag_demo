@@ -68,14 +68,15 @@ except Exception as exc:
 | 十一（10-29） | `wiki_compile_scheduler.py` 2、`wiki_lint_scheduler.py` 2、`trace_collector.py` 2、`utils/rate_limit.py` 1 | 后台任务与埋点的缺口可追：Wiki 去抖编译的单篇 raw chunks 失败补 `kb_id`/`doc_id`（否则表现为「wiki 内容莫名缺失」）、整批编译失败保留堆栈与文档数；lint 调度区分「单个 KB 失败」与「循环整体异常」，都能定位到 KB；trace 落库失败带 `trace_id`；**限流 Redis 探测失败按需上报但只记首次**——该函数每个请求都走，且失败后果是限流/配额静默退化为单进程（多副本下限流被放大 N 倍） |
 | 十二（10-29） | `title_generator.py` 2、`query_rewriter.py` 2、`strategy_manager.py` 2、`progress_manager.py` 1、`pipeline/generation.py` 1 | 对话体验类降级统一留痕：标题生成（初始化/生成）与 Query 改写（默认 LLM/多查询）失败都退回降级方案，补 `question_len`/`query_len` 便于判断「是不是都在超时」；策略配置回载失败带 `strategy` 名（否则「重启后某策略没生效」无从排查）；答案校验失败只丢「可能有误」提示，按异常性质分级；**上传进度推送失败此前完全静默**（用户只看到进度条卡住），现摘连接并带 `upload_id`；`_cleanup_terminal_progress` 里关闭已断开连接的失败判定为预期控制流，保留静默并注明 |
 | 十三（10-29） | `rule_learner.py` 2、`wiki_synthesis_service.py` 2 | **学习成果静默丢失**：决策阈值写库失败时接口仍返回 `success`，现显式 `REPORTABLE` 并在返回值补 `threshold_persisted`（重启后阈值回到旧值这事对调用方可见）；逐样本跳过补 `skipped` 计数便于判断模型侧还是脏数据。synthesis 去重检索失败维持 fail-open（按不存在处理），但补 `kb_scope`——否则检索层长期故障会静默产出大量重复综合页；回流写入失败属本批条目全丢，显式 `REPORTABLE` 并带 `kb_id`/`items` |
+| 十四（10-30） | `document_processor.py` 2、`document_analyzer.py` 2、`document_loader.py` 1、`answer_generator.py` 2、`citation_backfiller.py` 2、`evaluation/retrieval_evaluator.py` 3、`evaluation/generation_evaluator.py` 2、`model_config_service.py` 1 | **预览接口的类型掩盖**：`preview_document` 原先把所有异常包成 `ValueError`，路由据此返回 **400**，于是 MinIO/OCR/解析器故障被说成「你的请求有问题」——既不告警也看不到原始异常类型；现只让「文件不存在/类型不支持/超限」保留 ValueError，其余原样上抛走 500 并带 `doc_id`/`filename`/`page`。**重复检测失败返回 `[]` = 「没有重复」**，上传流程据此放行，属结论错误 → 显式 `REPORTABLE`（带 `kb_id`/`threshold`）。引用补全的两级降级：来源向量失败＝整体退化为 `[?]`（记 `sources`），逐句 embedding 失败按句发生，前 3 次记录、之后每 50 次记录，避免一条长答案刷几十行。评估器把「自身故障」与「真的不相关」都算成 0 分，相似度环节显式 `REPORTABLE`，否则只能看到指标掉、看不到是评估器坏了。`model_config_service.test_provider` 的失败返回属预期控制流（管理员点连接测试），保留静默并注明 |
 
-累计 **268 处调用点 / 覆盖约 294 个 `except` 分支**（助手合并的端点按一次调用计）。保留静默的点全部就地写明理由（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、非法金额/时间戳/数值解析、`json.loads` 兜底、SSE 中断指标计数、provider 健康状态重置、registry 版本探测、检索失败埋点、Redis 锁操作的 `ConnectionError` 包装上抛、`search_postprocessor` 三处 URL 解析容错、各引擎 `raise WebSearchError(...)` 包装上抛）。
+累计 **282 处调用点 / 覆盖约 308 个 `except` 分支**（助手合并的端点按一次调用计）。保留静默的点全部就地写明理由（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、非法金额/时间戳/数值解析、`json.loads` 兜底、SSE 中断指标计数、provider 健康状态重置、registry 版本探测、检索失败埋点、Redis 锁操作的 `ConnectionError` 包装上抛、`search_postprocessor` 三处 URL 解析容错、各引擎 `raise WebSearchError(...)` 包装上抛）。
 
 ## 4. 推广顺序（建议）
 
 1. ~~**已拆小的高频路由**：`api/document/{upload,query}.py`、`api/admin_models.py`~~（admin_models 已完成；document 两文件待办）；
 2. ~~**外部依赖边界**：`services/milvus_*.py`、`services/web_search_*.py`~~（已完成）；
-3. ~~**各 3 处的小文件**：`services/context_enhancer.py`、`services/badcase/feedback_handler.py`~~（已完成，`evaluation/retrieval_evaluator.py` 已在早前批次处理）；下一批转 1~2 处/文件的**长尾**；`main.py`（9）判定保持现状（应用装配，异常即启动失败）；
+3. ~~**各 3 处的小文件**：`services/context_enhancer.py`、`services/badcase/feedback_handler.py`、`services/evaluation/retrieval_evaluator.py`~~（已完成，评估器并入第十四批）；当前转 1~2 处/文件的**长尾**：`document_*`、`answer_generator`、`citation_backfiller`、`evaluation/generation_evaluator` 已完成，剩下 `strategies/*`、`tools/plugins/*`、`guardrails` 其余点位；`main.py`（9）判定保持现状（应用装配，异常即启动失败）；
 4. **长尾**：其余 ~235 处随日常改动顺带迁移，避免二次触碰同一文件；
 5. **收敛规则**：迁移时逐点判断「能否处理」——能处理（重试/降级/跳过）→ 保留 `except` + 分级记录；不能处理（应继续抛）→ 删掉本地 `except`，交给上层。
 
