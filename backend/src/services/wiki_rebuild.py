@@ -16,6 +16,7 @@ from typing import Callable, Optional, Union
 from sqlalchemy import select
 
 from src.models import Document
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("wiki_rebuild")
 
@@ -66,7 +67,13 @@ async def _wipe_existing(db, kb_id: str) -> int:
         try:
             await minio.delete_file_async(row.content_path)
         except Exception as e:
-            logger.warning(f"MinIO 对象删除失败（继续）: {row.content_path}: {e}")
+            log_exception(
+                logger, e,
+                action="wiki.rebuild.delete_object",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="MinIO 对象删除失败，继续清理其余产物",
+                kb_id=str(kb_id), page_id=str(row.id),
+            )
     await db.execute(sa_delete(WikiPage).filter(WikiPage.kb_id == str(kb_id)))
     await db.commit()
     return len(rows)
@@ -90,7 +97,12 @@ async def rebuild_kb_wiki(
             if inspect.isawaitable(result):
                 await result
         except Exception as e:
-            logger.warning(f"Wiki 重编译进度回调失败: {e}")
+            log_exception(
+                logger, e,
+                action="wiki.rebuild.progress_callback",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Wiki 重编译进度回调失败（不影响编译本身）",
+            )
 
     from src.middleware.prometheus import record_wiki_compile
     from src.services.wiki_compiler import WikiCompiler
@@ -135,7 +147,13 @@ async def rebuild_kb_wiki(
             )
         except Exception as e:
             record_wiki_compile(result="failed")
-            logger.warning(f"Wiki 重编译失败（跳过该文档）: {doc.filename}: {e}")
+            # 单文档失败会以「部分成功」形态返回，必须能定位到具体文档
+            log_exception(
+                logger, e,
+                action="wiki.rebuild.compile_document",
+                message="Wiki 重编译失败，跳过该文档",
+                kb_id=str(kb_id), doc_id=str(doc.id), filename=doc.filename,
+            )
             report(10 + int(span * i), f"[{i}/{len(docs)}] {doc.filename}: 编译失败，跳过")
 
     return {

@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("ocr_parser")
 
@@ -51,7 +52,15 @@ def is_scanned_pdf(pdf_path: str) -> bool:
         if reader.is_encrypted:
             try:
                 reader.decrypt("")
-            except Exception:
+            except Exception as e:
+                # 加密且空密码解不开：按文本型返回，后续常规解析会给出明确错误
+                log_exception(
+                    logger, e,
+                    action="ocr.detect.decrypt",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="PDF 加密且空密码解密失败，按文本型处理",
+                    file=os.path.basename(pdf_path),
+                )
                 return False
         pages = list(reader.pages)
         if not pages:
@@ -66,7 +75,13 @@ def is_scanned_pdf(pdf_path: str) -> bool:
         )
         return scanned
     except Exception as e:
-        logger.warning(f"扫描版检测失败，按文本型 PDF 处理: {pdf_path}, 错误: {e}")
+        log_exception(
+            logger, e,
+            action="ocr.detect.scanned",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="扫描版检测失败，按文本型 PDF 处理",
+            file=os.path.basename(pdf_path),
+        )
         return False
 
 
@@ -215,6 +230,7 @@ def parse_pdf_with_paddle(pdf_path: str) -> str:
     except OcrUnavailableError:
         raise
     except Exception as e:
+        # 包装为 OcrParseError 由调用方回退 PyPDF 解析，此处不重复记录（保留异常链）
         raise OcrParseError(f"PP-StructureV3 解析失败: {e}") from e
     text = "\n\n".join(t for t in texts if t)
     if not text.strip():

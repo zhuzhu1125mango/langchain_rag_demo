@@ -7,6 +7,8 @@ import json
 import logging
 import re
 
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -83,7 +85,11 @@ class QuestionProcessor:
                     "changes": "问题无需修改"
                 }
         except Exception as e:
-            logger.error(f"问题重写失败: {str(e)}", exc_info=True)
+            log_exception(
+                logger, e,
+                action="question.rewrite",
+                message="问题重写失败，沿用原问题",
+            )
             return {
                 "rewritten": question,
                 "original": question,
@@ -160,7 +166,11 @@ class QuestionProcessor:
                     "description": "无法确定问题类型"
                 }
         except Exception as e:
-            logger.error(f"问题分类失败: {str(e)}", exc_info=True)
+            log_exception(
+                logger, e,
+                action="question.classify",
+                message="问题分类失败，降级为 EXPLORATORY",
+            )
             return {
                 "type": "EXPLORATORY",
                 "subtype": "",
@@ -234,7 +244,13 @@ class QuestionProcessor:
             return cleaned_suggestions[:5]
 
         except Exception as e:
-            logger.error(f"生成推荐问题失败: {str(e)}", exc_info=True)
+            # 与 chat.tools.suggestions 口径一致：辅助能力失败只记可恢复，不算故障
+            log_exception(
+                logger, e,
+                action="question.suggestions",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="生成推荐问题失败，返回默认推荐",
+            )
             # 返回默认推荐问题
             return [
                 "这个话题还有哪些方面可以了解？",

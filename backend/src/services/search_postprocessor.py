@@ -386,7 +386,7 @@ class SearchPostprocessor:
                 netloc = netloc[4:]
             return netloc
         except Exception:
-            return ""
+            return ""  # urlparse 对畸形 URL 的防御：按「无域名」计，噪音过滤继续
 
     def _is_noise_number(self, value: Decimal, context: str) -> bool:
         """判断数值是否为噪音（年份、版本号、百分比、纯序号等）。
@@ -437,7 +437,7 @@ class SearchPostprocessor:
             path = parsed.path.rstrip("/")
             return f"{netloc}{path}"
         except Exception:
-            return url.lower()
+            return url.lower()  # 解析不了就用原串小写去重，比抛错更安全
 
     def _content_hash(self, content: str) -> str:
         """基于内容前 200 字符生成哈希。"""
@@ -452,7 +452,7 @@ class SearchPostprocessor:
             parsed = urlparse(url)
             netloc = parsed.netloc.lower()
         except Exception:
-            return 0.5
+            return 0.5  # 域名解析失败给中性分，不因一条坏 URL 影响整体排序
 
         if any(domain in netloc for domain in _LOW_QUALITY_DOMAINS):
             return 0.2

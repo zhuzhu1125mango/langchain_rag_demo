@@ -328,3 +328,48 @@ class TestObservedDegradation:
         fatal = [r for r in caplog.records if "action=kb.retrieval.dense_fallback" in r.getMessage()]
         assert fatal and fatal[0].levelno == logging.ERROR
         assert "severity=reportable" in fatal[0].getMessage()
+
+
+class TestNotificationAndWikiGrading:
+    """第八批：WS 推送失败与 Wiki 空白基线降级的回归。"""
+
+    def test_ws_send_failure_drops_connection_with_log(self, caplog):
+        """推送失败要摘除连接，并留下可定位的 connection_id（此前完全静默）。"""
+        from src.api.notification import ConnectionManager
+
+        class _DeadSocket:
+            async def send_json(self, message):
+                raise ConnectionResetError("client gone")
+
+        manager = ConnectionManager()
+        manager.active_connections["conn-1"] = {
+            "websocket": _DeadSocket(),
+            "channels": set(),
+            "user_id": "u1",
+        }
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            asyncio.run(manager.send_personal_message("conn-1", {"type": "ping"}))
+
+        assert "conn-1" not in manager.active_connections, "失效连接必须被摘除"
+        hits = [r for r in caplog.records if "action=notification.send_personal" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "connection_id=conn-1" in hits[0].getMessage()
+
+    def test_wiki_blank_baseline_is_reportable(self, caplog):
+        """读不到既有页会让整库按「新建」重编（revision 归零），必须按需上报。"""
+        from src.services.wiki_compiler import WikiCompiler
+
+        class _BrokenDB:
+            async def execute(self, *args, **kwargs):
+                raise ConnectionError("db down")
+
+        compiler = WikiCompiler()
+        with caplog.at_level(logging.WARNING, logger="wiki_compiler"):
+            pages = asyncio.run(compiler._load_existing_pages(_BrokenDB(), "kb-1"))
+
+        assert pages == []
+        hits = [r for r in caplog.records if "action=wiki.compile.load_existing_pages" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "kb_id=kb-1" in hits[0].getMessage()

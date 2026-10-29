@@ -19,6 +19,7 @@ from src.services.wiki_text import (  # noqa: F401  兼容历史导入路径
     normalize_doc_ids,
     normalize_title,
 )
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.services.wiki_types import (  # noqa: F401  兼容历史导入路径
     _THINK_RE,
     _WIKI_LINK_RE,
@@ -79,6 +80,7 @@ class WikiCompiler(PageCompileMixin, PagePersistMixin):
         try:
             current_key = model_manager.embedding_model_key
         except Exception:
+            # 仅用于判断缓存是否失效：取不到就当未知，下次照常复用实例
             current_key = ""
         if self._embeddings is None or (current_key and current_key != getattr(self, "_embeddings_key", "")):
             self._embeddings = model_manager.get_embeddings()
@@ -147,7 +149,16 @@ class WikiCompiler(PageCompileMixin, PagePersistMixin):
             )
             rows = result.scalars().all()
         except Exception as e:
-            logger.warning(f"加载既有 Wiki 页失败，按空白编译处理: {e}")
+            # 返回空列表会让全部页面按「新建」编译（revision 归零、旧页不合并）。
+            # 即便底层是连接类异常（自动分级会判可恢复），后果也是数据一致性受损，
+            # 因此显式抬到需上报：这条一旦出现，本次编译产物需要人工核对。
+            log_exception(
+                logger, e,
+                action="wiki.compile.load_existing_pages",
+                severity=ErrorSeverity.REPORTABLE,
+                message="加载既有 Wiki 页失败，本次按空白基线编译（产物需人工核对）",
+                kb_id=str(kb_id),
+            )
             return []
 
         if not rows:
@@ -191,7 +202,13 @@ class WikiCompiler(PageCompileMixin, PagePersistMixin):
             try:
                 content = await self._generate_page(cand, existing, material)
             except Exception as e:
-                logger.warning(f"Wiki 页「{cand['title']}」生成失败，跳过: {e}")
+                log_exception(
+                    logger, e,
+                    action="wiki.compile.generate_page",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="Wiki 页生成失败，跳过该页",
+                    page=cand.get("title"),
+                )
                 continue
             compiled.append(
                 CompiledPage(

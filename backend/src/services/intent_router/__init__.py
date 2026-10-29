@@ -13,6 +13,7 @@ import logging
 from typing import Dict, List, Optional
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.services.intent_router.confidence_gate import ConfidenceGate
 from src.services.intent_router.conversation_context import (
     ConversationContext,
@@ -337,7 +338,12 @@ class IntentRouter:
                         search_mode=search_mode,
                     )
                 except Exception as e:
-                    logger.warning(f"LLM 路由冲突裁决失败，降级为直接 LLM: {e}")
+                    log_exception(
+                        logger, e,
+                        action="intent.router.conflict_llm",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="LLM 路由冲突裁决失败，降级为直接 LLM",
+                    )
                     return IntentDecision(
                         primary_mode=PrimaryMode.DIRECT_LLM,
                         fallback_strategy=FallbackStrategy.NONE,
@@ -435,7 +441,12 @@ class IntentRouter:
                     )
                     return emb_decision
             except Exception as e:
-                logger.warning(f"Embedding 意图分类失败，继续 LLM 路由: {e}")
+                log_exception(
+                    logger, e,
+                    action="intent.router.embedding",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="Embedding 意图分类失败，继续 LLM 路由",
+                )
 
         # 12. 规则未命中且开启 LLM 路由 → 走语义路由
         if settings.intent_router.INTENT_ROUTER_USE_LLM:
@@ -449,7 +460,12 @@ class IntentRouter:
                     search_mode=search_mode,
                 )
             except Exception as e:
-                logger.warning(f"LLM 路由失败，降级为直接 LLM: {e}")
+                log_exception(
+                    logger, e,
+                    action="intent.router.llm",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="LLM 路由失败，降级为直接 LLM",
+                )
                 return IntentDecision(
                     primary_mode=PrimaryMode.DIRECT_LLM,
                     fallback_strategy=FallbackStrategy.NONE,

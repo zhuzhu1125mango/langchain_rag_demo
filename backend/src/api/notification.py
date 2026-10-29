@@ -9,6 +9,7 @@ WebSocket通知路由 - 提供实时通知通道
 
 import asyncio
 import json
+import logging
 import uuid
 from typing import List, Optional
 
@@ -28,6 +29,9 @@ from src.services.notification_service import (
     NotificationType,
     Notification
 )
+from src.utils.error_handling import ErrorSeverity, log_exception
+
+logger = logging.getLogger("rag_system")
 from src.services.progress_manager import progress_store
 
 router = APIRouter(tags=["notifications"])
@@ -156,7 +160,15 @@ class ConnectionManager:
             websocket = self.active_connections[connection_id]["websocket"]
             try:
                 await websocket.send_json(message)
-            except Exception:
+            except Exception as e:
+                # 推送时连接已断：摘除即可，但要留下连接标识以便排查「消息丢失」
+                log_exception(
+                    logger, e,
+                    action="notification.send_personal",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="推送消息失败，摘除该连接",
+                    connection_id=connection_id,
+                )
                 self.disconnect(connection_id)
 
     async def broadcast(self, channel: str, message: dict):
@@ -254,7 +266,13 @@ async def websocket_notifications(
 
     except WebSocketDisconnect:
         manager.disconnect(connection_id)
-    except Exception:
+    except Exception as e:
+        log_exception(
+            logger, e,
+            action="notification.ws_notifications",
+            message="通知 WS 主循环异常退出",
+            connection_id=connection_id,
+        )
         manager.disconnect(connection_id)
 
 
@@ -286,7 +304,13 @@ async def websocket_knowledge_bases(websocket: WebSocket):
 
     except WebSocketDisconnect:
         manager.disconnect(connection_id)
-    except Exception:
+    except Exception as e:
+        log_exception(
+            logger, e,
+            action="notification.ws_kb",
+            message="知识库 WS 主循环异常退出",
+            connection_id=connection_id,
+        )
         manager.disconnect(connection_id)
 
 
@@ -327,7 +351,18 @@ async def websocket_documents(
 
     try:
         require_owner(kb.owner_id, current_user)
-    except Exception:
+    except HTTPException:
+        # 403 属正常拒绝路径，不是异常
+        await websocket.close(code=1008, reason="无权访问该知识库")
+        return
+    except Exception as e:
+        # DB/依赖故障此前与「无权限」表现完全一致，必须留痕才能区分
+        log_exception(
+            logger, e,
+            action="notification.ws_docs.ownership",
+            message="知识库归属校验异常，按无权访问关闭连接",
+            kb_id=kb_id, user_id=current_user.user_id,
+        )
         await websocket.close(code=1008, reason="无权访问该知识库")
         return
 
@@ -345,6 +380,12 @@ async def websocket_documents(
 
     except WebSocketDisconnect:
         manager.disconnect(connection_id)
-    except Exception:
+    except Exception as e:
+        log_exception(
+            logger, e,
+            action="notification.ws_docs",
+            message="文档 WS 主循环异常退出",
+            connection_id=connection_id, kb_id=kb_id,
+        )
         manager.disconnect(connection_id)
 

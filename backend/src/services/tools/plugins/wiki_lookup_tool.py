@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from src.services.tools.tool_manager import BaseTool, ToolResult
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -89,7 +90,7 @@ class WikiLookupTool(BaseTool):
 
             record_wiki_nav({"mode": mode, "target": target, "index_used": index_used})
         except Exception:
-            pass
+            pass  # 导航埋点：纯指标计数，失败不影响导航结果
 
     async def execute(self, **kwargs) -> ToolResult:
         # _owner_id 由编排层服务端注入（非模型参数），用于工具侧归属校验
@@ -128,7 +129,13 @@ class WikiLookupTool(BaseTool):
                 return await self._fetch_page(navigator, kb_ids, page_title, kwargs)
             return await self._entry_search(navigator, kb_ids, query, kwargs)
         except Exception as e:
-            logger.warning(f"wiki_lookup 工具执行失败: {e}")
+            # 工具失败会以 success=False 回给 Agent，属用户可见的能力降级
+            log_exception(
+                logger, e,
+                action="wiki_lookup.execute",
+                message="wiki_lookup 工具执行失败",
+                kb_count=len(kb_ids),
+            )
             return ToolResult(
                 tool_name=self.name,
                 input_arguments=kwargs,
@@ -190,7 +197,13 @@ class WikiLookupTool(BaseTool):
             try:
                 index_page = await navigator.get_index_page(kb_ids)
             except Exception as e:
-                logger.warning(f"wiki_lookup 索引页读取失败（忽略）: {e}")
+                log_exception(
+                    logger, e,
+                    action="wiki_lookup.index_page",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="索引页读取失败，回退语义检索入口",
+                    kb_count=len(kb_ids),
+                )
 
         # E-1 W3 导航埋点：入口类型（经索引页目录 / 语义检索）
         self._record_nav(

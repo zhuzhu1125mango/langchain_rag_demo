@@ -7,6 +7,8 @@ import asyncio
 import logging
 from typing import List
 
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -84,7 +86,13 @@ class KBComparator:
                         "doc_count": 0
                     }
             except Exception as e:
-                logger.error(f"从知识库 {kb_id} 检索失败: {str(e)}", exc_info=True)
+                # 单库失败会以「检索失败」写进对比结果，属用户可见降级
+                log_exception(
+                    logger, e,
+                    action="kb_compare.retrieve",
+                    message="对比时知识库检索失败，该库标记为检索失败",
+                    kb_id=kb_id,
+                )
                 results[kb_id] = {
                     "answer": f"检索失败: {str(e)}",
                     "sources": [],
@@ -178,7 +186,12 @@ class KBComparator:
                 "comparisons": comparisons
             }
         except Exception as e:
-            logger.error(f"答案差异分析失败: {str(e)}", exc_info=True)
+            log_exception(
+                logger, e,
+                action="kb_compare.diff_analysis",
+                message="答案差异分析失败，返回占位结果",
+                kb_count=len(answers),
+            )
             return {
                 "similarity_score": 0.5,
                 "consistency": "unknown",
@@ -237,5 +250,10 @@ class KBComparator:
 
             return differences[:5]
         except Exception as e:
-            logger.error(f"提取关键差异失败: {str(e)}", exc_info=True)
+            log_exception(
+                logger, e,
+                action="kb_compare.extract_differences",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="提取关键差异失败，返回空列表",
+            )
             return []

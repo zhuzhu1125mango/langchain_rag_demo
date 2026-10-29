@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.config import settings
 from src.services.model_manager import model_manager
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.services.intent_router.intent_examples import IntentExampleStore
 from src.services.intent_router.models import (
     FallbackStrategy,
@@ -76,7 +77,12 @@ class EmbeddingIntentClassifier:
                 self.embeddings = model_manager.get_embeddings()
                 self._model_name = current_model
             except Exception as e:
-                logger.warning(f"意图分类 Embedding 模型初始化失败: {e}")
+                log_exception(
+                    logger, e,
+                    action="intent.classifier.embeddings_init",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="意图分类 Embedding 模型初始化失败，本轮跳过该层",
+                )
                 self.embeddings = None
         return self.embeddings
 
@@ -105,7 +111,13 @@ class EmbeddingIntentClassifier:
         try:
             embs = await embeddings.aembed_documents(examples)
         except Exception as e:
-            logger.warning(f"模式 {mode} 示例 embedding 计算失败: {e}")
+            log_exception(
+                logger, e,
+                action="intent.classifier.example_embeddings",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="意图示例 embedding 计算失败，该模式跳过",
+                mode=mode,
+            )
             return []
 
         self._example_embeddings_cache[mode] = embs
@@ -141,7 +153,12 @@ class EmbeddingIntentClassifier:
         try:
             query_embedding = await embeddings.aembed_query(question)
         except Exception as e:
-            logger.warning(f"问题 embedding 计算失败: {e}")
+            log_exception(
+                logger, e,
+                action="intent.classifier.query_embedding",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="问题 embedding 计算失败，降级为 DIRECT_LLM",
+            )
             return EmbeddingClassifierResult(
                 primary_mode=PrimaryMode.DIRECT_LLM,
                 confidence=0.0,
