@@ -13,6 +13,8 @@ import threading
 from typing import Dict, Optional, Any
 from uuid import UUID
 
+from src.utils.error_handling import log_exception
+
 logger = logging.getLogger("rag_system")
 
 # 全局进度存储
@@ -172,7 +174,8 @@ async def _cleanup_terminal_progress(upload_id: str):
     for conn in connections:
         try:
             await conn.close()
-        except Exception:
+        except Exception:  # noqa: BLE001
+            # 终态清理阶段连接多半已由客户端断开，关闭失败无需处理（保留静默）
             pass
 
 
@@ -192,7 +195,16 @@ async def notify_ws_clients_async(upload_id: str):
     for conn in connections[:]:  # 使用切片复制列表避免迭代时修改
         try:
             await conn.send_json(message)
-        except Exception:
+        except Exception as exc:
+            # 上传进度推送失败会摘掉连接：此前完全静默，
+            # 用户侧表现为「进度条卡住」却查不到任何线索
+            log_exception(
+                logger,
+                exc,
+                action="progress.push",
+                message="上传进度推送失败，摘除该连接",
+                upload_id=upload_id,
+            )
             # 移除无效连接
             try:
                 connections.remove(conn)

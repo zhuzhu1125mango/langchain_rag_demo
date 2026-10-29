@@ -11,6 +11,7 @@ from typing import Any, Optional
 from src.config import settings
 from src.services.model_manager import model_manager
 from src.utils.async_singleton import AsyncSingleton
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,14 @@ class TitleGenerator(AsyncSingleton["TitleGenerator"]):
                 )
                 self._model_generation = generation
             except Exception as e:
-                logger.warning(f"标题生成 LLM 初始化失败: {e}")
+                # 下一次调用会重试初始化；失败期间标题退化为截断问题，
+                # 属功能降级而非请求失败，分级交给异常性质
+                log_exception(
+                    logger,
+                    e,
+                    action="conversation.title.init",
+                    message="标题生成 LLM 初始化失败，本次退化为截断",
+                )
                 self._llm = None
         return self._llm
 
@@ -90,7 +98,14 @@ class TitleGenerator(AsyncSingleton["TitleGenerator"]):
             logger.info(f"会话标题生成成功: {title}")
             return title
         except Exception as e:
-            logger.warning(f"LLM 生成标题失败，使用降级方案: {e}")
+            # 标题只是观感优化，降级为截断即可；但连续失败说明模型侧不稳，要能统计
+            log_exception(
+                logger,
+                e,
+                action="conversation.title.generate",
+                message="LLM 生成标题失败，使用截断降级",
+                question_len=len(question or ""),
+            )
             return self._fallback(question)
 
     def _fallback(self, question: str) -> str:

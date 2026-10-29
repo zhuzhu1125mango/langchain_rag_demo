@@ -2,6 +2,7 @@ import logging
 from typing import List, Dict, Optional, Tuple
 
 from src.config import settings
+from src.utils.error_handling import log_exception
 
 from .strategies.base import Strategy
 from .strategies.keyword import KeywordStrategy
@@ -266,7 +267,15 @@ class StrategyManager:
             try:
                 cfg = await sample_store.get_strategy_config(name)
             except Exception as e:
-                logger.warning(f"回载策略配置失败[{name}]: {e}")
+                # 单策略配置读失败只跳过该策略（用默认开关），但要能定位到策略名，
+                # 否则「重启后某策略配置没生效」无从排查
+                log_exception(
+                    logger,
+                    e,
+                    action="strategy.reload.config",
+                    message="回载策略配置失败，沿用默认开关",
+                    strategy=name,
+                )
                 continue
             if not cfg:
                 continue
@@ -283,7 +292,12 @@ class StrategyManager:
         try:
             decision_cfg = await sample_store.get_strategy_config("__decision__")
         except Exception as e:
-            logger.warning(f"回载决策阈值失败: {e}")
+            log_exception(
+                logger,
+                e,
+                action="strategy.reload.decision",
+                message="回载决策阈值失败，沿用配置默认值",
+            )
             decision_cfg = None
         if decision_cfg:
             threshold = (decision_cfg.get("config") or {}).get("threshold")

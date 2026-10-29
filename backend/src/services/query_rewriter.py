@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 from src.config import settings
 from src.services.model_manager import model_manager
 from src.services.prompts.prompt_loader import PromptLoader
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,13 @@ class QueryRewriter:
                 think=False,
             )
         except Exception as e:
-            logger.warning(f"QueryRewriter 默认 LLM 初始化失败: {e}")
+            # 返回 None 表示本次不改写（直接用原问题检索），属可接受降级
+            log_exception(
+                logger,
+                e,
+                action="query.rewrite.init",
+                message="QueryRewriter 默认 LLM 初始化失败，本次跳过改写",
+            )
             return None
 
     async def rewrite(
@@ -482,7 +489,14 @@ class QueryRewriter:
                 if isinstance(queries, list):
                     return [str(q).strip() for q in queries if str(q).strip()]
         except Exception as e:
-            logger.warning(f"LLM Query 改写失败: {e}")
+            # 多查询改写失败返回空列表 → 调用方退回单查询检索
+            log_exception(
+                logger,
+                e,
+                action="query.rewrite.multi",
+                message="LLM 多查询改写失败，退回单查询检索",
+                query_len=len(question or ""),
+            )
 
         return []
 

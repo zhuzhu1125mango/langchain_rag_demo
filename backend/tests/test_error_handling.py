@@ -639,3 +639,73 @@ class TestSchedulerAndTraceGrading:
         assert len(hits) == 1, "每请求都会走到这里，重复记录会淹没真正的告警"
         assert hits[0].levelno == logging.ERROR
         assert "severity=reportable" in hits[0].getMessage()
+
+
+class TestConversationAndProgressGrading:
+    """对话体验类降级（标题/改写/进度推送）：不阻断回答，但失败要能统计。"""
+
+    def test_title_generation_falls_back_with_log(self, caplog, monkeypatch):
+        from src.services.title_generator import TitleGenerator
+
+        class _BrokenLLM:
+            async def ainvoke(self, prompt):
+                raise TimeoutError("llm timeout")
+
+        gen = TitleGenerator()
+
+        async def _fake_get_llm():
+            return _BrokenLLM()
+
+        monkeypatch.setattr(gen, "_get_llm", _fake_get_llm)
+
+        with caplog.at_level(logging.WARNING, logger="src.services.title_generator"):
+            title = asyncio.run(gen.generate_title("如何配置模型路由"))
+
+        assert title, "失败必须回落到截断标题，不能返回空"
+        hits = [r for r in caplog.records if "action=conversation.title.generate" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "severity=recoverable" in hits[0].getMessage()
+
+    def test_multi_query_rewrite_failure_returns_empty(self, caplog):
+        from src.services.query_rewriter import QueryRewriter
+
+        class _BrokenLLM:
+            async def ainvoke(self, prompt):
+                raise ConnectionError("upstream reset")
+
+        rewriter = QueryRewriter(llm=_BrokenLLM())
+        with caplog.at_level(logging.WARNING, logger="src.services.query_rewriter"):
+            queries = asyncio.run(rewriter._llm_rewrite("RAG 怎么调优", None))
+
+        assert queries == []
+        hits = [r for r in caplog.records if "action=query.rewrite.multi" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "query_len=" in hits[0].getMessage()
+
+    def test_progress_push_failure_prunes_and_logs(self, caplog):
+        """上传进度推送失败此前完全静默，用户侧只看到「进度条卡住」。"""
+        from src.services import progress_manager as pm
+
+        class _DeadConn:
+            async def send_json(self, message):
+                raise ConnectionResetError("client gone")
+
+        class _Progress:
+            def to_dict(self):
+                return {"upload_id": "up-1", "progress": 50}
+
+        dead = _DeadConn()
+        pm.progress_store.clear()
+        pm.ws_connections.clear()
+        pm.progress_store["up-1"] = _Progress()
+        pm.ws_connections["up-1"] = [dead]
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            asyncio.run(pm.notify_ws_clients_async("up-1"))
+
+        assert dead not in pm.ws_connections["up-1"]
+        hits = [r for r in caplog.records if "action=progress.push" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "upload_id=up-1" in hits[0].getMessage()
+        pm.progress_store.clear()
+        pm.ws_connections.clear()

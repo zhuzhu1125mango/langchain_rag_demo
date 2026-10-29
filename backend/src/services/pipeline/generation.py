@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 from src.config import settings
 from src.services.context_builder import estimate_token_count
 from src.services.pipeline.state import _PipelineState
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -57,7 +58,13 @@ class GenerationMixin:
             )
             return self.answer_verifier.format_warning_suffix(verification_result), verification_result
         except Exception as e:
-            logger.warning(f"答案校验失败，跳过警告追加: {e}")
+            # 校验失败只是少了「答案可能有误」的提示，本轮照常返回答案
+            log_exception(
+                logger,
+                e,
+                action="answer.verify",
+                message="答案校验失败，跳过警告追加",
+            )
             return None, None
 
     async def verify_web_answer(
