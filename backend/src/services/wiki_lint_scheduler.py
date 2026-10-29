@@ -11,6 +11,7 @@ from typing import Optional
 
 from src.config import settings
 from src.services.wiki_lint import lint_kb_wiki
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -42,7 +43,15 @@ async def lint_active_kbs() -> int:
             logger.info(f"Wiki 周期 lint 完成 kb={kb_id}: {summary}")
             count += 1
         except Exception as e:
-            logger.warning(f"Wiki 周期 lint 失败 kb={kb_id}: {e}")
+            # 单个 KB 失败不中断本轮，但要能定位到具体 KB；
+            # 否则「某库长期 lint 不出来」只留下无主 warning
+            log_exception(
+                logger,
+                e,
+                action="wiki.lint.kb",
+                message="Wiki 周期 lint 失败，跳过该知识库",
+                kb_id=kb_id,
+            )
     return count
 
 
@@ -57,7 +66,13 @@ async def _loop() -> None:
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            logger.warning(f"Wiki lint 周期任务异常（继续下一轮）: {e}")
+            log_exception(
+                logger,
+                e,
+                action="wiki.lint.loop",
+                message="Wiki lint 周期任务异常，继续下一轮",
+                interval_hours=interval_hours,
+            )
 
 
 def start_scheduler() -> Optional[asyncio.Task]:

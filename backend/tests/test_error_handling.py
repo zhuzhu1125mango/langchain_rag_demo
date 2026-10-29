@@ -569,3 +569,73 @@ class TestLongTailGrading:
         text = hits[0].getMessage()
         assert "kb_scope=1" in text
         assert "top_k=3" in text
+
+
+class TestSchedulerAndTraceGrading:
+    """后台任务与埋点的分级：失败不阻断主流程，但缺口必须可追。"""
+
+    def test_wiki_compile_skips_doc_with_trace(self, caplog, monkeypatch):
+        """单篇 raw chunks 拉取失败只跳过该文档，日志必须能定位到 doc_id。"""
+        from src import database
+        from src.services import wiki_compile_scheduler as sched
+        from src.services import wiki_rebuild
+
+        class _FakeSession:
+            async def __aenter__(self):
+                return None
+
+            async def __aexit__(self, *args):
+                return False
+
+        async def _broken_load(kb_id, doc_id):
+            raise ConnectionError("milvus down")
+
+        monkeypatch.setattr(database, "async_session_maker", lambda: _FakeSession())
+        monkeypatch.setattr(wiki_rebuild, "load_raw_chunks", _broken_load)
+
+        with caplog.at_level(logging.WARNING, logger="wiki_compile_scheduler"):
+            asyncio.run(sched._compile_batch("kb-7", ["d1", "d2"]))
+
+        hits = [r for r in caplog.records if "action=wiki.scheduler.load_chunks" in r.getMessage()]
+        assert len(hits) == 2, "每篇拉取失败都要留痕"
+        assert all(h.levelno == logging.WARNING for h in hits), "Milvus 抖动属可恢复"
+        text = hits[0].getMessage()
+        assert "kb_id=kb-7" in text
+        assert "doc_id=d1" in text
+
+    def test_trace_persist_failure_keeps_trace_id(self, caplog, monkeypatch):
+        """trace 落库失败不应静默：链路无留痕时要能按 trace_id 反查。"""
+        from src import database
+        from src.services.trace_collector import TraceCollector
+
+        def _broken_factory():
+            raise ConnectionError("db down")
+
+        monkeypatch.setattr(database, "AsyncSessionLocal", _broken_factory)
+        collector = TraceCollector(trace_id="t-1")
+        collector.data.update({"question": "q"})
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            asyncio.run(collector.save_async())
+
+        hits = [r for r in caplog.records if "action=trace.persist" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "trace_id=t-1" in hits[0].getMessage()
+
+    def test_rate_limit_probe_warns_once(self, caplog, monkeypatch):
+        """限流 Redis 探测失败会静默退化为单进程：按需上报，但只在首次记录。"""
+        from src.services import cache_service
+        from src.utils import rate_limit
+
+        monkeypatch.setattr(rate_limit, "_probe_warned", False)
+        # 用裸 object 顶替 CacheService：内部属性探测必然抛 AttributeError（代码漂移）
+        monkeypatch.setattr(cache_service, "CacheService", object())
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            assert rate_limit._redis_client() is None
+            assert rate_limit._redis_client() is None
+
+        hits = [r for r in caplog.records if "action=rate_limit.redis_probe" in r.getMessage()]
+        assert len(hits) == 1, "每请求都会走到这里，重复记录会淹没真正的告警"
+        assert hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()

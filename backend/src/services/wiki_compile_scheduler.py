@@ -15,6 +15,7 @@ import time
 from typing import Dict, List, Optional, Set
 
 from src.config import settings
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("wiki_compile_scheduler")
 
@@ -93,7 +94,16 @@ async def _compile_batch(kb_id: str, doc_ids: List[str]) -> None:
                 try:
                     doc_chunks = await load_raw_chunks(kb_id, doc_id)
                 except Exception as e:
-                    logger.warning(f"Wiki 去抖编译拉取 raw chunks 失败（跳过）: doc={doc_id}: {e}")
+                    # 单篇拉取失败只跳过该文档，但结果是「这篇的内容没进 wiki」，
+                    # 必须能按 doc_id 追到，否则表现为 wiki 内容莫名缺失
+                    log_exception(
+                        logger,
+                        e,
+                        action="wiki.scheduler.load_chunks",
+                        message="拉取 raw chunks 失败，跳过该文档",
+                        kb_id=kb_id,
+                        doc_id=doc_id,
+                    )
                     continue
                 if doc_chunks:
                     chunks.extend(doc_chunks)
@@ -132,4 +142,13 @@ async def _compile_batch(kb_id: str, doc_ids: List[str]) -> None:
             )
     except Exception as e:
         record_wiki_compile(result="failed")
-        logger.warning(f"Wiki 去抖编译失败: kb={kb_id}, docs={doc_ids}: {e}", exc_info=True)
+        # 编译失败对用户不可见（去抖后台任务），指标只给计数，
+        # 这里要留下 kb/doc 与堆栈，才能判断是数据问题还是编译器缺陷
+        log_exception(
+            logger,
+            e,
+            action="wiki.scheduler.compile",
+            message="Wiki 去抖编译失败",
+            kb_id=kb_id,
+            docs=len(doc_ids),
+        )

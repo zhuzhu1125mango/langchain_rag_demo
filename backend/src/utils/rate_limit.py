@@ -19,8 +19,12 @@ from fastapi import HTTPException, Request, status
 from starlette.types import Scope
 
 from src.config import settings
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
+
+# 探测失败只留痕一次：该函数在每个限流请求上都会执行，重复记录会淹没真正的告警
+_probe_warned = False
 
 # key = "{scope}:{client_ip}" -> 窗口内请求时间戳（进程内降级用）
 _buckets: Dict[str, Deque[float]] = defaultdict(deque)
@@ -122,6 +126,7 @@ def get_client_ip(request: Request) -> str:
 
 def _redis_client():
     """返回已初始化的 Redis 客户端；未初始化时返回 None（不主动建连）。"""
+    global _probe_warned
     try:
         from src.services.cache_service import CacheService
 
@@ -130,7 +135,19 @@ def _redis_client():
         cache = CacheService._instances.get(CacheService)
         if cache is not None and getattr(cache, "available", False):
             return cache.client
-    except Exception:
+    except Exception as exc:
+        # 读的是 CacheService 内部状态，异常基本等于「类结构变了」这类代码漂移；
+        # 后果是限流与配额静默退化为单进程（多副本部署下限流被放大 N 倍），
+        # 必须按需上报，但只在首次记录避免每请求刷日志
+        if not _probe_warned:
+            _probe_warned = True
+            log_exception(
+                logger,
+                exc,
+                action="rate_limit.redis_probe",
+                severity=ErrorSeverity.REPORTABLE,
+                message="限流 Redis 探测失败，退化为进程内限流（仅记首次）",
+            )
         return None
     return None
 

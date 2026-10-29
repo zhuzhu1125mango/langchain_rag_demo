@@ -10,6 +10,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from src.services.tools.tool_manager import ToolResult
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -162,8 +163,15 @@ class TraceCollector:
                 session.add(record)
                 await session.commit()
         except Exception as e:
-            # 保存失败不应影响主流程
-            logger.warning(f"Trace 持久化失败 [{self.trace_id}]: {e}")
+            # 保存失败不阻断请求，但这条 trace 就此丢失（审计与慢请求分析会缺口），
+            # 连接类记 warning，结构类（列不匹配等）升级为 error
+            log_exception(
+                logger,
+                e,
+                action="trace.persist",
+                message="Trace 持久化失败，该请求链路无留痕",
+                trace_id=self.trace_id,
+            )
 
     def save_background(self) -> None:
         """在后台任务中保存（不阻塞主流程）。"""
@@ -176,4 +184,11 @@ class TraceCollector:
             import logging
 
             logger = logging.getLogger("rag_system")
-            logger.warning(f"Trace 后台保存任务创建失败 [{self.trace_id}]: {e}")
+            # 通常是事件循环已关闭（进程退出/测试环境）：trace 丢失但不影响业务
+            log_exception(
+                logger,
+                e,
+                action="trace.save_background",
+                message="Trace 后台保存任务创建失败，该请求链路无留痕",
+                trace_id=self.trace_id,
+            )
