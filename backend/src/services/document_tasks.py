@@ -45,6 +45,7 @@ from src.services.semantic_cache_service import (
     schedule_invalidation as _schedule_semantic_cache_invalidation,
 )
 from src.services.vector_store import VectorStoreManager
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -83,7 +84,13 @@ def invalidate_doc_cache(*kb_ids: Optional[str]) -> None:
         try:
             _schedule_semantic_cache_invalidation(kb_id)
         except Exception as exc:
-            logger.warning("文档状态变更后失效语义缓存失败 [kb_id=%s]: %s", kb_id, exc)
+            log_exception(
+                logger, exc,
+                action="document.cache.invalidate_after_status",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="文档状态变更后失效语义缓存失败",
+                kb_id=kb_id,
+            )
 
 
 async def delete_document_vectors(doc_id: str) -> None:
@@ -92,7 +99,13 @@ async def delete_document_vectors(doc_id: str) -> None:
         vector_store = await VectorStoreManager.get_instance()
         await vector_store.delete_by_document_id(doc_id)
     except Exception as exc:
-        logger.error("删除文档向量失败，状态变更已中止: doc=%s err=%s", doc_id, exc)
+        # fail-closed：向量删不掉就不能改状态，否则会留下"已下架但仍被检索到"的脏数据
+        log_exception(
+            logger, exc,
+            action="document.vectors.delete_by_document",
+            message="删除文档向量失败，状态变更已中止",
+            doc_id=doc_id,
+        )
         raise HTTPException(
             status_code=503,
             detail="向量索引暂不可用，文档状态未变更，请稍后重试",
@@ -292,7 +305,14 @@ async def process_document_async(
                 await db.commit()
                 logger.info(f"文档LLM智能分析完成: {doc.filename}")
             except Exception as e:
-                logger.warning(f"文档LLM分析失败，保留规则分析结果: {doc.filename}, 错误: {str(e)}")
+                # LLM 增强是可选增益，失败保留规则分析结果，不影响文档发布
+                log_exception(
+                    logger, e,
+                    action="document.process.llm_analysis",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="文档 LLM 智能分析失败，保留规则分析结果",
+                    doc_id=doc_id,
+                )
 
             # 阶段7：Wiki 编译（P2 LLM-Wiki 编译层，默认关闭）
             # 编译失败/超时仅记录日志与指标，不阻断文档上传（raw 层永远可用兜底）。
@@ -346,12 +366,24 @@ async def process_document_async(
 
                 await invalidate_kb_list_cache(doc.owner_id)
             except Exception as exc:
-                logger.warning(f"文档处理完成后刷新知识库列表缓存失败: {exc}")
+                log_exception(
+                    logger, exc,
+                    action="document.process.invalidate_kb_list_cache",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="文档处理完成后刷新知识库列表缓存失败，计数可能短暂滞后",
+                    doc_id=doc_id,
+                )
 
             logger.info(f"文档处理完成: {doc.filename}, 共{len(chunks)}个文本块")
 
         except Exception as e:
-            logger.error(f"文档处理失败: {doc_id}, 错误: {str(e)}", exc_info=True)
+            # 后台任务顶层：没有调用方兜底，这里是唯一记录点
+            log_exception(
+                logger, e,
+                action="document.process.background",
+                message="文档处理失败，已置为 failed 并通知前端",
+                doc_id=doc_id,
+            )
 
             # 更新文档状态为失败（用户可见文案保持通用，详细错误仅进日志）
             try:
@@ -362,8 +394,13 @@ async def process_document_async(
                     doc.processing_message = "处理失败，请重新上传或联系管理员"
                     doc.processing_progress = 0
                     await db.commit()
-            except Exception:
-                logger.error(f"写入文档失败状态时出错: {doc_id}", exc_info=True)
+            except Exception as mark_exc:
+                log_exception(
+                    logger, mark_exc,
+                    action="document.process.mark_failed",
+                    message="写入文档失败状态时出错，前端可能一直显示处理中",
+                    doc_id=doc_id,
+                )
 
             # 进度记录写入终态
             update_upload_progress(task_upload_id, status="failed", message="处理失败，请稍后重试")
@@ -427,7 +464,14 @@ async def _maybe_compile_wiki(db, doc, doc_id: str, kb_id: str, chunks, task_upl
         )
     except Exception as e:
         record_wiki_compile(result="failed")
-        logger.warning(f"Wiki 编译失败（不阻断文档上传）: {doc.filename}, 错误: {str(e)}")
+        # Wiki 编译失败不阻断上传（raw 层永远可用兜底），但需要可观测
+        log_exception(
+            logger, e,
+            action="document.wiki_compile",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="Wiki 编译失败，不阻断文档上传",
+            doc_id=doc_id,
+        )
 
 
 async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str, task_id: str):
@@ -479,7 +523,13 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
 
                     await invalidate_kb_list_cache(owner_id)
                 except Exception as exc:
-                    logger.warning(f"文档删除完成后刷新知识库列表缓存失败: {exc}")
+                    log_exception(
+                        logger, exc,
+                        action="document.delete.invalidate_kb_list_cache",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="文档删除完成后刷新知识库列表缓存失败，计数可能短暂滞后",
+                        doc_id=doc_id,
+                    )
 
             # P1-3：知识库内容已变更，失效相关语义缓存
             _schedule_semantic_cache_invalidation(kb_id)
@@ -492,7 +542,13 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
             logger.info(f"文档删除完成: {doc_id}")
 
         except Exception as e:
-            logger.error(f"文档删除失败: {doc_id}, 错误: {str(e)}", exc_info=True)
+            # 后台任务顶层：删除链路没有调用方兜底
+            log_exception(
+                logger, e,
+                action="document.delete.background",
+                message="文档删除失败，已置为 failed 并通知前端",
+                doc_id=doc_id,
+            )
             update_upload_progress(task_id, status="failed", message="删除失败，请稍后重试")
             await notify_task_failed(task_id, "文档删除失败")
 

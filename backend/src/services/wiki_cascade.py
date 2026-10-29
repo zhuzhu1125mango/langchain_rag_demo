@@ -16,6 +16,7 @@ from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
 
 from src.services.wiki_lock import get_kb_lock
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("wiki_cascade")
 
@@ -69,7 +70,15 @@ async def on_document_deleted(db, kb_id: str, doc_id: str) -> None:
             if removed_pages:
                 await WikiCompiler().rebuild_index_page(db, kb_id)
     except Exception as e:
-        logger.warning(f"Wiki 级联（源文档删除）失败（不影响删除主流程）: {e}")
+        # 级联清理是删除主流程的附加动作，失败不阻断文档删除
+        log_exception(
+            logger, e,
+            action="wiki_cascade.on_document_deleted",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="Wiki 级联（源文档删除）失败，不影响删除主流程",
+            kb_id=kb_id,
+            doc_id=doc_id,
+        )
         return
 
     # P5：级联重写（锁外调度后台任务；开关关闭时行为与 Phase 2 完全一致）
@@ -132,9 +141,13 @@ async def _rewrite_pages(kb_id: str, affected: List[dict]) -> None:
                             try:
                                 chunks.extend(await load_raw_chunks(kb_id, d))
                             except Exception as e:
-                                logger.warning(
-                                    f"Wiki 级联重写拉取剩余来源失败（跳过该来源）: "
-                                    f"doc={d}: {e}"
+                                log_exception(
+                                    logger, e,
+                                    action="wiki_cascade.rewrite.load_source",
+                                    severity=ErrorSeverity.RECOVERABLE,
+                                    message="级联重写拉取剩余来源失败，跳过该来源",
+                                    kb_id=kb_id,
+                                    doc_id=d,
                                 )
                         material = "\n\n".join(
                             c.page_content for c in chunks if getattr(c, "page_content", "")
@@ -168,8 +181,13 @@ async def _rewrite_pages(kb_id: str, affected: List[dict]) -> None:
                         await compiler._fill_links(db, kb_id, [row], [content])
                         rewritten += 1
                     except Exception as e:
-                        logger.warning(
-                            f"Wiki 级联重写失败（保留当前内容）: 页「{item['title']}」: {e}"
+                        log_exception(
+                            logger, e,
+                            action="wiki_cascade.rewrite.page",
+                            severity=ErrorSeverity.RECOVERABLE,
+                            message="级联重写单页失败，保留当前内容继续其余页面",
+                            kb_id=kb_id,
+                            page_id=item.get("page_id"),
                         )
                 if rewritten or removed:
                     await compiler.rebuild_index_page(db, kb_id)
@@ -177,7 +195,14 @@ async def _rewrite_pages(kb_id: str, affected: List[dict]) -> None:
             f"Wiki 级联重写完成: kb={kb_id}, 重写 {rewritten} 页, 删除 {removed} 页"
         )
     except Exception as e:
-        logger.warning(f"Wiki 级联重写任务异常: kb={kb_id}: {e}")
+        # fire-and-forget 任务顶层：无调用方兜底，整任务崩溃需要堆栈
+        log_exception(
+            logger, e,
+            action="wiki_cascade.rewrite.task",
+            message="Wiki 级联重写任务整体异常",
+            kb_id=kb_id,
+            pages=len(affected),
+        )
 
 
 async def on_kb_deleted(db, kb_id: str) -> None:
@@ -197,7 +222,13 @@ async def on_kb_deleted(db, kb_id: str) -> None:
             await db.commit()
             logger.info(f"Wiki 级联（知识库删除）: kb={kb_id}, 清理页面 {len(rows)} 页")
     except Exception as e:
-        logger.warning(f"Wiki 级联（知识库删除）失败（不影响删除主流程）: {e}")
+        log_exception(
+            logger, e,
+            action="wiki_cascade.on_kb_deleted",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="Wiki 级联（知识库删除）失败，不影响删除主流程",
+            kb_id=kb_id,
+        )
 
 
 async def _delete_page_artifacts(row) -> None:
@@ -209,9 +240,22 @@ async def _delete_page_artifacts(row) -> None:
         vector_store = await VectorStoreManager.get_instance()
         await vector_store.milvus_service.delete_by_document_id(row.id)
     except Exception as e:
-        logger.warning(f"Wiki 页向量删除失败（继续）: page={row.id}: {e}")
+        # 向量删不掉会留下孤儿向量（页面已删但检索命中），需可见但不中断
+        log_exception(
+            logger, e,
+            action="wiki_cascade.delete_page_vectors",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="Wiki 页向量删除失败，继续其余清理",
+            page_id=row.id,
+        )
     try:
         minio = await MinioService.get_instance()
         await minio.delete_file_async(row.content_path)
     except Exception as e:
-        logger.warning(f"Wiki 页 MinIO 正文删除失败（继续）: {row.content_path}: {e}")
+        log_exception(
+            logger, e,
+            action="wiki_cascade.delete_page_file",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="Wiki 页 MinIO 正文删除失败，继续其余清理",
+            page_id=row.id,
+        )

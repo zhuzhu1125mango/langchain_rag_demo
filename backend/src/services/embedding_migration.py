@@ -23,6 +23,7 @@ from src.services.model_adapters import build_embeddings
 from src.services.model_config_service import load_registry_config_from_db
 from src.services.model_manager import model_manager
 from src.services.model_registry import ModelRegistry, ModelRegistryConfig, ResolvedModel
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -125,7 +126,14 @@ async def _get_or_adopt(
         dimension = await milvus.describe_embedding_dimension(collection)
         chunk_count = await milvus._collection_count(collection) if dimension else 0
     except Exception as exc:
-        logger.warning("读取 Milvus 索引画像失败（状态未知）: %s", exc)
+        # Milvus 不可达：画像状态未知，本次不写库，由调用方按 unknown 处理
+        log_exception(
+            logger, exc,
+            action="embedding_migration.probe_profile",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="读取 Milvus 索引画像失败，状态按未知处理",
+            collection=collection,
+        )
         return None
 
     if dimension is None:
@@ -227,7 +235,12 @@ async def _invalidate_caches() -> None:
 
         await SemanticCacheService().invalidate_all()
     except Exception as exc:  # 缓存不可用不能回滚已完成的数据迁移
-        logger.warning("Embedding 迁移后失效语义缓存失败: %s", exc)
+        log_exception(
+            logger, exc,
+            action="embedding_migration.invalidate_caches",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="Embedding 迁移后失效语义缓存失败，旧向量缓存将按 TTL 自然过期",
+        )
 
 
 async def rebuild_index(
@@ -301,33 +314,59 @@ async def rebuild_index(
             )
             return _status_dict(row, target)
         except Exception as exc:
-            logger.exception("Embedding 索引重建失败: %s", exc)
+            log_exception(
+                logger, exc,
+                action="embedding_migration.rebuild",
+                message="Embedding 索引重建失败，开始回滚",
+                previous_profile=previous["profile_id"],
+                target_profile=target.profile_id,
+            )
             # 已经完成集合交换时先还原旧集合；尚未交换则清理影子集合
             if backup:
                 try:
                     await milvus.restore_collection(backup)
                 except Exception as restore_exc:
-                    logger.error("重建失败后还原备份集合失败，需人工介入: %s", restore_exc)
+                    log_exception(
+                        logger, restore_exc,
+                        action="embedding_migration.restore_backup",
+                        message="重建失败后还原备份集合失败，需人工介入",
+                        backup_collection=backup,
+                    )
                 if applied:
                     try:
                         model_manager.apply_registry_config(
                             ModelRegistryConfig.model_validate(previous_config_snapshot(previous, config)), source="rollback"
                         )
-                    except Exception:
-                        logger.error("重建失败后还原在线配置失败", exc_info=True)
+                    except Exception as route_exc:
+                        log_exception(
+                            logger, route_exc,
+                            action="embedding_migration.rollback_route",
+                            message="重建失败后还原在线配置失败，需人工介入",
+                        )
                 milvus.refresh_embeddings()
             elif shadow:
                 try:
                     await milvus.drop_collection_by_name(shadow)
                 except Exception as cleanup_exc:
-                    logger.warning("清理影子集合失败: %s", cleanup_exc)
+                    log_exception(
+                        logger, cleanup_exc,
+                        action="embedding_migration.drop_shadow",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="清理影子集合失败，需人工删除残留集合",
+                        shadow_collection=shadow,
+                    )
 
             row.status = "failed"
             row.last_error = f"{type(exc).__name__}: {exc}"[:500]
             try:
                 await db.commit()
-            except Exception:
-                logger.error("记录 Embedding 迁移失败状态时提交失败", exc_info=True)
+            except Exception as commit_exc:
+                # 画像是"重建状态"的唯一来源，写不进去会让闸门失效，必须上报
+                log_exception(
+                    logger, commit_exc,
+                    action="embedding_migration.mark_failed",
+                    message="记录 Embedding 迁移失败状态时提交失败，索引画像可能停留在 rebuilding",
+                )
             raise EmbeddingMigrationError(str(exc)) from exc
 
 
@@ -383,7 +422,12 @@ async def rollback_index(db: AsyncSession) -> Dict[str, Any]:
             model_manager.apply_registry_config(config, source="rollback")
             milvus.refresh_embeddings()
         except Exception as exc:
-            logger.error("索引已回滚但恢复在线配置失败，需人工介入: %s", exc)
+            log_exception(
+                logger, exc,
+                action="embedding_migration.rollback_apply_config",
+                message="索引已回滚但恢复在线配置失败，需人工介入",
+                backup_collection=row.backup_collection,
+            )
             raise EmbeddingMigrationError(f"索引已回滚，但恢复模型配置失败: {exc}") from exc
 
         target_profile = profile_from_resolved(old_model)
@@ -416,7 +460,13 @@ def schedule_rebuild(force: bool = False) -> None:
             try:
                 await rebuild_index(db, force=force)
             except Exception as exc:
-                logger.error("后台 Embedding 重建任务失败: %s", exc)
+                # 后台任务无调用方兜底，这里是唯一记录点，必须留堆栈
+                log_exception(
+                    logger, exc,
+                    action="embedding_migration.background_rebuild",
+                    message="后台 Embedding 重建任务失败",
+                    force=force,
+                )
 
     task = asyncio.create_task(_run())
     _rebuild_tasks.add(task)

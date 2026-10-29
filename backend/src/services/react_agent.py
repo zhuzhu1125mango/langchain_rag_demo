@@ -9,7 +9,7 @@ from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 from src.services.search_agent_types import AgentStep, SearchAgentResult
 from src.services.search_agent_base import BaseSearchAgent
@@ -185,7 +185,13 @@ class ReActAgent(BaseSearchAgent):
             async for chunk in self.llm.astream(final_prompt):
                 yield chunk.content if chunk.content else "", sources
         except Exception as e:
-            logger.warning(f"ReAct 流式生成失败: {e}")
+            # 流式最终合成失败：已产出的 chunk 无法撤回，只能结束并让上层兜底
+            log_exception(
+                logger, e,
+                action="agent.react.stream_final",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="ReAct 流式最终合成失败，返回空答案",
+            )
             yield "", sources
 
     def _parse_react(self, content: str) -> Tuple[str, Optional[str], Dict[str, Any], Optional[str]]:
@@ -227,6 +233,7 @@ class ReActAgent(BaseSearchAgent):
                     if not isinstance(action_args, dict):
                         action_args = {}
                 except Exception:
+                    # LLM 输出格式不合规是常态（模型自由度所致），按无行动处理即可
                     logger.debug(f"ReAct 行动 JSON 解析失败: {balanced[:200]}")
 
         return thought, action_name, action_args, final_answer

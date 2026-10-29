@@ -15,6 +15,7 @@ import redis.asyncio as aioredis
 
 from src.config import settings
 from src.utils.async_singleton import AsyncSingleton
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,7 @@ class CacheService(AsyncSingleton["CacheService"]):
             try:
                 await self.client.aclose()
             except Exception:
+                # 旧连接可能已经断开，关闭失败不影响新建，忽略即可
                 pass
             self.client = None
 
@@ -122,6 +124,7 @@ class CacheService(AsyncSingleton["CacheService"]):
                 else:
                     await self.client.close()
             except Exception:
+                # 关闭一个已经失效的连接本来就会报错，此处不需要记录
                 pass
             finally:
                 self.client = None
@@ -151,6 +154,8 @@ class CacheService(AsyncSingleton["CacheService"]):
             self._available = True
             logger.info("Redis 缓存服务恢复可用")
         except Exception:
+            # 探测失败说明仍未恢复，重置冷却窗口静默等待下一轮；
+            # 真正的 Redis 故障已由触发降级的首次操作记录过，这里不再重复刷日志。
             self._unavailable_until = time.monotonic() + REDIS_RECOVERY_COOLDOWN
 
     async def _execute(self, coro):
@@ -180,7 +185,14 @@ class CacheService(AsyncSingleton["CacheService"]):
                 except json.JSONDecodeError:
                     return value
         except Exception as exc:
-            logger.warning("读取缓存失败 [key=%s]: %s", key, exc)
+            # Redis 故障是常态降级场景：缓存未命中即回源，业务不受影响
+            log_exception(
+                logger, exc,
+                action="cache.get",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="读取缓存失败，按未命中处理",
+                cache_key=key,
+            )
             self._mark_unavailable()
         return None
 
@@ -201,7 +213,13 @@ class CacheService(AsyncSingleton["CacheService"]):
                 return await self._execute(self.client.set(key, value, ex=expire))
             return await self._execute(self.client.set(key, value))
         except Exception as exc:
-            logger.warning("写入缓存失败 [key=%s]: %s", key, exc)
+            log_exception(
+                logger, exc,
+                action="cache.set",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="写入缓存失败，本次结果不回填缓存",
+                cache_key=key,
+            )
             self._mark_unavailable()
         return False
 
@@ -210,7 +228,13 @@ class CacheService(AsyncSingleton["CacheService"]):
         try:
             return await self._execute(self.client.delete(key))
         except Exception as exc:
-            logger.warning("删除缓存失败 [key=%s]: %s", key, exc)
+            log_exception(
+                logger, exc,
+                action="cache.delete",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="删除缓存失败，返回 0",
+                cache_key=key,
+            )
             self._mark_unavailable()
         return 0
 
@@ -219,7 +243,13 @@ class CacheService(AsyncSingleton["CacheService"]):
         try:
             return await self._execute(self.client.exists(key)) == 1
         except Exception as exc:
-            logger.warning("判断缓存存在失败 [key=%s]: %s", key, exc)
+            log_exception(
+                logger, exc,
+                action="cache.exists",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="判断缓存存在失败，按不存在处理",
+                cache_key=key,
+            )
             self._mark_unavailable()
         return False
 
@@ -240,7 +270,13 @@ class CacheService(AsyncSingleton["CacheService"]):
                 if cursor == 0:
                     break
         except Exception as exc:
-            logger.warning("按模式清除缓存失败 [pattern=%s]: %s", pattern, exc)
+            log_exception(
+                logger, exc,
+                action="cache.clear_pattern",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="按模式清除缓存失败，仍有部分键未清（等 TTL 自然过期）",
+                pattern=pattern,
+            )
             self._mark_unavailable()
 
     async def ping(self) -> bool:
@@ -254,6 +290,11 @@ class CacheService(AsyncSingleton["CacheService"]):
             self._available = True
             return True
         except Exception as exc:
-            logger.warning("Redis ping 失败: %s", exc)
+            log_exception(
+                logger, exc,
+                action="cache.ping",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="Redis ping 失败，标记缓存不可用",
+            )
             self._mark_unavailable()
             return False

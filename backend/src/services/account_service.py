@@ -28,6 +28,8 @@ from src.models import (
     WikiPage,
 )
 
+from src.utils.error_handling import ErrorSeverity, log_exception
+
 logger = logging.getLogger("rag_system")
 
 
@@ -142,14 +144,32 @@ async def delete_user_account(db: AsyncSession, user_id: str) -> Dict[str, int]:
             try:
                 await vector_store.delete_by_document_id(str(doc.id))
             except Exception as exc:
-                logger.warning("注销清理文档向量失败 [doc=%s]: %s", doc.id, exc)
+                log_exception(
+                    logger, exc,
+                    action="account.delete.vectors.document",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="注销清理文档向量失败，继续其余清理",
+                    doc_id=doc.id,
+                )
         for kb in kbs:
             try:
                 await vector_store.delete_by_kb_id(str(kb.id))
             except Exception as exc:
-                logger.warning("注销清理知识库向量失败 [kb=%s]: %s", kb.id, exc)
+                log_exception(
+                    logger, exc,
+                    action="account.delete.vectors.kb",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="注销清理知识库向量失败，继续其余清理",
+                    kb_id=kb.id,
+                )
     except Exception as exc:
-        logger.warning("注销时向量库不可用，跳过向量清理: %s", exc)
+        log_exception(
+            logger, exc,
+            action="account.delete.vectors.connect",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="注销时向量库不可用，跳过向量清理",
+            user_id=user_id,
+        )
 
     try:
         from src.services.minio_service import MinioService
@@ -160,9 +180,21 @@ async def delete_user_account(db: AsyncSession, user_id: str) -> Dict[str, int]:
                 try:
                     await minio.delete_file_async(doc.file_path)
                 except Exception as exc:
-                    logger.warning("注销删除原文件失败 [doc=%s]: %s", doc.id, exc)
+                    log_exception(
+                        logger, exc,
+                        action="account.delete.objects.document",
+                        severity=ErrorSeverity.RECOVERABLE,
+                        message="注销删除原文件失败，继续其余清理",
+                        doc_id=doc.id,
+                    )
     except Exception as exc:
-        logger.warning("注销时 MinIO 不可用，跳过原文件清理: %s", exc)
+        log_exception(
+            logger, exc,
+            action="account.delete.objects.connect",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="注销时 MinIO 不可用，跳过原文件清理",
+            user_id=user_id,
+        )
 
     execution_ids = select(StrategyExecution.id).where(StrategyExecution.user_id == user_id)
     result = await db.execute(delete(StrategyFeedback).where(StrategyFeedback.execution_id.in_(execution_ids)))
@@ -190,17 +222,31 @@ async def delete_user_account(db: AsyncSession, user_id: str) -> Dict[str, int]:
     await db.commit()
 
     # 内容删除后失效语义缓存与知识库列表缓存
+    from src.services.semantic_cache_service import schedule_invalidation
+
     for kb in kbs:
         try:
-            from src.services.semantic_cache_service import schedule_invalidation
-
             schedule_invalidation(str(kb.id))
-        except Exception:
-            pass
+        except Exception as exc:
+            log_exception(
+                logger, exc,
+                action="account.delete.invalidate_semantic_cache",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="注销后失效语义缓存失败，旧答案将按 TTL 自然过期",
+                kb_id=kb.id,
+            )
     try:
-        from src.services.cache_service import invalidate_kb_list_cache
+        # 注意：invalidate_kb_list_cache 属 api.knowledge_base，不在 services.cache_service；
+        # 此前写错模块导致 ImportError 被静默吞掉，注销后列表缓存从未失效。
+        from src.api.knowledge_base import invalidate_kb_list_cache
 
         await invalidate_kb_list_cache(user_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception(
+            logger, exc,
+            action="account.delete.invalidate_kb_list_cache",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="注销后失效知识库列表缓存失败，前端可能短暂显示已删除知识库",
+            user_id=user_id,
+        )
     return summary
