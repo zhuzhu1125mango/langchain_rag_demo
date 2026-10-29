@@ -62,13 +62,15 @@ except Exception as exc:
 
 | 五（10-29） | `pipeline/agent.py` 7、`wiki_pages.py` 6、`wiki_navigator.py` 6、`rag_chain.py` 5、`exchange_rate_tool.py` 2、`gold_price_tool.py` 2 | 管线记忆/联网搜索降级路径分级；RAGChain 装配期的「持久性降级」（缓存/embeddings/后处理器）标可恢复，编排器初始化失败标需上报；行情类工具多源失败按可恢复、数值/时间解析保留静默并注明 |
 
-累计 **144 处调用点 / 覆盖约 171 个 `except` 分支**（助手合并的端点按一次调用计）。保留静默的点全部就地写明理由（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、非法金额/时间戳/数值解析、`json.loads` 兜底、SSE 中断指标计数、各引擎 `raise WebSearchError(...)` 包装上抛）。
+| 六（10-29） | `auth.py` 5、`utils/quota.py` 5、`model_manager.py` 4、`hybrid_search.py` 4、`document/upload.py` 5、`document/query.py` 5、`knowledge_base/manage.py` 5、`chat/tools.py` 5 | 认证链（吊销/Key 查询）标注 fail-open/fail-closed 语义；配额后端故障按环境分流（**生产 REPORTABLE，开发 RECOVERABLE**）；**补上两个完全静默的 500**（文档预览、取文本块原先连日志都没有） |
+
+累计 **181 处调用点 / 覆盖约 208 个 `except` 分支**（助手合并的端点按一次调用计）。保留静默的点全部就地写明理由（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、非法金额/时间戳/数值解析、`json.loads` 兜底、SSE 中断指标计数、provider 健康状态重置、registry 版本探测、各引擎 `raise WebSearchError(...)` 包装上抛）。
 
 ## 4. 推广顺序（建议）
 
 1. ~~**已拆小的高频路由**：`api/document/{upload,query}.py`、`api/admin_models.py`~~（admin_models 已完成；document 两文件待办）；
 2. ~~**外部依赖边界**：`services/milvus_*.py`、`services/web_search_*.py`~~（已完成）；
-3. **下一批**：`auth.py`（5）、`utils/quota.py`（5）、`services/model_manager.py`（5）、`services/hybrid_search.py`（5）、`api/document/{upload,query}.py`（5+5）、`api/knowledge_base/manage.py`（5）、`api/chat/tools.py`（5）；
+3. **下一批**：`services/wiki_persist.py`（4）、`services/wiki_lock.py`（4）、`services/tools/tool_manager.py`（4）、`services/model_adapters.py`（4）、`services/kb_retrieval_service.py`（4）、`api/knowledge_base/query.py`（4）、`api/chat/message.py`（4）；`main.py`（9）判定保持现状（应用装配，异常即启动失败）；
 4. **长尾**：其余 ~290 处随日常改动顺带迁移，避免二次触碰同一文件；
 5. **收敛规则**：迁移时逐点判断「能否处理」——能处理（重试/降级/跳过）→ 保留 `except` + 分级记录；不能处理（应继续抛）→ 删掉本地 `except`，交给上层。
 
