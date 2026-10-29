@@ -60,13 +60,15 @@ except Exception as exc:
 | 三（10-29） | `web_search_*` 14、`experiment.py` 11、`learning.py` 7、`learning_engine.py` 1 | 外部依赖边界统一降级语义；`experiment`/`learning` 共 17 个端点改用 `_fail` 并各自带 `action=`；`search_multi` 改为逐路记录单 query 失败（原先只拼一句 warning，丢失堆栈与定位） |
 | 四（10-29） | `cache_service.py` 6、`embedding_migration.py` 9、`document_tasks.py` 9、`wiki_cascade.py` 7、`account_service.py` 7、`react_agent.py` 1 | Redis 降级路径全部 `RECOVERABLE`；迁移/重建失败改为保留堆栈并按「需人工介入」上报；**发现并修复真实缺陷**：注销账号时 `invalidate_kb_list_cache` 从错误模块导入，ImportError 被 `except: pass` 吞掉，导致缓存从未失效（已加回归测试） |
 
-累计 **117 处调用点 / 覆盖约 144 个 `except` 分支**（助手合并的端点按一次调用计）。有意保留静默的点共 8 处（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、`json.loads` 兜底、各引擎 `raise WebSearchError(...)` 包装上抛），全部就地写明理由。
+| 五（10-29） | `pipeline/agent.py` 7、`wiki_pages.py` 6、`wiki_navigator.py` 6、`rag_chain.py` 5、`exchange_rate_tool.py` 2、`gold_price_tool.py` 2 | 管线记忆/联网搜索降级路径分级；RAGChain 装配期的「持久性降级」（缓存/embeddings/后处理器）标可恢复，编排器初始化失败标需上报；行情类工具多源失败按可恢复、数值/时间解析保留静默并注明 |
+
+累计 **144 处调用点 / 覆盖约 171 个 `except` 分支**（助手合并的端点按一次调用计）。保留静默的点全部就地写明理由（`get_extra_info` 非 socket 传输、`urlparse` 畸形输入、`model_manager` 属性探测、`aclose` 关闭已失效连接、`_maybe_recover` 冷却期探测、ReAct 行动 JSON 解析、非法金额/时间戳/数值解析、`json.loads` 兜底、SSE 中断指标计数、各引擎 `raise WebSearchError(...)` 包装上抛）。
 
 ## 4. 推广顺序（建议）
 
 1. ~~**已拆小的高频路由**：`api/document/{upload,query}.py`、`api/admin_models.py`~~（admin_models 已完成；document 两文件待办）；
 2. ~~**外部依赖边界**：`services/milvus_*.py`、`services/web_search_*.py`~~（已完成）；
-3. **下一批**：`services/pipeline/agent.py`（7）、`services/wiki_pages.py`（6）、`services/wiki_navigator.py`（6）、`services/rag_chain.py`（6）、`services/tools/plugins/{exchange_rate,gold_price}_tool.py`（6+5）；
+3. **下一批**：`auth.py`（5）、`utils/quota.py`（5）、`services/model_manager.py`（5）、`services/hybrid_search.py`（5）、`api/document/{upload,query}.py`（5+5）、`api/knowledge_base/manage.py`（5）、`api/chat/tools.py`（5）；
 4. **长尾**：其余 ~290 处随日常改动顺带迁移，避免二次触碰同一文件；
 5. **收敛规则**：迁移时逐点判断「能否处理」——能处理（重试/降级/跳过）→ 保留 `except` + 分级记录；不能处理（应继续抛）→ 删掉本地 `except`，交给上层。
 
