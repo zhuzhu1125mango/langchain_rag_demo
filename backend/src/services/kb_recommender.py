@@ -8,6 +8,7 @@ P3 增强：对有 Wiki 索引页的 KB 融合「覆盖先验」（索引页 emb
 import logging
 
 from src.config import settings
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -96,7 +97,17 @@ class KBRecommender:
 
             return recommendations[:top_k]
         except Exception as e:
-            logger.error(f"知识库推荐失败: {str(e)}", exc_info=True)
+            # 推荐失败返回空列表：调用方会退化为「不自动勾选」，功能静默失效但请求不断，
+            # 因此分类交给异常性质（检索/网络抖动可恢复，解析类错误需上报）
+            log_exception(
+                logger,
+                e,
+                action="kb.recommend",
+                message="知识库推荐失败，返回空推荐",
+                question_len=len(question or ""),
+                kb_scope=len(kb_ids) if kb_ids is not None else None,
+                top_k=top_k,
+            )
             return []
 
     async def _get_route_priors(self, question: str, kb_ids: list) -> dict:

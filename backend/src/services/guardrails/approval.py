@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Tuple
 
 from src.config import settings
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -77,7 +78,14 @@ class ApprovalGate:
 
             return await CacheService.get_instance()
         except Exception as exc:
-            logger.warning(f"审批通道 Redis 不可用: {exc}")
+            # Redis 不可用时按 fail-closed 处理（后续 get 取不到记录 → 拒绝执行），
+            # 属预期降级，但要留痕：否则「审批一律被拒」会被误读成用户没点同意
+            log_exception(
+                logger,
+                exc,
+                action="guardrails.approval.cache",
+                message="审批通道缓存不可用，后续审批按拒绝处理",
+            )
             return None
 
     @staticmethod

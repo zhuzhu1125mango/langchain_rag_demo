@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database import AsyncSessionLocal
 from src.models.audit_log import AuditLog
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,18 @@ async def record_audit(
             )
             await _commit_to_session(db, record)
     except Exception as e:  # noqa: BLE001 —— 审计失败不应阻断主流程
-        logger.warning(f"审计日志写入失败（已忽略）: action={action} err={e}")
+        # 后果优先：不阻断业务是对的，但「审计链断了」属合规缺口，底层即便是连接类
+        # 异常也要按需上报，否则敏感操作无痕且只在 warning 里一闪而过
+        log_exception(
+            logger,
+            e,
+            action="audit.record",
+            severity=ErrorSeverity.REPORTABLE,
+            message="审计日志写入失败，审计链出现缺口",
+            audit_action=action,
+            resource_type=resource_type,
+            actor_user_id=actor_user_id,
+        )
 
 
 async def query_audit_logs(

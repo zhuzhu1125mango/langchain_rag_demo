@@ -9,10 +9,15 @@
 
 import asyncio
 import json
+import logging
 from typing import Dict, Set, Optional, Any
 from dataclasses import dataclass, asdict
 from enum import Enum
 from datetime import datetime
+
+from src.utils.error_handling import log_exception
+
+logger = logging.getLogger("rag_system")
 
 # WebSocket连接管理
 # channel -> set of WebSocket connections
@@ -98,7 +103,17 @@ async def broadcast(channel: str, notification: Notification) -> None:
     for ws in connections:
         try:
             await ws.send_json(message)
-        except Exception:
+        except Exception as exc:
+            # 客户端断连属常态（可恢复），但必须留痕：此前静默摘除，
+            # 无法区分「用户关页面」和「消息序列化/权限问题导致全员收不到」
+            log_exception(
+                logger,
+                exc,
+                action="notification.service.broadcast",
+                message="广播推送失败，摘除该连接",
+                channel=channel,
+                connections=len(connections),
+            )
             # 标记无效连接
             dead_connections.add(ws)
 

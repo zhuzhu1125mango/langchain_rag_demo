@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config import settings
 from src.models import AuditLog, RequestTrace
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -49,4 +50,13 @@ async def periodic_retention(interval_s: float) -> None:
             async with async_session_maker() as db:
                 await purge_expired_data(db)
         except Exception as exc:
-            logger.warning("保留期清扫失败: %s", exc)
+            # 清扫失败只影响本轮：下个周期重试，不退出循环。
+            # 分级交给异常性质——连接类记 warning；若是解析/结构类缺陷则升级为 error，
+            # 否则「过期审计日志一直没被删」会在 warning 里长期无人处理（SEC-14）
+            log_exception(
+                logger,
+                exc,
+                action="retention.sweep",
+                message="保留期清扫失败，下个周期重试",
+                interval_s=interval,
+            )

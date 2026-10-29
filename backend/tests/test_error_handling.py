@@ -489,3 +489,83 @@ class TestContextAndBadcaseGrading:
         hits = [r for r in caplog.records if "action=badcase.learning.apply" in r.getMessage()]
         assert hits and hits[0].levelno == logging.WARNING
         assert "severity=recoverable" in hits[0].getMessage()
+
+
+class TestLongTailGrading:
+    """1~2 处/文件的长尾：只处理「失败后仍有可见后果」的点。"""
+
+    def test_audit_write_loss_is_reportable(self, caplog, monkeypatch):
+        """审计失败不阻断业务，但审计链缺口属合规问题，必须按需上报。"""
+        from src.services import audit_service
+
+        class _BrokenSessionFactory:
+            def __call__(self):
+                raise ConnectionError("db down")
+
+        monkeypatch.setattr(audit_service, "AsyncSessionLocal", _BrokenSessionFactory())
+
+        with caplog.at_level(logging.WARNING, logger="src.services.audit_service"):
+            asyncio.run(
+                audit_service.record_audit(
+                    action="document.delete",
+                    resource_type="document",
+                    resource_id="doc-1",
+                    actor_user_id="u1",
+                )
+            )
+
+        hits = [r for r in caplog.records if "action=audit.record" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        text = hits[0].getMessage()
+        assert "severity=reportable" in text, "连接类异常也要因审计缺口升级"
+        assert "audit_action=document.delete" in text
+        assert "resource_type=document" in text
+
+    def test_broadcast_failure_is_visible_and_prunes(self, caplog):
+        """广播发送失败要摘除连接并留痕，否则分不清「用户关页面」与「全员收不到」。"""
+        from src.services.notification_service import (
+            Notification,
+            NotificationType,
+            broadcast,
+            channel_connections,
+        )
+
+        class _DeadSocket:
+            async def send_json(self, message):
+                raise ConnectionResetError("client gone")
+
+        dead = _DeadSocket()
+        channel_connections.clear()
+        channel_connections["kb:9"] = {dead}
+
+        note = Notification(type=NotificationType.KB_UPDATED, channel="kb:9", data={"kb_id": "9"})
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            asyncio.run(broadcast("kb:9", note))
+
+        assert dead not in channel_connections["kb:9"], "失效连接必须摘除"
+        hits = [r for r in caplog.records if "action=notification.service.broadcast" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "channel=kb:9" in hits[0].getMessage()
+        channel_connections.clear()
+
+    def test_kb_recommend_failure_degrades_visibly(self, caplog):
+        """推荐失败返回空列表是「静默功能失效」，此前只有一句 error，无法聚合定位。"""
+        from src.services.kb_recommender import KBRecommender
+
+        class _BrokenChain:
+            def _has_vector_store(self):
+                return True
+
+            async def _retrieve_documents(self, question, kb_ids=None):
+                raise RuntimeError("vector store exploded")
+
+        recommender = KBRecommender(_BrokenChain())
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(recommender.recommend_knowledge_bases("报销流程", kb_ids=["kb-1"]))
+
+        assert result == []
+        hits = [r for r in caplog.records if "action=kb.recommend" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR, "RuntimeError 应判为需上报"
+        text = hits[0].getMessage()
+        assert "kb_scope=1" in text
+        assert "top_k=3" in text

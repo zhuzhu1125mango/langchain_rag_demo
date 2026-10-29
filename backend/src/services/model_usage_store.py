@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.database import async_session_maker
 from src.models.model_registry import ModelUsageDaily
 from src.services.model_usage import model_usage
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -67,7 +68,15 @@ async def flush_usage_deltas() -> int:
             await session.commit()
     except Exception as exc:
         model_usage.restore(rows)
-        logger.warning("模型用量落库失败，增量已回填内存: %s", exc)
+        # 增量已回填内存，下个周期会重试；连接类记 warning，结构/类型类错误升级，
+        # 否则「用量一直落不了库」只会在 warning 里被忽略（影响计费口径）
+        log_exception(
+            logger,
+            exc,
+            action="model.usage.flush",
+            message="模型用量落库失败，增量已回填内存待下轮重试",
+            rows=len(rows),
+        )
         return 0
     return len(rows)
 
