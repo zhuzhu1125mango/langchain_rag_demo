@@ -49,7 +49,7 @@ export function useDocumentActions(documentsData: Ref<{ items?: Document[] } | n
       toast.info('正在删除文档...', `正在后台删除 ${doc.filename}`)
 
       // 立即重拉文档列表（D2）：实际 query key 为 ['documents', effectiveParams]
-      // （queries/kb.ts），不能写死 ['documents'] 做乐观 setQueryData——
+      // （queries/kb/documents.ts），不能写死 ['documents'] 做乐观 setQueryData——
       // 此前写入无人读取的键导致删除不生效。失效命中前缀即可触发精确重拉（既有惯例）。
       queryClient.invalidateQueries({ queryKey: ['documents'] })
 
