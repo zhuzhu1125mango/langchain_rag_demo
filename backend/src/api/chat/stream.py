@@ -22,7 +22,7 @@ from src.services.pipeline.state import set_ab_config, reset_ab_config
 from src.services.title_generator import TitleGenerator
 from src.utils.sensitive_words import sensitive_filter
 from src.utils.validators import parse_uuid_list, validate_kb_ownership
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 from .common import (
     MessageRequest,
@@ -297,7 +297,15 @@ async def stream_answer(
                 if at == "search_status":
                     try:
                         status_data = json.loads(chunk) if chunk else {}
-                    except Exception:
+                    except Exception as exc:
+                        # 解析失败会让前端只看到「running / 0 来源」，
+                        # 与「搜索确实没结果」不可分，必须留原始片段
+                        log_exception(
+                            logger, exc,
+                            action="chat.stream.search_status.parse",
+                            message="search_status 事件解析失败，前端状态将退化为默认值",
+                            raw=str(chunk)[:120],
+                        )
                         status_data = {}
                     reasoning_payload = {
                         "type": "reasoning",
@@ -326,7 +334,16 @@ async def stream_answer(
                 if at == "approval_required":
                     try:
                         approval_payload = json.loads(chunk) if chunk else {}
-                    except Exception:
+                    except ValueError as exc:
+                        # 审批请求解析不出来 = 这张审批卡片永远不会弹给用户，
+                        # 高危工具调用就此悬空。属安全相关的事件丢失，必须上报。
+                        log_exception(
+                            logger, exc,
+                            action="chat.stream.approval.parse",
+                            severity=ErrorSeverity.REPORTABLE,
+                            message="审批事件解析失败，高危工具审批已丢失（用户不会看到审批卡片）",
+                            raw=str(chunk)[:200],
+                        )
                         approval_payload = {}
                     if approval_payload:
                         logger.info(

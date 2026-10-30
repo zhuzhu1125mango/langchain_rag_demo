@@ -14,6 +14,11 @@ from typing import List, Optional, Dict, Any
 from src.config import settings
 from src.auth import get_current_user, require_admin, CurrentUser
 from src.services.document_processor import SUPPORTED_EXTENSIONS
+from src.utils.error_handling import ErrorSeverity, log_exception
+
+import logging
+
+logger = logging.getLogger("rag_system")
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -47,7 +52,15 @@ def _model_config() -> ModelConfig:
         embedding_dimension = int(
             registry.get_embedding_model().model.embedding_dimension or settings.model.EMBEDDING_DIMENSION
         )
-    except Exception:
+    except Exception as exc:
+        # registry 读不到 embedding 模型时回退 env 值：管理员据此判断索引是否
+        # 需要重建，显示一个与真实索引不符的维度会直接误导运维决策
+        log_exception(
+            logger, exc,
+            action="config.model.embedding_dimension",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="读取 registry embedding 维度失败，回退 .env 配置值",
+        )
         embedding_dimension = settings.model.EMBEDDING_DIMENSION
     return ModelConfig(
         embedding_model_name=registry.get_model_name("embedding") or (settings.model.EMBEDDING_MODEL_NAME or ""),

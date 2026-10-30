@@ -238,7 +238,17 @@ class ToolManager:
             result = await asyncio.wait_for(tool.execute(**kwargs), timeout=30.0)
             result.latency_ms = int((time.time() - start) * 1000)
             return result
-        except asyncio.TimeoutError:
+        except asyncio.TimeoutError as exc:
+            # 超时以 success=False 回给 Agent 是可见的，但「哪个工具慢到 30s」
+            # 只有服务端日志能回答，否则只能看到工具调用莫名失败
+            log_exception(
+                logger, exc,
+                action="tools.execute.timeout",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="工具执行超时",
+                tool=tool_name,
+                timeout_s=30.0,
+            )
             return ToolResult(
                 tool_name=tool_name,
                 input_arguments=kwargs,

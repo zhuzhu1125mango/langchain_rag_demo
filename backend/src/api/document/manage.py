@@ -35,7 +35,7 @@ from src.services.document_tasks import (
 from src.services.notification_service import notify_doc_list_changed
 from src.services.progress_manager import create_upload_progress, update_upload_progress
 from src.services.vector_store import VectorStoreManager
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.validators import validate_kb_ownership
 
 from .common import (
@@ -426,6 +426,7 @@ async def batch_delete(
     deleted_docs = []
     deleted_count = 0
     task_ids = []
+    invalid_ids: list = []
 
     for doc_id in ids:
         try:
@@ -458,13 +459,25 @@ async def batch_delete(
                     kb_id, doc_id, "deleting", owner_id=current_user.user_id
                 )
 
-        except ValueError:
+        except ValueError as exc:
+            # ID 不是合法 UUID：跳过是对的，但响应里只说「已提交 N 个」，
+            # 调用方会以为 N 就是请求的全部，漏删这件事完全不可见
+            invalid_ids.append(str(doc_id))
+            log_exception(
+                logger, exc,
+                action="document.batch_delete.invalid_id",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="批量删除跳过非法文档 ID",
+                doc_id=str(doc_id)[:64],
+                total=len(ids),
+            )
             continue
 
     return {
         "message": f"已提交{deleted_count}个删除任务",
         "deleted_count": deleted_count,
-        "tasks": deleted_docs
+        "tasks": deleted_docs,
+        "invalid_ids": invalid_ids,
     }
 
 

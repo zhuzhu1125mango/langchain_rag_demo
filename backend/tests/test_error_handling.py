@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
@@ -1165,3 +1166,66 @@ class TestRerankAndPriceToolGrading:
         assert hits and hits[0].levelno == logging.ERROR, "按 1 计算会改变答案，必须是 reportable"
         assert "severity=reportable" in hits[0].getMessage()
         assert "raw_amount=很多" in hits[0].getMessage()
+
+
+class TestApiAndToolBoundaryGrading:
+    """路由与工具边界：跳过/超时这类「看起来正常」的失败要能反查。"""
+
+    def test_batch_delete_invalid_id_is_reported(self, caplog):
+        """非法 ID 被跳过是对的，但响应只说「已提交 N 个」，漏删对调用方不可见。"""
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.api import document_router
+        from src.auth import get_current_user
+        from src.database import get_db
+
+        class _DB:
+            async def execute(self, *args, **kwargs):
+                raise AssertionError("非法 ID 不应发起查询")
+
+        app = FastAPI()
+        app.include_router(document_router)
+        app.dependency_overrides[get_db] = lambda: _DB()
+        app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="u-1")
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            resp = TestClient(app).post("/documents/batch/delete", json={"ids": ["not-a-uuid"]})
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["invalid_ids"] == ["not-a-uuid"]
+        assert body["deleted_count"] == 0
+        hits = [r for r in caplog.records if "action=document.batch_delete.invalid_id" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "total=1" in hits[0].getMessage()
+
+    def test_tool_timeout_is_logged_with_name(self, caplog, monkeypatch):
+        """超时以 success=False 回给 Agent，但「哪个工具慢到 30s」只有日志能回答。"""
+        from src.services.tools import tool_manager as tm_mod
+        from src.services.tools.tool_manager import BaseTool, ToolManager, ToolResult
+
+        class _SlowTool(BaseTool):
+            name = "slow_tool"
+            description = "慢工具"
+            parameters = {"type": "object", "properties": {}}
+
+            async def execute(self, **kwargs) -> ToolResult:
+                return ToolResult(tool_name=self.name, output="never")
+
+        async def _always_timeout(coro, timeout=None):
+            coro.close()
+            raise asyncio.TimeoutError()
+
+        manager = ToolManager()
+        manager.register_tool(_SlowTool())
+        monkeypatch.setattr(tm_mod.asyncio, "wait_for", _always_timeout)
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(manager.execute("slow_tool"))
+
+        assert result.success is False and result.error == "工具执行超时"
+        hits = [r for r in caplog.records if "action=tools.execute.timeout" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "tool=slow_tool" in hits[0].getMessage()
+        assert "timeout_s=30.0" in hits[0].getMessage()

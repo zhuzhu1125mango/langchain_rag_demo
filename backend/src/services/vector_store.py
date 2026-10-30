@@ -11,6 +11,7 @@ from pymilvus.exceptions import MilvusException
 
 from src.services.milvus_service import MilvusService
 from src.utils.async_singleton import AsyncSingleton
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,16 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
                 query, k=k, document_ids=document_ids, kb_ids=kb_ids
             )
         except MilvusException as e:
-            # 仅捕获 Milvus 已知可恢复异常降级纯向量检索；其它异常（配置错误等）上抛
-            logger.warning(f"混合检索失败，降级为纯向量检索: {e}")
+            # 仅捕获 Milvus 已知可恢复异常降级纯向量检索；其它异常（配置错误等）上抛。
+            # 降级后少了两路召回，结果排序与命中率都会变——用户只会觉得「检索变差」。
+            log_exception(
+                logger, e,
+                action="vector_store.search_hybrid",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="混合检索失败，降级为纯向量检索",
+                k=k,
+                kb_scope=len(kb_ids) if kb_ids else 0,
+            )
             results = await self.milvus_service.search(
                 query, k=k, document_ids=document_ids, kb_ids=kb_ids
             )

@@ -14,6 +14,7 @@ from minio.error import S3Error
 
 from src.config import settings
 from src.utils.async_singleton import AsyncSingleton
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("minio_service")
 
@@ -51,7 +52,15 @@ class MinioService(AsyncSingleton["MinioService"]):
                 self._client.make_bucket(settings.minio.MINIO_BUCKET_NAME)
                 logger.info(f"Created bucket: {settings.minio.MINIO_BUCKET_NAME}")
         except S3Error as e:
-            logger.error(f"Error creating bucket: {e}")
+            # 建桶失败这里只报一句就往下走：真正的报错会推迟到 upload/download，
+            # 到那时已经看不出是「桶不存在」，所以就地留下 bucket 名与错误码。
+            log_exception(
+                logger, e,
+                action="minio.ensure_bucket",
+                severity=ErrorSeverity.REPORTABLE,
+                message="MinIO bucket 校验/创建失败，后续上传下载将不可用",
+                bucket=settings.minio.MINIO_BUCKET_NAME,
+            )
 
     def upload_file(self, file, file_id=None):
         """同步上传文件到 MinIO。
