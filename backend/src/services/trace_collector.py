@@ -18,6 +18,9 @@ logger = logging.getLogger("rag_system")
 # 与 rag_chain 的 _background_store_tasks 一致）；任务完成时回调自动清理。
 _background_tasks: set = set()
 
+# 已被提示过「无对应列」的键，避免逐请求重复告警
+_dropped_key_warned: set = set()
+
 
 class TraceCollector:
     """单次请求链路追踪采集器。"""
@@ -144,9 +147,16 @@ class TraceCollector:
         payload = {k: v for k, v in self.data.items() if k in known}
         dropped = set(self.data) - known
         if dropped:
-            logger.warning(
-                f"Trace 含无对应列的键，落库前已丢弃 [{self.trace_id}]: {sorted(dropped)}"
-            )
+            # 这是代码与表结构不同步，不是某次请求的异常：每个请求都打 WARNING 会把
+            # 真正的问题淹掉，同一键只提示一次，其余降为 debug。
+            fresh = sorted(k for k in dropped if k not in _dropped_key_warned)
+            _dropped_key_warned.update(fresh)
+            if fresh:
+                logger.warning(
+                    f"Trace 含无对应列的键，落库前已丢弃（仅提示一次）[{self.trace_id}]: {fresh}"
+                )
+            else:
+                logger.debug(f"Trace 丢弃无对应列的键 [{self.trace_id}]: {sorted(dropped)}")
         return payload
 
     async def save_async(self) -> None:

@@ -34,6 +34,8 @@ class VerificationResult:
         warnings: 警告信息列表。
         unsupported_claims: 未在 sources 中找到支撑的声明。
         conflicting_claims: 与 sources 冲突的声明。
+        citation_issues: 引用编号问题（如 [n] 超出有效来源范围）。单列一份，
+            便于调用方在不解析 warnings 文案的前提下判断「引用是否对得上」。
         citation_coverage: 引用覆盖率（有 [n] 的句子 / 总事实句，[?] 不计入分子）。
         cross_source_consistency: 多源交叉一致的比例。
         source_authority: 来源平均权威度。
@@ -45,6 +47,7 @@ class VerificationResult:
     warnings: List[str] = field(default_factory=list)
     unsupported_claims: List[str] = field(default_factory=list)
     conflicting_claims: List[str] = field(default_factory=list)
+    citation_issues: List[str] = field(default_factory=list)
     citation_coverage: float = 0.0
     cross_source_consistency: float = 0.0
     source_authority: float = 0.0

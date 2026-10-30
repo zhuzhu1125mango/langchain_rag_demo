@@ -130,6 +130,7 @@ class AnswerVerifierChecksMixin:
         answer: str,
         valid_indices: set,
         warnings: List[str],
+        citation_issues: Optional[List[str]] = None,
     ) -> None:
         """校验答案中的引用编号是否有效。
 
@@ -137,6 +138,7 @@ class AnswerVerifierChecksMixin:
             answer: 答案文本。
             valid_indices: 有效 source_index 集合。
             warnings: 收集警告。
+            citation_issues: 收集引用类问题（供调用方用结构化判断，不必解析文案）。
         """
         citations = _ANSWER_CITATION_RE.findall(answer)
         if not citations:
@@ -150,7 +152,10 @@ class AnswerVerifierChecksMixin:
             except ValueError:
                 continue
             if valid_indices and idx not in valid_indices:
-                warnings.append(f"引用 [{idx}] 超出有效来源范围")
+                issue = f"引用 [{idx}] 超出有效来源范围"
+                warnings.append(issue)
+                if citation_issues is not None:
+                    citation_issues.append(issue)
 
     def _compute_cross_source_consistency(
         self,

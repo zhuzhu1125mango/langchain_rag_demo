@@ -1419,3 +1419,76 @@ class TestRelevanceGateAndStreamRetryGrading:
         assert "attempt=1 max_retries=1" in hits[0].getMessage()
         assert "model=grading-llm" in hits[0].getMessage()
         assert "severity=recoverable" in hits[0].getMessage()
+
+
+class TestVerificationSignalGrading:
+    """校验链：结果算出来了却不让用户看到，等于没算。"""
+
+    def test_conflicting_claims_override_high_confidence(self):
+        """多源数值冲突是确定性证据，置信度再高也不能静默。"""
+        from src.services.answer_verification_types import VerificationResult
+        from src.services.answer_verifier import AnswerVerifier
+
+        verifier = AnswerVerifier()
+        result = VerificationResult(
+            is_consistent=False,
+            confidence=0.95,
+            conflicting_claims=["数值 850 与多源数据存在冲突"],
+        )
+
+        suffix = verifier.format_warning_suffix(result)
+
+        assert suffix, "is_consistent=False 却返回空后缀，等于把冲突吃掉了"
+        assert "不一致" in suffix
+
+    def test_citation_out_of_range_is_surfaced(self):
+        """答案引用 [9] 但只有 1 个来源：用户点开对不上任何东西。"""
+        from src.services.answer_verification_types import VerificationResult
+        from src.services.answer_verifier import AnswerVerifier
+
+        verifier = AnswerVerifier()
+        result = VerificationResult(
+            is_consistent=True,
+            confidence=0.92,
+            citation_issues=["引用 [9] 超出有效来源范围"],
+            warnings=["引用 [9] 超出有效来源范围"],
+        )
+
+        suffix = verifier.format_warning_suffix(result)
+
+        assert "引用编号" in suffix
+
+    @pytest.mark.asyncio
+    async def test_citation_issue_is_structured(self):
+        """verification 结果要能被结构化判断，不必让调用方去解析告警文案。"""
+        from src.services.answer_verifier import AnswerVerifier
+
+        verifier = AnswerVerifier()
+        answer = "金价 850 元 [9]。"
+        sources = [
+            {"source_index": 1, "title": "金价A", "content": "金价 850 元", "url": "https://a.com"}
+        ]
+
+        result = await verifier.verify(answer, sources)
+
+        assert result.citation_issues == ["引用 [9] 超出有效来源范围"]
+        assert "引用 [9] 超出有效来源范围" in result.warnings
+
+    def test_trace_dropped_key_warns_once(self, caplog, monkeypatch):
+        """代码与表结构不同步不是请求级异常，逐请求告警会把真问题淹掉。"""
+        from src.services import trace_collector as mod
+
+        monkeypatch.setattr(mod, "_dropped_key_warned", set(), raising=False)
+
+        collector = mod.TraceCollector(trace_id="t-1")
+        collector.data["question"] = "q"
+        collector.data["verification"] = {"confidence": 0.9}
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            first = collector._to_record_payload()
+            collector._to_record_payload()
+            collector._to_record_payload()
+
+        assert "verification" not in first and "question" in first
+        hits = [r for r in caplog.records if "无对应列的键" in r.getMessage()]
+        assert len(hits) == 1, "同一键只应提示一次"

@@ -87,9 +87,10 @@ class AnswerVerifier(AnswerVerifierChecksMixin):
         # 2. 日期一致性
         self._check_date_consistency(answer, sources, warnings)
 
-        # 3. 引用真实性
+        # 3. 引用真实性（单列 citation_issues：下游要能结构化判断引用是否对得上）
+        citation_issues: List[str] = []
         valid_indices = self._collect_valid_indices(sources)
-        self._check_citation_validity(answer, valid_indices, warnings)
+        self._check_citation_validity(answer, valid_indices, warnings, citation_issues)
 
         # 4. 计算四因子
         cross_source_consistency = self._compute_cross_source_consistency(
@@ -122,6 +123,7 @@ class AnswerVerifier(AnswerVerifierChecksMixin):
             warnings=warnings,
             unsupported_claims=unsupported_claims,
             conflicting_claims=conflicting_claims,
+            citation_issues=citation_issues,
             citation_coverage=round(citation_coverage, 4),
             cross_source_consistency=round(cross_source_consistency, 4),
             source_authority=round(source_authority, 4),
@@ -131,12 +133,20 @@ class AnswerVerifier(AnswerVerifierChecksMixin):
     def format_warning_suffix(self, result: VerificationResult) -> str:
         """根据校验结果生成追加到答案末尾的警告文本。
 
+        判定顺序按「信号强弱」而非只看加权置信度：多源数值冲突与引用越界都属
+        确定性证据，即使四项加权分很高也必须提示。此前只看 confidence，导致
+        `is_consistent=False`（有冲突）的答案照样不带任何警告。
+
         Args:
             result: 校验结果。
 
         Returns:
             警告文本，无需追加时返回空字符串。
         """
+        if result.conflicting_claims:
+            return "\n\n⚠️ 不同来源对同一数据给出的数值不一致，建议以官方渠道为准。"
+        if result.citation_issues:
+            return "\n\n⚠️ 答案中的部分引用编号在来源列表中不存在，请谨慎参考。"
         if result.confidence >= self.warning_threshold:
             return ""
         if result.confidence < self.low_threshold:
