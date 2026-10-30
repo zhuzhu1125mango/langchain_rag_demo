@@ -11,7 +11,7 @@
 import inspect
 import logging
 import time
-from typing import Callable, Optional, Union
+from typing import Callable, List, Optional, Union
 
 from sqlalchemy import select
 
@@ -86,7 +86,11 @@ async def rebuild_kb_wiki(
 ) -> dict:
     """按 KB 全量重编译；progress_cb(percent, message) 可选（sync 或 async 均可）。
 
-    返回 {"documents", "pages_wiped", "pages_created", "pages_updated", "chunks_indexed"}。
+    返回 {"documents", "pages_wiped", "pages_created", "pages_updated", "chunks_indexed",
+    "documents_failed", "failed_documents"}。
+
+    `documents_failed > 0` 表示该 KB 的 Wiki 处于缺页状态：本流程先清后建，
+    失败文档的旧页面已删且未重建，调用方必须据此改汇报口径。
     """
 
     async def report(percent: int, message: str) -> None:
@@ -114,18 +118,19 @@ async def rebuild_kb_wiki(
             )
         )
     ).scalars().all()
-    report(5, f"待编译文档 {len(docs)} 篇")
+    await report(5, f"待编译文档 {len(docs)} 篇")
 
     wiped = await _wipe_existing(db, kb_id)
-    report(10, f"已清理既有 Wiki 页面 {wiped} 页")
+    await report(10, f"已清理既有 Wiki 页面 {wiped} 页")
 
     compiler = WikiCompiler()
     total_created = total_updated = total_indexed = 0
+    failed_docs: List[str] = []
     span = 90 / len(docs) if docs else 0
     for i, doc in enumerate(docs, 1):
         chunks = await load_raw_chunks(kb_id, doc.id)
         if not chunks:
-            report(10 + int(span * i), f"[{i}/{len(docs)}] {doc.filename}: 无 raw chunks，跳过")
+            await report(10 + int(span * i), f"[{i}/{len(docs)}] {doc.filename}: 无 raw chunks，跳过")
             continue
         try:
             compile_started = time.monotonic()
@@ -140,7 +145,7 @@ async def rebuild_kb_wiki(
             total_created += result.pages_created
             total_updated += result.pages_updated
             total_indexed += result.chunks_indexed
-            report(
+            await report(
                 10 + int(span * i),
                 f"[{i}/{len(docs)}] {doc.filename}: 新建 {result.pages_created} 页，"
                 f"更新 {result.pages_updated} 页",
@@ -154,7 +159,29 @@ async def rebuild_kb_wiki(
                 message="Wiki 重编译失败，跳过该文档",
                 kb_id=str(kb_id), doc_id=str(doc.id), filename=doc.filename,
             )
-            report(10 + int(span * i), f"[{i}/{len(docs)}] {doc.filename}: 编译失败，跳过")
+            failed_docs.append(doc.filename or str(doc.id))
+            await report(10 + int(span * i), f"[{i}/{len(docs)}] {doc.filename}: 编译失败，跳过")
+
+    if failed_docs:
+        # 本流程是「先清后建」：失败文档的旧页面已被 _wipe_existing 删掉且不会再生成，
+        # 所以这个 KB 的 Wiki 实际处于「缺页」状态。逐文档的日志只能说明单篇失败，
+        # 看不出「整个知识库现在少了哪几块」，必须有一条聚合记录 + 返回值标记。
+        all_failed = len(failed_docs) >= len(docs)
+        log_exception(
+            logger,
+            RuntimeError("Wiki 重编译存在失败文档"),
+            action="wiki.rebuild.incomplete",
+            severity=ErrorSeverity.REPORTABLE,
+            message=(
+                "Wiki 全量重编译全部失败，该知识库的 Wiki 已被清空"
+                if all_failed
+                else "部分文档重编译失败，其 Wiki 页面已随清理删除且未重建"
+            ),
+            kb_id=str(kb_id),
+            failed=len(failed_docs),
+            total=len(docs),
+            samples=failed_docs[:5],
+        )
 
     return {
         "documents": len(docs),
@@ -162,4 +189,6 @@ async def rebuild_kb_wiki(
         "pages_created": total_created,
         "pages_updated": total_updated,
         "chunks_indexed": total_indexed,
+        "documents_failed": len(failed_docs),
+        "failed_documents": failed_docs[:10],
     }

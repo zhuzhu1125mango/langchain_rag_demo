@@ -1492,3 +1492,152 @@ class TestVerificationSignalGrading:
         assert "verification" not in first and "question" in first
         hits = [r for r in caplog.records if "无对应列的键" in r.getMessage()]
         assert len(hits) == 1, "同一键只应提示一次"
+
+
+class TestWikiRebuildIncompleteGrading:
+    """Wiki 重建：先清后建，失败必须让「缺页」可见，而不是报「完成」。"""
+
+    @staticmethod
+    def _fake_db(docs):
+        class _Result:
+            def scalars(self):
+                return self
+
+            def all(self):
+                return docs
+
+        class _DB:
+            async def execute(self, *args, **kwargs):
+                return _Result()
+
+            async def commit(self):
+                return None
+
+        return _DB()
+
+    def test_partial_failure_is_aggregated(self, caplog, monkeypatch):
+        """单篇失败的日志只能说明某一篇坏了，看不出「整个知识库少了哪几块」。"""
+        from src.services import wiki_rebuild as mod
+
+        docs = [
+            SimpleNamespace(id="d1", filename="a.pdf"),
+            SimpleNamespace(id="d2", filename="b.pdf"),
+        ]
+
+        class _Compiler:
+            async def compile_document(self, db, kb_id, doc_ids, chunks):
+                if doc_ids == ["d2"]:
+                    raise RuntimeError("LLM 返回空")
+                return SimpleNamespace(
+                    pages_created=1, pages_updated=0, chunks_indexed=2, fact_retention_rate=0.9
+                )
+
+        async def _wipe(db, kb_id):
+            return 5
+
+        async def _chunks(kb_id, doc_id):
+            return ["chunk"]
+
+        monkeypatch.setattr(mod, "_wipe_existing", _wipe)
+        monkeypatch.setattr(mod, "load_raw_chunks", _chunks)
+        monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", _Compiler)
+
+        with caplog.at_level(logging.ERROR, logger="wiki_rebuild"):
+            stats = asyncio.run(mod.rebuild_kb_wiki(self._fake_db(docs), "kb-1"))
+
+        assert stats["documents_failed"] == 1
+        assert stats["failed_documents"] == ["b.pdf"]
+        assert stats["pages_created"] == 1
+        hits = [r for r in caplog.records if "action=wiki.rebuild.incomplete" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "failed=1 total=2" in hits[0].getMessage()
+
+    def test_all_failed_says_wiki_wiped(self, caplog, monkeypatch):
+        """全部失败 = 旧页面已删且没重建，这个 KB 的 Wiki 现在是空的。"""
+        from src.services import wiki_rebuild as mod
+
+        docs = [SimpleNamespace(id="d1", filename="only.pdf")]
+
+        class _Compiler:
+            async def compile_document(self, *args, **kwargs):
+                raise ConnectionError("milvus down")
+
+        async def _wipe(db, kb_id):
+            return 7
+
+        async def _chunks(kb_id, doc_id):
+            return ["chunk"]
+
+        monkeypatch.setattr(mod, "_wipe_existing", _wipe)
+        monkeypatch.setattr(mod, "load_raw_chunks", _chunks)
+        monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", _Compiler)
+
+        with caplog.at_level(logging.ERROR, logger="wiki_rebuild"):
+            stats = asyncio.run(mod.rebuild_kb_wiki(self._fake_db(docs), "kb-2"))
+
+        assert stats["pages_wiped"] == 7 and stats["pages_created"] == 0
+        assert stats["documents_failed"] == 1
+        hits = [r for r in caplog.records if "action=wiki.rebuild.incomplete" in r.getMessage()]
+        assert hits and "Wiki 已被清空" in hits[0].getMessage()
+
+    def test_index_page_failure_is_reportable(self, caplog, monkeypatch):
+        """页面写进了库（列表可见）但向量没进去 → 问答永远检索不到这一页。"""
+        from src.services.wiki_persist import PagePersistMixin
+
+        class _BrokenStore:
+            async def add_documents(self, docs, kb_id):
+                raise TimeoutError("milvus write timeout")
+
+        async def _get_instance():
+            return _BrokenStore()
+
+        monkeypatch.setattr(
+            "src.services.vector_store.VectorStoreManager.get_instance", _get_instance
+        )
+
+        persist = object.__new__(PagePersistMixin)
+        page = SimpleNamespace(title="报销制度", content="正文内容", page_type="entity")
+        row = SimpleNamespace(id="page-1")
+
+        with caplog.at_level(logging.ERROR, logger="rag_system"):
+            indexed = asyncio.run(persist._index_page("kb-1", row, page))
+
+        assert indexed == 0
+        hits = [r for r in caplog.records if "action=wiki.persist.index_page" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "检索不到" in hits[0].getMessage()
+
+    def test_progress_callback_actually_runs(self, monkeypatch):
+        """report() 是 async 却全部漏 await：重编译期间用户只看到「正在提交任务」。"""
+        from src.services import wiki_rebuild as mod
+
+        docs = [SimpleNamespace(id="d1", filename="a.pdf")]
+        events = []
+
+        class _Compiler:
+            async def compile_document(self, *args, **kwargs):
+                return SimpleNamespace(
+                    pages_created=1, pages_updated=0, chunks_indexed=1, fact_retention_rate=0.9
+                )
+
+        async def _wipe(db, kb_id):
+            return 2
+
+        async def _chunks(kb_id, doc_id):
+            return ["chunk"]
+
+        def _progress(percent, message):
+            events.append((percent, message))
+
+        monkeypatch.setattr(mod, "_wipe_existing", _wipe)
+        monkeypatch.setattr(mod, "load_raw_chunks", _chunks)
+        monkeypatch.setattr("src.services.wiki_compiler.WikiCompiler", _Compiler)
+
+        asyncio.run(mod.rebuild_kb_wiki(self._fake_db(docs), "kb-3", progress_cb=_progress))
+
+        messages = [m for _, m in events]
+        assert any("待编译文档" in m for m in messages), "进度回调从未被调用"
+        assert any("已清理既有 Wiki 页面" in m for m in messages)
+        assert any("新建 1 页" in m for m in messages)

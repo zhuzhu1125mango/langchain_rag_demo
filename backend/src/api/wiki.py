@@ -110,10 +110,21 @@ async def _run_wiki_rebuild(kb_id: str, task_id: str) -> None:
     async with async_session_maker() as db:
         try:
             stats = await rebuild_kb_wiki(db, kb_id, progress_cb=progress)
+            failed = stats.get("documents_failed", 0)
+            total = stats.get("documents", 0)
             message = (
                 f"重编译完成: 新建 {stats['pages_created']} 页，"
                 f"更新 {stats['pages_updated']} 页，入库 {stats['chunks_indexed']} 块"
             )
+            if failed:
+                # 先清后建：失败文档的旧页面已删且没重建，这里若仍报「完成」，
+                # 用户会以为 Wiki 只是没变化，实际是少了几块内容。
+                message += f"；{failed}/{total} 篇编译失败，其页面缺失"
+            if failed and failed >= total > 0:
+                # 全部失败 = Wiki 被清空，按失败处理，别让进度条显示绿灯
+                update_upload_progress(task_id, status="failed", message=message)
+                await notify_task_failed(task_id, message)
+                return
             await notify_task_progress(task_id, 100, message)
             update_upload_progress(task_id, status="completed", message=message)
             await notify_task_completed(task_id, {"kb_id": kb_id, "status": "wiki_rebuilt", **stats})

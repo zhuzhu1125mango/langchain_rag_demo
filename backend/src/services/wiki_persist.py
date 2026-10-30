@@ -179,11 +179,14 @@ class PagePersistMixin:
             await vector_store.add_documents(docs, str(kb_id))
             return len(docs)
         except Exception as e:
+            # 页面文本已落库（列表里看得见），但向量没入库 → wiki_lookup 永远检索不到
+            # 这一页。用户视角是「Wiki 里明明有这页，问问题却引用不到」，属结论错误，
+            # 不能按「有 raw 层兜底」轻描淡写。
             log_exception(
                 logger, e,
                 action="wiki.persist.index_page",
-                severity=ErrorSeverity.RECOVERABLE,
-                message="Wiki 页向量入库失败（raw 层兜底不受影响）",
+                severity=ErrorSeverity.REPORTABLE,
+                message="Wiki 页向量入库失败，该页在列表中可见但问答检索不到",
                 kb_id=str(kb_id), page=page.title,
             )
             return 0
