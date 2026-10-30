@@ -6,13 +6,35 @@
 
 import asyncio
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.config import settings
 from src.services.kb_retrieval_service import KBRetrievalService
 from src.services.pipeline.state import _request_decision, _request_retrieval_score
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("rag_system")
+
+# 「相关性无法度量」只需说明一次：模型缺失是部署期问题，不是请求级故障，
+# 每个请求都刷一条会把日志冲掉。
+_similarity_unavailable_logged = False
+_rerank_probe_logged = False
+
+
+def _log_similarity_unavailable(exc: Optional[BaseException] = None) -> None:
+    """记录「语义相关性兜底不可用，门禁退化为放行」（进程内只记首次）。"""
+    global _similarity_unavailable_logged
+    if _similarity_unavailable_logged:
+        return
+    _similarity_unavailable_logged = True
+    log_exception(
+        logger,
+        exc if exc is not None else ImportError("sentence-transformers 不可用"),
+        action="pipeline.relevance.fallback",
+        severity=ErrorSeverity.REPORTABLE,
+        message="相关性无法度量，知识库检索结果一律放行（KB_RELEVANCE_SCORE_THRESHOLD 失效，仅记首次）",
+        threshold=settings.processing.KB_RELEVANCE_SCORE_THRESHOLD,
+    )
 
 
 class RetrievalMixin:
@@ -26,8 +48,11 @@ class RetrievalMixin:
                 # D 显存防抖：显式绑定 CPU，避免与 qwen3:4b 争抢有限显存
                 self.sentence_transformer = SentenceTransformer('all-MiniLM-L6-v2', device="cpu")
                 self.similarity_util = util
-            except ImportError:
+            except Exception as exc:
+                # 依赖缺失或权重损坏都归为「度量能力不可用」：相关性门禁退化为放行，
+                # 不能让一次模型加载失败把整轮检索打成 500。
                 self.sentence_transformer = None
+                _log_similarity_unavailable(exc)
 
     async def _calculate_relevance(self, question, docs):
         """
@@ -66,7 +91,11 @@ class RetrievalMixin:
         self._init_similarity_model()
 
         if self.sentence_transformer is None:
-            return 0.6, True
+            # 测不出来时对「是否相关」只能 fail-open（不丢知识库结果），但分数不能编：
+            # 原先返回常量 0.6，看起来像测过且刚好过阈值，实际是假数据，
+            # 会把「检索相关度」指标、评测与 badcase 复盘一起带偏。
+            _log_similarity_unavailable()
+            return 0.0, True
 
         texts = [
             question,
@@ -99,11 +128,22 @@ class RetrievalMixin:
         未加载时 hybrid_search 会令 rerank_score=rrf_score（数量级 ~1/61），
         不可作相关性依据，须走语义相似度兜底。
         """
+        global _rerank_probe_logged
         try:
             from src.services.hybrid_search import KBReranker
 
             return KBReranker.model_loaded()
-        except Exception:
+        except Exception as exc:
+            # 探测失败会静默改走语义兜底：相关性判定口径在无人察觉时换了一套
+            if not _rerank_probe_logged:
+                _rerank_probe_logged = True
+                log_exception(
+                    logger,
+                    exc,
+                    action="pipeline.relevance.rerank_probe",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="rerank 就绪探测失败，改用语义相似度判定相关性（仅记首次）",
+                )
             return False
 
     def get_last_retrieval_score(self):

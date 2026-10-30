@@ -1337,3 +1337,85 @@ class TestAgentToolDegradationGrading:
         assert hits and hits[0].levelno == logging.ERROR
         assert "severity=reportable" in hits[0].getMessage()
         assert "candidates=1" in hits[0].getMessage()
+
+
+class TestRelevanceGateAndStreamRetryGrading:
+    """判定链上的静默降级：相关性门禁与 LLM 重试失败。"""
+
+    def _retrieval_obj(self, monkeypatch, mod):
+        obj = object.__new__(mod.RetrievalMixin)
+        obj.sentence_transformer = None
+        obj.similarity_util = None
+        obj.similarity_threshold = 0.3
+        monkeypatch.setattr(mod, "_similarity_unavailable_logged", False, raising=False)
+        monkeypatch.setattr(
+            mod.RetrievalMixin, "_rerank_score_available", staticmethod(lambda: False)
+        )
+        return obj
+
+    def test_relevance_fallback_does_not_fabricate_score(self, caplog, monkeypatch):
+        """测不出相关性时可以放行，但分数不能编一个 0.6 当真实测量值。"""
+        from src.services.pipeline import retrieval as mod
+
+        obj = self._retrieval_obj(monkeypatch, mod)
+        monkeypatch.setitem(__import__("sys").modules, "sentence_transformers", None)
+
+        docs = [SimpleNamespace(page_content="报销流程见附件", metadata={})]
+        with caplog.at_level(logging.ERROR, logger="rag_system"):
+            score, has_relevant = asyncio.run(obj._calculate_relevance("怎么报销", docs))
+
+        assert has_relevant is True, "测不出来时 fail-open，不能把知识库结果丢掉"
+        assert score == 0.0, "0.6 是编出来的常量，会被当成「刚好过阈值」的真实分数"
+        hits = [r for r in caplog.records if "action=pipeline.relevance.fallback" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+
+    def test_relevance_fallback_logs_once(self, caplog, monkeypatch):
+        """模型缺失是部署期问题，逐请求刷屏会盖掉真正的请求级故障。"""
+        from src.services.pipeline import retrieval as mod
+
+        obj = self._retrieval_obj(monkeypatch, mod)
+        monkeypatch.setitem(__import__("sys").modules, "sentence_transformers", None)
+
+        docs = [SimpleNamespace(page_content="x", metadata={})]
+        with caplog.at_level(logging.ERROR, logger="rag_system"):
+            for _ in range(3):
+                asyncio.run(obj._calculate_relevance("q", docs))
+
+        hits = [r for r in caplog.records if "action=pipeline.relevance.fallback" in r.getMessage()]
+        assert len(hits) == 1, "只应记首次"
+
+    def test_stream_retry_exhausted_is_logged(self, caplog, monkeypatch):
+        """重试耗尽后用户拿到的是「模型调用失败: xxx」，日志此前只有指标计数。"""
+        from src.services.pipeline import generation as mod
+
+        class _BrokenLLM:
+            model = "grading-llm"
+            labels = []
+
+            def astream(self, prompt):
+                async def _gen():
+                    raise ConnectionError("ollama refused")
+                    yield  # pragma: no cover
+                return _gen()
+
+        obj = object.__new__(mod.GenerationMixin)
+        obj.llm = _BrokenLLM()
+        obj.llm_direct = None
+
+        async def _collect():
+            out = []
+            async for item in obj._stream_with_retry("p", [], [], "answer", max_retries=1):
+                out.append(item)
+            return out
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            chunks = asyncio.run(_collect())
+
+        assert chunks and chunks[-1][3] == "error"
+        assert "模型调用失败" in chunks[-1][0]
+        hits = [r for r in caplog.records if "action=pipeline.generate.stream" in r.getMessage()]
+        assert hits, "重试耗尽必须有日志"
+        assert "attempt=1 max_retries=1" in hits[0].getMessage()
+        assert "model=grading-llm" in hits[0].getMessage()
+        assert "severity=recoverable" in hits[0].getMessage()

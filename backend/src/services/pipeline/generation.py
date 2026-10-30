@@ -167,13 +167,31 @@ class GenerationMixin:
 
                 return
             except Exception as e:
+                # 重试前把真实模型标识算出来，供指标与日志共用
+                labels = getattr(llm, "labels", None) or []
+                metric_model = labels[0].split("/")[-1] if labels else getattr(
+                    llm, "model", settings.model.OLLAMA_MODEL_NAME
+                )
                 if PROMETHEUS_AVAILABLE:
-                    labels = getattr(llm, "labels", None) or []
-                    metric_model = labels[0].split("/")[-1] if labels else getattr(
-                        llm, "model", settings.model.OLLAMA_MODEL_NAME
-                    )
                     record_llm_call_error(metric_model)
-                if attempt < max_retries - 1:
+                # 此前这条路径只有 Prometheus 计数：指标未接时（PROMETHEUS_AVAILABLE=False）
+                # 一次失败就是零痕迹，而用户看到的是「模型调用失败: xxx」被当成答案。
+                is_final = attempt >= max_retries - 1
+                log_exception(
+                    logger,
+                    e,
+                    action="pipeline.generate.stream",
+                    message=(
+                        "LLM 流式生成失败，重试耗尽，向用户返回错误文本"
+                        if is_final
+                        else "LLM 流式生成失败，续传重试"
+                    ),
+                    attempt=attempt + 1,
+                    max_retries=max_retries,
+                    resumed_chars=len(yielded_part),
+                    model=metric_model,
+                )
+                if not is_final:
                     await asyncio.sleep(1)
                     continue
                 error_msg = f"模型调用失败: {str(e)}"
