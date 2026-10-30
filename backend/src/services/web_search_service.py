@@ -23,6 +23,11 @@ from src.services.web_search_rewriter import SearchQueryRewriter
 from src.services.web_search_types import WebContent, WebSearchError
 from src.services.web_search_engines import EngineMixin
 
+# 「全部抓取失败、整体退回搜索摘要」的累计计数与节流阈值：
+# 站点大面积反爬时每次搜索都会命中，逐条记录会把日志刷满。
+_fetch_all_failed_hits = 0
+_FETCH_ALL_FAILED_REPORT_EVERY = 50
+
 class WebSearchService(EngineMixin, ContentMixin):
     """联网搜索服务统一入口，集成多搜索引擎、Query 改写、重排与缓存。"""
 
@@ -117,6 +122,32 @@ class WebSearchService(EngineMixin, ContentMixin):
                 message="写入搜索缓存失败，不影响本次结果",
                 cache_key=key,
             )
+
+    def _snippet_fallback(self, results: List[SearchResult], max_results: int) -> List[WebContent]:
+        """正文全部抓取失败时的兜底：退回搜索引擎摘要。
+
+        摘要通常只有一两句，注入上下文后答案会明显变浅；这是「看起来正常但质量
+        掉一档」的典型降级，必须留痕，否则只能看到「模型答得敷衍」。
+        """
+        global _fetch_all_failed_hits
+        _fetch_all_failed_hits += 1
+        if (
+            _fetch_all_failed_hits <= 3
+            or _fetch_all_failed_hits % _FETCH_ALL_FAILED_REPORT_EVERY == 0
+        ):
+            log_exception(
+                logger,
+                ValueError("全部网页正文抓取失败"),
+                action="web_search.build_context.fetch_all_failed",
+                severity=ErrorSeverity.REPORTABLE,
+                message="网页正文全部抓取失败，退回搜索摘要（答案深度下降）",
+                candidates=len(results),
+                hits=_fetch_all_failed_hits,
+            )
+        return [
+            WebContent(url=r.url, title=r.title, content=r.content, snippet=r.content)
+            for r in results[:max_results]
+        ]
 
     async def search(self, query: str, max_results: Optional[int] = None) -> List[SearchResult]:
         """执行单 Query 搜索，按配置路由到对应搜索引擎。"""
@@ -240,10 +271,7 @@ class WebSearchService(EngineMixin, ContentMixin):
         valid_contents = [c for c in contents if c is not None]
 
         if not valid_contents:
-            valid_contents = [
-                WebContent(url=r.url, title=r.title, content=r.content, snippet=r.content)
-                for r in results[:max_results]
-            ]
+            valid_contents = self._snippet_fallback(results, max_results)
 
         # 语义重排
         ranked_contents = await self.reranker.rerank(query, valid_contents, top_k=max_results)
@@ -350,10 +378,7 @@ class WebSearchService(EngineMixin, ContentMixin):
         valid_contents = [c for c in contents if c is not None]
 
         if not valid_contents:
-            valid_contents = [
-                WebContent(url=r.url, title=r.title, content=r.content, snippet=r.content)
-                for r in results[:max_results]
-            ]
+            valid_contents = self._snippet_fallback(results, max_results)
 
         # 语义重排
         ranked_contents = await self.reranker.rerank(query, valid_contents, top_k=max_results)

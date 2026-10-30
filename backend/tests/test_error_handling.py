@@ -1229,3 +1229,111 @@ class TestApiAndToolBoundaryGrading:
         assert hits and hits[0].levelno == logging.WARNING
         assert "tool=slow_tool" in hits[0].getMessage()
         assert "timeout_s=30.0" in hits[0].getMessage()
+
+
+class TestAgentToolDegradationGrading:
+    """工具侧降级：失败只回一句「失败」给模型时，日志必须能反查原因。"""
+
+    def test_fetch_webpage_error_is_logged(self, caplog, monkeypatch):
+        """抓取失败此前完全无日志：事后只能看到「Agent 没用上网页内容」。"""
+        from src.config import settings
+        from src.services.tools.plugins import fetch_webpage_tool as mod
+
+        monkeypatch.setattr(settings.search, "AGENT_WEB_FETCH_ENABLED", True, raising=False)
+        monkeypatch.setattr(mod, "validate_url_safe", lambda url: None)
+
+        class _BrokenService:
+            async def fetch_content(self, url, title="", snippet=""):
+                raise ConnectionError("connection refused")
+
+        tool = mod.FetchWebpageTool(web_search_service=_BrokenService())
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(tool.execute(url="https://example.com/a"))
+
+        assert result.success is False and "抓取失败" in result.error
+        hits = [r for r in caplog.records if "action=tools.fetch_webpage.execute" in r.getMessage()]
+        assert hits, "抓取失败必须留痕"
+        assert hits[0].levelno == logging.WARNING
+        assert "severity=recoverable" in hits[0].getMessage()
+        assert "url=https://example.com/a" in hits[0].getMessage()
+
+    def test_fetch_webpage_empty_body_is_reportable(self, caplog, monkeypatch):
+        """抓取没报错但正文为空：多半是反爬/提取器失效，属质量退化。"""
+        from src.config import settings
+        from src.services.tools.plugins import fetch_webpage_tool as mod
+
+        monkeypatch.setattr(settings.search, "AGENT_WEB_FETCH_ENABLED", True, raising=False)
+        monkeypatch.setattr(mod, "_empty_content_hits", 0, raising=False)
+        monkeypatch.setattr(mod, "validate_url_safe", lambda url: None)
+
+        class _EmptyService:
+            async def fetch_content(self, url, title="", snippet=""):
+                return SimpleNamespace(content="")
+
+        tool = mod.FetchWebpageTool(web_search_service=_EmptyService())
+
+        with caplog.at_level(logging.ERROR, logger="rag_system"):
+            result = asyncio.run(tool.execute(url="https://blocked.example.com/b"))
+
+        assert "内容为空" in result.output
+        hits = [r for r in caplog.records if "action=tools.fetch_webpage.empty_body" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+
+    def test_kb_search_failure_is_logged_with_scope(self, caplog):
+        """检索服务故障与「确实没有相关文档」在 Agent 侧同形，必须能分开。"""
+        from src.services.tools.plugins.kb_search_tool import KBSearchTool
+
+        class _BrokenService:
+            async def retrieve(self, query, kb_ids=None):
+                raise TimeoutError("milvus timeout")
+
+        tool = KBSearchTool(kb_retrieval_service=_BrokenService(), kb_ids=["kb-1", "kb-2"])
+
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            result = asyncio.run(tool.execute(query="报销流程"))
+
+        assert result.success is False and "知识库检索失败" in result.error
+        hits = [r for r in caplog.records if "action=tools.kb_search.execute" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "severity=recoverable" in hits[0].getMessage()
+        assert "kb_count=2" in hits[0].getMessage()
+
+    def test_dropped_tool_call_is_reported(self, caplog, monkeypatch):
+        """模型给了 JSON 却解析不出工具名 → 调用被丢弃，上层按「无需工具」硬答。"""
+        from src.services import function_calling_agent as mod
+
+        monkeypatch.setattr(mod, "_dropped_tool_call_hits", 0, raising=False)
+
+        handler = object.__new__(mod.FunctionCallingHandler)
+        content = '{"tool_name": "web_search", "query": "今天北京天气"}'
+
+        with caplog.at_level(logging.ERROR, logger="function_calling_agent"):
+            calls = handler._parse_tool_calls(content)
+
+        assert calls == []
+        hits = [r for r in caplog.records if "action=agent.fc.parse_tool_calls" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "json_blocks=1" in hits[0].getMessage()
+
+    def test_snippet_fallback_is_reported(self, caplog, monkeypatch):
+        """全部正文抓取失败退回摘要：答案变浅，但此前完全没有痕迹。"""
+        from src.services import web_search_service as mod
+        from src.services.search_types import SearchResult
+
+        monkeypatch.setattr(mod, "_fetch_all_failed_hits", 0, raising=False)
+
+        svc = object.__new__(mod.WebSearchService)
+        results = [SearchResult(title="t1", url="https://a.example.com", content="摘要一")]
+        contents = svc._snippet_fallback(results, 5)
+
+        assert len(contents) == 1 and contents[0].content == "摘要一"
+        hits = [
+            r for r in caplog.records
+            if "action=web_search.build_context.fetch_all_failed" in r.getMessage()
+        ]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "candidates=1" in hits[0].getMessage()

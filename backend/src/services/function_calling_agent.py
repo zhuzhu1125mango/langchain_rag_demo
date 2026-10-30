@@ -9,7 +9,7 @@ from src.utils.security import redact_for_log
 
 logger = logging.getLogger(__name__)
 
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 from src.services.search_agent_types import (
     SearchAgentResult,
@@ -19,6 +19,32 @@ from src.services.search_agent_types import (
 )
 from src.services.search_agent_base import BaseSearchAgent
 from src.services.search_agent_types import is_realtime_question
+
+# 工具调用解析为空的累计计数：模型偶尔跑偏是常态，但比例升高说明提示词或
+# 解析规则退化了。前 3 次逐条记，之后每 50 次一条。
+_dropped_tool_call_hits = 0
+_DROPPED_TOOL_CALL_REPORT_EVERY = 50
+
+
+def _report_dropped_tool_call(content: str, blocks: List[Dict[str, Any]]) -> None:
+    """记录「模型想调工具、但解析不出工具名」的丢弃事件。"""
+    global _dropped_tool_call_hits
+    _dropped_tool_call_hits += 1
+    if (
+        _dropped_tool_call_hits <= 3
+        or _dropped_tool_call_hits % _DROPPED_TOOL_CALL_REPORT_EVERY == 0
+    ):
+        log_exception(
+            logger,
+            ValueError("工具调用解析为空"),
+            action="agent.fc.parse_tool_calls",
+            severity=ErrorSeverity.REPORTABLE,
+            message="模型输出了工具调用但无法解析出工具名，调用被丢弃",
+            json_blocks=len(blocks),
+            hits=_dropped_tool_call_hits,
+            raw=redact_for_log(content)[:300],
+        )
+
 
 class FunctionCallingHandler(BaseSearchAgent):
     """
@@ -183,6 +209,11 @@ class FunctionCallingHandler(BaseSearchAgent):
                 arguments = {}
             if name:
                 calls.append(ToolCall(name=name, arguments=arguments))
+
+        # 模型给了 JSON 却抽不出工具名 → 调用被静默丢弃，上层按「无需工具」直接作答，
+        # 用户看到的是一个拿训练数据硬答的答案。此前这条路径没有任何痕迹。
+        if not calls and (blocks or looks_like_tool_call(content)):
+            _report_dropped_tool_call(content, blocks)
         return calls
 
     def _format_tool_results(self, tool_results: List[ToolResult]) -> str:

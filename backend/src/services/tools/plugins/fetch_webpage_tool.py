@@ -1,9 +1,18 @@
 """网页抓取工具插件。"""
 
+import logging
 from typing import Any, Optional
 
 from src.services.tools.tool_manager import BaseTool, ToolResult
+from src.utils.error_handling import ErrorSeverity, log_exception
 from src.utils.security import validate_url_safe, UnsafeUrlError
+
+logger = logging.getLogger("rag_system")
+
+# 「抓取成功但正文为空」按工具实例累计，前 3 次逐条记、之后每 50 次一条：
+# 站点反爬时每次调用都会命中，逐条记录会把日志刷满。
+_empty_content_hits = 0
+_EMPTY_CONTENT_REPORT_EVERY = 50
 
 
 class FetchWebpageTool(BaseTool):
@@ -65,6 +74,15 @@ class FetchWebpageTool(BaseTool):
                 snippet=kwargs.get("snippet", ""),
             )
         except Exception as e:
+            # 失败原因要能反查：此前这里直接返回「抓取失败」给模型，
+            # 日志侧一个字都没有，事后只能看到「Agent 没用上网页内容」。
+            log_exception(
+                logger, e,
+                action="tools.fetch_webpage.execute",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="网页抓取失败，错误回传给模型",
+                url=url,
+            )
             return ToolResult(
                 tool_name=self.name,
                 input_arguments=kwargs,
@@ -75,6 +93,20 @@ class FetchWebpageTool(BaseTool):
         # fetch_content 返回 WebContent 数据类，取其 content 字段（字符串）
         page_text = content.content if hasattr(content, "content") else str(content)
         if not page_text:
+            # 抓取本身没报错、正文却是空：多半是站点改版或反爬拦住了提取器，
+            # 属于「静默降级」——模型只会看到一句「内容为空」，运营侧看不出面。
+            global _empty_content_hits
+            _empty_content_hits += 1
+            if _empty_content_hits <= 3 or _empty_content_hits % _EMPTY_CONTENT_REPORT_EVERY == 0:
+                log_exception(
+                    logger,
+                    ValueError("抓取成功但正文为空"),
+                    action="tools.fetch_webpage.empty_body",
+                    severity=ErrorSeverity.REPORTABLE,
+                    message="网页正文提取为空，可能是反爬或提取器失效",
+                    url=url,
+                    hits=_empty_content_hits,
+                )
             return ToolResult(tool_name=self.name, output="网页内容为空或无法解析。")
 
         return ToolResult(

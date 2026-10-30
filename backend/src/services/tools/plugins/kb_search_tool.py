@@ -8,6 +8,7 @@ import logging
 from typing import Any
 
 from src.services.tools.tool_manager import BaseTool, ToolResult
+from src.utils.error_handling import log_exception
 
 logger = logging.getLogger("rag_system")
 
@@ -129,7 +130,14 @@ class KBSearchTool(BaseTool):
                 sources=sources,
             )
         except Exception as e:
-            logger.warning(f"kb_search 工具执行失败: {e}")
+            # 检索服务故障（Milvus/嵌入不可用）与「确实没有相关文档」在 Agent 侧
+            # 都表现为「拿不到资料」，但前者要修、后者是正常结论，必须能分开。
+            log_exception(
+                logger, e,
+                action="tools.kb_search.execute",
+                message="知识库检索工具执行失败，错误回传给模型",
+                kb_count=len(kb_ids),
+            )
             return ToolResult(
                 tool_name=self.name,
                 input_arguments=kwargs,
