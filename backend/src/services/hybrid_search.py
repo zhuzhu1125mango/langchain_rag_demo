@@ -221,6 +221,13 @@ class KBReranker:
             else:
                 scores = await asyncio.to_thread(KBReranker._model.predict, pairs)
 
+            # 打分失败的条目为 None：不能当作 0 分参与过滤，否则整批被
+            # KB_RERANK_MIN_SCORE 滤空，表现成「知识库没有相关内容」。
+            # 部分失败即整批回退 RRF，避免 0~1 重排分与 RRF 分混排造成次序错乱。
+            failed = sum(1 for score in scores if score is None)
+            if failed:
+                raise RuntimeError(f"重排打分失败 {failed}/{len(scores)} 条，整批回退 RRF 排序")
+
             for result, score in zip(results, scores):
                 result["rerank_score"] = float(score)
 

@@ -1081,3 +1081,87 @@ class TestWikiGraphAndABGrading:
         assert len(hits) == 3, "前 3 次记录，之后每 100 次一条"
         assert "failures=1" in hits[0].getMessage()
         assert "experiment_id=exp-1" in hits[0].getMessage()
+
+
+class TestRerankAndPriceToolGrading:
+    """重排分数与价格工具：失败被冒充成「低相关 / 默认值」，结论会直接错。"""
+
+    def test_rerank_score_failure_returns_none(self, caplog):
+        """打分失败必须以 None 表达；0.0 会被下游当成「判定不相关」而滤掉候选。"""
+        from src.services.ollama_reranker import OllamaReranker
+
+        reranker = OllamaReranker("grading-rerank-model")
+        reranker._initialized = True
+
+        class _BrokenClient:
+            async def generate(self, model, prompt):
+                raise ConnectionError("ollama connection refused")
+
+        reranker._client = _BrokenClient()
+
+        with caplog.at_level(logging.WARNING, logger="ollama_reranker"):
+            score = asyncio.run(reranker._score_pair("查询", "文档"))
+
+        assert score is None
+        hits = [r for r in caplog.records if "action=rerank.ollama.score" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.WARNING
+        assert "severity=recoverable" in hits[0].getMessage()
+        assert "model=grading-rerank-model" in hits[0].getMessage()
+
+    def test_rerank_unparseable_output_is_logged(self, caplog):
+        """模型没按格式给分数：与「0 分」区分开，否则一条不相关都查不出来。"""
+        from src.services import ollama_reranker as mod
+
+        reranker = mod.OllamaReranker("grading-rerank-parse")
+        reranker._initialized = True
+
+        class _GarbageClient:
+            async def generate(self, model, prompt):
+                return {"response": "I cannot rate this."}
+
+        reranker._client = _GarbageClient()
+        monkeypatch_marker = mod._parse_failures
+
+        with caplog.at_level(logging.WARNING, logger="ollama_reranker"):
+            score = asyncio.run(reranker._score_pair("查询", "文档"))
+
+        assert score is None
+        hits = [r for r in caplog.records if "action=rerank.ollama.parse" in r.getMessage()]
+        assert hits and mod._parse_failures == monkeypatch_marker + 1
+        assert "raw=I cannot rate this." in hits[0].getMessage()
+
+    def test_exchange_rate_bad_amount_is_reportable(self, caplog, monkeypatch):
+        """金额认不出来却按 1 算，用户会拿到一个「看着正常」的错误数字。"""
+        from decimal import Decimal
+
+        from src.services.tools.plugins import exchange_rate_tool as mod
+
+        point = mod.PriceDataPoint(
+            value=Decimal("7.1"),
+            currency="CNY",
+            unit="USD",
+            timestamp=None,
+            source="frankfurter",
+            source_url="https://api.frankfurter.dev/v1/latest",
+        )
+
+        async def _fake_frankfurter(from_currency, to_currency):
+            return point
+
+        monkeypatch.setattr(mod, "_fetch_frankfurter", _fake_frankfurter)
+        monkeypatch.delenv("FREE_EXCHANGE_RATE_API_KEY", raising=False)
+
+        tool = mod.ExchangeRateTool()
+        with caplog.at_level(logging.ERROR, logger="rag_system"):
+            result = asyncio.run(
+                tool.execute(from_currency="USD", to_currency="CNY", amount="很多", question="很多美元是多少人民币")
+            )
+
+        # 答案要么带「金额没认出来」的提示，要么直接因置信度不足拒答；
+        # 两种情况都不能给出一个看着正常的数字
+        assert ("未识别出兑换金额" in result.output) or ("无法获取可靠" in result.output)
+        assert result.input_arguments["amount"] == "1", "金额确实被替换成了 1，故必须留痕"
+        hits = [r for r in caplog.records if "action=tools.exchange_rate.amount_parse" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR, "按 1 计算会改变答案，必须是 reportable"
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "raw_amount=很多" in hits[0].getMessage()

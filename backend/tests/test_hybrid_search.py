@@ -53,3 +53,38 @@ async def test_kbreranker_no_model():
     assert ranked[0]["document_id"] == "doc3"
     assert ranked[1]["document_id"] == "doc1"
     assert "rerank_score" in ranked[0]
+
+
+class _FailedOllamaReranker:
+    """所有 pair 都打分失败的 Ollama 重排器替身。"""
+
+    async def predict(self, pairs):
+        return [None for _ in pairs]
+
+
+@pytest.mark.asyncio
+async def test_kbreranker_failed_scores_fall_back_to_rrf(monkeypatch):
+    """重排打分失败时整批回退 RRF，不能把候选全部当「不相关」滤空。
+
+    打分失败此前被转成 0.0，低于 KB_RERANK_MIN_SCORE 而被全部过滤，
+    接口返回空列表 → 上游答「知识库没有相关内容」，实为重排服务故障。
+    """
+    KBReranker._model_loaded = True
+    KBReranker._model_failed = False
+    KBReranker._ollama_reranker = _FailedOllamaReranker()
+    monkeypatch.setattr("src.services.hybrid_search.KBReranker._registry_reranker", classmethod(lambda cls: None))
+
+    reranker = KBReranker(provider="ollama")
+    results = [
+        {"document_id": "doc1", "content": "content1", "rrf_score": 0.8},
+        {"document_id": "doc2", "content": "content2", "rrf_score": 0.6},
+        {"document_id": "doc3", "content": "content3", "rrf_score": 0.9},
+    ]
+    ranked = await reranker.rerank("query", results, top_k=3)
+
+    assert [r["document_id"] for r in ranked] == ["doc3", "doc1", "doc2"]
+    # 回退时 rerank_score 用 RRF 分，标记「这不是真实相关性」
+    assert all("rerank_score" in r for r in ranked)
+
+    KBReranker._model_loaded = False
+    KBReranker._ollama_reranker = None

@@ -393,8 +393,9 @@ async def test_ollama_reranker_score_pair_and_predict(monkeypatch):
     failing = _FakeOllamaClient(error=RuntimeError("ollama down"))
     monkeypatch.setattr("src.services.ollama_reranker.AsyncClient", lambda host=None: failing)
     reranker2 = OllamaReranker("failing-model")
-    assert await reranker2._score_pair("q", "d") == 0.0
-    assert await reranker2.predict([("q", "d")]) == [0.0]
+    # 打分失败返回 None（不是 0.0）：调用方据此整批回退，而不是把候选当「不相关」滤掉
+    assert await reranker2._score_pair("q", "d") is None
+    assert await reranker2.predict([("q", "d")]) == [None]
 
 
 # ---------------------------------------------------------------------------

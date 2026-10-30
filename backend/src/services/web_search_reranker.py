@@ -165,6 +165,12 @@ class WebReranker:
             else:
                 raise RuntimeError("无可用重排序模型")
 
+            # 打分失败为 None，不能当 0 分参与排序（会把好结果压到底部）；
+            # 有失败即整批走嵌入兜底，保证排序口径一致。
+            failed = sum(1 for score in scores if score is None)
+            if failed:
+                raise RuntimeError(f"重排打分失败 {failed}/{len(scores)} 条，改用嵌入兜底")
+
             for content, score in zip(candidates, scores):
                 content.score = float(score)
 

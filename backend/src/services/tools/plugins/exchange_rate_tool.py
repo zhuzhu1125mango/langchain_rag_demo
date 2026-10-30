@@ -109,11 +109,22 @@ class ExchangeRateTool(BaseTool):
         from_currency = _normalize_currency(from_currency) or "USD"
         to_currency = _normalize_currency(to_currency) or "CNY"
 
+        amount_fallback = False
         try:
             amount_decimal = Decimal(str(amount))
-        except Exception:
-            # 非法金额（"abc"/None）按 1 处理，查询汇率本身仍有效
+        except Exception as exc:
+            # 金额来自模型填参，非法值（"abc"/None）此前静默按 1 处理，
+            # 用户问「300 美元是多少」却拿到 1 美元的兑换值，且答案看着完全正常。
+            amount_fallback = True
             amount_decimal = Decimal("1")
+            log_exception(
+                logger, exc,
+                action="tools.exchange_rate.amount_parse",
+                severity=ErrorSeverity.REPORTABLE,
+                message="汇率工具金额无法解析，按 1 计算（换算结果可能不符合用户意图）",
+                raw_amount=str(amount)[:60],
+                question=question[:60],
+            )
 
         # 1. 免费数据源 frankfurter.app
         data_points: List[PriceDataPoint] = []
@@ -142,6 +153,11 @@ class ExchangeRateTool(BaseTool):
             Decimal("0.0001"), rounding=ROUND_HALF_UP
         )
 
+        extra_warnings = list(validated.warnings)
+        if amount_fallback:
+            # 让答案本身带上「金额没认出来」，而不是只写进日志
+            extra_warnings.append("未识别出兑换金额，已按 1 计算")
+
         item_name = f"{from_currency}兑{to_currency}汇率"
         if amount_decimal != Decimal("1"):
             item_name = f"{amount_decimal} {from_currency} 兑换 {to_currency}"
@@ -157,7 +173,7 @@ class ExchangeRateTool(BaseTool):
             cross_validation_score=validated.cross_validation_score,
             sources=validated.sources,
             fallback_used=validated.fallback_used,
-            warnings=validated.warnings,
+            warnings=extra_warnings,
         )
         answer = format_price_answer(display_result, item_name=item_name)
 

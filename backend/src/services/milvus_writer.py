@@ -64,7 +64,16 @@ class WriteMixin:
                 # B2：csr->dict 转换为纯 CPU 密集，移入线程池避免阻塞事件循环
                 sparse_embeddings = await asyncio.to_thread(self._convert_sparse_embeddings, sparse_embeddings)
             except Exception as e:
-                logger.warning(f"BM25 sparse embedding 计算失败，跳过 sparse 字段插入: {e}")
+                # 少了 sparse 字段的 chunk 在混合检索里只会被 dense 召回命中，
+                # 等于永久失去一路召回；必须留痕才看得出「检索变差」的原因。
+                log_exception(
+                    logger, e,
+                    action="milvus.sparse_embed",
+                    severity=ErrorSeverity.REPORTABLE,
+                    message="BM25 sparse embedding 计算失败，本批 chunk 跳过 sparse 字段（该批文档将缺少稀疏召回）",
+                    kb_id=kb_id,
+                    chunks=len(documents),
+                )
                 sparse_embeddings = None
 
         data = []
