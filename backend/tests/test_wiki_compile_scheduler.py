@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -13,6 +14,7 @@ from src.config import settings
 from src.services.wiki_compile_scheduler import (
     _pending,
     _timers,
+    drain,
     pending_docs,
     schedule_compile,
     wait_running_tasks,
@@ -154,3 +156,56 @@ class TestScheduleCompile:
         await asyncio.sleep(0.01)
         await wait_running_tasks(timeout=5)
         assert recorded[0]["result"] == "timeout"
+
+
+class TestDrainOnShutdown:
+    """关机排空：pending 集合与计时器只在内存里，直接退出就永久丢编译。"""
+
+    async def test_drain_fires_pending_immediately(self, fake_session_maker, monkeypatch):
+        calls = _patch_compile(monkeypatch, WikiCompileResult(pages_created=1))
+        _patch_load_chunks(monkeypatch, {"d1": _chunks("甲")})
+        # 去抖窗口远大于测试时长：不 drain 的话这批文档永远不会被编译
+        monkeypatch.setattr(settings.wiki_compile, "WIKI_COMPILE_DEBOUNCE_SECONDS", 60)
+
+        schedule_compile("kb-drain", "d1")
+        assert pending_docs("kb-drain") == {"d1"}
+
+        stats = await drain(timeout=5)
+
+        assert stats == {"fired": 1, "running": 1, "cancelled": 0}
+        assert calls and calls[0]["doc_ids"] == ["d1"]
+        assert pending_docs("kb-drain") == set()
+
+    async def test_drain_noop_when_idle(self, monkeypatch):
+        monkeypatch.setattr(settings.wiki_compile, "WIKI_COMPILE_DEBOUNCE_SECONDS", 60)
+        assert await drain(timeout=5) == {"fired": 0, "running": 0, "cancelled": 0}
+
+    async def test_drain_timeout_reports_missing_pages(
+        self, caplog, fake_session_maker, monkeypatch
+    ):
+        calls = _patch_compile(monkeypatch, WikiCompileResult())
+        _patch_load_chunks(monkeypatch, {"d1": _chunks("甲")})
+
+        async def slow_compile(self, db, kb_id, doc_ids, chunks):
+            calls.append({"kb_id": kb_id, "doc_ids": list(doc_ids), "chunks": chunks})
+            await asyncio.sleep(10)
+            return WikiCompileResult()
+
+        monkeypatch.setattr(
+            "src.services.wiki_compiler.WikiCompiler.compile_document", slow_compile
+        )
+        monkeypatch.setattr(settings.wiki_compile, "WIKI_COMPILE_DEBOUNCE_SECONDS", 60)
+
+        schedule_compile("kb-slow", "d1")
+
+        with caplog.at_level(logging.ERROR, logger="wiki_compile_scheduler"):
+            stats = await drain(timeout=0.05)
+
+        assert stats["fired"] == 1 and stats["cancelled"] == 1
+        hits = [
+            r for r in caplog.records
+            if "action=wiki.scheduler.drain_timeout" in r.getMessage()
+        ]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+        assert "cancelled=1" in hits[0].getMessage()

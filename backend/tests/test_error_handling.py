@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import threading
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -1641,3 +1643,134 @@ class TestWikiRebuildIncompleteGrading:
         assert any("待编译文档" in m for m in messages), "进度回调从未被调用"
         assert any("已清理既有 Wiki 页面" in m for m in messages)
         assert any("新建 1 页" in m for m in messages)
+
+
+class TestBackgroundTaskLifecycleGrading:
+    """后台任务生命周期：被取消、被重启打断的处理要留下可见状态与日志。"""
+
+    @staticmethod
+    def _fake_db(doc):
+        class _Result:
+            def scalars(self):
+                return self
+
+            def first(self):
+                return doc
+
+        class _DB:
+            async def execute(self, *args, **kwargs):
+                return _Result()
+
+            async def commit(self):
+                return None
+
+        @asynccontextmanager
+        async def maker():
+            yield _DB()
+
+        return maker
+
+    def test_cancelled_process_marks_document_failed(self, caplog, monkeypatch):
+        """CancelledError 不走 except Exception：文档会永远停在「处理中」。"""
+        from src.services import document_tasks as mod
+
+        doc = SimpleNamespace(
+            id="11111111-1111-1111-1111-111111111111",
+            filename="a.pdf",
+            processing_status="processing",
+            processing_message="正在解析文档...",
+            processing_progress=10,
+        )
+
+        async def _noop(*args, **kwargs):
+            return None
+
+        monkeypatch.setattr(mod, "async_session_maker", self._fake_db(doc))
+        monkeypatch.setattr(mod, "update_upload_progress", lambda *a, **k: None)
+        monkeypatch.setattr(mod, "notify_task_progress", _noop)
+        monkeypatch.setattr(mod, "notify_task_failed", _noop)
+        monkeypatch.setattr(mod, "notify_task_completed", _noop)
+        monkeypatch.setattr(mod, "notify_doc_list_changed", _noop)
+
+        gate = threading.Event()
+
+        def _blocking_parse(*args, **kwargs):
+            gate.wait(timeout=2.0)
+            return []
+
+        monkeypatch.setattr(mod, "process_document", _blocking_parse)
+
+        async def _run_then_cancel():
+            task = asyncio.create_task(
+                mod.process_document_async(doc.id, "raw/a.pdf", "kb-1", "task-1", None, None)
+            )
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            gate.set()
+
+        with caplog.at_level(logging.ERROR, logger="rag_system"):
+            asyncio.run(_run_then_cancel())
+
+        assert doc.processing_status == "failed"
+        assert "中断" in doc.processing_message
+        assert doc.processing_progress == 0
+        hits = [r for r in caplog.records if "action=document.process.cancelled" in r.getMessage()]
+        assert hits, "取消路径必须留痕，否则「一直处理中」无从追查"
+        assert hits[0].levelno == logging.ERROR
+        assert "severity=reportable" in hits[0].getMessage()
+
+    def test_stale_processing_recovered_and_reported(self, caplog, monkeypatch):
+        """上次进程被强杀留下的 processing 文档，启动时要被标记失败。"""
+        from src.services import document_tasks as mod
+
+        class _Result:
+            rowcount = 3
+
+        class _DB:
+            async def execute(self, *args, **kwargs):
+                return _Result()
+
+            async def commit(self):
+                return None
+
+        @asynccontextmanager
+        async def maker():
+            yield _DB()
+
+        monkeypatch.setattr(mod, "async_session_maker", maker)
+
+        with caplog.at_level(logging.ERROR, logger="rag_system"):
+            stats = asyncio.run(mod.recover_stale_processing_documents())
+
+        assert stats["recovered"] == 3
+        hits = [r for r in caplog.records if "action=document.recover.stale" in r.getMessage()]
+        assert hits and hits[0].levelno == logging.ERROR
+        assert "recovered=3" in hits[0].getMessage()
+
+    def test_stale_recovery_silent_when_nothing_stale(self, caplog, monkeypatch):
+        """正常重启不应产生噪音：没有僵死文档就不记录。"""
+        from src.services import document_tasks as mod
+
+        class _Result:
+            rowcount = 0
+
+        class _DB:
+            async def execute(self, *args, **kwargs):
+                return _Result()
+
+            async def commit(self):
+                return None
+
+        @asynccontextmanager
+        async def maker():
+            yield _DB()
+
+        monkeypatch.setattr(mod, "async_session_maker", maker)
+
+        with caplog.at_level(logging.DEBUG, logger="rag_system"):
+            stats = asyncio.run(mod.recover_stale_processing_documents())
+
+        assert stats["recovered"] == 0
+        assert not [r for r in caplog.records if "document.recover.stale" in r.getMessage()]

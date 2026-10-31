@@ -15,7 +15,7 @@ import time
 from typing import Dict, List, Optional, Set
 
 from src.config import settings
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("wiki_compile_scheduler")
 
@@ -72,6 +72,62 @@ async def wait_running_tasks(timeout: Optional[float] = None) -> None:
     await asyncio.wait(
         set(_running_tasks), timeout=timeout, return_when=asyncio.ALL_COMPLETED
     )
+
+
+async def drain(timeout: Optional[float] = 30.0) -> Dict[str, int]:
+    """关机前排空去抖队列与在途编译，避免重启丢掉已上传文档的 Wiki 编译。
+
+    上传管线在 debounce>0 时只做两件事：把 doc_id 放进 pending、起一个
+    ``loop.call_later`` 计时器（默认 20s）。这两样都只在**进程内存**里，
+    进程一旦退出就一起消失 —— 上一次上传回报的是「已加入批量编译队列」，
+    之后既没有任务记录也没有日志，这些文档的 Wiki 页从此不会生成，
+    wiki_lookup 也永远检索不到它们。
+
+    因此在 lifespan shutdown 里必须先「立即触发待编译 + 等完在途任务」，
+    再退出进程。返回 ``{"fired", "running", "cancelled"}``：
+    ``cancelled > 0`` 说明超时窗口内没跑完，这部分文档的 Wiki 仍会缺失。
+
+    Args:
+        timeout: 等待在途编译完成的上限（秒），None 表示不设上限。
+    """
+    # 1. 取消全部去抖计时器，改为立即触发（不再等 20s 窗口）
+    fired = 0
+    for handle in list(_timers.values()):
+        handle.cancel()
+    _timers.clear()
+    for key in list(_pending.keys()):
+        if _pending.get(key):
+            _fire(key)
+            fired += 1
+
+    running = len(_running_tasks)
+    cancelled = 0
+    if _running_tasks:
+        pending_tasks = set(_running_tasks)
+        _, still_running = await asyncio.wait(
+            pending_tasks, timeout=timeout, return_when=asyncio.ALL_COMPLETED
+        )
+        if still_running:
+            cancelled = len(still_running)
+            for task in still_running:
+                task.cancel()
+            # 给取消留一点收敛时间，避免 "Task was destroyed but pending"
+            await asyncio.wait(still_running, timeout=5)
+
+    if cancelled:
+        # 编译是「文档 → Wiki 页」的唯一写入方，没跑完就是永久缺页；
+        # 此时进程即将退出，只能靠这条日志让运维知道重启代价
+        log_exception(
+            logger,
+            RuntimeError("Wiki 编译未在关机超时内完成"),
+            action="wiki.scheduler.drain_timeout",
+            severity=ErrorSeverity.REPORTABLE,
+            message="关机时在途 Wiki 编译被取消，相关文档的 Wiki 页将缺失",
+            cancelled=cancelled,
+            timeout_s=timeout,
+        )
+
+    return {"fired": fired, "running": running, "cancelled": cancelled}
 
 
 async def _compile_batch(kb_id: str, doc_ids: List[str]) -> None:

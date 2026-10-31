@@ -31,6 +31,7 @@ from src.database import async_engine, Base, init_db
 from src.config import settings, LOG_DIR
 from src.exceptions import AppException
 from src.utils.security import validate_secret_key, SecretKeyValidationError
+from src.utils.error_handling import log_exception
 from src.auth import get_current_user, require_admin, CurrentUser
 from src.api import (
     document_router,
@@ -334,6 +335,26 @@ async def lifespan(app: FastAPI):
         await init_db()
         logger.info("Database tables created successfully")
 
+    # 上次进程被强杀/OOM/重启打断时，文档会停在 processing_status="processing"：
+    # 状态机只有 completed / failed 两个出口，两条都没走到就没人再管它 ——
+    # 前端永久转圈，同一文件重传还会被「内容重复」拦住。启动时统一回收。
+    try:
+        from src.services.document_tasks import recover_stale_processing_documents
+
+        recovered = await recover_stale_processing_documents()
+        if recovered["recovered"]:
+            logger.warning(
+                "启动回收：%s 篇文档的处理在上次运行中被中断，已标记为失败",
+                recovered["recovered"],
+            )
+    except Exception as recover_err:
+        log_exception(
+            logger,
+            recover_err,
+            action="startup.recover.stale_documents",
+            message="启动回收僵死文档失败，部分文档可能仍停在「处理中」",
+        )
+
     # W4-23：加载运行时配置覆盖（UI 修改的 processing 调优参数落盘于
     # backend/data/runtime_config.json，重启不丢失）
     from src.services.runtime_config_service import load_runtime_overrides
@@ -482,12 +503,40 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         logger.info("保留期清扫任务已取消")
 
+    # 关机前排空 Wiki 去抖编译队列：pending 集合与 20s 计时器都只在进程内存里，
+    # 直接退出等于把「已回报加入队列」的文档永久丢掉（Wiki 缺页且无人知晓）
+    try:
+        from src.services.wiki_compile_scheduler import drain as drain_wiki_compile
+
+        drained = await drain_wiki_compile(timeout=30.0)
+        if drained["fired"] or drained["running"]:
+            logger.info(
+                "关机前 Wiki 编译收尾: 立即触发 %s 个 KB、等待 %s 个在途任务、超时取消 %s 个",
+                drained["fired"],
+                drained["running"],
+                drained["cancelled"],
+            )
+    except Exception as drain_err:
+        log_exception(
+            logger,
+            drain_err,
+            action="startup.shutdown.wiki_drain",
+            message="关机前排空 Wiki 编译队列失败，待编译文档将永久缺页",
+        )
+
     try:
         from src.services.wiki_lint_scheduler import stop_scheduler
 
         await stop_scheduler()
-    except Exception:
-        pass
+    except Exception as stop_err:
+        # 此前是裸 pass：lint 循环停不下来时，它会在 DB/连接池关闭后继续 tick，
+        # 每分钟产生一批「连接已关闭」错误，而日志里没有任何「没停下来」的记录
+        log_exception(
+            logger,
+            stop_err,
+            action="startup.shutdown.wiki_lint_stop",
+            message="Wiki lint 调度器停止失败，后台循环可能在资源关闭后继续运行",
+        )
 
 
 app = FastAPI(

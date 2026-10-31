@@ -20,7 +20,7 @@ import re
 import time
 import uuid
 from collections import Counter
-from typing import Optional
+from typing import Dict, Optional
 
 from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import select
@@ -147,6 +147,71 @@ def schedule_document_reindex(
     task = asyncio.create_task(process_document_async(*args))
     _reindex_tasks.add(task)
     task.add_done_callback(_reindex_tasks.discard)
+
+
+async def recover_stale_processing_documents(
+    stale_after_seconds: float = 900.0,
+) -> Dict[str, int]:
+    """启动时把「上次进程没跑完」的文档标记为失败（否则永远停在处理中）。
+
+    文档状态机只有处理成功（completed）与明确异常（failed）两个出口：
+    进程被强杀、OOM、`docker restart` 打断时两个都走不到，库里留下
+    ``processing_status='processing'`` 的记录。前端会一直转圈，而且同一文件
+    再次上传会撞上「内容重复」检测，用户既用不了也传不上去 —— 只有重启后
+    的这条清理能把它解开。
+
+    阈值用于多副本部署：别的 worker 正在处理的文档会随阶段推进不断刷新
+    ``updated_at``，超时未刷新才认定已死。
+
+    Args:
+        stale_after_seconds: ``updated_at`` 超过该秒数未刷新才判定为僵死。
+
+    Returns:
+        ``{"recovered": 标记数量}``。
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import or_, update
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=stale_after_seconds)
+    recovered = 0
+    try:
+        async with async_session_maker() as db:
+            result = await db.execute(
+                update(Document)
+                .where(Document.processing_status.in_(("processing", "uploading")))
+                .where(or_(Document.updated_at.is_(None), Document.updated_at < cutoff))
+                .values(
+                    processing_status="failed",
+                    processing_message="服务重启导致处理中断，请重新上传",
+                    processing_progress=0,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await db.commit()
+            recovered = int(result.rowcount or 0)
+    except Exception as e:
+        # 清理失败不阻断启动：留着「处理中」至少还能人工介入
+        log_exception(
+            logger,
+            e,
+            action="document.recover.stale",
+            message="启动时回收僵死文档失败，部分文档可能仍停在「处理中」",
+            stale_after_s=stale_after_seconds,
+        )
+        return {"recovered": 0}
+
+    if recovered:
+        log_exception(
+            logger,
+            RuntimeError("存在上次进程中断的文档处理"),
+            action="document.recover.stale",
+            severity=ErrorSeverity.REPORTABLE,
+            message="启动时发现上次未完成的文档处理，已标记为失败（需用户重新上传）",
+            recovered=recovered,
+            stale_after_s=stale_after_seconds,
+        )
+    return {"recovered": recovered}
 
 
 async def apply_document_status(
@@ -375,6 +440,41 @@ async def process_document_async(
                 )
 
             logger.info(f"文档处理完成: {doc.filename}, 共{len(chunks)}个文本块")
+
+        except asyncio.CancelledError:
+            # CancelledError 继承自 BaseException，不会走到下面的 except Exception：
+            # 服务关闭 / 上层 wait_for 超时会在这里直接跳出，文档就此停在
+            # processing_status="processing"，前端转圈到天荒地老，也没有任何日志。
+            log_exception(
+                logger,
+                RuntimeError("文档处理任务被取消"),
+                action="document.process.cancelled",
+                severity=ErrorSeverity.REPORTABLE,
+                message="文档处理被取消（服务关闭或任务超时），已标记为失败",
+                doc_id=doc_id,
+            )
+            try:
+                result = await db.execute(
+                    select(Document).filter(Document.id == uuid.UUID(doc_id))
+                )
+                doc = result.scalars().first()
+                if doc:
+                    doc.processing_status = "failed"
+                    doc.processing_message = "处理被中断，请重新上传"
+                    doc.processing_progress = 0
+                    await db.commit()
+            except Exception as mark_exc:
+                log_exception(
+                    logger,
+                    mark_exc,
+                    action="document.process.mark_cancelled",
+                    message="取消后写入失败状态失败，文档将停留在「处理中」",
+                    doc_id=doc_id,
+                )
+            update_upload_progress(
+                task_upload_id, status="failed", message="处理被中断，请重新上传"
+            )
+            raise
 
         except Exception as e:
             # 后台任务顶层：没有调用方兜底，这里是唯一记录点

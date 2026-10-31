@@ -27,6 +27,22 @@ ws_connections: Dict[str, list] = {}
 _main_loop: Optional[asyncio.AbstractEventLoop] = None
 _loop_lock = threading.Lock()
 
+# 推送/清理任务的强引用集合：asyncio 只持弱引用，不保存下来时任务可能在
+# await conn.send_json 期间被 GC 回收，表现为「进度条偶发不更新」且无任何日志。
+_scheduled_tasks: set = set()
+
+
+def _spawn(coro) -> None:
+    """创建受引用保护的后台任务（丢弃返回值，异常由协程内部处理）。"""
+    try:
+        task = asyncio.create_task(coro)
+    except RuntimeError:
+        coro.close()
+        logger.debug("后台任务创建失败（无运行中的事件循环）")
+        return
+    _scheduled_tasks.add(task)
+    task.add_done_callback(_scheduled_tasks.discard)
+
 
 def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
     """注册主事件循环（应用 lifespan 启动时调用）。"""
@@ -133,7 +149,7 @@ def _schedule_notify(upload_id: str):
     """把 WS 通知调度到事件循环执行；支持从工作线程投递（W6 #22）。"""
     try:
         loop = asyncio.get_running_loop()
-        loop.call_soon(lambda: asyncio.create_task(notify_ws_clients_async(upload_id)))
+        loop.call_soon(lambda: _spawn(notify_ws_clients_async(upload_id)))
     except RuntimeError:
         main_loop = get_main_loop()
         if main_loop is not None and main_loop.is_running():
@@ -161,7 +177,7 @@ def _schedule_terminal_cleanup(upload_id: str):
         return
     loop.call_later(
         PROGRESS_RETENTION_SECONDS,
-        lambda: asyncio.create_task(_cleanup_terminal_progress(upload_id)),
+        lambda: _spawn(_cleanup_terminal_progress(upload_id)),
     )
 
 
