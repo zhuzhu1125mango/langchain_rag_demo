@@ -6,12 +6,12 @@
 
 import logging
 import time
-import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from src.config import settings
+from src.services.agent_memory import memory_doc_id
 from src.services.decision_pipeline import DecisionResult
 from src.services.identity import IDENTITY_PROMPT_RULE
 
@@ -214,11 +214,10 @@ class _StageTimer:
 def _memory_doc_id(session_id: str) -> str:
     """为跨请求记忆生成确定性 document_id（UUIDv5，基于 session_id）。
 
-    同会话得到同一 document_id，使记忆切片聚合可统一检索；不同会话 UUID 不同，
-    天然隔离。必须产出合法 UUID——Milvus 过滤表达式 `_safe_id` 仅放行 UUID，
-    拒绝 `memory:{session_id}` 这类带冒号的字符串（防注入白名单）。
+    实现已收敛到 :mod:`src.services.agent_memory`，供写入侧与「会话删除时的
+    向量清理」共用同一份命名规则；此处保留旧名以免调用方大改。
     """
-    return str(uuid.uuid5(uuid.NAMESPACE_URL, f"agent-memory:{session_id}"))
+    return memory_doc_id(session_id)
 
 
 def record_wiki_nav(event: Dict[str, Any]) -> None:

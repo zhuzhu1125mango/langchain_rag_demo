@@ -23,6 +23,26 @@ class AdminMixin:
         )
         await self._throttled_flush()
 
+    async def delete_by_document_ids(self, document_ids: List[str]):
+        """按多个文档 ID 批量删除切片，最后统一 flush 一次。
+
+        用于「一次要清掉多个文档的向量」的场景（会话记忆、批量注销等），
+        避免逐条删除各自 flush 触发 Milvus 单集合 0.1 QPS 限流。
+
+        注意：任一 ID 非法（非 UUID）会在拼接表达式时抛 ``ValueError``，
+        整批都不会删——保持「要么全删要么不动」的语义，避免半批残留。
+        """
+        if not document_ids:
+            return
+        expr = "document_id in [" + ",".join(
+            f"'{self._safe_id(document_id)}'" for document_id in document_ids
+        ) + "]"
+        await self.client.delete(
+            collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+            filter=expr
+        )
+        await self._throttled_flush()
+
     async def delete_by_kb_id(self, kb_id):
         """按知识库 ID 删除其下所有切片。"""
         expr = f"kb_id == '{self._safe_id(kb_id)}'"

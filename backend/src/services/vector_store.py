@@ -126,6 +126,10 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         """按文档 ID 删除向量数据。"""
         await self.milvus_service.delete_by_document_id(document_id)
 
+    async def delete_by_document_ids(self, document_ids):
+        """按多个文档 ID 批量删除向量数据，并统一 flush 一次。"""
+        await self.milvus_service.delete_by_document_ids(document_ids)
+
     async def delete_by_kb_id(self, kb_id):
         """按知识库 ID 删除向量数据。"""
         await self.milvus_service.delete_by_kb_id(kb_id)

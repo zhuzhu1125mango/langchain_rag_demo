@@ -112,6 +112,30 @@ async def delete_document_vectors(doc_id: str) -> None:
         )
 
 
+async def _discard_partial_vectors(doc_id: str, *, action: str, reason: str) -> bool:
+    """回滚「向量已写入、但文档最终判定失败」的残留切片（best-effort）。
+
+    这类残留最隐蔽：文档列表显示「处理失败」，检索却能命中它的正文——用户以为
+    内容没进库，实际已经进了，并且重试上传会再写一份，检索结果成对出现。
+    清理失败按 REPORTABLE 记录（元数据已标失败，切片再也无人认领）。
+    """
+    try:
+        vector_store = await VectorStoreManager.get_instance()
+        await vector_store.delete_by_document_id(doc_id)
+    except Exception as exc:
+        log_exception(
+            logger, exc,
+            action=action,
+            severity=ErrorSeverity.REPORTABLE,
+            message="文档处理失败后清理残留向量失败：切片仍可被检索命中（文档已标 failed）",
+            doc_id=doc_id,
+            reason=reason,
+        )
+        return False
+    logger.info("文档处理失败，已回滚残留向量: doc=%s reason=%s", doc_id, reason)
+    return True
+
+
 def doc_has_indexed_vectors(doc: Document) -> bool:
     """判断文档是否可能有向量：published，或已处理完成且 chunks_count > 0。"""
     return getattr(doc, "status", None) == "published" or (
@@ -270,6 +294,10 @@ async def process_document_async(
     在独立的事务中处理文档：解析 → 向量化 → 规则分析 → LLM 增强 → Wiki 编译 → 发布。
     """
     async with async_session_maker() as db:
+        # 向量一旦写入，后续任何一步失败都会留下「文档标 failed、切片却可被检索到」
+        # 的孤儿向量；重试上传还会再叠一份，导致检索结果重复。用这个标记把清理
+        # 限定在「确实写过向量」之后，避免解析阶段就失败也白跑一次 Milvus 删除。
+        vectors_written = False
         try:
             # 获取文档记录
             result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
@@ -304,6 +332,7 @@ async def process_document_async(
 
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.add_documents(chunks, kb_id)
+            vectors_written = True
 
             doc.processing_progress = 70
             await db.commit()
@@ -474,6 +503,10 @@ async def process_document_async(
             update_upload_progress(
                 task_upload_id, status="failed", message="处理被中断，请重新上传"
             )
+            if vectors_written:
+                await _discard_partial_vectors(
+                    doc_id, action="document.process.cancelled.vector_rollback", reason="cancelled"
+                )
             raise
 
         except Exception as e:
@@ -504,6 +537,12 @@ async def process_document_async(
 
             # 进度记录写入终态
             update_upload_progress(task_upload_id, status="failed", message="处理失败，请稍后重试")
+
+            # 向量写入发生在解析之后：此时失败必须回滚，否则「失败文档」仍被检索命中
+            if vectors_written:
+                await _discard_partial_vectors(
+                    doc_id, action="document.process.failed.vector_rollback", reason="exception"
+                )
 
             # 发送失败通知
             await notify_task_failed(task_upload_id, "文档处理失败")
@@ -575,35 +614,62 @@ async def _maybe_compile_wiki(db, doc, doc_id: str, kb_id: str, chunks, task_upl
 
 
 async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str, task_id: str):
-    """异步删除文档（后台任务）：MinIO 文件 → 向量 → DB 记录 → Wiki 级联。"""
+    """异步删除文档（后台任务）：向量 → DB 记录 → 原文件 → Wiki 级联。
+
+    顺序刻意如此——三类数据的重要性不同：
+    - 向量决定「还能不能被检索到」，DB 行决定「还能不能被用户发现/重试」，
+      原文件只是附件；
+    - 先删向量：失败则文档原样保留，用户重试即可，**不会**出现「文件已删、
+      记录还在、内容还能被检索命中」的半删除态（旧顺序先删文件，正是这个坑）；
+    - 再删 DB 行：失败则文档仍在列表但已搜不到，重试删除即可修复；
+    - 最后删文件且 best-effort：文件残留只是存储占用，不影响删除语义。
+
+    ``phase`` 让失败日志能指出「卡在哪一步」，否则只剩一句「删除失败」，
+    运维无法判断该重试还是该手工清 Milvus。
+    """
+    phase = "vectors"
     async with async_session_maker() as db:
         try:
-            # 阶段1：删除MinIO文件 (0-30%)
-            await notify_task_progress(task_id, 10, "正在删除文件...")
-            if file_path.startswith("minio://"):
-                from src.services.minio_service import MinioService
-
-                minio_service = await MinioService.get_instance()
-                await minio_service.delete_file_async(file_path)
-            elif os.path.exists(file_path):
-                os.remove(file_path)
-
-            await notify_task_progress(task_id, 30, "文件已删除")
-
-            # 阶段2：删除向量 (30-70%)
-            await notify_task_progress(task_id, 50, "正在删除向量...")
+            # 阶段1：删除向量 (0-50%)
+            await notify_task_progress(task_id, 10, "正在删除向量...")
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_document_id(doc_id)
+            await notify_task_progress(task_id, 50, "向量已删除")
 
-            await notify_task_progress(task_id, 80, "向量已删除")
-
-            # 阶段3：删除数据库记录 (70-100%)
+            # 阶段2：删除数据库记录 (50-70%)
+            phase = "database"
             result = await db.execute(select(Document).filter(Document.id == uuid.UUID(doc_id)))
             doc = result.scalars().first()
             owner_id = doc.owner_id if doc else None
             if doc:
                 await db.delete(doc)
                 await db.commit()
+            else:
+                # 并发删除 / 上次已删一半：不是错误，但必须留痕，否则「删了没删」无从判断
+                logger.info("删除文档时记录已不存在，继续清理文件: doc=%s", doc_id)
+            await notify_task_progress(task_id, 70, "记录已删除")
+
+            # 阶段3：删除原文件 (70-90%)，失败只告警
+            phase = "object"
+            await notify_task_progress(task_id, 80, "正在清理文件...")
+            try:
+                if file_path.startswith("minio://"):
+                    from src.services.minio_service import MinioService
+
+                    minio_service = await MinioService.get_instance()
+                    await minio_service.delete_file_async(file_path)
+                elif os.path.exists(file_path):
+                    os.remove(file_path)
+            except Exception as exc:
+                log_exception(
+                    logger, exc,
+                    action="document.delete.object",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="文档记录与向量已删除，仅原文件清理失败（对象存储残留，不影响检索）",
+                    doc_id=doc_id,
+                    file_path=file_path,
+                )
+            await notify_task_progress(task_id, 90, "文件清理完成")
 
             await notify_task_progress(task_id, 100, "删除完成")
 
@@ -634,22 +700,38 @@ async def process_document_delete_async(doc_id: str, kb_id: str, file_path: str,
             # P1-3：知识库内容已变更，失效相关语义缓存
             _schedule_semantic_cache_invalidation(kb_id)
 
-            # P2：Wiki 级联清理（剪源/删孤儿页），失败不阻断删除主流程
-            from src.services.wiki_cascade import on_document_deleted
+            # P2：Wiki 级联清理（剪源/删孤儿页）。放在最后且单独兜底：
+            # 文档本身已经删干净了，级联失败不应把整次删除改判为 failed。
+            phase = "wiki_cascade"
+            try:
+                from src.services.wiki_cascade import on_document_deleted
 
-            await on_document_deleted(db, kb_id, doc_id)
+                await on_document_deleted(db, kb_id, doc_id)
+            except Exception as exc:
+                log_exception(
+                    logger, exc,
+                    action="document.delete.wiki_cascade",
+                    severity=ErrorSeverity.REPORTABLE,
+                    message="文档已删除，但 Wiki 级联清理失败（页面可能仍引用已删来源）",
+                    doc_id=doc_id,
+                    kb_id=kb_id,
+                )
 
             logger.info(f"文档删除完成: {doc_id}")
 
         except Exception as e:
-            # 后台任务顶层：删除链路没有调用方兜底
+            # 后台任务顶层：删除链路没有调用方兜底。
+            # phase 必须进日志与前端文案：卡在向量/记录/文件 三处的处置完全不同。
             log_exception(
                 logger, e,
                 action="document.delete.background",
-                message="文档删除失败，已置为 failed 并通知前端",
+                message=f"文档删除失败（阶段: {phase}）",
                 doc_id=doc_id,
+                phase=phase,
             )
-            update_upload_progress(task_id, status="failed", message="删除失败，请稍后重试")
+            update_upload_progress(
+                task_id, status="failed", message=f"删除失败（{phase}），请稍后重试"
+            )
             await notify_task_failed(task_id, "文档删除失败")
 
 

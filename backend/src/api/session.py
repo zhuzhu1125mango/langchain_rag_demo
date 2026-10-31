@@ -361,8 +361,19 @@ async def delete_session(
             raise HTTPException(status_code=404, detail="会话不存在")
         require_owner(session.user_id, current_user)
 
+        owner_id = str(session.user_id)
         await db.delete(session)
         await db.commit()
+
+        # 记忆向量清理：会话行删掉后，uuid5(agent-memory:{session_id}) 这批切片
+        # 再无任何元数据指向，只能靠这里清理。失败不阻断删除（用户点删除必须生效），
+        # 但按 REPORTABLE 记录——留下的对话摘要属于隐私数据。
+        from src.services.agent_memory import delete_session_memories
+
+        await delete_session_memories(
+            [session_id], action="session.delete.memory_vectors", user_id=owner_id
+        )
+
         return {"message": "删除成功"}
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的会话ID")
@@ -404,6 +415,17 @@ async def batch_delete_sessions(
         raise HTTPException(status_code=400, detail="包含无效的会话ID")
 
     try:
+        # 先确认「确实属于当前用户、且即将被删」的会话：批量 delete 只给出总 rowcount，
+        # 无法按 id 区分；若照单全清记忆向量，会把别人会话的记忆一并删掉。
+        owned_ids = (
+            await db.execute(
+                select(SessionModel.id).where(
+                    SessionModel.id.in_(session_ids),
+                    SessionModel.user_id == current_user.user_id,
+                )
+            )
+        ).scalars().all()
+
         # 先删除关联的反馈记录（仅当前用户的）
         await db.execute(
             delete(FeedbackModel).where(
@@ -419,6 +441,16 @@ async def batch_delete_sessions(
             )
         )
         await db.commit()
+
+        # 记忆向量与 DB 行同步清理（失败仅记 REPORTABLE，不阻断已提交的删除）
+        from src.services.agent_memory import delete_session_memories
+
+        await delete_session_memories(
+            [str(i) for i in owned_ids],
+            action="session.batch_delete.memory_vectors",
+            user_id=str(current_user.user_id),
+        )
+
         return {"deleted_count": result.rowcount}
     except IntegrityError as e:
         await db.rollback()

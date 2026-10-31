@@ -134,41 +134,57 @@ async def delete_user_account(db: AsyncSession, user_id: str) -> Dict[str, int]:
 
     docs = (await db.execute(select(Document).where(Document.owner_id == user_id))).scalars().all()
     kbs = (await db.execute(select(KnowledgeBase).where(KnowledgeBase.owner_id == user_id))).scalars().all()
+    # 会话摘要的向量（kb_id="memory"）既不属于任何文档也不属于任何知识库，
+    # 只能由会话 ID 反推 document_id；必须在这里先快照，注销后 DB 行就没了。
+    session_ids = [
+        str(sid)
+        for sid in (
+            await db.execute(select(Session.id).where(Session.user_id == user_id))
+        ).scalars().all()
+    ]
 
-    # 向量与对象存储清理：best-effort，失败仅告警，不阻断数据库注销
+    # 向量与对象存储清理：best-effort，失败仅告警，不阻断数据库注销。
+    # 但「残留」是永久性的（DB 行删掉后再无任何记录指向这些向量），
+    # 所以严重度按后果定：REPORTABLE，而非「等下次重试就好」的 RECOVERABLE。
     try:
         from src.services.vector_store import VectorStoreManager
 
         vector_store = await VectorStoreManager.get_instance()
-        for doc in docs:
+        doc_ids = [str(doc.id) for doc in docs]
+        if doc_ids:
             try:
-                await vector_store.delete_by_document_id(str(doc.id))
+                await vector_store.delete_by_document_ids(doc_ids)
             except Exception as exc:
                 log_exception(
                     logger, exc,
                     action="account.delete.vectors.document",
-                    severity=ErrorSeverity.RECOVERABLE,
-                    message="注销清理文档向量失败，继续其余清理",
-                    doc_id=doc.id,
+                    severity=ErrorSeverity.REPORTABLE,
+                    message="注销清理文档向量失败：已注销用户的内容仍留在向量库，可被检索命中",
+                    user_id=user_id,
+                    documents=len(doc_ids),
                 )
-        for kb in kbs:
+        kb_ids = [str(kb.id) for kb in kbs]
+        if kb_ids:
             try:
-                await vector_store.delete_by_kb_id(str(kb.id))
+                await vector_store.delete_by_kb_ids(kb_ids)
             except Exception as exc:
                 log_exception(
                     logger, exc,
                     action="account.delete.vectors.kb",
-                    severity=ErrorSeverity.RECOVERABLE,
-                    message="注销清理知识库向量失败，继续其余清理",
-                    kb_id=kb.id,
+                    severity=ErrorSeverity.REPORTABLE,
+                    message="注销清理知识库向量失败：已注销用户的内容仍留在向量库，可被检索命中",
+                    user_id=user_id,
+                    knowledge_bases=len(kb_ids),
                 )
     except Exception as exc:
         log_exception(
             logger, exc,
             action="account.delete.vectors.connect",
-            severity=ErrorSeverity.RECOVERABLE,
-            message="注销时向量库不可用，跳过向量清理",
+            severity=ErrorSeverity.REPORTABLE,
+            message="注销时向量库不可用，本次注销的全部向量未清理（数据残留）",
             user_id=user_id,
+            documents=len(docs),
+            knowledge_bases=len(kbs),
         )
 
     try:
@@ -220,6 +236,14 @@ async def delete_user_account(db: AsyncSession, user_id: str) -> Dict[str, int]:
     result = await db.execute(delete(User).where(User.id == uid))
     summary["users"] = result.rowcount or 0
     await db.commit()
+
+    # 会话记忆向量：注销后这批摘要再无任何元数据指向，也无法按库删除
+    # （kb_id="memory" 不是 UUID，会被 _safe_id 白名单拒绝），只能按会话清。
+    from src.services.agent_memory import delete_session_memories
+
+    await delete_session_memories(
+        session_ids, action="account.delete.memory_vectors", user_id=user_id
+    )
 
     # 内容删除后失效语义缓存与知识库列表缓存
     from src.services.semantic_cache_service import schedule_invalidation

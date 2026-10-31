@@ -13,6 +13,7 @@ from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import KnowledgeBase, Document
 from src.services.vector_store import VectorStoreManager
 from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
+from src.utils.error_handling import ErrorSeverity, log_exception
 
 logger = logging.getLogger("knowledge_base_api")
 
@@ -25,9 +26,29 @@ BATCH_DELETE_CHUNK_SIZE = 800
 # 这里再加一层保护，确保任何情况下知识库列表接口都不会被缓存阻塞。
 KB_CACHE_OPERATION_TIMEOUT = 2.0
 
-from src.services.vector_store import VectorStoreManager
-from src.services.semantic_cache_service import schedule_invalidation as _schedule_semantic_cache_invalidation
-from src.utils.error_handling import ErrorSeverity, log_exception
+
+async def _count_kb_residual(vector_store, kb_id: str) -> int:
+    """删除后核对某知识库的残留切片数；无法核对时按 0 处理（不制造假告警）。
+
+    主要用于发现「delete 返回成功但实际 0 影响」的形态：历史切片的 kb_id 若为
+    空串（schema 升级后补字段时的默认值），按库过滤永远匹配不到。
+    """
+    milvus = getattr(vector_store, "milvus_service", None)
+    count_by_kb = getattr(milvus, "count_by_kb", None)
+    if count_by_kb is None:
+        return 0
+    try:
+        return int(await count_by_kb(kb_id) or 0)
+    except Exception as exc:
+        log_exception(
+            logger, exc,
+            action="knowledge_base.delete.vectors_verify",
+            severity=ErrorSeverity.RECOVERABLE,
+            message="无法核对向量残留数量，跳过删除后校验",
+            kb_id=kb_id,
+        )
+        return 0
+
 
 from .common import (
     BatchDeleteKnowledgeBasesRequest,
@@ -198,14 +219,66 @@ async def delete_knowledge_base(
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_kb_ids([str(kb.id)])
         except Exception as exc:
-            # 向量清理失败不阻塞 DB 删除，但会留下孤儿向量（检索仍可命中）
+            # 失败后仍会删 DB 行 —— 这些向量从此没有任何元数据指向，只能靠日志人工清理。
+            # 属于永久性数据残留（检索仍可命中已删库内容），不是「等下次重试」的可恢复抖动。
             log_exception(
                 logger, exc,
                 action="knowledge_base.delete.vectors",
-                severity=ErrorSeverity.RECOVERABLE,
-                message="删除知识库时向量存储清理失败，继续删除数据库记录",
+                severity=ErrorSeverity.REPORTABLE,
+                message="删除知识库时向量清理失败，DB 记录仍被删除：该库切片成为无主向量"
+                        "（检索可命中、无元数据可追溯），需按 kb_id 人工清理",
                 kb_id=str(kb.id),
+                documents=len(docs),
             )
+            # 回退到逐文档删除：部分历史数据的 kb_id 未回填（默认空串），
+            # 按库过滤删不到，但按 document_id 删得到。
+            doc_ids = [str(d.id) for d in docs]
+            if doc_ids:
+                try:
+                    await vector_store.delete_by_document_ids(doc_ids)
+                    logger.info(
+                        "按 kb_id 删除向量失败后，回退逐文档删除成功: kb=%s docs=%d",
+                        kb.id, len(doc_ids),
+                    )
+                except Exception as retry_exc:
+                    log_exception(
+                        logger, retry_exc,
+                        action="knowledge_base.delete.vectors_retry",
+                        severity=ErrorSeverity.REPORTABLE,
+                        message="按知识库与按文档两轮向量清理均失败，确认存在无主向量",
+                        kb_id=str(kb.id),
+                        documents=len(doc_ids),
+                    )
+        else:
+            # 删除成功也要核对：kb_id 字段对历史数据可能为空串，此时 delete 会
+            # 「成功返回 0 影响」而不报错——元数据照删，向量全留，正是最难发现的形态。
+            residual = await _count_kb_residual(vector_store, str(kb.id))
+            if residual:
+                doc_ids = [str(d.id) for d in docs]
+                if doc_ids:
+                    try:
+                        await vector_store.delete_by_document_ids(doc_ids)
+                        residual = await _count_kb_residual(vector_store, str(kb.id))
+                    except Exception as retry_exc:
+                        log_exception(
+                            logger, retry_exc,
+                            action="knowledge_base.delete.vectors_residual_retry",
+                            severity=ErrorSeverity.REPORTABLE,
+                            message="发现向量残留后按文档重删失败",
+                            kb_id=str(kb.id),
+                            residual=residual,
+                        )
+                if residual:
+                    log_exception(
+                        logger, RuntimeError("知识库删除后仍有向量残留"),
+                        action="knowledge_base.delete.vectors_residual",
+                        severity=ErrorSeverity.REPORTABLE,
+                        message="按 kb_id 删除返回成功但仍有残留切片：这些切片将可被检索命中，"
+                                "且删除 DB 记录后无法再追溯",
+                        kb_id=str(kb.id),
+                        residual=residual,
+                        documents=len(docs),
+                    )
 
         # 删除 MinIO 中的原始文件（并发执行），失败仅告警不阻塞。
         minio_service = await MinioService.get_instance()
@@ -376,12 +449,16 @@ async def batch_delete_knowledge_bases(
             vector_store = await VectorStoreManager.get_instance()
             await vector_store.delete_by_kb_ids([str(kb_id) for kb_id in found_ids])
         except Exception as exc:
+            # 批量删除会紧接着清掉 DB 行，这之后没有任何记录能反查出该删哪些向量。
+            # 日志必须带上具体 kb_id，否则运维只有「失败」二字，无法人工补救。
             log_exception(
                 logger, exc,
                 action="knowledge_base.batch_delete.vectors",
-                severity=ErrorSeverity.RECOVERABLE,
-                message="批量删除知识库时向量存储清理失败，继续删除数据库记录",
+                severity=ErrorSeverity.REPORTABLE,
+                message="批量删除知识库时向量清理失败，DB 记录仍被删除：这些库的切片成为"
+                        "无主向量（检索可命中、无元数据可追溯），需按 kb_ids 人工清理",
                 kb_count=len(found_ids),
+                kb_ids=",".join(sorted(str(k) for k in found_ids)[:20]),
             )
 
     # 删除 MinIO 中的原始文件：W6 #78b 下沉到后台任务（独立会话 + 分批并发），

@@ -222,12 +222,14 @@ async def on_kb_deleted(db, kb_id: str) -> None:
             await db.commit()
             logger.info(f"Wiki 级联（知识库删除）: kb={kb_id}, 清理页面 {len(rows)} 页")
     except Exception as e:
+        # 知识库已删，这些 wiki_pages 行与正文再无人认领；失败的页面级向量删除
+        # 也已无处追溯，因此按 REPORTABLE 记录并带上库 ID 供人工清理。
         log_exception(
             logger, e,
             action="wiki_cascade.on_kb_deleted",
-            severity=ErrorSeverity.RECOVERABLE,
-            message="Wiki 级联（知识库删除）失败，不影响删除主流程",
-            kb_id=kb_id,
+            severity=ErrorSeverity.REPORTABLE,
+            message="Wiki 级联（知识库删除）失败：页面行/向量可能残留，需按 kb_id 人工清理",
+            kb_id=str(kb_id),
         )
 
 
@@ -240,13 +242,15 @@ async def _delete_page_artifacts(row) -> None:
         vector_store = await VectorStoreManager.get_instance()
         await vector_store.milvus_service.delete_by_document_id(row.id)
     except Exception as e:
-        # 向量删不掉会留下孤儿向量（页面已删但检索命中），需可见但不中断
+        # 向量删不掉 = 页面从列表消失、检索却仍能命中它的正文（引用指向已删页）。
+        # 这是永久性残留，不是上游抖动，按 REPORTABLE 记，才能被人捡起来清理。
         log_exception(
             logger, e,
             action="wiki_cascade.delete_page_vectors",
-            severity=ErrorSeverity.RECOVERABLE,
-            message="Wiki 页向量删除失败，继续其余清理",
+            severity=ErrorSeverity.REPORTABLE,
+            message="Wiki 页已删除但向量残留：该页内容仍可被检索命中",
             page_id=row.id,
+            kb_id=getattr(row, "kb_id", None),
         )
     try:
         minio = await MinioService.get_instance()

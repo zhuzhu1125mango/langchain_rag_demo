@@ -9,6 +9,7 @@ import time
 from typing import Dict, List
 
 from src.config import settings
+from src.services.agent_memory import MEMORY_KB_ID
 from src.services.decision_pipeline import QAMode
 from src.services.output_sanitizer import OutputSanitizer
 from src.services.pipeline.state import _PipelineState, _memory_doc_id
@@ -85,7 +86,7 @@ class AgentMixin:
                 },
             )
             await self.vector_store.milvus_service.insert_embeddings(
-                [doc], kb_id=f"memory"
+                [doc], kb_id=MEMORY_KB_ID
             )
         except Exception as e:
             log_exception(
