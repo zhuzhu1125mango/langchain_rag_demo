@@ -31,7 +31,7 @@ dependencies = [
     "pymilvus==3.0.2",
     "pymilvus-model==0.3.2",
     "minio==7.2.20",
-    "pypdf==6.21.3",
+    "pypdf==6.21.4",
     "python-docx==1.2.0",
     "openpyxl==3.1.5",
     "python-pptx==1.0.2",
