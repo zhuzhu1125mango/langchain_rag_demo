@@ -91,6 +91,30 @@ except Exception as exc:
 4. **长尾**：其余 ~235 处随日常改动顺带迁移，避免二次触碰同一文件；
 5. **收敛规则**：迁移时逐点判断「能否处理」——能处理（重试/降级/跳过）→ 保留 `except` + 分级记录；不能处理（应继续抛）→ 删掉本地 `except`，交给上层。
 
+## 4.1 保留静默清单（CODE-2 收口，2026-11-01）
+
+推广完成后做了一次全量复核：按「`except` 块内既无 `log_exception`、也无 `raise`」扫出
+120 个候选，逐个判定后**确认下面这些属于「应当静默」**——它们要么是每请求都会走到的
+控制流，要么是失败已经被返回值精确表达。给它们加日志只会把真正的异常淹掉
+（本项目一次问答会调用 JWT 解码、URL 校验十几次）。
+
+| 位置 | 形态 | 为什么必须静默 |
+|---|---|---|
+| `auth.verify_password` | `except (ValueError, TypeError) → False` | 库里存了坏 hash 时只能判「密码不对」，属认证失败而非系统故障；记录会把一次登录失败变成 error，且日志里出现密码相关上下文 |
+| `auth.decode_token` / `refresh_access_token` | `except PyJWTError → None` | 每个带 token 的请求都跑一次，token 过期/被篡改是常态；失败结果 `None` 已由调用方转成 401，再记就是噪音 |
+| `api/notification.py` WS 鉴权 | `except (HTTPException, BadRequestException) → close(1008)` | 越权订阅是**预期被拒绝**，不是错误；用户已由 close code 得到明确反馈 |
+| `api/notification.py` 心跳/订阅 | `except json.JSONDecodeError → pass` | 客户端发来半截帧属正常断线过程；记录会在网络抖动时刷屏 |
+| `api/notification.py` 断连 | `except WebSocketDisconnect → disconnect()` | 控制流（谁都会断开），不是异常 |
+| `utils/security` IP/URL 校验 | `except ValueError / UnsafeUrlError → False / None` | 「这个 URL 不安全」是**判定结果**，不是故障；SSRF 拦截率需要的是指标而非 error 日志 |
+| `progress_manager` 线程桥接 | `except RuntimeError`（无运行中的 loop） | 工作线程里没有 event loop 是设计内的分支，已走 `logger.debug` |
+| `progress_manager` 终态清理 | `except Exception: pass` + 注释 | 客户端早已断开，关闭失败没有任何下游可通知 |
+| `web_search_content` 对端复核 | `except Exception → return` | 非 socket 传输（测试替身/内存流）没有 `get_extra_info`，属预期形态，已注明 |
+| `main.py` 应用装配 | 9 处 | 装配期异常等于启动失败，uvicorn 会打印完整堆栈；此处再记会重复 |
+
+> 与之相对，**「假值兜底」不在此列**：凡是 `return 0.0 / 0.6 / []` 会被上层当成测量结果的，
+> 都已在前面的批次里改成显式分级（重排队列 0.0、相关性门禁 0.6、重复检测 `[]` 等）。
+> 判定标准不是「有没有 except」，而是「失败会不会被当成结论」。
+
 ## 5. 验收口径（单模块）
 
 - 该模块所有 `except Exception` 都走 `log_exception`，或已被删除；
