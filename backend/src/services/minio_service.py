@@ -102,6 +102,26 @@ class MinioService(AsyncSingleton["MinioService"]):
         actual_key = file_key.replace(f"minio://{settings.minio.MINIO_BUCKET_NAME}/", "")
         self._client.remove_object(settings.minio.MINIO_BUCKET_NAME, actual_key)
 
+    def iter_objects(self, prefix: str = "", max_objects: int = 0):
+        """流式遍历桶内对象，逐个产出 ``(object_key, size)``。
+
+        供一致性巡检等离线工具使用：list_objects 内部按 1000 条分页拉取，
+        调用方不必关心 continuation token；``max_objects`` > 0 时到量即停
+        （避免误跑超大桶时长时间占用连接）。
+        """
+        for index, obj in enumerate(
+            self._client.list_objects(
+                settings.minio.MINIO_BUCKET_NAME, prefix=prefix, recursive=True
+            )
+        ):
+            if max_objects and index >= max_objects:
+                logger.warning(
+                    "MinIO 对象遍历达到上限 %d，结果可能不完整（prefix=%s）",
+                    max_objects, prefix,
+                )
+                return
+            yield obj.object_name, obj.size
+
     def get_file_url(self, file_key, expires=3600):
         """同步生成带签名的临时访问 URL。
 
