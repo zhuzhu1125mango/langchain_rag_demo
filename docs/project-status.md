@@ -1,6 +1,6 @@
 # 项目状态与待办台账
 
-> 状态：持续维护 · 最后更新：2026-10-28
+> 状态：持续维护 · 最后更新：2026-11-02
 > 职责：**项目已完成 / 剩余待办的唯一台账**（见 [README.md](README.md) 目录结构）；各专题的方案与实测细节见对应的 `design/` 文档，本表只做汇总与索引。
 > 关联：[special-projects-2026-09.md](design/special-projects-2026-09.md)、[improvement-roadmap.md](design/improvement-roadmap.md)、[chat-latency-and-model-config.md](design/chat-latency-and-model-config.md)、[e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md)、[security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md)
 
@@ -133,7 +133,7 @@
 |---|---|---|---|---|
 | E2 | Query 回流沉淀 synthesis 页 | ✅ **已实现（2026-10-28 核实，原列为待办系重复记账）**：复用 D3 synthesis 机制——`wiki_synthesis_service.py` 判定纯函数 + per-KB 去抖 + 0.92 语义去重（防噪声页）+ `WikiCompiler.persist_pages` 落 `source_kind="wiki_syn"`，`pipeline/stages.py:820` 在终态副作用中调用；`WIKI_SYNTHESIS_ENABLED=false` 灰度。**待办收敛为「灰度验收 + 是否开启决策」** | 中（依赖 W3） | 开发 |
 | LEARN | 学习闭环 / 实验接入 | ✅ 三断链（权重无回载 / KB 短路 strategy_results 恒空 / A/B 未接入问答链路）已修复并经 dev 端到端验证：W-A 单例+权重回载 / W-B 短路补采 / W-C A/B 接入 chat，三开关灰度默认关，见 [learning-loop-wiring.md](design/learning-loop-wiring.md) | 中 | 开发 |
-| SA | 专项 A 巨型文件拆分决策 | 后端拆分**已完成**：11 个巨型文件全部拆完，仅 `main.py` 731 保持（装配脚本，拆分收益低）；剩前端 `queries/kb.ts` 948 待拆（需单独跑前端测试链） | 低 | owner |
+| SA | 专项 A 巨型文件拆分决策 | ✅ **已完成（2026-10-29）**：后端 11 个巨型文件全部拆完，仅 `main.py` 731 保持（装配脚本，拆分收益低）；前端 `queries/kb.ts` 948 已由 **CODE-4** 拆为 8 个子模块 + barrel（前端单测/构建全绿）。原「待拆」记录系 CODE-4 之前所写，已过期 | — | ✅ 已收口 |
 | W0 | 批次二手动项 | Tavily API Key 轮换；~~`configs/license/minio.license` 处置决策~~ **已消解（2026-10-28 核实：文件不存在，`configs/license/` 为空且未纳入 git）** | 低 | owner |
 | HG | 挂起区 | 专项 B 触发监控（消息>200/节点>300）；L3 critic 反思灰度时点；MCP 分发边界（局域网多用户形态）最终确认；Office/HTML/EPUB loader 迁移（`document_loaders.py` 仍走 community，已确认）、~~axios 5xx 非幂等重试~~ **已修（2026-10-28）**：`utils/axios.ts` 抽出 `isRetryableRequest` 纯函数，仅 `ECONNREFUSED` 允许任意方法重试，超时/5xx 仅幂等方法（GET/HEAD/OPTIONS/PUT/DELETE），POST/PATCH 不再重试；+6 单测 | 低（触发器） | 开发 |
 | ENV | `.env.dev` rerank 模型漂移（**已核实：不存在**） | 2026-10-18 复核：`.env.dev` / `.env.prod` / `.env.example` 三份的 `KB_RERANK_MODEL` 与 `SEARCH_RERANK_MODEL` 均为 `BAAI/bge-reranker-base`，`config.py` 两处默认均为 `None`（无硬编码）→ **无漂移**；原台账条目标述有误（陈旧），本条作废，无需改动 | 无 | 开发 |
@@ -301,7 +301,8 @@
 
 ## 五、提交与推送状态
 
-- 当前工作区（2026-10-28）：**干净**；origin/main HEAD = **`6d71479`**，最近 CI 7/7 + security-scan 全绿。
+- 当前工作区（2026-11-02 核实）：**干净**；origin/main HEAD = **`b9159e1`**，最近 CI 7/7 + security-scan 全绿。
+- 2026-11-01 推送链：`a07a7c2` 删除链路一致性 → `061bfbf` 语义缓存命中校验 → `41288796509` 一致性巡检工具 → `ce407ca` 部署 + nightly 接线 → `e281d61` CODE-2 收口 → `aeee05b`/`569b087`/`dbcce38`/`117afdb` AGT-1 → `b9159e1` DEPLOY-3 记录。生产已对齐（DEPLOY-2 / DEPLOY-3）。
 - 本轮推送（2026-10-28）：
   - `6faccd9`（docs）：核实剩余待办并回写台账（P0 部署偏差 / E2 已实现 / CODE 实测数字）
   - `6d71479`（fix(ui)）：axios 重试仅限幂等方法（+ `axios.spec.ts` 6 例；前端 137 例全通过、覆盖率 36.7/42.64/26.15/35.51）
