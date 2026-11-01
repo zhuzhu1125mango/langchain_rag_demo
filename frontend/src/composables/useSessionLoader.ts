@@ -5,6 +5,7 @@ import { api } from '@/utils/axios'
 import { generateId } from '@/utils/id'
 import { useToast } from '@/composables/useToast'
 import type { Message, ReasoningStep } from '@/queries/chat'
+import { getActiveChatRun } from '@/queries/chat'
 import type { RawSourceMeta } from '@/composables/useChatStream'
 
 /**
@@ -19,7 +20,7 @@ export function useSessionLoader() {
   const toast = useToast()
 
   /** 加载指定会话的历史消息并映射到前端消息结构。 */
-  async function loadSession(sessionId: string): Promise<void> {
+  async function loadSession(sessionId: string, recoverInFlight = true): Promise<void> {
     try {
       interface SessionMessage {
         id?: string
@@ -77,11 +78,58 @@ export function useSessionLoader() {
           isLoading: false
         }))
         chatStore.setMessages(messages)
+        // 刷新/换设备回来时，该会话可能还有在途生成（AGT-1：生成已与连接解耦）
+        if (recoverInFlight) void recoverInFlightRun(sessionId)
       }
     } catch (error) {
       console.error('加载会话失败:', error)
       toast.error('加载历史对话失败', '请稍后重试')
     }
+  }
+
+  /**
+   * AGT-1：找回在途回答。
+   *
+   * 服务端不再因断连而停止生成，但助手消息要等生成结束才落库——刷新时直接
+   * 拉历史会看到「只有问题、没有回答」，用户会以为回答丢了并重问一遍。
+   * 这里先放占位消息，等运行结束后重新拉历史（占位被真实消息替换）。
+   *
+   * 只做「等 + 重拉」而不重放事件流：刷新场景下用户要的是答案不丢，
+   * 逐 token 重放会与占位消息的生命周期纠缠，收益不成正比。
+   */
+  async function recoverInFlightRun(sessionId: string): Promise<void> {
+    let active: { run_id: string | null }
+    try {
+      active = await getActiveChatRun(sessionId)
+    } catch {
+      // 查询失败不影响历史展示；最坏情况是这次刷新看不到在途回答
+      return
+    }
+    if (!active.run_id) return
+
+    chatStore.addMessage({ id: generateId(), role: 'assistant', content: '', isLoading: true })
+    chatStore.setTyping(true)
+
+    const deadline = Date.now() + 120_000
+    try {
+      while (Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
+        // 用户已切到别的会话：停手，别把消息写到当前会话上
+        if (chatStore.currentSession?.id !== sessionId) return
+        try {
+          const latest = await getActiveChatRun(sessionId)
+          if (!latest.run_id) break
+        } catch {
+          // 单次查询失败（网络抖动）不终止，下一轮再试
+        }
+      }
+    } finally {
+      chatStore.setTyping(false)
+    }
+
+    if (chatStore.currentSession?.id !== sessionId) return
+    // 重新拉历史：真实助手消息（含 stopped / error 标记）替换占位消息
+    await loadSession(sessionId, false)
   }
 
   onMounted(() => {

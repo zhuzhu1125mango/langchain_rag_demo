@@ -503,6 +503,27 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         logger.info("保留期清扫任务已取消")
 
+    # 关机前排空流式问答运行：生成已与连接解耦，进程退出不会经过任何请求的
+    # finally。这里取消在途运行并等部分答案落库，否则用户看到的是「问题还在、
+    # 回答凭空消失」，且没有任何日志解释
+    try:
+        from src.services.chat_run import get_run_registry
+
+        drained_runs = await get_run_registry().drain(timeout=10.0)
+        if drained_runs["running"]:
+            logger.info(
+                "关机前流式问答收尾: 在途 %s 个已取消（部分答案尽量落库），保留 %s 个",
+                drained_runs["running"],
+                drained_runs["retained"],
+            )
+    except Exception as run_drain_err:
+        log_exception(
+            logger,
+            run_drain_err,
+            action="startup.shutdown.chat_run_drain",
+            message="关机前排空流式问答运行失败，在途回答可能未落库",
+        )
+
     # 关机前排空语义缓存失效任务：删除/下架后触发的失效是 fire-and-forget，
     # 任务还排在事件循环里就退出 = 这次删除从没清过缓存，且日志上毫无痕迹
     try:

@@ -4,6 +4,7 @@
 - ``common``  请求模型 / 会话 ID 解析 / 配额依赖 / A/B 分流配置
 - ``message`` 非流式发送 ``/messages`` 与消息反馈
 - ``stream``  SSE ``/stream``（含会话准备与收尾落库）
+- ``runs``    流式运行的续传 / 停止 / 在途查询（AGT-1）
 - ``tools``   审批回执、推荐问题、上下文增强、改写、分类、对比
 
 对外 ``router`` 前缀与标签保持不变；``MessageRequest`` 等模型保留包级导出
@@ -12,13 +13,14 @@
 
 from fastapi import APIRouter
 
-from . import message, stream, tools
+from . import message, runs, stream, tools
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# 顺序：/messages（含 /messages/{id}/feedback）→ /stream → 其余静态路径
+# 顺序：/messages（含 /messages/{id}/feedback）→ /stream → /runs → 其余静态路径
 router.include_router(message.router)
 router.include_router(stream.router)
+router.include_router(runs.router)
 router.include_router(tools.router)
 
 # 兼容历史导入路径

@@ -3,7 +3,7 @@ import { useRouter } from 'vue-router'
 import { useQueryClient } from '@tanstack/vue-query'
 import { useChatStore } from '@/stores/chat'
 import type { MessageSource, ReasoningStep } from '@/queries/chat'
-import { resolveChatApproval } from '@/queries/chat'
+import { resolveChatApproval, stopChatRun } from '@/queries/chat'
 import type ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import { getToken } from '@/utils/auth'
 import { generateId } from '@/utils/id'
@@ -43,6 +43,11 @@ export interface UseChatStreamOptions {
   messageListRef: Ref<InstanceType<typeof ChatMessageList> | null>
 }
 
+/** AbortError 判定：主动停止/主动关闭都会触发，不能当成网络故障。 */
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { name?: string }).name === 'AbortError'
+}
+
 export function useChatStream(options: UseChatStreamOptions) {
   const { questionInput, selectedKBs, useWebSearch, deepThinking, searchStatus, suggestions, messageListRef } = options
   const chatStore = useChatStore()
@@ -57,6 +62,10 @@ export function useChatStream(options: UseChatStreamOptions) {
   // 当前流式回答对应的助手消息 ID（内容到达后 isLoading 即变为 false，
   // 停止时不能只靠 isLoading 定位目标消息）
   let activeAssistantMessageId: string | null = null
+  // AGT-1：服务端运行 ID 与已收到的最后一个事件序号。生成已与连接解耦，
+  // 断线后凭这两个值续传，不必重问一遍、也不会重复渲染已收到的内容。
+  let activeRunId: string | null = null
+  let lastEventSeq = 0
 
   // SSE reasoning 事件节流：同一帧内多次 reasoning 更新合并为一次状态提交，
   // 避免高频时间线更新导致渲染抖动。
@@ -70,6 +79,46 @@ export function useChatStream(options: UseChatStreamOptions) {
     }
   }
 
+  /**
+   * AGT-1：断线续传。凭 run_id + 已收序号重新挂上服务端仍在跑的生成，
+   * 从断点继续接收，不重发问题、也不重复渲染已收内容。
+   *
+   * 失败语义：404（运行已过期）/ 409（事件断档）直接放弃，交给调用方按
+   * 「连接断开」提示；网络仍不通则短退避重试一次。
+   */
+  async function resumeActiveRun(
+    pump: (body: ReadableStream<Uint8Array>) => Promise<void>,
+    outerController: AbortController
+  ): Promise<void> {
+    const runId = activeRunId
+    if (!runId) return
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const controller = new AbortController()
+      activeStreamController = controller
+      try {
+        const headers: Record<string, string> = {}
+        const token = getToken()
+        if (token) headers['Authorization'] = `Bearer ${token}`
+
+        const response = await fetch(`/api/chat/runs/${runId}/stream?after=${lastEventSeq}`, {
+          headers,
+          signal: controller.signal
+        })
+        if (!response.ok || !response.body) return
+        await pump(response.body)
+        return
+      } catch (error) {
+        if (isAbortError(error)) return
+        // 网络仍未恢复：退避后重试一次，仍失败就交给「连接断开」分支
+        await new Promise(resolve => setTimeout(resolve, 400 * (attempt + 1)))
+      } finally {
+        // 交还控制权：停止/卸载仍作用于原控制器
+        if (activeStreamController === controller) activeStreamController = outerController
+      }
+    }
+  }
+
   /** 发送用户问题，通过 SSE 接收流式回答；传入 overrideQuestion 用于重新生成场景。 */
   async function sendMessage(overrideQuestion?: string): Promise<void> {
     const question = (overrideQuestion ?? questionInput.value).trim()
@@ -79,6 +128,8 @@ export function useChatStream(options: UseChatStreamOptions) {
     if (hasLoadingMessage) return
 
     stopRequested = false
+    activeRunId = null
+    lastEventSeq = 0
     chatStore.setTyping(true)
 
     if (useWebSearch.value) {
@@ -104,8 +155,6 @@ export function useChatStream(options: UseChatStreamOptions) {
     let invocationController: AbortController | null = null
     // 跨 try/catch 使用：主动关闭标记与 AbortError 判定（catch 中需忽略）。
     let streamEnded = false
-    const isAbortError = (error: unknown) =>
-      typeof error === 'object' && error !== null && (error as { name?: string }).name === 'AbortError'
 
     try {
       let assistantMsgId = generateId()
@@ -185,6 +234,14 @@ export function useChatStream(options: UseChatStreamOptions) {
           // 用 assistantMsgId 精确定位（end 前的 message_id 替换不影响流期内写入）。
           const lastMsg = chatStore.messages.find(m => m.id === assistantMsgId)
           if (!lastMsg) return
+
+          // AGT-1：首帧携带服务端运行 ID。断线后凭它续传；没有它就只能判「连接断开」
+          if (data.type === 'run') {
+            if (typeof data.run_id === 'string' && data.run_id) {
+              activeRunId = data.run_id
+            }
+            return
+          }
 
           if (data.type === 'search_status') {
             searchStatus.value = data.status || 'idle'
@@ -348,11 +405,13 @@ export function useChatStream(options: UseChatStreamOptions) {
       }
 
       // 逐块读取 SSE 流：按空行（\n\n）切分事件，提取 "data: " 行
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
+      // 逐块读取 SSE 流：按空行（\n\n）切分事件，取 id: 记录游标、data: 分发。
+      // 抽成函数是因为「续传」要走同一套解析（processEvent 在同一作用域内）。
+      const pump = async (body: ReadableStream<Uint8Array>): Promise<void> => {
+        const reader = body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
 
-      try {
         while (!streamEnded) {
           const { done, value } = await reader.read()
           if (done) break
@@ -362,10 +421,27 @@ export function useChatStream(options: UseChatStreamOptions) {
           buffer = events.pop() || ''
 
           for (const event of events) {
-            const dataLine = event.split('\n').find(line => line.startsWith('data:'))
+            const lines = event.split('\n')
+            // id: 是续传游标——丢了它重连只能从头重放，已收到的内容会重复渲染
+            const idLine = lines.find(line => line.startsWith('id:'))
+            if (idLine) {
+              const seq = Number(idLine.slice(3).trim())
+              if (Number.isFinite(seq) && seq > lastEventSeq) lastEventSeq = seq
+            }
+            const dataLine = lines.find(line => line.startsWith('data:'))
             if (!dataLine) continue
             processEvent(dataLine.slice(5).trim())
           }
+        }
+      }
+
+      try {
+        await pump(response.body)
+
+        // 服务端没发 end 就断了 = 静默中断。此前这里直接判「连接断开」，
+        // 但服务端生成并没有停（AGT-1 已与连接解耦）：先凭 run_id 续上。
+        if (!streamEnded && !receivedEnd && !stopRequested && activeRunId) {
+          await resumeActiveRun(pump, controller)
         }
       } finally {
         // 释放底层连接（服务端正常结束或中途退出均安全）
@@ -418,6 +494,9 @@ export function useChatStream(options: UseChatStreamOptions) {
       // 已被新消息取代的旧流不能把新流的 typing 置为 false。
       if (invocationController === null || activeStreamController === invocationController) {
         chatStore.setTyping(false)
+        // 本次流已收尾：清掉运行句柄，避免下次「停止」误打到上一轮已结束的运行
+        activeRunId = null
+        lastEventSeq = 0
       }
     }
   }
@@ -431,6 +510,15 @@ export function useChatStream(options: UseChatStreamOptions) {
     if (activeAssistantMessageId) {
       chatStore.updateMessage(activeAssistantMessageId, { isLoading: false, stopped: true })
     }
+    // 先停服务端：生成已与连接解耦，只 abort 本地连接的话服务端会继续生成
+    // （白烧一次 LLM，用户回到会话还能看到回答继续变长）。失败不阻塞本地停止。
+    const runId = activeRunId
+    if (runId) {
+      void stopChatRun(runId).catch(() => {
+        /* 网络不通时仅本地 abort 兜底，服务端会因空闲超时回收 */
+      })
+    }
+    activeRunId = null
     activeStreamController.abort()
   }
 

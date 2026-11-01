@@ -505,6 +505,31 @@ class SemanticCacheSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 
+class ChatRunSettings(BaseSettings):
+    """流式运行注册表（AGT-1：会话可恢复 + 可取消）。
+
+    生成与 HTTP 连接解耦：连接断开不再取消生成，事件进缓冲，
+    客户端凭 run_id + 序号重连续传。所有缓冲都在进程内（单 worker 部署），
+    进程重启即丢——需要跨重启恢复要等 AM-4 持久执行。
+    """
+
+    # 总开关：false 时退化为「连接即生命周期」的旧行为
+    CHAT_RUN_ENABLED: bool = True
+    # 终态后保留可重连窗口（秒）。小于客户端重试间隔会让「刚答完刷新」拿不到
+    CHAT_RUN_RETENTION_SECONDS: int = 300
+    # 运行中空闲超时（秒）：长时间无新事件视为卡死，回收并取消
+    CHAT_RUN_IDLE_TIMEOUT_SECONDS: int = 900
+    # 单用户并发运行上限：超限返回 429，避免一个人打满 LLM
+    CHAT_RUN_MAX_PER_USER: int = 5
+    # 单 run 事件缓冲上限（帧数）：超出丢弃最旧并记录 dropped，
+    # 重连方若游标早于最旧帧会被告知从头读取（resume_gap）
+    CHAT_RUN_MAX_FRAMES: int = 4000
+    # 重连时的心跳间隔（秒）：注释帧保活，防代理空闲超时掐断
+    CHAT_RUN_HEARTBEAT_SECONDS: int = 15
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
+
+
 class GuardrailSettings(BaseSettings):
     """Agent 输入/输出/工具护栏与 HITL 审批（AM-2，见 docs/design/agent-guardrails-hitl.md）。
 
@@ -634,6 +659,7 @@ class Settings(BaseSettings):
     intent_router: IntentRouterSettings = IntentRouterSettings()
     search: SearchSettings = SearchSettings()
     semantic_cache: SemanticCacheSettings = SemanticCacheSettings()
+    chat_run: ChatRunSettings = ChatRunSettings()
     guardrail: GuardrailSettings = GuardrailSettings()
     wiki_compile: WikiCompileSettings = WikiCompileSettings()
     decision: DecisionSettings = DecisionSettings()

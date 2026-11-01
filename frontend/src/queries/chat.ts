@@ -212,8 +212,25 @@ export async function resolveChatApproval(
   await api.post(`/chat/approvals/${approvalId}`, { approved, reason })
 }
 
-/** 获取基于当前输入的问题推荐。 */
-export function useGetSuggestions() {
+/** AGT-1：停止服务端生成。
+ *
+ * 生成已与 HTTP 连接解耦，只 abort 本地连接不会让服务端停下——必须调这个，
+ * 否则用户点「停止」后服务端仍在烧 LLM，且回到会话还能看到回答继续变长。
+ */
+export async function stopChatRun(
+  runId: string
+): Promise<{ run_id: string; stopped: boolean; status: string }> {
+  return api.post(`/chat/runs/${runId}/stop`)
+}
+
+/** AGT-1：查询会话在途运行（刷新/换设备后重新挂上，从 after 续传）。 */
+export async function getActiveChatRun(
+  sessionId: string
+): Promise<{ run_id: string | null; after?: number; published?: number }> {
+  return api.get('/chat/runs/active', { params: { session_id: sessionId } })
+}
+
+/** 获取基于当前输入的问题推荐。 */export function useGetSuggestions() {
   return async function getSuggestions(
     question?: string,
     sessionId?: string,

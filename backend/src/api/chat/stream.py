@@ -1,6 +1,6 @@
 """聊天流式路由：SSE 回答、会话准备与收尾落库。"""
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from typing import Optional
@@ -19,6 +19,14 @@ from src.services.vector_store import VectorStoreManager
 from src.services.session_service import append_session_message
 from src.services.learning_engine import learning_engine
 from src.services.pipeline.state import set_ab_config, reset_ab_config
+from src.services.chat_run import (
+    RunLimitExceeded,
+    defer_task,
+    format_sse,
+    get_run_registry,
+    reset_current_run,
+    set_current_run,
+)
 from src.services.title_generator import TitleGenerator
 from src.utils.sensitive_words import sensitive_filter
 from src.utils.validators import parse_uuid_list, validate_kb_ownership
@@ -31,6 +39,7 @@ from .common import (
     _record_ab_metric,
     _resolve_ab_config,
 )
+from .runs import iter_run_frames
 
 logger = logging.getLogger("src.api.chat")
 
@@ -39,6 +48,21 @@ router = APIRouter(tags=["chat"])
 # B2-3：流式收尾（后台答案校验 + 落库）任务引用集，防止 fire-and-forget 任务被 GC。
 # 客户端在 end 后断连时该任务仍会完成，保证助手消息（含校验警告）落库。
 _stream_finalize_tasks: set = set()
+
+
+def _reject_run_limit(exc: RunLimitExceeded, session_id) -> HTTPException:
+    """在途生成超限的统一拒绝：一个人挂多条生成会把 LLM 配额打满。"""
+    log_exception(
+        logger,
+        exc,
+        action="chat.stream.run_limit",
+        severity=ErrorSeverity.REPORTABLE,
+        message="在途生成数超限，拒绝新请求",
+        session_id=str(session_id),
+        limit=exc.limit,
+    )
+    return HTTPException(status_code=429, detail="当前有多个回答正在生成，请等待或先停止")
+
 
 async def _prepare_stream_session(
     session_id: Optional[str],
@@ -120,7 +144,9 @@ async def stream_answer(
     detected, word, category = sensitive_filter.detect(question)
     if detected:
         async def error_generator():
-            yield json.dumps({"type": "error", "error": f"输入包含敏感内容 [{category}]: {word}"})
+            # 必须是完整 SSE 帧：裸 JSON 没有 "data:" 前缀，前端按 \\n\\n 切帧后
+            # 找不到 data 行会整帧丢弃，用户只看到转圈直到连接结束
+            yield format_sse({"type": "error", "error": f"输入包含敏感内容 [{category}]: {word}"})
         return StreamingResponse(error_generator(), media_type="text/event-stream")
 
     # 知识库 ID 校验：格式 + 归属（在流式响应开始前完成，错误以 4xx 返回）
@@ -137,12 +163,26 @@ async def stream_answer(
     user_message_id = str(uuid.uuid4())
     assistant_message_id = str(uuid.uuid4())
 
+    # 预检并发上限：必须早于用户消息落库，否则历史里会留下一条「有问无答」
+    try:
+        get_run_registry().assert_capacity(str(current_user.user_id))
+    except RunLimitExceeded as exc:
+        raise _reject_run_limit(exc, session_id) from exc
+
     prepared = await _prepare_stream_session(session_id, question, kb_ids, user_message_id, current_user)
     if prepared is None:
         async def error_generator():
-            yield json.dumps({"type": "error", "error": "会话不存在"})
+            yield format_sse({"type": "error", "error": "会话不存在"})
         return StreamingResponse(error_generator(), media_type="text/event-stream")
     current_session_id, history = prepared
+
+    # AGT-1：把「运行」从「连接」里拆出来。生成跑在独立 task，事件进带序号的
+    # 缓冲；本连接只是它的一个订阅者。断连不再取消生成，客户端可凭 run_id 续传。
+    registry = get_run_registry()
+    try:
+        run = registry.create(str(current_session_id), str(current_user.user_id))
+    except RunLimitExceeded as exc:
+        raise _reject_run_limit(exc, current_session_id) from exc
 
     # 保存助手消息（流式生成结束或异常时调用）。
     # C7：返回会话是否仍为默认标题，标题生成移到 end 事件之后的后台任务，
@@ -252,6 +292,10 @@ async def stream_answer(
             return new_title
 
     # 流式生成回答
+    # 生成结果的终态标记：generate() 内部把异常吞成 error 事件后正常返回，
+    # 若不在外层留痕，run 会被记成 completed（失败被伪装成成功）
+    generation = {"failed": False}
+
     async def generate():
         full_answer = ""
         sources = []
@@ -378,6 +422,9 @@ async def stream_answer(
             )
             _stream_finalize_tasks.add(partial_task)
             partial_task.add_done_callback(_stream_finalize_tasks.discard)
+            # 同时登记到当前 run：停止接口要等这条落库才返回，否则用户点停止
+            # 后立刻刷新会看不到「已停止」的那半条回答
+            defer_task(partial_task)
             raise
         except Exception as e:
             log_exception(
@@ -398,6 +445,7 @@ async def stream_answer(
                         record_learning=False, stopped=True, error=error_text,
                     )
                 )
+                defer_task(save_task)
                 await asyncio.shield(save_task)
             except Exception as save_err:
                 log_exception(
@@ -410,6 +458,7 @@ async def stream_answer(
             # 详细错误仅进日志（上方 logger.error 已带 exc_info），客户端只收通用文案 + request_id
             error_payload = {'type': 'error', 'error': '生成回答失败，请稍后重试', 'request_id': request_id}
             logger.debug(f"SSE error payload: {error_payload}")
+            generation["failed"] = True
             yield f"data: {json.dumps(error_payload)}\n\n"
             return
         finally:
@@ -536,4 +585,43 @@ async def stream_answer(
                     session_id=current_session_id,
                 )
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    # 运行事件必须是第一帧，且要进缓冲——续传方靠它与本地消息对齐
+    run.publish({"type": "run", "run_id": run.run_id, "session_id": current_session_id})
+
+    async def _pump():
+        """把生成器输出灌进运行缓冲：连接死活与它无关。"""
+        token = set_current_run(run)
+        try:
+            async for frame in generate():
+                run.publish_raw(frame)
+            run.finish("failed" if generation["failed"] else "completed")
+        except asyncio.CancelledError:
+            # 用户停止 / 关机 / 空闲超时：先落终态再向上抛，订阅者据此收尾
+            run.finish("stopped", run.stop_reason or "cancelled")
+            raise
+        except Exception as exc:
+            run.finish("failed", type(exc).__name__)
+            log_exception(
+                logger,
+                exc,
+                action="chat.run.pump",
+                severity=ErrorSeverity.REPORTABLE,
+                message="流式生成任务异常退出",
+                run_id=run.run_id,
+                request_id=request_id,
+            )
+        finally:
+            reset_current_run(token)
+
+    run_task = asyncio.create_task(_pump())
+    run.attach_task(run_task)
+
+    return StreamingResponse(
+        iter_run_frames(run, 0),
+        media_type="text/event-stream",
+        headers={
+            # 代理缓冲会把事件攒成大块，续传与「边算边看」都失去意义
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )

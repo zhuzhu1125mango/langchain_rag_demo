@@ -12,16 +12,19 @@ import { defineComponent, h, ref, type Ref } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 
 // vi.mock 工厂会被提升到文件顶部，共享 spy 须经 vi.hoisted 创建
-const { routerReplace, invalidateQueries, refetchQueries, resolveApprovalMock } = vi.hoisted(() => ({
-  routerReplace: vi.fn(),
-  invalidateQueries: vi.fn(),
-  refetchQueries: vi.fn(),
-  resolveApprovalMock: vi.fn()
-}))
+const { routerReplace, invalidateQueries, refetchQueries, resolveApprovalMock, stopRunMock } =
+  vi.hoisted(() => ({
+    routerReplace: vi.fn(),
+    invalidateQueries: vi.fn(),
+    refetchQueries: vi.fn(),
+    resolveApprovalMock: vi.fn(),
+    stopRunMock: vi.fn()
+  }))
 
 vi.mock('@/queries/chat', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/queries/chat')>()),
-  resolveChatApproval: resolveApprovalMock
+  resolveChatApproval: resolveApprovalMock,
+  stopChatRun: stopRunMock
 }))
 
 vi.mock('vue-router', () => ({
@@ -571,5 +574,142 @@ describe('卸载中止（D4）', () => {
     h.wrapper.unmount()
 
     expect(capturedSignal?.aborted).toBe(true)
+  })
+})
+
+describe('AGT-1 可取消与可续传', () => {
+  /** 服务端首帧：携带运行 ID，续传全靠它。 */
+  const RUN_FRAME = 'id: 1\ndata: {"type":"run","run_id":"run-1","session_id":"s1"}\n\n'
+
+  it('停止时调用服务端停止接口——只 abort 连接停不掉已解耦的生成', async () => {
+    stopRunMock.mockResolvedValue({ run_id: 'run-1', stopped: true, status: 'stopped' })
+
+    let capturedSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => {
+      capturedSignal = init?.signal
+      let step = 0
+      return {
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              step += 1
+              if (step === 1) return { done: false, value: encoder.encode(RUN_FRAME) }
+              if (step === 2) {
+                return {
+                  done: false,
+                  value: encoder.encode('id: 2\ndata: {"type":"content","content":"部分回答"}\n\n')
+                }
+              }
+              return new Promise(() => {})
+            }
+          })
+        }
+      }
+    }))
+
+    const h = mountStream()
+    void h.api.sendMessage('长问题')
+    await vi.waitFor(() => expect(assistantOf(h.store).content).toBe('部分回答'))
+
+    h.api.stopGeneration()
+
+    await vi.waitFor(() => expect(stopRunMock).toHaveBeenCalledWith('run-1'))
+    await vi.waitFor(() => expect(capturedSignal?.aborted).toBe(true))
+    expect(assistantOf(h.store).stopped).toBe(true)
+  })
+
+  it('断线后按游标续传：不重发问题、已收内容不重复', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      urls.push(url)
+      if (url === '/api/chat/stream') {
+        // 服务端还没发 end 就断（网络中断），此时服务端仍在生成
+        let step = 0
+        return {
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                step += 1
+                if (step === 1) return { done: false, value: encoder.encode(RUN_FRAME) }
+                if (step === 2) {
+                  return {
+                    done: false,
+                    value: encoder.encode('id: 2\ndata: {"type":"content","content":"前半段"}\n\n')
+                  }
+                }
+                return { done: true, value: undefined }
+              }
+            })
+          }
+        }
+      }
+      // 续传：从 id:2 之后继续，后端把剩下的补齐
+      return {
+        ok: true,
+        body: {
+          getReader: () => {
+            let step = 0
+            return {
+              read: async () => {
+                step += 1
+                if (step === 1) {
+                  return {
+                    done: false,
+                    value: encoder.encode('id: 3\ndata: {"type":"content","content":"后半段"}\n\n')
+                  }
+                }
+                if (step === 2) {
+                  return {
+                    done: false,
+                    value: encoder.encode(
+                      'id: 4\ndata: {"type":"end","message_id":"m1","session_id":"s1","sources":[],"answer_type":"llm_direct","reasoning":[]}\n\n'
+                    )
+                  }
+                }
+                return { done: true, value: undefined }
+              }
+            }
+          }
+        }
+      }
+    }))
+
+    const h = mountStream()
+    await h.api.sendMessage('原问题')
+
+    expect(urls).toEqual(['/api/chat/stream', '/api/chat/runs/run-1/stream?after=2'])
+    const assistant = assistantOf(h.store)
+    expect(assistant.content).toBe('前半段后半段')
+    expect(assistant.error).toBeUndefined()
+  })
+
+  it('续传失败（运行已过期）时回落到连接断开提示', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url === '/api/chat/stream') {
+        let step = 0
+        return {
+          ok: true,
+          body: {
+            getReader: () => ({
+              read: async () => {
+                step += 1
+                if (step === 1) return { done: false, value: encoder.encode(RUN_FRAME) }
+                return { done: true, value: undefined }
+              }
+            })
+          }
+        }
+      }
+      return { ok: false, status: 404, body: null }
+    }))
+
+    const h = mountStream()
+    await h.api.sendMessage('问题')
+
+    const assistant = assistantOf(h.store)
+    expect(assistant.error).toBe('连接断开，无法获取响应')
+    expect(assistant.isLoading).toBe(false)
   })
 })
