@@ -503,6 +503,27 @@ async def lifespan(app: FastAPI):
     except asyncio.CancelledError:
         logger.info("保留期清扫任务已取消")
 
+    # 关机前排空语义缓存失效任务：删除/下架后触发的失效是 fire-and-forget，
+    # 任务还排在事件循环里就退出 = 这次删除从没清过缓存，且日志上毫无痕迹
+    try:
+        from src.services.semantic_cache_service import drain_invalidations
+
+        drained_cache = await drain_invalidations(timeout=10.0)
+        if drained_cache["pending"]:
+            logger.info(
+                "关机前语义缓存失效收尾: 待处理 %s 个、完成 %s 个、超时取消 %s 个",
+                drained_cache["pending"],
+                drained_cache["completed"],
+                drained_cache["cancelled"],
+            )
+    except Exception as cache_drain_err:
+        log_exception(
+            logger,
+            cache_drain_err,
+            action="startup.shutdown.semantic_cache_drain",
+            message="关机前排空语义缓存失效任务失败，已删内容的答案可能在 TTL 内继续命中",
+        )
+
     # 关机前排空 Wiki 去抖编译队列：pending 集合与 20s 计时器都只在进程内存里，
     # 直接退出等于把「已回报加入队列」的文档永久丢掉（Wiki 缺页且无人知晓）
     try:

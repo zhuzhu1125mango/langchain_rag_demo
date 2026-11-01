@@ -155,6 +155,13 @@ class PipelineOrchestrationMixin:
                 exact_hit = await SemanticCacheService().lookup_exact(
                     state.user_id or "anonymous", state.kb_ids, state.resolved_question
                 )
+                # 精确命中同样要校验来源：这条路径跳过意图/决策/检索，
+                # 一旦条目脏了，连「问题是否还该走知识库」都不会再判一次。
+                if exact_hit is not None and not await SemanticCacheService().validate_hit(
+                    exact_hit, state.user_id or "anonymous", state.kb_ids
+                ):
+                    state.trace.add_stage("exact_cache_stale", "dropped", latency_ms=0)
+                    exact_hit = None
             if exact_hit is not None:
                 async for ev in self._replay_cache_hit(state, exact_hit):
                     yield ev

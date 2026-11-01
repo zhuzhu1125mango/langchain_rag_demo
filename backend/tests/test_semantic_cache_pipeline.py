@@ -73,6 +73,18 @@ def patch_lookup(monkeypatch, hit=None, embedding=None):
     return calls
 
 
+def patch_validate(monkeypatch, ok=True):
+    """命中来源校验：默认放行（本文件关注回放/写入逻辑，来源有效性另有专测）。"""
+    calls = []
+
+    async def fake_validate(self, hit, user_id, kb_ids):
+        calls.append({"question": hit.question, "user_id": user_id, "kb_ids": kb_ids})
+        return ok
+
+    monkeypatch.setattr(SemanticCacheService, "validate_hit", fake_validate)
+    return calls
+
+
 def patch_store(monkeypatch):
     calls = []
 
@@ -92,6 +104,7 @@ class TestLookupStage:
         chain = make_chain()
         state = make_state()
         calls = patch_lookup(monkeypatch, hit=make_hit())
+        patch_validate(monkeypatch, ok=True)
 
         events = []
         async for ev in chain._stage_semantic_cache_lookup(state):
@@ -118,6 +131,22 @@ class TestLookupStage:
         assert chunk_events[0][2] == ["来源1"]
         assert state.final_answer == make_hit().answer
         assert state.answer_type == "knowledge_base"
+
+    async def test_stale_hit_is_dropped_and_falls_through(self, monkeypatch):
+        """来源已删：不得回放缓存答案，按未命中继续正常链路。"""
+        chain = make_chain()
+        state = make_state()
+        patch_lookup(monkeypatch, hit=make_hit())
+        validated = patch_validate(monkeypatch, ok=False)
+
+        events = []
+        async for ev in chain._stage_semantic_cache_lookup(state):
+            events.append(ev)
+
+        assert events == [], "脏命中不能回放任何事件"
+        assert state.finished is False, "丢弃后必须继续走检索，否则用户拿到空答案"
+        assert state.semantic_cache_hit is False
+        assert len(validated) == 1, "命中必须先校验来源"
 
     async def test_miss_keeps_pipeline_running(self, monkeypatch):
         chain = make_chain()

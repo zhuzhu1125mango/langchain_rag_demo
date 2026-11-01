@@ -49,6 +49,13 @@ class CacheStagesMixin:
         if hit is None:
             return
 
+        # 命中也可能是脏的：失效是 best-effort（Redis 抖动/关机丢任务/索引缺失
+        # 导致按库失效漏 scope）。来源已删/已下架就丢弃条目、当未命中走正常链路，
+        # 绝不能让用户看到引用已删文档的答案。
+        if not await service.validate_hit(hit, state.user_id or "anonymous", state.kb_ids):
+            state.trace.add_stage("semantic_cache_stale", "dropped", latency_ms=0)
+            return
+
         async for ev in self._replay_cache_hit(state, hit):
             yield ev
 

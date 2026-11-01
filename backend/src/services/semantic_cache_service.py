@@ -36,7 +36,7 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import ErrorSeverity, log_exception
 # 缓存 key 前缀：rag:semcache:{user_id}:{kb_scope}
 KEY_PREFIX = "rag:semcache"
 # SEC-11：kb_id → scope keys 反向索引（Redis Set），避免失效时全库 SCAN
@@ -337,6 +337,139 @@ class SemanticCacheService:
             match_type=match_type,
         )
 
+    # ------------------------------------------------------------------
+    # 命中校验（缓存与库内容的一致性最后一道闸）
+    # ------------------------------------------------------------------
+    async def _sources_alive(
+        self, hit: SemanticCacheHit, kb_ids: Optional[List[str]]
+    ) -> tuple[bool, List[str]]:
+        """检查命中条目引用的来源是否仍可用；返回 (是否有效, 失效 id 列表)。
+
+        为什么要在命中时再查一次库：失效是 best-effort 的（Redis 抖动、进程在
+        异步失效任务执行前退出、scope 索引写入失败导致按库失效扫不到该 scope）。
+        任何一次漏失效都会让「引用已删文档的答案」在 TTL（默认 24h）内继续被返回。
+        与检索链路相比，这里只需一次轻量 SELECT，命中本来就是为了省一次 LLM 调用。
+
+        判定口径与检索链路一致：文档必须仍是 published（下架/归档即已从索引移除）；
+        wiki 页面由 wiki_pages 表判定（其 id 也写入 document_id）；来源全部无
+        document_id 的旧条目无从判断，按有效处理（不能因字段缺失就丢掉缓存）。
+        """
+        raw_ids: set = set()
+        wiki_ids: set = set()
+        for meta in hit.source_metadata or []:
+            if not isinstance(meta, dict):
+                continue
+            if meta.get("source_type") not in (None, "kb"):
+                continue  # 联网/工具来源不落库，不参与校验
+            doc_id = str(meta.get("document_id") or "").strip()
+            if not doc_id:
+                continue
+            if meta.get("source_kind") == "wiki":
+                wiki_ids.add(doc_id)
+            else:
+                raw_ids.add(doc_id)
+
+        if not raw_ids and not wiki_ids:
+            return True, []
+
+        scope = {str(k) for k in (kb_ids or []) if k}
+        try:
+            import uuid as _uuid
+
+            from sqlalchemy import select
+
+            from src.database import async_session_maker
+            from src.models import Document
+            from src.models.wiki_page import WikiPage
+
+            alive: set = set()
+            async with async_session_maker() as db:
+                if raw_ids:
+                    wanted = []
+                    for value in raw_ids:
+                        try:
+                            wanted.append(_uuid.UUID(value))
+                        except ValueError:
+                            continue  # 非 UUID 的 document_id 不可能存在于 documents 表
+                    if wanted:
+                        rows = await db.execute(
+                            select(Document.id, Document.kb_id).where(
+                                Document.id.in_(wanted),
+                                Document.status == "published",
+                            )
+                        )
+                        for doc_id, doc_kb_id in rows.all():
+                            # 文档已移出本次查询范围：引用它等于跨库作答
+                            if scope and doc_kb_id and str(doc_kb_id) not in scope:
+                                continue
+                            alive.add(str(doc_id))
+                if wiki_ids:
+                    rows = await db.execute(
+                        select(WikiPage.id).where(
+                            WikiPage.id.in_(list(wiki_ids)),
+                            WikiPage.status != "deleted",
+                        )
+                    )
+                    for (page_id,) in rows.all():
+                        alive.add(str(page_id))
+
+            missing = sorted((raw_ids | wiki_ids) - alive)
+            return (not missing), missing
+        except Exception as exc:
+            # 库不可用属于全局故障：此时缓存是唯一还能出答案的路径，按有效放行
+            log_exception(
+                logger, exc,
+                action="semantic_cache.validate_sources",
+                message="无法校验缓存来源是否仍存在，本次按有效处理（fail-open）",
+            )
+            return True, []
+
+    async def discard(self, hit: SemanticCacheHit, user_id: str, kb_ids: Optional[List[str]]) -> bool:
+        """删除单条缓存条目（来源失效时调用）。返回是否删除成功。"""
+        try:
+            cache = await self._get_cache()
+            if not cache.available:
+                return False
+            key = self.scope_key(user_id, kb_ids)
+            field_id = self.exact_field_id(hit.question)
+            await self._execute(cache, cache.client.hdel(key, field_id))
+            return True
+        except Exception as exc:
+            # 删不掉只是浪费一次校验，条目下次命中仍会被拦下
+            log_exception(
+                logger, exc, action="semantic_cache.discard",
+                message="删除失效缓存条目失败", user_id=user_id,
+            )
+            return False
+
+    async def validate_hit(
+        self, hit: SemanticCacheHit, user_id: str, kb_ids: Optional[List[str]]
+    ) -> bool:
+        """命中回放前的有效性校验：来源已失效则就地删除条目并返回 False。
+
+        返回 False 时调用方必须按「未命中」继续走正常链路，绝不能回放该答案。
+        """
+        ok, missing = await self._sources_alive(hit, kb_ids)
+        if ok:
+            return True
+
+        discarded = await self.discard(hit, user_id, kb_ids)
+        log_exception(
+            logger,
+            RuntimeError("语义缓存命中引用了已失效来源"),
+            action="semantic_cache.stale_hit",
+            severity=ErrorSeverity.REPORTABLE,
+            message="语义缓存条目引用的文档已删除/下架，已丢弃该条目并重新走检索"
+                    "（说明失效链路漏了一次，需排查）",
+            user_id=user_id,
+            kb_ids=",".join(sorted(str(k) for k in (kb_ids or []))[:5]),
+            match_type=hit.match_type,
+            missing_document_ids=",".join(missing[:10]),
+            missing_count=len(missing),
+            discarded=discarded,
+        )
+        return False
+
     def _record_hit(self, start: float, match_type: str):
         if _METRICS_AVAILABLE:
             record_semantic_cache_hit(match_type, time.time() - start)
@@ -450,9 +583,13 @@ class SemanticCacheService:
                 await self._execute(cache, cache.client.sadd(INDEX_ALL, scope_key))
                 await self._execute(cache, cache.client.expire(INDEX_ALL, ttl))
         except Exception as exc:
+            # 索引写不进去，这个 scope 从此不会被「按 kb 失效」命中（只要索引里
+            # 还有别的 scope，失效逻辑就不会回退全库 SCAN）→ 缓存可能长期不更新。
             log_exception(
                 logger, exc, action="semantic_cache.index_scope",
-                message="语义缓存索引写入失败（fail-open）",
+                severity=ErrorSeverity.REPORTABLE,
+                message="语义缓存 scope 索引写入失败：该范围后续按知识库失效会漏掉它",
+                scope=scope_key,
             )
 
     async def _candidate_scopes(self, cache, kb_id: str) -> List[str]:
@@ -483,6 +620,17 @@ class SemanticCacheService:
         try:
             cache = await self._get_cache()
             if not cache.available:
+                # 此处曾静默 return 0：Redis 抖动期间的删除/改状态不失效任何条目，
+                # 恢复后旧答案继续命中到 TTL，日志里看不出「这次删除没清缓存」。
+                log_exception(
+                    logger,
+                    RuntimeError("Redis 不可用，语义缓存失效被跳过"),
+                    action="semantic_cache.invalidate_unavailable",
+                    severity=ErrorSeverity.RECOVERABLE,
+                    message="缓存不可用，本次未失效任何条目（旧条目将在 TTL 内继续命中，"
+                            "命中侧会做来源校验兜底）",
+                    kb_id=kb_id,
+                )
                 return 0
 
             deleted = 0
@@ -513,9 +661,13 @@ class SemanticCacheService:
                 logger.info(f"语义缓存失效 [kb_id={kb_id}]: 删除 {deleted} 条")
             return deleted
         except Exception as exc:
+            # 失效没做成 = 已删/已下架内容在 TTL 内仍可能被回放，不是「下次重试就好」
             log_exception(
                 logger, exc, action="semantic_cache.invalidate_kb",
-                message="语义缓存失效失败（fail-open）", kb_id=kb_id,
+                severity=ErrorSeverity.REPORTABLE,
+                message="语义缓存失效失败：相关条目可能在 TTL 内继续命中"
+                        "（命中侧会做来源校验兜底）",
+                kb_id=kb_id,
             )
             return 0
 
@@ -528,6 +680,15 @@ class SemanticCacheService:
         try:
             cache = await self._get_cache()
             if not cache.available:
+                # 全量失效用于 Embedding 模型切换：旧条目的向量与新模型不可比，
+                # 静默跳过会让新查询按旧向量做相似度匹配，命中语义上无关的答案。
+                log_exception(
+                    logger,
+                    RuntimeError("Redis 不可用，语义缓存全量失效被跳过"),
+                    action="semantic_cache.invalidate_all_unavailable",
+                    severity=ErrorSeverity.REPORTABLE,
+                    message="缓存不可用，全量失效未执行：切换 Embedding 后旧条目可能被错误命中",
+                )
                 return 0
             deleted = 0
             index_keys: List[str] = []
@@ -587,3 +748,31 @@ def schedule_global_invalidation() -> None:
     task = asyncio.create_task(_invalidate())
     _invalidation_tasks.add(task)
     task.add_done_callback(_invalidation_tasks.discard)
+
+
+async def drain_invalidations(timeout: float = 10.0) -> dict:
+    """关机前等待未完成的后台失效任务。
+
+    失效是 fire-and-forget：任务还排在事件循环里时进程退出，就等于这次删除/下架
+    从来没清过缓存，且日志上完全看不出来。返回 ``{"pending","completed","cancelled"}``。
+    """
+    tasks = [t for t in _invalidation_tasks if not t.done()]
+    if not tasks:
+        return {"pending": 0, "completed": 0, "cancelled": 0}
+
+    done, pending = await asyncio.wait(tasks, timeout=timeout)
+    cancelled = 0
+    if pending:
+        for task in pending:
+            task.cancel()
+            cancelled += 1
+        await asyncio.gather(*pending, return_exceptions=True)
+        log_exception(
+            logger,
+            RuntimeError("关机时仍有未完成的缓存失效任务"),
+            action="semantic_cache.invalidate_drain",
+            severity=ErrorSeverity.REPORTABLE,
+            message="关机前缓存失效超时未完成：已删/已下架内容的答案可能在 TTL 内继续命中",
+            pending=len(pending),
+        )
+    return {"pending": len(tasks), "completed": len(done), "cancelled": cancelled}
