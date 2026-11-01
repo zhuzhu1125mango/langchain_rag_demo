@@ -48,18 +48,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# 从构建阶段拷贝 uv 与已编译的虚拟环境
-COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
-COPY --from=builder /app/.venv /app/.venv
-
-ENV PATH="/app/.venv/bin:$PATH"
-
-# 以非 root 用户运行：创建专用用户并赋予 /app 数据目录写权限，
-# 降低镜像被攻破后对宿主权限的获取面
+# 以非 root 用户运行：创建专用用户与数据目录，
+# 降低镜像被攻破后对宿主权限的获取面。
+#
+# 这里**不能**用 `chown -R appuser:appuser /app`：
+# 该命令在 COPY venv 之后执行，OverlayFS 会把每个文件复制进新层，
+# 实测 chown 层 2.01GB ≈ .venv 的 1.9GB —— 等于把整个虚拟环境存了两份。
+# 改为先建用户，再用 `COPY --chown` 授予归属，只保留一份。
 RUN useradd --create-home --user-group appuser \
     && mkdir -p /app/data /app/logs \
-    && chown -R appuser:appuser /app
+    && chown appuser:appuser /app /app/data /app/logs
+
 USER appuser
+
+# 从构建阶段拷贝 uv 与已编译的虚拟环境（归属直接给 appuser，不触发 chown 复制）
+COPY --from=builder --chown=appuser:appuser /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+
+ENV PATH="/app/.venv/bin:$PATH"
 
 # 复制项目代码（归属 appuser）
 COPY --chown=appuser:appuser . .

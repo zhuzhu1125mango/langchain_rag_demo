@@ -87,6 +87,34 @@
 
 ## 二、剩余待办
 
+### 收口清单（2026-11-02 · 按「参考实现」定位重排）
+
+> 本表取代下方 2026-10-28 版执行序，是当前阶段（无用户、个人实践）的**唯一排序**。
+> 判据只有两条：**能不能让别人 10 分钟内跑起来**、**能不能让某条声称具备可验证数字**。
+> 两条都不满足的，不在本表里（见「不做」区）。
+
+| 序 | 项 | 内容 | 验收物 | 预估 |
+|---|---|---|---|---|
+| **P0-1** | 镜像瘦身：chown 复制 | `Dockerfile.prod` 原在 `COPY .venv` 之后 `chown -R /app`，OverlayFS 把 1.9GB 的 venv 整个复制进新层（`docker history` 实测该层 2.01GB）。已改为「先建用户 + `COPY --chown`」 | 重建后 backend 镜像 ≤3.6GB，且 `docker history` 无 2GB 级层 | 0.5 天（含重建） |
+| **P0-2** | 身份最小闭环 | `users.is_admin` 字段；`require_admin` 认「已登录且 is_admin」，全局 `X-Admin-Key` 降级为**应急引导通道**；新增 `scripts/create_admin.py`（配合 `alembic` 一次迁移） | 空库一条命令建出管理员并可登录；审计 actor 为真实用户而非空；新增测试覆盖越权与引导通道 | 1.5 天 |
+| **P0-3** | `--profile demo` | 新增 compose profile，只起 backend/frontend/postgres/redis/milvus/etcd/minio 共 **7 个容器**，去掉 grafana/prometheus/alertmanager/postgres-exporter（−1.5GB） | `docker compose --profile demo up -d` 起 7 容器且 `/health/ready` 四项 ok | 1 天 |
+| **P0-4** | 优雅停机（非 HA） | `SIGTERM` → 停止接新请求 → `chat_run.drain()` + wiki 编译 `drain()` → 等在途落库 → 超时再退。现在 restart 直接杀进程，在途回答全丢 | 生成进行中执行 `docker restart backend-prod`，重启后该条回答完整落库（`stopped=false`） | 1 天 |
+| **P1-1** | 评测集扩容 + 基准 | 现有评测集仅 **5 题**，「准/快」没有任何数字。扩到 30~50 题（含多跳/数值/拒答），产出 hit@5 / MRR / P95 / 成功率 | `docs/benchmarks/` 一份带日期的报告 + 一条可复现命令 | 2~3 天 |
+| **P1-2** | 文档下载接口 | 现在只有元数据 JSON 导出（`account/export`），**拿不回原文 PDF**；`document/*` 无 download 端点 | 新增 `GET /documents/{id}/file`（走 MinIO 原文），前端可下载 | 0.5 天 |
+| **P1-3** | 巡检接 nightly | `scripts/nightly_consistency.ps1` 已可跑，但 `schtasks` 被本机安全策略拦截，计划任务未注册 | owner 执行一条注册命令（见 [monitoring.md](guide/monitoring.md) §6.1） | owner 5 分钟 |
+| **P2-1** | 技术叙事 | 把「删除为什么可对账」「失败为什么可判定」写成长文——这是别人抄不走的素材 | 一篇 ≥3000 字文章（删除四类数据落点 + 三类静默失败 + 可复现命令） | 1~2 天 |
+| **P2-2** | 回补正式镜像 | 当前生产用覆盖镜像；标准 `docker compose build` 上次卡在 wheel 下载。待网络恢复后重建，顺带验证 P0-1 | 正式镜像 tag + DEPLOY-4 记录（含实测体积） | 0.5 天 |
+
+**不做（冻结，不排期）**
+
+| 项 | 冻结理由 |
+|---|---|
+| 多租户 / 组织层级 / SSO / RBAC | 无用户验收；现有 `owner` 隔离够单组织内网使用；加租户层是另一量级改造 |
+| 真 HA：多副本 / PG 主从 / 故障转移 | 9 处进程内状态需外置；单机部署没有第二台机器接管；成本 2~3 周、收益 0。**注意区分**：P0-4 优雅停机不算 HA |
+| 桌面端 / 免登录单用户版 | 需第二套存储抽象（SQLite + 嵌入式向量 + 本地目录），成本是重写而非优化，且会作废删除一致性与缓存校验 |
+| 企业级压测与 SLA | 无客户拿它做采购依据；容量数字留待 P1-1 以「参考基线」形式给出 |
+| 「企业级」对外表述 | 待三门槛（容量实测 / ≥50 题标注集 / 恢复演练）达标，见 §〇 |
+
 ### 优先级执行序（汇总视图 · 2026-10-28 刷新）
 
 | 级别 | 项 | 内容 | 依赖 / 归属 |
