@@ -287,13 +287,18 @@ curl -X POST http://localhost:8000/api/documents/upload \
 
 **响应格式** (SSE):
 
-> **实现要点**：服务端只发送 `data:` 行，**不使用 SSE 的 `event:` 字段**；
-> 事件类型由 `data` JSON 中的 `type` 字段表达（见 `backend/src/api/chat.py` 的流式生成器）。
+> **实现要点**：服务端不使用 SSE 的 `event:` 字段，事件类型由 `data` JSON 中的 `type` 表达；
+> 但**每帧带 `id: <序号>`**（续传游标，见 §1.2.1），空闲时每 15s 发一条 `: ping` 注释帧保活
+> （客户端按 SSE 协议忽略）。生成已与连接解耦：客户端断连不再取消生成，可凭 `run_id` 续传。
 
-事件类型共 6 种（`reasoning` / `thinking` / `content` / `end` / `title` / `error`）。
+事件类型共 7 种（`run` / `reasoning` / `thinking` / `content` / `end` / `title` / `error`）。
 **没有独立的 `sources` 事件**——来源信息随 `end` 事件一并下发：
 
 ```
+id: 1
+data: {"type": "run", "run_id": "本次生成的运行ID", "session_id": "会话ID"}
+
+id: 2
 data: {"type": "reasoning", "step": "intent|kb_retrieve|web_search|tool_execute|answer_generate|...",
        "status": "running|done|skipped", "title": "步骤标题", "content": "步骤说明",
        "metadata": {...}}
@@ -311,10 +316,47 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 ```
 
 **说明**：
+- `run` 是**首帧**，携带本次生成的 `run_id`：断线续传、停止生成都依赖它，客户端应保存
 - `reasoning` 为分步过程事件，前端渲染为答案气泡上方的可折叠时间线；`thinking` 为模型原始思考增量，供折叠面板实时展示
 - `end` 事件**不含** `title`：标题生成已改为后台任务（避免推迟流完成信号），完成后**在 `end` 之后**补发独立的 `title` 事件。客户端断开时标签生成任务仍会落库，仅 `title` 事件丢失，刷新侧栏可见新标题
 - `end` 事件的来源字段名为 `sources`（非 `sources_metadata`），每项含 `source_type` 为 `kb` 或 `web`；网页来源额外含 `url` 字段供前端跳转
 - 会话不存在等错误在**流开始前**无法以 4xx 返回时，会以 `200 + error 事件` 形式下发；非流式接口同场景返回 404
+- 在途生成超过单用户上限（默认 5）时，`POST /api/chat/stream` 直接返回 **429**（在用户消息落库之前拒绝，不留「有问无答」）
+
+### 1.2.1 流式运行的续传 / 停止 / 在途查询
+
+**GET** `/api/chat/runs/{run_id}/stream`
+
+从指定游标续传。生成在服务端独立进行，连接只是订阅者，因此断线重连不丢内容、也不重复。
+
+| 参数 | 位置 | 说明 |
+|------|------|------|
+| run_id | path | 首帧 `run` 事件下发的运行 ID |
+| after | query | 已收到的最后序号；缺省时读取 `Last-Event-ID` 头 |
+
+返回与 `POST /api/chat/stream` 相同的 SSE 流，从 `after` 之后开始重放并继续跟随。
+状态码：`404` 运行已结束且超过保留窗口（默认 300s）或进程重启；`403` 非本人运行；
+`409` 中间事件已被缓冲上限回收（`detail.code = resume_gap`），应重新加载会话历史。
+
+```bash
+# 断线后从第 12 帧续传
+curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
+```
+
+**POST** `/api/chat/runs/{run_id}/stop`
+
+停止生成：取消服务端任务，**等部分答案落库后**返回（因此返回后刷新页面能看到标记「已停止」的回答）。
+
+```json
+{"run_id": "...", "stopped": true, "status": "stopped", "reason": "user_stop", "published": 42}
+```
+
+已结束的运行返回 `stopped: false` 与当前 `status`（幂等，不报错）。
+
+**GET** `/api/chat/runs/active?session_id=...`
+
+查询该会话是否有在途生成（刷新/换设备后重新挂上）。无则返回 `{"run_id": null}`。
+
 
 ### 1.3 获取会话历史
 
