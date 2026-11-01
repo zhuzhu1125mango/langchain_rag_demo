@@ -11,6 +11,7 @@ import logging
 import time
 from datetime import datetime, timezone
 from src.database import async_session
+from src.config import settings
 from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel
 from src.services.rag_chain import RAGChain
@@ -164,10 +165,11 @@ async def stream_answer(
     assistant_message_id = str(uuid.uuid4())
 
     # 预检并发上限：必须早于用户消息落库，否则历史里会留下一条「有问无答」
-    try:
-        get_run_registry().assert_capacity(str(current_user.user_id))
-    except RunLimitExceeded as exc:
-        raise _reject_run_limit(exc, session_id) from exc
+    if settings.chat_run.CHAT_RUN_ENABLED:
+        try:
+            get_run_registry().assert_capacity(str(current_user.user_id))
+        except RunLimitExceeded as exc:
+            raise _reject_run_limit(exc, session_id) from exc
 
     prepared = await _prepare_stream_session(session_id, question, kb_ids, user_message_id, current_user)
     if prepared is None:
@@ -178,11 +180,18 @@ async def stream_answer(
 
     # AGT-1：把「运行」从「连接」里拆出来。生成跑在独立 task，事件进带序号的
     # 缓冲；本连接只是它的一个订阅者。断连不再取消生成，客户端可凭 run_id 续传。
+    # 开关关闭时 run 为 None，退回旧行为（连接即生命周期），供出问题时一键回滚。
     registry = get_run_registry()
-    try:
-        run = registry.create(str(current_session_id), str(current_user.user_id))
-    except RunLimitExceeded as exc:
-        raise _reject_run_limit(exc, current_session_id) from exc
+    run = None
+    if settings.chat_run.CHAT_RUN_ENABLED:
+        try:
+            run = registry.create(str(current_session_id), str(current_user.user_id))
+        except RunLimitExceeded as exc:
+            raise _reject_run_limit(exc, current_session_id) from exc
+    else:
+        logger.warning(
+            "CHAT_RUN_ENABLED=false：退化为连接即生命周期，客户端断连将取消本次生成"
+        )
 
     # 保存助手消息（流式生成结束或异常时调用）。
     # C7：返回会话是否仍为默认标题，标题生成移到 end 事件之后的后台任务，
@@ -586,6 +595,9 @@ async def stream_answer(
                 )
 
     # 运行事件必须是第一帧，且要进缓冲——续传方靠它与本地消息对齐
+    if run is None:
+        return StreamingResponse(generate(), media_type="text/event-stream")
+
     run.publish({"type": "run", "run_id": run.run_id, "session_id": current_session_id})
 
     async def _pump():
