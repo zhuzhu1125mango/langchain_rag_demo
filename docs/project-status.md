@@ -4,6 +4,20 @@
 > 职责：**项目已完成 / 剩余待办的唯一台账**（见 [README.md](README.md) 目录结构）；各专题的方案与实测细节见对应的 `design/` 文档，本表只做汇总与索引。
 > 关联：[special-projects-2026-09.md](design/special-projects-2026-09.md)、[improvement-roadmap.md](design/improvement-roadmap.md)、[chat-latency-and-model-config.md](design/chat-latency-and-model-config.md)、[e1-navigable-lookup-gap.md](design/e1-navigable-lookup-gap.md)、[security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md)
 
+## 〇、定位（2026-11-02 定稿）
+
+**工程化参考实现，不是产品。** 个人实践项目，无真实用户、无 SLA。价值主张是「可复现的严谨」：
+删得干净、错得明白、断得回来，每条声称都能指到文件 / 测试 / 一条能跑的命令。
+
+据此形成的取舍规则（后续排期一律按此判断）：
+
+- **做**：能让别人 10 分钟内跑起来的事（`create-admin`、`--profile demo`）；能让「准/快」有数字的事（评测集扩容 + 基准）；能把已有工程深度讲清楚的事（技术叙事）。
+- **不做**：多租户 / SSO / RBAC、真 HA 与多副本、桌面端与免登录单用户版、企业级压测。
+- **「企业级」一词冻结**：待三条门槛达标后再用——① 容量实测（X 并发下 P95 与成功率）② 质量标注集（≥50 题，含多跳/数值/拒答）③ 恢复演练（从备份完整恢复一次并记时）。在此之前 README 不出现该词（除说明其冻结状态）。
+
+背景：曾按「企业级私有化平台」对外表述，但企业侧四项硬缺口（身份体系、审计四洞、HA、容量基线）均无用户验收压力，
+个人侧又受 11 容器 / 9.3GB 镜像 / 空库无法建号所限；两侧都不成立时，「参考实现」是唯一不需要打折的定位。
+
 ---
 
 ## 一、已完成工作

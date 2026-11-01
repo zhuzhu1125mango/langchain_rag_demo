@@ -1,10 +1,76 @@
-# 知澜 · 企业知识问答系统
+# 知澜 · 一个把「可验证」做进 RAG 的知识库
 
-**知澜**是基于 **LangChain + Ollama + Milvus** 构建的企业级私有文档 RAG（Retrieval-Augmented Generation）知识问答平台，默认完全离线运行，数据安全可控；外部模型服务为可选能力（默认关闭）。
+**知澜**是一个可私有化部署的 RAG 知识问答系统：LangChain + Ollama + Milvus，默认完全离线，
+数据不出内网。它不是一个「接上大模型就能问答」的 demo——它关心的是另外三件事：
+
+> **删得干净、错得明白、断得回来。**
+
+| 难点 | 常见做法（以及它的后果） | 这里的做法 | 证据 |
+|---|---|---|---|
+| **删除真的删干净了吗** | 删 DB 行就算删完。向量、对象存储、语义缓存里仍留着内容——用户以为删了，检索还能命中 | 删除按 **DB / 向量 / 对象 / 缓存** 四类数据落点逐一对齐，失败带 `phase` 可定位；另有**只读对账工具**主动比对 Milvus↔DB、MinIO↔DB、Redis↔DB | `backend/src/services/consistency_audit.py`<br>`backend/scripts/consistency_audit.py`<br>`backend/tests/test_consistency_delete_chain.py`（13 例）<br>`backend/tests/test_consistency_audit.py`（29 例） |
+| **出错了，日志能判定能不能重试吗** | 一律 `except: logger.error(...)`，或把异常压成默认值（打分失败 → 0 分 → 被当成「不相关」） | 三级严重度（`RECOVERABLE` / `REPORTABLE` / `PROGRAMMING`），**异常类型优先于文案**；「后果优先」——底层是连接错误但会导致结论错误的，显式抬级 | `backend/src/utils/error_handling.py`<br>**369 处调用点 / 约 393 个 handler**<br>`backend/tests/test_error_handling.py`（93 例） |
+| **回答生成到一半断网了怎么办** | 生成器就是响应体，客户端一断连 `CancelledError` 直接杀掉生成，只落半截答案；切网/刷新=重问一次 | 运行与连接解耦：事件进带序号的缓冲，断连只结束订阅；凭 `run_id` + 游标续传，可显式停止并保留已生成部分 | `backend/src/services/chat_run.py`<br>`backend/src/api/chat/runs.py`<br>`backend/tests/test_chat_run.py`（29 例） |
+
+三件事都有一个共同点：**它们的失败是静默的**。不报错、不告警、看起来一切正常，直到有人发现
+「删掉的东西还能搜到」或者「知识库明明有内容却答没有」。这个项目的大部分工程量，花在把这些
+静默失败变成可判定的信号上。
 
 ---
 
-## ✨ 功能特性
+## 🚀 上手（拉过一次镜像后约 10 分钟）
+
+```bash
+# 0. 前置：Docker / Docker Compose，以及 Ollama（不在 compose 内，需单独安装）
+ollama pull qwen2.5:3b-instruct   # 直答模型
+ollama pull qwen3:4b              # 深度思考（按需）
+ollama pull bge-m3                # 嵌入模型（1024 维）
+
+# 1. 一键起开发栈（后端起 8000，前端起 5173）
+git clone https://github.com/zhuzhu1125mango/langchain_rag_demo.git
+cd langchain_rag_demo
+./scripts/start-dev.sh        # Windows: .\scripts\start-dev.ps1
+
+# 2. 打开 http://localhost:5173 → 注册 → 建知识库 → 上传文档 → 提问
+```
+
+首次需要拉约 **9.3 GB** 镜像与 **5.6 GB** 模型，所以「10 分钟」指的是**已经拉过一次之后**。
+文档标称最低 8 GB 内存 / 4 核；compose 里各服务资源上限合计约 9.9 GB（含监控栈），
+实测基线尚未补齐——见下方「边界」。
+
+## 🔍 怎么验证上面那些说法
+
+不要求你相信 README，跑这几条：
+
+```bash
+cd backend
+IN_DOCKER=false uv run pytest -q                       # 后端全量：1510 passed / 105 skipped（2026-11-02）
+uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
+uv run pytest tests/test_chat_run.py -q                # 续传/停止：29 例
+uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出报告不删（退出码 0/1/2）
+```
+
+`consistency_audit.py` 的退出码是刻意的：**0=一致、1=有差异、2=巡检没跑成**。
+某一侧采集失败时它不会打印「未发现差异」——假阴性比不巡检更危险。
+
+## 🚧 边界（有意不做的事）
+
+写清楚不做什么，比写清楚做了什么更能说明一个项目的取舍：
+
+| 不做 | 原因 |
+|---|---|
+| 多租户 / 组织层级 / SSO | 现有隔离按 `owner` 做，够单个组织内网使用；加租户层是另一个量级的改造 |
+| 高可用 / 多副本 | 9 处进程内状态（运行缓冲、Wiki 去抖、进度表、限流桶…）会互相打架；单机是当前唯一自洽的形态 |
+| 桌面端 / 免登录单用户版 | 需要第二套存储抽象（SQLite + 嵌入式向量），成本是重写而不是优化 |
+| 「企业级」这个词 | 等三条可验证门槛达标后再用：容量实测、质量标注集、恢复演练。**在此之前它就是打折的形容词** |
+
+这是个人的实践项目，没有真实用户，因此也没有 SLA。它的价值主张是**可复现的严谨**：
+每一条声称都能指到文件、指到测试、指到一条能跑的命令。
+
+---
+
+## 📋 能力清单（完整）
+
+上面是三个关键点，这里是全部能力。
 
 | 功能模块 | 特性描述 | 状态 |
 |---------|---------|------|
@@ -18,7 +84,7 @@
 | 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
 | 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启，多工具/多步推理）＋原生 Function Calling / ReAct 作为回退路径 | ✅ |
 | 🛡️ **Agent 安全护栏** | 输入（提示注入/越权/超长）拦截、工具参数与 URL 安全校验、输出凭证/系统提示脱敏；高危工具可开启人工审批（SSE 审批卡片 + 回执 API，`AGENT_APPROVAL_MODE` 默认 off）；SEC-5：检索/网页内容按不可信上下文隔离、工具域名/DLP 策略、`fetch_webpage` 默认关闭 | ✅ |
-| 🔐 **多租户安全与配额** | SEC-1~5：学习样本按 owner 隔离；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致。SEC P2/P3：实验/通知隔离、分类标签 admin 写、SSRF fail-closed + 连接层固定 IP、JWT 登出吊销、语义缓存按 KB 索引失效、live/ready 探针、账号导出/注销与日志脱敏、评估配额、会话分页/批量上限、CSP/HSTS、ToolGuard DNS | ✅ |
+| 🔐 **隔离、安全与配额（owner 级）** | SEC-1~5：学习样本与资源按 owner 隔离（单组织多用户，非多租户）；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致。SEC P2/P3：实验/通知隔离、分类标签 admin 写、SSRF fail-closed + 连接层固定 IP、JWT 登出吊销、语义缓存按 KB 索引失效、live/ready 探针、账号导出/注销与日志脱敏、评估配额、会话分页/批量上限、CSP/HSTS、ToolGuard DNS | ✅ |
 | 📊 **Agent 评测** | 轨迹级四维确定性评测 + 答案级判分器 + A/B 门槛与离线 harness（`AGENT_TRAJ_EVAL_ENABLED` 默认关；在线抽样待办） | ✅ |
 | 💬 **流式输出** | 实时打字效果；**生成与连接解耦**（AGT-1）：断网/刷新不丢回答，重连按 `run_id` 续传、可显式停止并保留已生成部分 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
