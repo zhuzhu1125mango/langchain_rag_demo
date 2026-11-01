@@ -124,6 +124,49 @@ docker compose restart prometheus
 # configs/grafana/datasources/prometheus.yml 已预置 Prometheus 数据源（指向 prometheus:9090）
 ```
 
+### 6.1 每日一致性巡检（只读）
+
+指标只能反映「有请求经过的地方」，而「元数据已删、向量/对象/缓存还在」这类问题
+**不会触发任何异常**——没有代码路径可以挂日志，只能主动对账。巡检覆盖：
+
+| 链路 | 检查项 |
+|---|---|
+| Milvus ↔ DB | 孤儿向量、文档下架后仍有向量、移库后 kb_id 未更新、kb_id 为空/指向已删库、已发布却检索不到 |
+| MinIO ↔ DB | 无主对象、DB 引用但文件已丢失 |
+| Redis ↔ DB | 缓存条目引用已删/未发布文档、所属库已删、过 TTL 未清、索引指向不存在的 scope |
+
+```bash
+# 手动跑一次（一次性容器，不碰正在服务的 backend 进程）
+./scripts/nightly_consistency.sh
+AUDIT_DIR=/var/log/rag-audit ./scripts/nightly_consistency.sh --skip-minio
+
+# cron：每日 04:10（错开 02:30 备份）
+10 4 * * * cd /opt/langchain_rag_demo && /usr/bin/env bash scripts/nightly_consistency.sh >> /var/log/rag-audit.log 2>&1
+```
+
+Windows 宿主机（Docker Desktop）用 PowerShell 版本 + 计划任务：
+
+```powershell
+# 手动跑一次
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\nightly_consistency.ps1
+
+# 注册每日 04:10 计划任务（需允许 schtasks；Docker Desktop 需保持运行）
+schtasks /Create /SC DAILY /ST 04:10 /TN "rag-consistency-audit" `
+  /TR 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "C:\MyCode\langchain_rag_demo\scripts\nightly_consistency.ps1"' /F
+```
+
+> 若 `schtasks` 被组策略/终端安全软件拦截，改用「任务计划程序」图形界面新建任务：
+> 操作 = `powershell.exe`，参数 = `-NoProfile -ExecutionPolicy Bypass -File <仓库>\scripts\nightly_consistency.ps1`，
+> 起始于 = 仓库根目录。
+
+产物：`backups/audit/consistency_<日期>.json`（结构化，`kind` 稳定可直接做告警规则）与同名 `.log`。
+
+退出码：`0` 一致 / `1` 发现差异 / `2` 巡检未完整执行（连不上某侧存储）。
+**`2` 要当故障处理**：它说明这次巡检没看到全貌，不能当成「没问题」。
+
+> 报告出来后的清理是破坏性操作：脚本故意没有 `--fix`，先按 `subject` 人工确认，
+> 再走 backup-restore.md 里的删除流程。
+
 ## 相关文档
 
 - 部署与端口规划：[deployment.md](deployment.md)
