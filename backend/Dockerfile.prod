@@ -79,4 +79,11 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # 启动命令：uvicorn 启动 FastAPI 应用（生产环境不启用 --reload）
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+#
+# --timeout-graceful-shutdown：SIGTERM 后 uvicorn 会先停止接新连接，再等**已有连接**
+# 自然结束，最后才跑 lifespan.shutdown。不设上限时它「无限等」——SSE 流式回答可能
+# 一直开着，于是 docker 的 stop_grace_period 一到就 SIGKILL，lifespan.shutdown 永远
+# 不会执行：drain() 不跑、在途回答不做落库、日志里连一句「被中断」都没有。
+# 设上限后 uvicorn 到点强制收尾并继续走 lifespan，把关停权交回应用自己。
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", \
+     "--timeout-graceful-shutdown", "20"]

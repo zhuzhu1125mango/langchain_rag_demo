@@ -87,6 +87,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile.prod
     container_name: backend-prod
+    # 关机预算（P0-4）：docker 默认只等 10s 就 SIGKILL，而应用侧需要
+    # uvicorn 连接收尾 20s + 在途回答自然写完 15s + 取消落库 10s + 缓存失效 10s
+    # + Wiki 编译 30s ≈ 85s。留出余量给 100s，否则「优雅停机」会在半路被砍。
+    stop_grace_period: 100s
     # 全量业务配置由 env 文件注入；新增功能开关只改 env 文件，不再改本文件
     env_file:
       - .env.prod

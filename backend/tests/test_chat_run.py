@@ -21,6 +21,7 @@ from src.services.chat_run import (
     ChatRun,
     ChatRunRegistry,
     RunLimitExceeded,
+    RunShuttingDown,
     defer_task,
     format_sse,
     get_current_run,
@@ -459,3 +460,105 @@ class TestRawPublishCursor:
         with pytest.raises(RunLimitExceeded):
             registry.assert_capacity("u1")
         assert registry.stats()["running"] == 1
+
+
+# ---------------------------------------------------------------------------
+# 优雅关机（P0-4）：先让在途写完，再取消剩下的
+# ---------------------------------------------------------------------------
+class TestGracefulDrain:
+    async def test_finishing_run_is_not_interrupted(self):
+        """关机不等于用户点「停止」：几秒能写完的回答不该被截断。"""
+        registry = ChatRunRegistry()
+        run = registry.register(ChatRun("r1", "s1", "u1"))
+
+        async def _worker():
+            await asyncio.sleep(0.05)
+            run.publish({"type": "content", "content": "完整回答"})
+            run.finish("completed")
+
+        run.attach_task(asyncio.ensure_future(_worker()))
+        result = await registry.drain(grace=2.0, timeout=0.5)
+
+        assert result["completed"] == 1, "自然结束的运行应计入 completed"
+        assert result["cancelled"] == 0
+        assert run.status == "completed"
+        assert run.stop_reason != "shutdown"
+
+    async def test_long_run_is_cancelled_after_grace(self):
+        """超过 grace 的才取消——并且要落定，不能悬空。"""
+        registry = ChatRunRegistry()
+        run = registry.register(ChatRun("r1", "s1", "u1"))
+        finished = []
+
+        async def _worker():
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                finished.append("cancelled")
+                run.finish("stopped", "shutdown")
+                raise
+
+        run.attach_task(asyncio.ensure_future(_worker()))
+        result = await registry.drain(grace=0.1, timeout=1.0)
+
+        assert result["completed"] == 0
+        assert result["cancelled"] == 1
+        assert run.is_terminal, "取消后必须落定，不能留悬挂运行"
+        assert run.stop_reason == "shutdown"
+
+    async def test_drain_sets_shutdown_flag(self):
+        registry = ChatRunRegistry()
+        assert registry.is_shutting_down is False
+        await registry.drain(grace=0.0, timeout=0.1)
+        assert registry.is_shutting_down is True
+
+    async def test_create_rejected_while_shutting_down(self):
+        """关机态下不受理新运行：宁可 503 让客户端重试，也不生成一条注定被截断的回答。"""
+        registry = ChatRunRegistry()
+        registry.begin_shutdown()
+        with pytest.raises(RunShuttingDown):
+            registry.create("s1", "u1")
+
+    async def test_drain_waits_for_partial_save_task(self):
+        """取消后要等「部分答案落库」这个派生任务，否则用户看到有问无答。"""
+        registry = ChatRunRegistry()
+        run = registry.register(ChatRun("r1", "s1", "u1"))
+        saved = []
+
+        async def _worker():
+            await asyncio.sleep(30)
+
+        async def _save_partial():
+            await asyncio.sleep(0.05)
+            saved.append("partial")
+
+        run.attach_task(asyncio.ensure_future(_worker()))
+        run.defer(asyncio.ensure_future(_save_partial()))
+
+        await registry.drain(grace=0.0, timeout=1.0)
+        assert saved == ["partial"]
+
+
+class TestShutdownRejection:
+    async def test_stream_rejects_with_503_before_persisting(self, monkeypatch):
+        """预检必须早于用户消息落库，否则历史里留下「有问无答」。"""
+        from types import SimpleNamespace
+
+        from src.api.chat import stream as stream_api
+        from src.api.chat.common import MessageRequest
+
+        registry = ChatRunRegistry()
+        registry.begin_shutdown()
+        monkeypatch.setattr(stream_api, "get_run_registry", lambda: registry)
+        monkeypatch.setattr(settings.chat_run, "CHAT_RUN_ENABLED", True, raising=False)
+
+        request = SimpleNamespace(state=SimpleNamespace(request_id="req-1"))
+        with pytest.raises(HTTPException) as exc:
+            await stream_api.stream_answer(
+                request,
+                MessageRequest(question="关机期间的提问"),
+                current_user=_User("u1"),
+            )
+
+        assert exc.value.status_code == 503
+        assert exc.value.headers["Retry-After"] == "5"

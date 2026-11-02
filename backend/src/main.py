@@ -509,11 +509,16 @@ async def lifespan(app: FastAPI):
     try:
         from src.services.chat_run import get_run_registry
 
-        drained_runs = await get_run_registry().drain(timeout=10.0)
+        # 两段式：先给 15s 让在途回答自然写完（关机不等于用户点了「停止」），
+        # 再取消剩余的并等部分答案落库。预算与 uvicorn/docker 的超时见 DEPLOY 文档。
+        drained_runs = await get_run_registry().drain(grace=15.0, timeout=10.0)
         if drained_runs["running"]:
             logger.info(
-                "关机前流式问答收尾: 在途 %s 个已取消（部分答案尽量落库），保留 %s 个",
+                "关机前流式问答收尾: 在途 %s 个（自然完成 %s / 取消后落定 %s / 强制终止 %s），保留 %s 个",
                 drained_runs["running"],
+                drained_runs["completed"],
+                drained_runs["cancelled"],
+                drained_runs["forced"],
                 drained_runs["retained"],
             )
     except Exception as run_drain_err:

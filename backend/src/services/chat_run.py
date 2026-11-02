@@ -67,6 +67,14 @@ class RunLimitExceeded(RuntimeError):
         self.limit = limit
 
 
+class RunShuttingDown(RuntimeError):
+    """进程正在关机：拒绝新建运行。
+
+    宁可让客户端收到 503 立刻重试，也不要受理一个注定被强制终止的生成——
+    后者会让用户等十几秒后拿到空回答，还会把「有问无答」写进历史。
+    """
+
+
 class ChatRun:
     """一次问答生成的可重连句柄。
 
@@ -280,6 +288,16 @@ class ChatRunRegistry:
 
     def __init__(self) -> None:
         self._runs: Dict[str, ChatRun] = {}
+        # 关机态：lifespan.shutdown 一开始就置位，之后 create() 一律拒绝
+        self._shutting_down = False
+
+    @property
+    def is_shutting_down(self) -> bool:
+        return self._shutting_down
+
+    def begin_shutdown(self) -> None:
+        """进入关机态（幂等）。之后新建运行会被拒绝。"""
+        self._shutting_down = True
 
     # -- 生命周期 ------------------------------------------------------
     def _running_of(self, user_id: str) -> List[ChatRun]:
@@ -301,6 +319,8 @@ class ChatRunRegistry:
         user_id: str,
         question_preview: str = "",
     ) -> ChatRun:
+        if self._shutting_down:
+            raise RunShuttingDown("服务正在关机，暂不受理新的生成请求")
         self.sweep()
         self.assert_capacity(user_id)
         running = self._running_of(user_id)
@@ -372,21 +392,61 @@ class ChatRunRegistry:
                 stalled += 1
         return {"expired": expired, "stalled": stalled, "runs": len(self._runs)}
 
-    async def drain(self, timeout: float = 10.0) -> Dict[str, int]:
-        """关机前排空：取消在途运行并等部分答案落库。"""
+    async def drain(self, grace: float = 15.0, timeout: float = 10.0) -> Dict[str, int]:
+        """关机前排空：**先让在途回答自己写完，再取消剩下的**。
+
+        两段式的原因：关机（升级/重启）不是用户点「停止」，不该无故截断回答。
+        先给 ``grace`` 秒自然结束（多数回答几秒内就能写完，用户拿到完整答案）；
+        超过仍没结束的才取消，并等部分答案落库——最差也留下半截，而不是什么都没有。
+
+        Args:
+            grace: 不打断的等待时长（秒）；0 表示直接进入取消阶段。
+            timeout: 取消后等待落定的总时长（秒）。
+
+        Returns:
+            ``{"running","completed","cancelled","forced"}``：
+            在途数、自然完成数、取消后落定数、强制置终态数。
+        """
+        self._shutting_down = True
         running = [r for r in self._runs.values() if not r.is_terminal]
-        for run in running:
+        completed = 0
+
+        if running and grace > 0:
+            deadline = time.monotonic() + grace
+            await asyncio.gather(
+                *(r.settle(max(0.0, deadline - time.monotonic())) for r in running),
+                return_exceptions=True,
+            )
+            completed = sum(1 for r in running if r.is_terminal)
+            if completed:
+                logger.info("关机前等待在途回答自然完成: %s/%s", completed, len(running))
+
+        remaining_runs = [r for r in running if not r.is_terminal]
+        if remaining_runs:
+            logger.info("关机前取消未完成回答: %s 个（尝试保存部分答案）", len(remaining_runs))
+        for run in remaining_runs:
             run.request_cancel("shutdown")
+
         deadline = time.monotonic() + timeout
-        for run in running:
+        for run in remaining_runs:
             remaining = max(0.0, deadline - time.monotonic())
             if remaining <= 0:
                 break
             await run.settle(timeout=remaining)
+
+        forced = 0
         for run in running:
             if not run.is_terminal:
                 run.finish("stopped", "shutdown")
-        return {"running": len(running), "retained": len(self._runs)}
+                forced += 1
+
+        return {
+            "running": len(running),
+            "completed": completed,
+            "cancelled": len(remaining_runs) - forced,
+            "forced": forced,
+            "retained": len(self._runs),
+        }
 
     def stats(self) -> Dict[str, int]:
         running = sum(1 for r in self._runs.values() if not r.is_terminal)

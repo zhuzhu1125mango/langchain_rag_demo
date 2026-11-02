@@ -22,6 +22,7 @@ from src.services.learning_engine import learning_engine
 from src.services.pipeline.state import set_ab_config, reset_ab_config
 from src.services.chat_run import (
     RunLimitExceeded,
+    RunShuttingDown,
     defer_task,
     format_sse,
     get_run_registry,
@@ -141,6 +142,15 @@ async def stream_answer(
     # request_id 由中间件生成并挂载到 request.state，SSE 错误事件仅回传该 ID
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
 
+    # 关机态最早判定：不要在建连、校验知识库归属、初始化 Milvus 之后才发现要拒绝——
+    # 那既白花时间，也会在日志里留下「初始化成功但回答没有」的假象。
+    if settings.chat_run.CHAT_RUN_ENABLED and get_run_registry().is_shutting_down:
+        raise HTTPException(
+            status_code=503,
+            detail="服务正在重启，请稍后重试",
+            headers={"Retry-After": "5"},
+        )
+
     # 敏感词检测
     detected, word, category = sensitive_filter.detect(question)
     if detected:
@@ -188,6 +198,22 @@ async def stream_answer(
             run = registry.create(str(current_session_id), str(current_user.user_id))
         except RunLimitExceeded as exc:
             raise _reject_run_limit(exc, current_session_id) from exc
+        except RunShuttingDown as exc:
+            # 预检通过后、创建前进入关机态的极小窗口。用户消息此时已落库，
+            # 所以按可上报处理——这条「有问无答」是可见的，而不是悄悄留下。
+            log_exception(
+                logger,
+                exc,
+                action="chat.stream.shutting_down",
+                severity=ErrorSeverity.REPORTABLE,
+                message="关机窗口内受理的请求被拒绝，用户消息可能已落库但无回答",
+                session_id=str(current_session_id),
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="服务正在重启，请稍后重试",
+                headers={"Retry-After": "5"},
+            ) from exc
     else:
         logger.warning(
             "CHAT_RUN_ENABLED=false：退化为连接即生命周期，客户端断连将取消本次生成"

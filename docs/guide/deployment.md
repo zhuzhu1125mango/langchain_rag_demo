@@ -107,6 +107,34 @@
 > 生产脚本**始终**带监控：告警链路是值班依赖，不能因为「默认精简」而静默消失。
 > 手工在生产执行 `docker compose up -d` 会得到 7 个服务 —— 已在运行中的监控容器不会被动停止，> 但重建栈时（如换机器）需显式加 `--profile monitoring`。
 
+### 2.2.2 关机与升级语义（P0-4）
+
+`docker stop` / `compose up -d`（换镜像）/ 重启主机都会给后端发 SIGTERM。此前的行为是
+**10 秒后被 SIGKILL**：uvicorn 会无限期等待已建立的 SSE 连接，docker 等不及就强杀，
+`lifespan.shutdown` 根本不执行——在途回答不做落库，日志里连一句「被中断」都没有。
+
+现在的时间预算：
+
+| 阶段 | 上限 | 由谁控制 |
+|---|---|---|
+| 停止接新连接、等在途连接结束 | 20s | `uvicorn --timeout-graceful-shutdown 20` |
+| 在途回答**自然写完**（不打断） | 15s | `chat_run.drain(grace=15)` |
+| 仍未完成的取消并等部分答案落库 | 10s | `chat_run.drain(timeout=10)` |
+| 语义缓存失效排空 | 10s | `drain_invalidations` |
+| Wiki 编译排空 | 30s | `wiki_compile_scheduler.drain` |
+| **合计（最坏）** | **约 85s** | `docker-compose.yml` 的 `stop_grace_period: 100s` |
+
+行为约定：
+
+- **关机期间的提问返回 503 + `Retry-After: 5`**，而不是受理一条注定被截断的生成（否则历史里会留下「有问无答」）；
+- 在途回答优先**写完**，写不完才取消；取消也会保存已生成部分（`stopped` 标记）；
+- 日志会打印 `关机前流式问答收尾: 在途 N 个（自然完成 a / 取消后落定 b / 强制终止 c）`。
+
+> ⚠️ **已知边界**：若 `/app/data/model_cache` 缺失（换机器、清空 data 卷），启动时会去 HuggingFace
+> 下载重排模型，其重试线程不是守护线程，**关机阶段进程可能拖到 `stop_grace_period` 后被 SIGKILL**。
+> 实测：无缓存容器 100s 被杀（exit 137），带缓存容器 **1s 退出（exit 0）**。生产环境 `/app/data`
+> 是持久卷（当前 6.1G 缓存）不受影响；换机器部署前先让首启完成预热。
+
 ### 2.3 环境切换流程
 
 ```bash
