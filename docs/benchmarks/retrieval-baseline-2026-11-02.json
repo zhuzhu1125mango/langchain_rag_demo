@@ -1,22 +1,41 @@
 {
   "metrics": {
-    "num_questions": 70,
-    "num_answerable": 64,
+    "num_questions": 90,
+    "num_answerable": 84,
     "num_no_answer": 6,
-    "num_corpus_docs": 72,
+    "num_corpus_docs": 78,
     "top_k": 5,
-    "hit_rate": 0.828125,
-    "mrr": 0.775,
-    "recall": 0.828125,
-    "latency_p50_ms": 0.267,
-    "latency_p95_ms": 0.953,
-    "answerable_top1_median": 11.8401,
-    "no_answer_top1_median": 3.0481,
-    "no_answer_separation": 0.2574
+    "hit_rate": 0.8690476190476191,
+    "mrr": 0.7386904761904761,
+    "recall": 0.8690476190476191,
+    "latency_p50_ms": 0.255,
+    "latency_p95_ms": 0.921,
+    "by_category": {
+      "colloquial": {
+        "n": 20,
+        "hit_rate": 0.45
+      },
+      "exact_match": {
+        "n": 20,
+        "hit_rate": 1.0
+      },
+      "multi_hop": {
+        "n": 4,
+        "hit_rate": 1.0
+      },
+      "policy": {
+        "n": 40,
+        "hit_rate": 1.0
+      }
+    },
+    "answerable_top1_median": 12.3105,
+    "no_answer_top1_median": 3.3526,
+    "no_answer_separation": 0.2723
   },
   "details": [
     {
       "question": "员工请假需要提前多久申请？",
+      "category": "policy",
       "golden_documents": [
         "leave_policy"
       ],
@@ -24,18 +43,19 @@
       "ranked_top_k": [
         "leave_policy",
         "leave_policy_legacy",
+        "remote_work",
         "hr_health_check",
-        "hr_offboarding",
-        "remote_work"
+        "hr_offboarding"
       ],
-      "top1_score": 8.1279,
+      "top1_score": 8.911,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.341
+      "latency_ms": 0.48
     },
     {
       "question": "公司年终奖什么时候发放？",
+      "category": "policy",
       "golden_documents": [
         "bonus_policy"
       ],
@@ -47,14 +67,15 @@
         "info_security",
         "training_policy"
       ],
-      "top1_score": 15.6312,
+      "top1_score": 16.3081,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.384
+      "latency_ms": 0.303
     },
     {
       "question": "试用期员工是否享受带薪年假？",
+      "category": "policy",
       "golden_documents": [
         "leave_policy"
       ],
@@ -62,37 +83,39 @@
       "ranked_top_k": [
         "leave_policy",
         "hr_probation_extend",
-        "leave_policy_legacy",
         "hr_probation",
+        "leave_policy_legacy",
         "hr_offboarding"
       ],
-      "top1_score": 22.7909,
+      "top1_score": 24.0308,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.292
+      "latency_ms": 0.34
     },
     {
       "question": "办公时间是什么时候？",
+      "category": "policy",
       "golden_documents": [
         "work_hours"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
         "work_hours",
-        "adm_parking_ev",
-        "rd_release_hotfix",
-        "ops_password_service",
-        "hr_probation_extend"
+        "zx_install",
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_x1_ops"
       ],
-      "top1_score": 6.3685,
+      "top1_score": 6.6387,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.204
+      "latency_ms": 0.238
     },
     {
       "question": "如何申请报销差旅费？",
+      "category": "policy",
       "golden_documents": [
         "reimbursement"
       ],
@@ -104,14 +127,15 @@
         "reimbursement_daily",
         "fin_invoice"
       ],
-      "top1_score": 8.6334,
+      "top1_score": 9.1105,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.199
+      "latency_ms": 0.246
     },
     {
       "question": "下一年度预算最晚什么时候提交？",
+      "category": "policy",
       "golden_documents": [
         "fin_budget"
       ],
@@ -123,14 +147,15 @@
         "adm_parking",
         "adm_visitor"
       ],
-      "top1_score": 9.0297,
+      "top1_score": 9.6378,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.229
+      "latency_ms": 0.292
     },
     {
       "question": "报销对发票抬头有什么要求？",
+      "category": "policy",
       "golden_documents": [
         "fin_invoice"
       ],
@@ -142,14 +167,15 @@
         "reimbursement_daily",
         "customer_reception"
       ],
-      "top1_score": 12.0842,
+      "top1_score": 12.7535,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.192
+      "latency_ms": 0.254
     },
     {
       "question": "供应商付款一般多少天到账？",
+      "category": "policy",
       "golden_documents": [
         "fin_payment"
       ],
@@ -157,18 +183,19 @@
       "ranked_top_k": [
         "fin_payment",
         "cs_refund",
-        "adm_parking_ev",
-        "ops_password_service",
-        "hr_probation_extend"
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_install"
       ],
-      "top1_score": 12.2623,
+      "top1_score": 12.7973,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.247
+      "latency_ms": 0.262
     },
     {
       "question": "20万元以上的采购需要谁审批？",
+      "category": "policy",
       "golden_documents": [
         "fin_procurement"
       ],
@@ -180,33 +207,35 @@
         "cs_refund",
         "cs_refund_enterprise"
       ],
-      "top1_score": 15.473,
+      "top1_score": 16.1694,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.47
+      "latency_ms": 0.243
     },
     {
       "question": "合同用印前必须经过哪个部门审核？",
+      "category": "policy",
       "golden_documents": [
         "fin_contract_seal"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
         "fin_contract_seal",
-        "hr_probation_extend",
         "fin_payment",
+        "hr_probation_extend",
         "ops_software_install",
         "cs_refund_enterprise"
       ],
-      "top1_score": 15.6905,
+      "top1_score": 16.4023,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.234
+      "latency_ms": 0.253
     },
     {
       "question": "部门备用金的额度上限是多少？",
+      "category": "policy",
       "golden_documents": [
         "fin_petty_cash"
       ],
@@ -218,33 +247,35 @@
         "hr_probation_extend",
         "hr_probation"
       ],
-      "top1_score": 12.348,
+      "top1_score": 12.9886,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.208
+      "latency_ms": 0.253
     },
     {
       "question": "固定资产多久盘点一次？",
+      "category": "policy",
       "golden_documents": [
         "fin_fixed_asset"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
         "fin_fixed_asset",
-        "adm_parking_ev",
-        "rd_release_hotfix",
-        "ops_password_service",
-        "hr_probation_extend"
+        "zx_install",
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_x1_ops"
       ],
-      "top1_score": 12.526,
+      "top1_score": 13.048,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.191
+      "latency_ms": 0.231
     },
     {
       "question": "出差借款最多能借多少比例？",
+      "category": "policy",
       "golden_documents": [
         "fin_travel_advance"
       ],
@@ -256,14 +287,15 @@
         "fin_payment",
         "reimbursement_daily"
       ],
-      "top1_score": 12.2621,
+      "top1_score": 12.758,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.368
+      "latency_ms": 0.265
     },
     {
       "question": "需求评审的结论有哪几种？",
+      "category": "policy",
       "golden_documents": [
         "rd_requirement_review"
       ],
@@ -275,14 +307,15 @@
         "hr_health_check",
         "sec_data_class_draft"
       ],
-      "top1_score": 15.9772,
+      "top1_score": 16.682,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.217
+      "latency_ms": 0.282
     },
     {
       "question": "常规发布窗口是每周哪几天？",
+      "category": "policy",
       "golden_documents": [
         "rd_release_window"
       ],
@@ -294,14 +327,15 @@
         "work_hours",
         "rd_canary"
       ],
-      "top1_score": 15.8675,
+      "top1_score": 16.7631,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.306
+      "latency_ms": 0.282
     },
     {
       "question": "灰度发布首批放量不能超过多少？",
+      "category": "policy",
       "golden_documents": [
         "rd_canary"
       ],
@@ -313,14 +347,15 @@
         "sec_data_class",
         "work_hours"
       ],
-      "top1_score": 16.8751,
+      "top1_score": 17.8098,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.255
+      "latency_ms": 0.218
     },
     {
       "question": "核心模块的代码评审需要几个人通过？",
+      "category": "policy",
       "golden_documents": [
         "rd_code_review"
       ],
@@ -332,14 +367,15 @@
         "adm_visitor",
         "info_security"
       ],
-      "top1_score": 13.7024,
+      "top1_score": 13.6482,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.212
+      "latency_ms": 0.204
     },
     {
       "question": "测试环境每天几点重置数据？",
+      "category": "policy",
       "golden_documents": [
         "rd_test_env"
       ],
@@ -348,17 +384,18 @@
         "rd_test_env",
         "sec_data_export",
         "sec_retention",
-        "sec_data_class_draft",
-        "sec_data_class"
+        "sec_data_class",
+        "sec_data_class_draft"
       ],
-      "top1_score": 13.7308,
+      "top1_score": 14.4289,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.253
+      "latency_ms": 0.201
     },
     {
       "question": "P0 缺陷要求多久内恢复？",
+      "category": "policy",
       "golden_documents": [
         "rd_bug_severity"
       ],
@@ -370,14 +407,15 @@
         "rd_oncall",
         "ops_monitor_alert"
       ],
-      "top1_score": 11.1071,
+      "top1_score": 11.5147,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.209
+      "latency_ms": 0.199
     },
     {
       "question": "收到 P0 告警后几分钟内要确认？",
+      "category": "policy",
       "golden_documents": [
         "rd_oncall"
       ],
@@ -386,17 +424,18 @@
         "rd_oncall",
         "ops_monitor_alert",
         "rd_bug_severity",
-        "fin_payment",
-        "rd_release_hotfix"
+        "zx_x1_ops",
+        "fin_payment"
       ],
-      "top1_score": 15.8082,
+      "top1_score": 14.7076,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.227
+      "latency_ms": 0.239
     },
     {
       "question": "线上回滚需要事先审批吗？",
+      "category": "policy",
       "golden_documents": [
         "rd_rollback"
       ],
@@ -408,14 +447,15 @@
         "rd_release_hotfix",
         "fin_procurement"
       ],
-      "top1_score": 10.0014,
+      "top1_score": 10.5986,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.262
+      "latency_ms": 0.444
     },
     {
       "question": "日志里禁止打印哪些信息？",
+      "category": "policy",
       "golden_documents": [
         "rd_log_spec"
       ],
@@ -427,14 +467,15 @@
         "ops_vpn",
         "ops_password_service"
       ],
-      "top1_score": 11.608,
+      "top1_score": 12.244,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.434
+      "latency_ms": 0.224
     },
     {
       "question": "对外接口下线要提前多久通知？",
+      "category": "policy",
       "golden_documents": [
         "rd_api_version"
       ],
@@ -443,17 +484,18 @@
         "rd_api_version",
         "work_hours",
         "ops_monitor_alert",
-        "sec_incident",
-        "sec_data_class"
+        "zx_x2_spec",
+        "zx_x1_pro_spec"
       ],
-      "top1_score": 19.2809,
+      "top1_score": 18.3845,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.571
+      "latency_ms": 0.211
     },
     {
       "question": "数据分为哪几个等级？",
+      "category": "policy",
       "golden_documents": [
         "sec_data_class"
       ],
@@ -465,14 +507,15 @@
         "sec_retention",
         "ops_vuln_report"
       ],
-      "top1_score": 5.3145,
+      "top1_score": 5.7025,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.572
+      "latency_ms": 0.213
     },
     {
       "question": "导出多少条以上数据需要审批？",
+      "category": "policy",
       "golden_documents": [
         "sec_data_export"
       ],
@@ -480,18 +523,19 @@
       "ranked_top_k": [
         "sec_data_export",
         "sec_data_class",
-        "sec_retention",
         "info_security",
+        "sec_retention",
         "rd_test_env"
       ],
-      "top1_score": 16.9612,
+      "top1_score": 17.8678,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.615
+      "latency_ms": 0.208
     },
     {
       "question": "用户注销后多久要删除个人信息？",
+      "category": "policy",
       "golden_documents": [
         "sec_privacy"
       ],
@@ -503,14 +547,15 @@
         "rd_log_spec",
         "rd_canary"
       ],
-      "top1_score": 16.3644,
+      "top1_score": 17.0768,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.539
+      "latency_ms": 0.215
     },
     {
       "question": "审计日志保留多长时间？",
+      "category": "policy",
       "golden_documents": [
         "sec_retention"
       ],
@@ -522,14 +567,15 @@
         "ops_backup",
         "cs_call_recording"
       ],
-      "top1_score": 13.9915,
+      "top1_score": 14.701,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.465
+      "latency_ms": 0.201
     },
     {
       "question": "发现数据泄露要在多久内上报？",
+      "category": "policy",
       "golden_documents": [
         "sec_incident"
       ],
@@ -541,14 +587,15 @@
         "rd_bug_severity",
         "sec_data_export"
       ],
-      "top1_score": 16.8469,
+      "top1_score": 17.7394,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.503
+      "latency_ms": 0.352
     },
     {
       "question": "紧急工单多久内要首次响应？",
+      "category": "policy",
       "golden_documents": [
         "cs_ticket_sla"
       ],
@@ -560,14 +607,15 @@
         "rd_bug_severity",
         "rd_release_window"
       ],
-      "top1_score": 17.4916,
+      "top1_score": 18.0732,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 1.298
+      "latency_ms": 0.388
     },
     {
       "question": "客户投诉多久没解决要升级到总监？",
+      "category": "policy",
       "golden_documents": [
         "cs_escalation"
       ],
@@ -579,14 +627,15 @@
         "cs_refund_enterprise",
         "customer_reception"
       ],
-      "top1_score": 19.8177,
+      "top1_score": 20.4939,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.971
+      "latency_ms": 0.203
     },
     {
       "question": "退款金额超过多少需要财务复核？",
+      "category": "policy",
       "golden_documents": [
         "cs_refund"
       ],
@@ -598,14 +647,15 @@
         "fin_budget_adjust",
         "fin_procurement"
       ],
-      "top1_score": 14.6744,
+      "top1_score": 15.5092,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.885
+      "latency_ms": 0.203
     },
     {
       "question": "客服录音保留多久？",
+      "category": "policy",
       "golden_documents": [
         "cs_call_recording"
       ],
@@ -617,33 +667,35 @@
         "sec_retention",
         "ops_backup"
       ],
-      "top1_score": 14.0962,
+      "top1_score": 14.7925,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.888
+      "latency_ms": 0.19
     },
     {
       "question": "密码多长时间必须更换一次？",
+      "category": "policy",
       "golden_documents": [
         "ops_password"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
         "ops_password",
+        "it_equipment",
         "rd_log_spec",
         "ops_password_service",
-        "it_equipment",
-        "hr_probation_extend"
+        "zx_x1_ops"
       ],
-      "top1_score": 8.7739,
+      "top1_score": 8.7378,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.883
+      "latency_ms": 0.199
     },
     {
       "question": "VPN 账号多久不用会被停用？",
+      "category": "policy",
       "golden_documents": [
         "ops_vpn"
       ],
@@ -651,37 +703,39 @@
       "ranked_top_k": [
         "ops_vpn",
         "hr_offboarding",
-        "ops_password_service",
         "training_policy",
+        "ops_password_service",
         "ops_mailbox"
       ],
-      "top1_score": 14.5551,
+      "top1_score": 14.9749,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.973
+      "latency_ms": 0.245
     },
     {
       "question": "核心数据库多久做一次全量备份？",
+      "category": "policy",
       "golden_documents": [
         "ops_backup"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
-        "ops_backup_archive",
         "ops_backup",
+        "ops_backup_archive",
         "rd_rollback",
         "hr_promotion",
         "rd_canary"
       ],
-      "top1_score": 14.3543,
+      "top1_score": 14.6997,
       "hit_rate": 1.0,
-      "mrr": 0.5,
+      "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.927
+      "latency_ms": 0.21
     },
     {
       "question": "高危漏洞要求多久内修复？",
+      "category": "policy",
       "golden_documents": [
         "ops_vuln_report"
       ],
@@ -693,14 +747,15 @@
         "rd_release_window",
         "cs_ticket_sla"
       ],
-      "top1_score": 17.668,
+      "top1_score": 18.4511,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.898
+      "latency_ms": 0.228
     },
     {
       "question": "员工邮箱容量有多大？",
+      "category": "policy",
       "golden_documents": [
         "ops_mailbox"
       ],
@@ -712,14 +767,15 @@
         "ops_password",
         "training_policy"
       ],
-      "top1_score": 13.8985,
+      "top1_score": 14.6017,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.93
+      "latency_ms": 0.377
     },
     {
       "question": "试用期一般是多长时间？",
+      "category": "policy",
       "golden_documents": [
         "hr_probation"
       ],
@@ -731,14 +787,15 @@
         "hr_offboarding",
         "attendance_flex"
       ],
-      "top1_score": 4.6236,
+      "top1_score": 4.8558,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 1.036
+      "latency_ms": 0.288
     },
     {
       "question": "公积金缴存比例是多少？",
+      "category": "policy",
       "golden_documents": [
         "hr_social_insurance"
       ],
@@ -748,16 +805,17 @@
         "fin_payment",
         "bonus_policy",
         "leave_policy",
-        "adm_parking_ev"
+        "zx_install"
       ],
-      "top1_score": 12.9142,
+      "top1_score": 13.5968,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.665
+      "latency_ms": 0.213
     },
     {
       "question": "每年体检额度是多少？",
+      "category": "policy",
       "golden_documents": [
         "hr_health_check"
       ],
@@ -769,14 +827,15 @@
         "adm_team_building",
         "fin_petty_cash"
       ],
-      "top1_score": 10.6188,
+      "top1_score": 11.0544,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.229
+      "latency_ms": 0.223
     },
     {
       "question": "出差住宿超标了由谁审批，住宿标准在哪里查？",
+      "category": "multi_hop",
       "golden_documents": [
         "expense_standard",
         "fin_travel_advance"
@@ -789,14 +848,15 @@
         "reimbursement",
         "reimbursement_daily"
       ],
-      "top1_score": 20.8357,
+      "top1_score": 21.8501,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.275
+      "latency_ms": 0.426
     },
     {
       "question": "发布前要做哪些评审，封版后还能改什么？",
+      "category": "multi_hop",
       "golden_documents": [
         "rd_requirement_review",
         "rd_release_window"
@@ -809,14 +869,15 @@
         "rd_code_review",
         "rd_release_hotfix"
       ],
-      "top1_score": 8.7793,
+      "top1_score": 9.2253,
       "hit_rate": 1.0,
       "mrr": 0.5,
       "recall": 1.0,
-      "latency_ms": 0.252
+      "latency_ms": 0.492
     },
     {
       "question": "导出数据需要谁审批，导出文件能保存多久？",
+      "category": "multi_hop",
       "golden_documents": [
         "sec_data_export",
         "sec_retention"
@@ -826,17 +887,18 @@
         "sec_data_export",
         "sec_data_class",
         "ops_mailbox",
-        "sec_retention",
-        "info_security"
+        "info_security",
+        "sec_retention"
       ],
-      "top1_score": 24.2495,
+      "top1_score": 25.3909,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.203
+      "latency_ms": 0.256
     },
     {
       "question": "离职时设备怎么归还，账号什么时候停用？",
+      "category": "multi_hop",
       "golden_documents": [
         "it_equipment",
         "hr_offboarding"
@@ -849,82 +911,87 @@
         "adm_seat",
         "ops_mailbox"
       ],
-      "top1_score": 12.0721,
+      "top1_score": 12.7125,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.202
+      "latency_ms": 0.507
     },
     {
       "question": "公司是否提供上下班通勤班车？",
+      "category": "no_answer",
       "golden_documents": [],
       "expect_no_answer": true,
       "ranked_top_k": [
         "attendance",
         "hr_health_check",
-        "fin_invoice",
         "training_policy",
+        "fin_invoice",
         "ops_wifi"
       ],
-      "top1_score": 4.1319,
+      "top1_score": 4.479,
       "hit_rate": null,
       "mrr": null,
       "recall": null,
-      "latency_ms": 0.216
+      "latency_ms": 1.26
     },
     {
       "question": "年会抽奖的最高奖项是什么？",
+      "category": "no_answer",
       "golden_documents": [],
       "expect_no_answer": true,
       "ranked_top_k": [
-        "adm_parking_ev",
-        "ops_password_service",
-        "rd_release_hotfix",
-        "fin_budget_adjust",
-        "hr_probation_extend"
+        "zx_install",
+        "zx_warranty",
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_x1_ops"
       ],
       "top1_score": 0.0,
       "hit_rate": null,
       "mrr": null,
       "recall": null,
-      "latency_ms": 0.401
+      "latency_ms": 0.942
     },
     {
       "question": "办公区有健身房吗，开放到几点？",
+      "category": "no_answer",
       "golden_documents": [],
       "expect_no_answer": true,
       "ranked_top_k": [
         "adm_visitor",
         "ops_wifi",
-        "adm_parking_ev",
-        "ops_password_service",
-        "hr_probation_extend"
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_install"
       ],
-      "top1_score": 3.6373,
+      "top1_score": 3.8499,
       "hit_rate": null,
       "mrr": null,
       "recall": null,
-      "latency_ms": 0.293
+      "latency_ms": 0.895
     },
     {
       "question": "员工可以申请股票期权吗？",
+      "category": "no_answer",
       "golden_documents": [],
       "expect_no_answer": true,
       "ranked_top_k": [
         "leave_policy",
         "training_policy",
-        "hr_social_insurance",
         "remote_work",
-        "bonus_policy"
+        "hr_social_insurance",
+        "leave_policy_legacy"
       ],
-      "top1_score": 2.4588,
+      "top1_score": 2.8553,
       "hit_rate": null,
       "mrr": null,
       "recall": null,
-      "latency_ms": 0.216
+      "latency_ms": 0.86
     },
     {
       "question": "员工食堂的午餐菜单在哪里看？",
+      "category": "no_answer",
       "golden_documents": [],
       "expect_no_answer": true,
       "ranked_top_k": [
@@ -934,14 +1001,15 @@
         "leave_policy",
         "bonus_policy"
       ],
-      "top1_score": 3.7873,
+      "top1_score": 4.0145,
       "hit_rate": null,
       "mrr": null,
       "recall": null,
-      "latency_ms": 0.199
+      "latency_ms": 0.895
     },
     {
       "question": "公司允许带宠物上班吗？",
+      "category": "no_answer",
       "golden_documents": [],
       "expect_no_answer": true,
       "ranked_top_k": [
@@ -951,14 +1019,15 @@
         "training_policy",
         "ops_mailbox"
       ],
-      "top1_score": 1.7378,
+      "top1_score": 1.9366,
       "hit_rate": null,
       "mrr": null,
       "recall": null,
-      "latency_ms": 0.191
+      "latency_ms": 0.749
     },
     {
       "question": "我想出去玩几天，流程上要提前多久跟领导说？",
+      "category": "colloquial",
       "golden_documents": [
         "leave_policy"
       ],
@@ -970,14 +1039,15 @@
         "hr_onboarding",
         "fin_petty_cash"
       ],
-      "top1_score": 2.4676,
+      "top1_score": 2.6689,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.259
+      "latency_ms": 0.322
     },
     {
       "question": "自己先垫钱买的东西，怎么把钱拿回来？",
+      "category": "colloquial",
       "golden_documents": [
         "reimbursement"
       ],
@@ -987,16 +1057,17 @@
         "ops_wifi",
         "fin_procurement",
         "rd_canary",
-        "adm_parking_ev"
+        "zx_install"
       ],
-      "top1_score": 2.7231,
+      "top1_score": 2.9121,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.245
+      "latency_ms": 0.287
     },
     {
       "question": "在家干活要连什么东西才能进公司系统？",
+      "category": "colloquial",
       "golden_documents": [
         "remote_work"
       ],
@@ -1006,16 +1077,17 @@
         "meeting_policy",
         "attendance",
         "hr_health_check",
-        "adm_visitor"
+        "adm_express"
       ],
-      "top1_score": 3.4073,
+      "top1_score": 3.4927,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.279
+      "latency_ms": 0.292
     },
     {
       "question": "电脑坏了找谁换一台新的？",
+      "category": "colloquial",
       "golden_documents": [
         "it_equipment"
       ],
@@ -1027,52 +1099,55 @@
         "info_security",
         "it_equipment"
       ],
-      "top1_score": 4.3983,
+      "top1_score": 4.6318,
       "hit_rate": 1.0,
       "mrr": 0.2,
       "recall": 1.0,
-      "latency_ms": 0.364
+      "latency_ms": 0.24
     },
     {
       "question": "年底发的那笔钱是怎么算出来的？",
+      "category": "colloquial",
       "golden_documents": [
         "bonus_policy"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
         "adm_team_building",
-        "adm_parking_ev",
-        "rd_release_hotfix",
-        "ops_password_service",
-        "hr_probation_extend"
+        "zx_install",
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_x1_ops"
       ],
-      "top1_score": 5.7301,
+      "top1_score": 5.9915,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.247
+      "latency_ms": 0.225
     },
     {
       "question": "刚进来头几个月算正式员工吗？",
+      "category": "colloquial",
       "golden_documents": [
         "hr_probation"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
         "rd_api_version",
-        "sec_data_class_draft",
         "bonus_policy",
         "hr_social_insurance",
+        "sec_data_class_draft",
         "hr_health_check"
       ],
-      "top1_score": 5.3397,
+      "top1_score": 5.7235,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.237
+      "latency_ms": 0.217
     },
     {
       "question": "公司网络连不上该找谁？",
+      "category": "colloquial",
       "golden_documents": [
         "ops_wifi"
       ],
@@ -1084,14 +1159,15 @@
         "info_security",
         "training_policy"
       ],
-      "top1_score": 8.8832,
+      "top1_score": 8.2295,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.269
+      "latency_ms": 0.302
     },
     {
       "question": "代码改完怎么让别人看过再上线？",
+      "category": "colloquial",
       "golden_documents": [
         "rd_code_review"
       ],
@@ -1103,33 +1179,35 @@
         "ops_password",
         "rd_code_review"
       ],
-      "top1_score": 4.0341,
+      "top1_score": 4.2686,
       "hit_rate": 1.0,
       "mrr": 0.2,
       "recall": 1.0,
-      "latency_ms": 0.315
+      "latency_ms": 0.357
     },
     {
       "question": "想换个座位找谁？",
+      "category": "colloquial",
       "golden_documents": [
         "adm_seat"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
-        "adm_parking_ev",
-        "ops_password_service",
-        "rd_release_hotfix",
-        "fin_budget_adjust",
-        "hr_probation_extend"
+        "zx_install",
+        "zx_warranty",
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_x1_ops"
       ],
       "top1_score": 0.0,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.261
+      "latency_ms": 0.238
     },
     {
       "question": "部门聚餐的钱怎么报？",
+      "category": "colloquial",
       "golden_documents": [
         "adm_team_building"
       ],
@@ -1141,7 +1219,7 @@
         "fin_fixed_asset",
         "fin_invoice"
       ],
-      "top1_score": 2.183,
+      "top1_score": 2.3818,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
@@ -1149,6 +1227,7 @@
     },
     {
       "question": "半夜系统报警谁爬起来处理？",
+      "category": "colloquial",
       "golden_documents": [
         "rd_oncall"
       ],
@@ -1160,33 +1239,35 @@
         "ops_password_service",
         "adm_parking_ev"
       ],
-      "top1_score": 2.253,
+      "top1_score": 2.1887,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.221
+      "latency_ms": 0.253
     },
     {
       "question": "发版出问题怎么退回去？",
+      "category": "colloquial",
       "golden_documents": [
         "rd_rollback"
       ],
       "expect_no_answer": false,
       "ranked_top_k": [
-        "adm_parking_ev",
-        "ops_password_service",
-        "rd_release_hotfix",
-        "fin_budget_adjust",
-        "hr_probation_extend"
+        "zx_install",
+        "zx_warranty",
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_x1_ops"
       ],
       "top1_score": 0.0,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.221
+      "latency_ms": 0.208
     },
     {
       "question": "客户闹到要赔钱找谁？",
+      "category": "colloquial",
       "golden_documents": [
         "cs_escalation"
       ],
@@ -1198,14 +1279,15 @@
         "cs_refund",
         "cs_escalation"
       ],
-      "top1_score": 3.7022,
+      "top1_score": 3.9278,
       "hit_rate": 1.0,
       "mrr": 0.2,
       "recall": 1.0,
-      "latency_ms": 0.226
+      "latency_ms": 0.215
     },
     {
       "question": "合同要盖章找谁？",
+      "category": "colloquial",
       "golden_documents": [
         "fin_contract_seal"
       ],
@@ -1215,16 +1297,17 @@
         "fin_payment",
         "hr_probation_extend",
         "cs_refund_enterprise",
-        "fin_budget_adjust"
+        "zx_x2_spec"
       ],
-      "top1_score": 5.257,
+      "top1_score": 5.4939,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.192
+      "latency_ms": 0.189
     },
     {
       "question": "买台新电脑要走什么流程？",
+      "category": "colloquial",
       "golden_documents": [
         "it_equipment"
       ],
@@ -1236,14 +1319,15 @@
         "ops_software_install",
         "hr_social_insurance"
       ],
-      "top1_score": 6.1467,
+      "top1_score": 6.5426,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.282
+      "latency_ms": 0.244
     },
     {
       "question": "离职前还有什么要交回去的？",
+      "category": "colloquial",
       "golden_documents": [
         "hr_offboarding"
       ],
@@ -1255,14 +1339,15 @@
         "hr_social_insurance",
         "adm_seat"
       ],
-      "top1_score": 3.9432,
+      "top1_score": 4.1688,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.297
+      "latency_ms": 0.208
     },
     {
       "question": "想升职要满足什么条件？",
+      "category": "colloquial",
       "golden_documents": [
         "hr_promotion"
       ],
@@ -1270,18 +1355,19 @@
       "ranked_top_k": [
         "rd_requirement_review",
         "cs_refund",
-        "adm_parking_ev",
-        "ops_password_service",
-        "hr_probation_extend"
+        "zx_x2_spec",
+        "zx_x1_pro_spec",
+        "zx_warranty"
       ],
-      "top1_score": 5.028,
+      "top1_score": 4.7325,
       "hit_rate": 0.0,
       "mrr": 0.0,
       "recall": 0.0,
-      "latency_ms": 0.266
+      "latency_ms": 0.192
     },
     {
       "question": "试用期能不能延长？",
+      "category": "colloquial",
       "golden_documents": [
         "hr_probation_extend"
       ],
@@ -1293,14 +1379,15 @@
         "hr_offboarding",
         "attendance_flex"
       ],
-      "top1_score": 11.2405,
+      "top1_score": 11.7175,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.252
+      "latency_ms": 0.185
     },
     {
       "question": "数据能拷到 U 盘带走吗？",
+      "category": "colloquial",
       "golden_documents": [
         "sec_data_export"
       ],
@@ -1312,14 +1399,15 @@
         "rd_test_env",
         "sec_data_class_draft"
       ],
-      "top1_score": 3.712,
+      "top1_score": 3.9388,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
-      "latency_ms": 0.313
+      "latency_ms": 0.224
     },
     {
       "question": "监控报警太多了怎么少一点？",
+      "category": "colloquial",
       "golden_documents": [
         "ops_monitor_alert"
       ],
@@ -1327,15 +1415,415 @@
       "ranked_top_k": [
         "ops_monitor_alert",
         "rd_rollback",
-        "adm_parking_ev",
-        "ops_password_service",
-        "hr_probation_extend"
+        "zx_x1_spec",
+        "zx_x2_spec",
+        "zx_warranty"
       ],
-      "top1_score": 3.4095,
+      "top1_score": 3.2501,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.425
+    },
+    {
+      "question": "智星 X1 的保修期是多久？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_warranty"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_warranty",
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_x1_spec",
+        "zx_x2_spec"
+      ],
+      "top1_score": 12.377,
       "hit_rate": 1.0,
       "mrr": 1.0,
       "recall": 1.0,
       "latency_ms": 0.268
+    },
+    {
+      "question": "智星 X1 的最大整机吞吐量是多少？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x2_spec",
+        "zx_warranty",
+        "zx_x1_spec",
+        "zx_install"
+      ],
+      "top1_score": 13.8611,
+      "hit_rate": 1.0,
+      "mrr": 0.25,
+      "recall": 1.0,
+      "latency_ms": 0.244
+    },
+    {
+      "question": "智星 X1 支持的最大吞吐量和工作温度范围分别是多少？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x1_spec",
+        "zx_install",
+        "zx_x2_spec",
+        "zx_warranty"
+      ],
+      "top1_score": 12.212,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 0.256
+    },
+    {
+      "question": "智星 X1 的工作温度范围是多少？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x2_spec",
+        "zx_x1_spec"
+      ],
+      "top1_score": 9.8016,
+      "hit_rate": 1.0,
+      "mrr": 0.2,
+      "recall": 1.0,
+      "latency_ms": 0.211
+    },
+    {
+      "question": "智星 X1 有几个 USB 接口？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x2_spec",
+        "zx_x1_spec",
+        "zx_install",
+        "zx_warranty"
+      ],
+      "top1_score": 13.1545,
+      "hit_rate": 1.0,
+      "mrr": 0.3333333333333333,
+      "recall": 1.0,
+      "latency_ms": 0.271
+    },
+    {
+      "question": "智星 X1 的 USB 接口能用来做什么？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x2_spec",
+        "zx_x1_spec",
+        "zx_install",
+        "zx_warranty"
+      ],
+      "top1_score": 13.1545,
+      "hit_rate": 1.0,
+      "mrr": 0.3333333333333333,
+      "recall": 1.0,
+      "latency_ms": 0.664
+    },
+    {
+      "question": "智星 X1 通过了哪些认证？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x1_spec",
+        "ops_password"
+      ],
+      "top1_score": 7.3911,
+      "hit_rate": 1.0,
+      "mrr": 0.25,
+      "recall": 1.0,
+      "latency_ms": 0.289
+    },
+    {
+      "question": "智星 X1 的整机功耗是多少？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x2_spec",
+        "zx_x1_spec",
+        "zx_warranty",
+        "zx_install"
+      ],
+      "top1_score": 15.1197,
+      "hit_rate": 1.0,
+      "mrr": 0.3333333333333333,
+      "recall": 1.0,
+      "latency_ms": 0.274
+    },
+    {
+      "question": "智星 X1 的尺寸和重量是多少？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x1_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x2_spec"
+      ],
+      "top1_score": 12.4864,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 0.362
+    },
+    {
+      "question": "智星 X1 的 WiFi 标准是什么？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_install",
+        "zx_x1_pro_spec",
+        "zx_warranty",
+        "zx_x1_spec",
+        "zx_x2_spec"
+      ],
+      "top1_score": 8.2738,
+      "hit_rate": 1.0,
+      "mrr": 0.25,
+      "recall": 1.0,
+      "latency_ms": 0.257
+    },
+    {
+      "question": "智星 X1 的指示灯有哪些状态？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x1_spec",
+        "zx_install",
+        "zx_warranty",
+        "rd_log_spec"
+      ],
+      "top1_score": 7.3911,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 0.234
+    },
+    {
+      "question": "智星 X1 支持哪些接口？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x1_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x2_spec"
+      ],
+      "top1_score": 10.7441,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 0.957
+    },
+    {
+      "question": "智星 X1 的产品定位是什么？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_pro_spec",
+        "zx_x1_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x2_spec"
+      ],
+      "top1_score": 9.4258,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 1.219
+    },
+    {
+      "question": "智星 X1 的默认管理地址和账号是什么？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_ops"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_ops",
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_warranty",
+        "ops_password_service"
+      ],
+      "top1_score": 10.1623,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.994
+    },
+    {
+      "question": "智星 X1 产生 CPU 过载告警的条件是什么？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_ops"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_ops",
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x1_spec"
+      ],
+      "top1_score": 12.6281,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.592
+    },
+    {
+      "question": "智星 X1 的内存使用率多少会产生告警？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_ops"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_ops",
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x1_spec"
+      ],
+      "top1_score": 14.9827,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.61
+    },
+    {
+      "question": "智星 X1 的固件升级包是什么格式？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_ops"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_ops",
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_warranty",
+        "zx_x1_spec"
+      ],
+      "top1_score": 9.3017,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.291
+    },
+    {
+      "question": "如何把智星 X1 恢复出厂设置？请说明操作步骤。",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_ops"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_x1_ops",
+        "zx_x1_pro_spec",
+        "zx_install",
+        "zx_warranty",
+        "meeting_policy"
+      ],
+      "top1_score": 11.9744,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.279
+    },
+    {
+      "question": "智星 X1 如何查看设备序列号？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_x1_ops"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_warranty",
+        "zx_x1_ops",
+        "zx_x1_pro_spec",
+        "zx_install",
+        "sec_audit"
+      ],
+      "top1_score": 14.3992,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 0.268
+    },
+    {
+      "question": "智星 X1 有哪些安装方式？",
+      "category": "exact_match",
+      "golden_documents": [
+        "zx_install"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "zx_install",
+        "zx_x1_pro_spec",
+        "zx_warranty",
+        "ops_software_install",
+        "zx_x1_ops"
+      ],
+      "top1_score": 15.8561,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.224
     }
   ]
 }

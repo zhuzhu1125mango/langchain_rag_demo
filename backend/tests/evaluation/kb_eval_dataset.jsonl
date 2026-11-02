@@ -68,3 +68,23 @@
 {"question": "试用期能不能延长？", "golden_chunk_ids": [], "golden_documents": ["hr_probation_extend"], "keywords": ["试用期"], "category": "colloquial"}
 {"question": "数据能拷到 U 盘带走吗？", "golden_chunk_ids": [], "golden_documents": ["sec_data_export"], "keywords": ["导出"], "category": "colloquial"}
 {"question": "监控报警太多了怎么少一点？", "golden_chunk_ids": [], "golden_documents": ["ops_monitor_alert"], "keywords": ["告警"], "category": "colloquial"}
+{"question": "智星 X1 的保修期是多久？", "golden_chunk_ids": [], "golden_documents": ["zx_warranty"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的最大整机吞吐量是多少？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 支持的最大吞吐量和工作温度范围分别是多少？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的工作温度范围是多少？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 有几个 USB 接口？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的 USB 接口能用来做什么？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 通过了哪些认证？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的整机功耗是多少？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的尺寸和重量是多少？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的 WiFi 标准是什么？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的指示灯有哪些状态？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 支持哪些接口？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的产品定位是什么？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_spec"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的默认管理地址和账号是什么？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_ops"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 产生 CPU 过载告警的条件是什么？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_ops"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的内存使用率多少会产生告警？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_ops"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 的固件升级包是什么格式？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_ops"], "keywords": [], "category": "exact_match"}
+{"question": "如何把智星 X1 恢复出厂设置？请说明操作步骤。", "golden_chunk_ids": [], "golden_documents": ["zx_x1_ops"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 如何查看设备序列号？", "golden_chunk_ids": [], "golden_documents": ["zx_x1_ops"], "keywords": [], "category": "exact_match"}
+{"question": "智星 X1 有哪些安装方式？", "golden_chunk_ids": [], "golden_documents": ["zx_install"], "keywords": [], "category": "exact_match"}

@@ -502,21 +502,22 @@ def main() -> int:
                 )
 
     # ---- 汇总 ----
-    print("=" * 78)
-    print(f"{'arm':<8}{'hit@' + str(args.top_k):>10}{'mrr':>8}{'recall':>8}   "
-          f"{'policy':>8}{'colloquial':>12}{'multi_hop':>11}")
-    for name in results:
-        r = results.get(name)
+    # 类别列必须动态取：写死 policy/colloquial/multi_hop 时，新增的 exact_match
+    # 会静默不显示——第一版就这样把 20 道精确匹配题藏在了汇总表外面。
+    cat_names = sorted({c for r in results.values() for c in r["by_category"]})
+    width = 8 + 10 + 8 + 8 + 3 + 13 * len(cat_names)
+    print("=" * width)
+    print(
+        f"{'arm':<8}{'hit@' + str(args.top_k):>10}{'mrr':>8}{'recall':>8}   "
+        + "".join(f"{c:>13}" for c in cat_names)
+    )
+    for name, r in results.items():
         if not r:
             continue
-        cat = r["by_category"]
-        print(
-            f"{name:<8}{r['hit_rate']:>10.3f}{r['mrr']:>8.3f}{r['recall']:>8.3f}   "
-            f"{cat.get('policy', {}).get('hit_rate', float('nan')):>8.3f}"
-            f"{cat.get('colloquial', {}).get('hit_rate', float('nan')):>12.3f}"
-            f"{cat.get('multi_hop', {}).get('hit_rate', float('nan')):>11.3f}"
-        )
-    print("-" * 78)
+        line = f"{name:<8}{r['hit_rate']:>10.3f}{r['mrr']:>8.3f}{r['recall']:>8.3f}   "
+        line += "".join(f"{r['by_category'].get(c, {}).get('hit_rate', float('nan')):>13.3f}" for c in cat_names)
+        print(line)
+    print("-" * width)
     print("注：dense/rerank 的耗时包含模型加载与网络，不代表单次查询延迟。")
 
     if args.report:

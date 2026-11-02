@@ -63,9 +63,9 @@ cd backend
 uv run python scripts/run_eval.py --report eval_report.json
 ```
 
-基于 `tests/evaluation/kb_eval_dataset.jsonl`（问题 + golden 文档）与 `eval_corpus.jsonl`（评估语料），使用与生产一致的 BM25 稀疏检索栈计算 hit_rate@5 / mrr@5 / recall@5，低于阈值（`EVAL_MIN_HIT_RATE` / `EVAL_MIN_MRR` / `EVAL_MIN_RECALL`，默认 0.80 / 0.75 / 0.80，取自 2026-11-02 基线减约 3pp）时非零退出。同一逻辑以 `tests/evaluation/test_retrieval_quality.py` 纳入单测，CI 中另有独立 `rag-eval` job 输出指标报告并卡点。
+基于 `tests/evaluation/kb_eval_dataset.jsonl`（问题 + golden 文档）与 `eval_corpus.jsonl`（评估语料），使用与生产一致的 BM25 稀疏检索栈计算 hit_rate@5 / mrr@5 / recall@5，低于阈值（`EVAL_MIN_HIT_RATE` / `EVAL_MIN_MRR` / `EVAL_MIN_RECALL`，默认 0.83 / 0.70 / 0.83，取自 2026-11-02 基线减约 4pp）时非零退出。同一逻辑以 `tests/evaluation/test_retrieval_quality.py` 纳入单测，CI 中另有独立 `rag-eval` job 输出指标报告并卡点。
 
-评测集规模与基线数字见 [benchmarks/retrieval-baseline-2026-11-02.md](../benchmarks/retrieval-baseline-2026-11-02.md)：70 题 / 72 篇（40 制度问法 + 20 口语化 + 4 多跳 + 6 无答案），有答案题与无答案题分开统计。`--show-misses` 只打印未命中题目，改检索逻辑后先看这个。
+评测集规模与基线数字见 [benchmarks/retrieval-baseline-2026-11-02.md](../benchmarks/retrieval-baseline-2026-11-02.md)：90 题 / 78 篇（40 制度问法 + 20 口语化 + **20 精确匹配** + 4 多跳 + 6 无答案），有答案题与无答案题分开统计，并按题型拆分（`--show-misses` 只打印未命中题目，改检索逻辑后先看这个）。精确匹配类来自生产真实 traces：**真实流量六成在问「型号 + 字段」**，改动评测集前先看 `request_traces` 的实际分布，别在正交语料上调优。
 
 通道对比（sparse / dense / hybrid / hybrid+rerank）另见 [benchmarks/channel-ab-2026-11-02.md](../benchmarks/channel-ab-2026-11-02.md)，用 `scripts/run_channel_ab.py` 复现——该脚本依赖本机 Ollama，不进 CI。
 

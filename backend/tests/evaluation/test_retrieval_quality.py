@@ -52,6 +52,13 @@ def test_eval_dataset_composition():
 
     assert len(dataset) >= 40, f"题目太少（{len(dataset)}），指标会失去区分度"
     assert len(corpus) >= 50, f"语料太少（{len(corpus)}），Top-5 命中会虚高"
+
+    # 题型覆盖：精确匹配类来自生产真实查询（型号 + 字段），是流量主力；
+    # 没有它，「要不要保留稀疏通道」这类决策就是在错误分布上得出的。
+    categories = {q.get("category") for q in dataset}
+    for required in ("policy", "colloquial", "exact_match"):
+        assert required in categories, f"评测集缺少 {required} 类题目"
+    assert (DEFAULT_CORPUS.exists())
     assert any(len(q.get("golden_documents", [])) > 1 for q in dataset), "缺少多跳题（golden 两篇）"
     assert any(not q.get("golden_documents") for q in dataset), "缺少无答案题"
 

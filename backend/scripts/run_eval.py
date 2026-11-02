@@ -21,9 +21,12 @@ eval_corpus.jsonl（评估语料），使用与生产一致的 BM25 稀疏检索
     cd backend && uv run python scripts/run_eval.py --report eval_report.json
 
 阈值卡点（环境变量可覆盖）：
-    EVAL_MIN_HIT_RATE（默认 0.80，2026-11-02 基线 0.828——口语化题扩到 20 道后的真实值）
-    EVAL_MIN_MRR（默认 0.75，基线 0.775）
-    EVAL_MIN_RECALL（默认 0.80，基线 0.828）
+    EVAL_MIN_HIT_RATE（默认 0.83，2026-11-02 基线 0.869）
+    EVAL_MIN_MRR（默认 0.70，基线 0.739）
+    EVAL_MIN_RECALL（默认 0.83，基线 0.869）
+    该基线含「型号 + 字段」类 20 题：BM25 top-5 能全中，但常被 X1 Pro 之类的
+    近型号干扰挤到第 4–5 位，因此 MRR 从 0.775 降到 0.739。这不是退化，
+    是新题型暴露了「召回到但排不准」——阈值随之按新基线校准。
     留约 3pp（≈2 题）回退空间：再多就卡不住退化，再少会被无关波动弄红。
 低于任一阈值时进程以非零码退出，供 CI rag-eval job 卡点。
 阈值不是「行业标准」而是**本数据集上的基线减回退空间**：要调整就先改数据集、
@@ -48,9 +51,9 @@ DEFAULT_CORPUS = BASE_DIR / "tests" / "evaluation" / "eval_corpus.jsonl"
 def get_thresholds() -> Dict[str, float]:
     """读取阈值（环境变量可覆盖默认值），调用时读取以便测试与 CI 覆盖。"""
     return {
-        "hit_rate": float(os.environ.get("EVAL_MIN_HIT_RATE", "0.80")),
-        "mrr": float(os.environ.get("EVAL_MIN_MRR", "0.75")),
-        "recall": float(os.environ.get("EVAL_MIN_RECALL", "0.80")),
+        "hit_rate": float(os.environ.get("EVAL_MIN_HIT_RATE", "0.83")),
+        "mrr": float(os.environ.get("EVAL_MIN_MRR", "0.70")),
+        "recall": float(os.environ.get("EVAL_MIN_RECALL", "0.83")),
     }
 
 
@@ -132,6 +135,7 @@ def evaluate(dataset: List[Dict], corpus: List[Dict], top_k: int = 5) -> Dict:
     latency_ms: List[float] = []
     answerable_top1: List[float] = []
     no_answer_top1: List[float] = []
+    category_hits: Dict[str, List[float]] = {}
 
     for sample in dataset:
         started = time.perf_counter()
@@ -156,9 +160,17 @@ def evaluate(dataset: List[Dict], corpus: List[Dict], top_k: int = 5) -> Dict:
         else:
             no_answer_top1.append(top1_score)
 
+        # 题型来自数据集标注；未标注时按形态推断，避免分类统计里出现空桶
+        category = sample.get("category") or (
+            "no_answer" if not golden else "multi_hop" if len(golden) > 1 else "policy"
+        )
+        if hit is not None:
+            category_hits.setdefault(category, []).append(hit)
+
         details.append(
             {
                 "question": sample["question"],
+                "category": category,
                 "golden_documents": golden,
                 "expect_no_answer": not golden,
                 "ranked_top_k": ranked_ids,
@@ -182,6 +194,12 @@ def evaluate(dataset: List[Dict], corpus: List[Dict], top_k: int = 5) -> Dict:
         "recall": sum(recalls) / n_answerable if n_answerable else 0.0,
         "latency_p50_ms": round(statistics.median(latency_ms), 3) if latency_ms else 0.0,
         "latency_p95_ms": round(_percentile(latency_ms, 95), 3) if latency_ms else 0.0,
+    }
+
+    # 只报总分会掩盖「哪类题在退」——制度题常年 1.000，口语题才是变量所在
+    metrics["by_category"] = {
+        cat: {"n": len(vals), "hit_rate": round(sum(vals) / len(vals), 4)}
+        for cat, vals in sorted(category_hits.items())
     }
 
     if answerable_top1 and no_answer_top1:
@@ -257,6 +275,12 @@ def main() -> int:
         f"语料 {metrics['num_corpus_docs']} 篇 / 单题排序 p50={metrics['latency_p50_ms']}ms "
         f"p95={metrics['latency_p95_ms']}ms)"
     )
+    by_cat = metrics.get("by_category") or {}
+    if by_cat:
+        # 分题型一行打完，才能立刻看出「总分掉了是因为哪类题」
+        print("  分题型: " + "  ".join(
+            f"{cat}={v['hit_rate']:.3f}({v['n']})" for cat, v in by_cat.items()
+        ))
     if "no_answer_separation" in metrics:
         print(
             f"无答案分离度={metrics['no_answer_separation']} "
