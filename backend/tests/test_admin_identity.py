@@ -219,6 +219,58 @@ class TestRequireAdmin:
         assert await require_admin(current_user=user, x_admin_key=None) is user
 
 
+class TestBootstrapKeyWithoutLogin:
+    """应急通道的前提是「没有登录态」。
+
+    P0-2 首次部署实测：``require_admin`` 原先 ``Depends(get_current_user)``，
+    没有凭据时 401 在函数体之前抛出，正确的 X-Admin-Key 根本读不到——
+    「管理员被锁死时的救援通道」实际要求「你先能登录」。这组用例锁住该回归。
+    """
+
+    async def test_key_works_without_any_login(self, monkeypatch):
+        monkeypatch.setattr(settings.security, "ADMIN_KEY", "global-key")
+        warnings = []
+        monkeypatch.setattr(
+            auth_module.logger, "warning", lambda msg, *a, **kw: warnings.append(msg)
+        )
+
+        user = await require_admin(current_user=None, x_admin_key="global-key")
+
+        assert user.is_authenticated is True
+        assert warnings and "ADMIN_KEY" in warnings[0]
+
+    async def test_wrong_key_without_login_is_403(self, monkeypatch):
+        monkeypatch.setattr(settings.security, "ADMIN_KEY", "global-key")
+
+        with pytest.raises(HTTPException) as exc:
+            await require_admin(current_user=None, x_admin_key="wrong")
+        assert exc.value.status_code == 403
+
+    async def test_no_key_no_login_is_403_in_prod(self, monkeypatch):
+        monkeypatch.setattr(settings.security, "ADMIN_KEY", "global-key")
+        monkeypatch.setattr(settings, "APP_ENV", "prod")
+
+        with pytest.raises(HTTPException) as exc:
+            await require_admin(current_user=None, x_admin_key=None)
+        assert exc.value.status_code == 403
+
+    async def test_optional_resolver_returns_none_in_prod(self, monkeypatch):
+        """``_optional_current_user`` 不得再把缺失凭据变成 401。"""
+        monkeypatch.setattr(settings, "APP_ENV", "prod")
+        monkeypatch.setattr(settings.security, "API_KEY", None)
+
+        assert await auth_module._optional_current_user(None, None) is None
+
+    async def test_get_current_user_still_401_without_credentials(self, monkeypatch):
+        """拆分后普通接口的拒绝行为不变（别把管理接口的放松泄漏给全站）。"""
+        monkeypatch.setattr(settings, "APP_ENV", "prod")
+        monkeypatch.setattr(settings.security, "API_KEY", None)
+
+        with pytest.raises(HTTPException) as exc:
+            await auth_module.get_current_user(None, None)
+        assert exc.value.status_code == 401
+
+
 # ---------------------------------------------------------------------------
 # 3. 首个注册用户自举
 # ---------------------------------------------------------------------------

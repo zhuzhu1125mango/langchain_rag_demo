@@ -399,29 +399,16 @@ def _bind_auth_user(user: CurrentUser) -> CurrentUser:
     return user
 
 
-async def get_current_user(
-    api_key: Optional[str] = Security(api_key_header),
-    jwt_credentials: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer),
-) -> CurrentUser:
-    """获取当前认证用户。
+async def _resolve_current_user(
+    api_key: Optional[str],
+    jwt_credentials: Optional[HTTPAuthorizationCredentials],
+) -> Optional[CurrentUser]:
+    """凭据解析（不抛异常）：通过返回用户，缺失/无效返回 None。
 
-    校验顺序：
-    1. X-API-Key 头；
-    2. Authorization: Bearer <JWT>（有效则返回对应用户）；
-    3. 未配置 API_KEY 且非生产环境时，返回默认用户（开发模式匿名放行）。
-
-    生产环境（含非 Docker 裸跑 APP_ENV=prod）必须配置 API_KEY，
-    否则除有效 JWT 外拒绝所有请求。
-
-    Args:
-        api_key: API Key 头内容。
-        jwt_credentials: JWT Bearer 凭证。
-
-    Returns:
-        CurrentUser: 当前用户信息。
-
-    Raises:
-        HTTPException: 认证失败时抛出 401。
+    单独拆出的原因见 ``require_admin``：管理接口的应急通道必须在**没有**
+    登录态时也能用，若直接依赖 ``get_current_user``，401 会在进入
+    ``require_admin`` 函数体之前就抛出，X-Admin-Key 永远不会被检查——
+    救援通道变成了「只有没被锁的人才能用」。
     """
     configured_key = getattr(settings, "API_KEY", None) or getattr(settings.security, "API_KEY", None)
 
@@ -447,11 +434,49 @@ async def get_current_user(
     if not configured_key and not settings.IS_PRODUCTION:
         return _DEFAULT_USER
 
+    return None
+
+
+async def get_current_user(
+    api_key: Optional[str] = Security(api_key_header),
+    jwt_credentials: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer),
+) -> CurrentUser:
+    """获取当前认证用户。
+
+    校验顺序：
+    1. X-API-Key 头；
+    2. Authorization: Bearer <JWT>（有效则返回对应用户）；
+    3. 未配置 API_KEY 且非生产环境时，返回默认用户（开发模式匿名放行）。
+
+    生产环境（含非 Docker 裸跑 APP_ENV=prod）必须配置 API_KEY，
+    否则除有效 JWT 外拒绝所有请求。
+
+    Args:
+        api_key: API Key 头内容。
+        jwt_credentials: JWT Bearer 凭证。
+
+    Returns:
+        CurrentUser: 当前用户信息。
+
+    Raises:
+        HTTPException: 认证失败时抛出 401。
+    """
+    user = await _resolve_current_user(api_key, jwt_credentials)
+    if user is not None:
+        return user
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="无效的认证凭据",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
+
+async def _optional_current_user(
+    api_key: Optional[str] = Security(api_key_header),
+    jwt_credentials: Optional[HTTPAuthorizationCredentials] = Security(jwt_bearer),
+) -> Optional[CurrentUser]:
+    """同 ``get_current_user``，但无凭据时返回 None 而不是 401（仅供 require_admin）。"""
+    return await _resolve_current_user(api_key, jwt_credentials)
 
 
 async def get_current_user_for_ws(websocket: WebSocket) -> CurrentUser:
@@ -598,7 +623,7 @@ async def _is_admin_user(current_user: CurrentUser) -> bool:
 
 
 async def require_admin(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: Optional[CurrentUser] = Depends(_optional_current_user),
     x_admin_key: Optional[str] = Security(admin_key_header),
 ) -> CurrentUser:
     """管理操作鉴权（全局配置修改、指标重置等）。
@@ -613,19 +638,27 @@ async def require_admin(
 
     第 2 条不再是唯一入口：这正是此前的缺口——审计里没有「谁」，
     且拿到一把 Key 就是全体管理员。
+
+    注：这里依赖的是 ``_optional_current_user`` 而非 ``get_current_user``。
+    后者在没有凭据时直接抛 401，应急通道就永远进不来（P0-2 部署实测：
+    带正确 X-Admin-Key 仍返回 401）——救援通道不能要求「你先能登录」。
     """
-    if await _is_admin_user(current_user):
+    if current_user is not None and await _is_admin_user(current_user):
         return current_user
 
     admin_key = getattr(settings.security, "ADMIN_KEY", None)
     if admin_key:
         if x_admin_key and hmac.compare_digest(x_admin_key.encode(), admin_key.encode()):
-            # 应急通道可被任何持有 Key 的调用方使用，必须留痕
+            # 应急通道可被任何持有 Key 的调用方使用，必须留痕（无登录态时记 -）
             logger.warning(
                 "管理接口经由全局 ADMIN_KEY 访问（非用户身份）: user_id=%s",
-                current_user.user_id,
+                current_user.user_id if current_user is not None else "-",
             )
-            return current_user
+            return (
+                current_user
+                if current_user is not None
+                else CurrentUser(user_id="admin_key", is_authenticated=True)
+            )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="需要管理员账号或有效的 X-Admin-Key",
@@ -635,4 +668,7 @@ async def require_admin(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="生产环境执行管理操作需管理员账号（scripts/create_admin.py）或配置 ADMIN_KEY",
         )
+    if current_user is None:
+        # 开发模式未配置任何 Key：保持「匿名可用」，与 get_current_user 的开发放行一致
+        return _DEFAULT_USER
     return current_user
