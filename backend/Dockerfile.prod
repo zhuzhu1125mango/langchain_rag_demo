@@ -70,6 +70,17 @@ ENV PATH="/app/.venv/bin:$PATH"
 # 复制项目代码（归属 appuser）
 COPY --chown=appuser:appuser . .
 
+# 离线语料随镜像发布（NLTK stopwords / punkt_tab，共 4.2MB）。
+#
+# 为什么不放在 /app/data 下：那是宿主 bind mount，Windows Docker Desktop 下
+# 一律映射为 root:root 0777，而 NLTK 的 pathsec 会**拒绝在他人可写目录读取语料**
+# （它认为谁都能替换 zip，就等于谁都能投喂可信数据）。后果不是报错而是降级：
+# 中文停用词加载失败 → BM25 分析器丢弃 stopwords → 持久化词表 load 失败 →
+# 首次插入时重 fit → 编码空间与历史 sparse 向量不一致（静默的检索质量下降）。
+# 镜像内目录归属 appuser、权限 0755，属于 NLTK 认可的「私有数据根」，且离线可用。
+COPY --chown=appuser:appuser vendor/nltk_data /app/nltk_data
+ENV NLTK_DATA=/app/nltk_data
+
 ENV PYTHONPATH=/app
 
 EXPOSE 8000

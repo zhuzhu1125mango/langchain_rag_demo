@@ -109,7 +109,7 @@ services:
       TRUSTED_PROXY_CIDRS: "172.16.0.0/12,127.0.0.1/32,::1/128"
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问 Ollama
       SKIP_OLLAMA_CHECK: "true"
-      NLTK_DATA: /app/data/nltk_data                   # nltk 语料离线目录（BM25 中文分词依赖 stopwords）
+      NLTK_DATA: /app/nltk_data                        # nltk 语料随镜像发布（BM25 中文分词依赖 stopwords）；不放 /app/data 是因为 bind mount 在 Windows 下为 0777，NLTK 会拒绝读取
       HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
       HF_HUB_OFFLINE: "1"                              # 容器内强制离线用缓存
       TRANSFORMERS_OFFLINE: "1"
