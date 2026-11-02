@@ -1,0 +1,1113 @@
+{
+  "metrics": {
+    "num_questions": 58,
+    "num_answerable": 52,
+    "num_no_answer": 6,
+    "num_corpus_docs": 72,
+    "top_k": 5,
+    "hit_rate": 0.9038461538461539,
+    "mrr": 0.8538461538461538,
+    "recall": 0.9038461538461539,
+    "latency_p50_ms": 0.238,
+    "latency_p95_ms": 0.448,
+    "answerable_top1_median": 12.7201,
+    "no_answer_top1_median": 3.0481,
+    "no_answer_separation": 0.2396
+  },
+  "details": [
+    {
+      "question": "员工请假需要提前多久申请？",
+      "golden_documents": [
+        "leave_policy"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "leave_policy",
+        "leave_policy_legacy",
+        "hr_health_check",
+        "hr_offboarding",
+        "remote_work"
+      ],
+      "top1_score": 8.1279,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.572
+    },
+    {
+      "question": "公司年终奖什么时候发放？",
+      "golden_documents": [
+        "bonus_policy"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "bonus_policy",
+        "hr_health_check",
+        "adm_express",
+        "info_security",
+        "training_policy"
+      ],
+      "top1_score": 15.6312,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.273
+    },
+    {
+      "question": "试用期员工是否享受带薪年假？",
+      "golden_documents": [
+        "leave_policy"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "leave_policy",
+        "hr_probation_extend",
+        "leave_policy_legacy",
+        "hr_probation",
+        "hr_offboarding"
+      ],
+      "top1_score": 22.7909,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.252
+    },
+    {
+      "question": "办公时间是什么时候？",
+      "golden_documents": [
+        "work_hours"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "work_hours",
+        "adm_parking_ev",
+        "rd_release_hotfix",
+        "ops_password_service",
+        "hr_probation_extend"
+      ],
+      "top1_score": 6.3685,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.211
+    },
+    {
+      "question": "如何申请报销差旅费？",
+      "golden_documents": [
+        "reimbursement"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "reimbursement",
+        "fin_travel_advance",
+        "travel_policy_abroad",
+        "reimbursement_daily",
+        "fin_invoice"
+      ],
+      "top1_score": 8.6334,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.238
+    },
+    {
+      "question": "下一年度预算最晚什么时候提交？",
+      "golden_documents": [
+        "fin_budget"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_budget",
+        "training_policy",
+        "hr_onboarding",
+        "adm_parking",
+        "adm_visitor"
+      ],
+      "top1_score": 9.0297,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.287
+    },
+    {
+      "question": "报销对发票抬头有什么要求？",
+      "golden_documents": [
+        "fin_invoice"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_invoice",
+        "reimbursement",
+        "adm_team_building",
+        "reimbursement_daily",
+        "customer_reception"
+      ],
+      "top1_score": 12.0842,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.446
+    },
+    {
+      "question": "供应商付款一般多少天到账？",
+      "golden_documents": [
+        "fin_payment"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_payment",
+        "cs_refund",
+        "adm_parking_ev",
+        "ops_password_service",
+        "hr_probation_extend"
+      ],
+      "top1_score": 12.2623,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.251
+    },
+    {
+      "question": "20万元以上的采购需要谁审批？",
+      "golden_documents": [
+        "fin_procurement"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_procurement",
+        "fin_payment",
+        "fin_budget",
+        "cs_refund",
+        "cs_refund_enterprise"
+      ],
+      "top1_score": 15.473,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.267
+    },
+    {
+      "question": "合同用印前必须经过哪个部门审核？",
+      "golden_documents": [
+        "fin_contract_seal"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_contract_seal",
+        "hr_probation_extend",
+        "fin_payment",
+        "ops_software_install",
+        "cs_refund_enterprise"
+      ],
+      "top1_score": 15.6905,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.228
+    },
+    {
+      "question": "部门备用金的额度上限是多少？",
+      "golden_documents": [
+        "fin_petty_cash"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_petty_cash",
+        "adm_seat",
+        "fin_travel_advance",
+        "hr_probation_extend",
+        "hr_probation"
+      ],
+      "top1_score": 12.348,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.318
+    },
+    {
+      "question": "固定资产多久盘点一次？",
+      "golden_documents": [
+        "fin_fixed_asset"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_fixed_asset",
+        "adm_parking_ev",
+        "rd_release_hotfix",
+        "ops_password_service",
+        "hr_probation_extend"
+      ],
+      "top1_score": 12.526,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.201
+    },
+    {
+      "question": "出差借款最多能借多少比例？",
+      "golden_documents": [
+        "fin_travel_advance"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_travel_advance",
+        "expense_standard",
+        "hr_social_insurance",
+        "fin_payment",
+        "reimbursement_daily"
+      ],
+      "top1_score": 12.2621,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.238
+    },
+    {
+      "question": "需求评审的结论有哪几种？",
+      "golden_documents": [
+        "rd_requirement_review"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_requirement_review",
+        "hr_promotion",
+        "rd_code_review",
+        "hr_health_check",
+        "sec_data_class_draft"
+      ],
+      "top1_score": 15.9772,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.191
+    },
+    {
+      "question": "常规发布窗口是每周哪几天？",
+      "golden_documents": [
+        "rd_release_window"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_release_window",
+        "rd_release_hotfix",
+        "sec_data_class",
+        "work_hours",
+        "rd_canary"
+      ],
+      "top1_score": 15.8675,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.189
+    },
+    {
+      "question": "灰度发布首批放量不能超过多少？",
+      "golden_documents": [
+        "rd_canary"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_canary",
+        "rd_release_window",
+        "rd_release_hotfix",
+        "sec_data_class",
+        "work_hours"
+      ],
+      "top1_score": 16.8751,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.219
+    },
+    {
+      "question": "核心模块的代码评审需要几个人通过？",
+      "golden_documents": [
+        "rd_code_review"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_code_review",
+        "hr_promotion",
+        "rd_requirement_review",
+        "adm_visitor",
+        "info_security"
+      ],
+      "top1_score": 13.7024,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.462
+    },
+    {
+      "question": "测试环境每天几点重置数据？",
+      "golden_documents": [
+        "rd_test_env"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_test_env",
+        "sec_data_export",
+        "sec_retention",
+        "sec_data_class_draft",
+        "sec_data_class"
+      ],
+      "top1_score": 13.7308,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.269
+    },
+    {
+      "question": "P0 缺陷要求多久内恢复？",
+      "golden_documents": [
+        "rd_bug_severity"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_bug_severity",
+        "rd_release_window",
+        "ops_backup",
+        "rd_oncall",
+        "ops_monitor_alert"
+      ],
+      "top1_score": 11.1071,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.23
+    },
+    {
+      "question": "收到 P0 告警后几分钟内要确认？",
+      "golden_documents": [
+        "rd_oncall"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_oncall",
+        "ops_monitor_alert",
+        "rd_bug_severity",
+        "fin_payment",
+        "rd_release_hotfix"
+      ],
+      "top1_score": 15.8082,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.243
+    },
+    {
+      "question": "线上回滚需要事先审批吗？",
+      "golden_documents": [
+        "rd_rollback"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_rollback",
+        "remote_work",
+        "rd_canary",
+        "rd_release_hotfix",
+        "fin_procurement"
+      ],
+      "top1_score": 10.0014,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.228
+    },
+    {
+      "question": "日志里禁止打印哪些信息？",
+      "golden_documents": [
+        "rd_log_spec"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_log_spec",
+        "sec_audit",
+        "sec_retention",
+        "ops_vpn",
+        "ops_password_service"
+      ],
+      "top1_score": 11.608,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.201
+    },
+    {
+      "question": "对外接口下线要提前多久通知？",
+      "golden_documents": [
+        "rd_api_version"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_api_version",
+        "work_hours",
+        "ops_monitor_alert",
+        "sec_incident",
+        "sec_data_class"
+      ],
+      "top1_score": 19.2809,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.203
+    },
+    {
+      "question": "数据分为哪几个等级？",
+      "golden_documents": [
+        "sec_data_class"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "sec_data_class",
+        "bonus_policy",
+        "sec_data_export",
+        "sec_retention",
+        "ops_vuln_report"
+      ],
+      "top1_score": 5.3145,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.223
+    },
+    {
+      "question": "导出多少条以上数据需要审批？",
+      "golden_documents": [
+        "sec_data_export"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "sec_data_export",
+        "sec_data_class",
+        "sec_retention",
+        "info_security",
+        "rd_test_env"
+      ],
+      "top1_score": 16.9612,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.327
+    },
+    {
+      "question": "用户注销后多久要删除个人信息？",
+      "golden_documents": [
+        "sec_privacy"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "sec_privacy",
+        "sec_data_export",
+        "cs_call_recording",
+        "rd_log_spec",
+        "rd_canary"
+      ],
+      "top1_score": 16.3644,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.247
+    },
+    {
+      "question": "审计日志保留多长时间？",
+      "golden_documents": [
+        "sec_retention"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "sec_retention",
+        "sec_audit",
+        "rd_log_spec",
+        "ops_backup",
+        "cs_call_recording"
+      ],
+      "top1_score": 13.9915,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.206
+    },
+    {
+      "question": "发现数据泄露要在多久内上报？",
+      "golden_documents": [
+        "sec_incident"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "sec_incident",
+        "info_security",
+        "ops_vuln_report",
+        "rd_bug_severity",
+        "sec_data_export"
+      ],
+      "top1_score": 16.8469,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.236
+    },
+    {
+      "question": "紧急工单多久内要首次响应？",
+      "golden_documents": [
+        "cs_ticket_sla"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "cs_ticket_sla",
+        "cs_escalation",
+        "rd_code_review",
+        "rd_bug_severity",
+        "rd_release_window"
+      ],
+      "top1_score": 17.4916,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.241
+    },
+    {
+      "question": "客户投诉多久没解决要升级到总监？",
+      "golden_documents": [
+        "cs_escalation"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "cs_escalation",
+        "cs_ticket_sla",
+        "cs_call_recording",
+        "cs_refund_enterprise",
+        "customer_reception"
+      ],
+      "top1_score": 19.8177,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.201
+    },
+    {
+      "question": "退款金额超过多少需要财务复核？",
+      "golden_documents": [
+        "cs_refund"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "cs_refund",
+        "fin_payment",
+        "cs_refund_enterprise",
+        "fin_budget_adjust",
+        "fin_procurement"
+      ],
+      "top1_score": 14.6744,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.211
+    },
+    {
+      "question": "客服录音保留多久？",
+      "golden_documents": [
+        "cs_call_recording"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "cs_call_recording",
+        "cs_quality_check",
+        "cs_escalation",
+        "sec_retention",
+        "ops_backup"
+      ],
+      "top1_score": 14.0962,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.216
+    },
+    {
+      "question": "密码多长时间必须更换一次？",
+      "golden_documents": [
+        "ops_password"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "ops_password",
+        "rd_log_spec",
+        "ops_password_service",
+        "it_equipment",
+        "hr_probation_extend"
+      ],
+      "top1_score": 8.7739,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.459
+    },
+    {
+      "question": "VPN 账号多久不用会被停用？",
+      "golden_documents": [
+        "ops_vpn"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "ops_vpn",
+        "hr_offboarding",
+        "ops_password_service",
+        "training_policy",
+        "ops_mailbox"
+      ],
+      "top1_score": 14.5551,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.271
+    },
+    {
+      "question": "核心数据库多久做一次全量备份？",
+      "golden_documents": [
+        "ops_backup"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "ops_backup_archive",
+        "ops_backup",
+        "rd_rollback",
+        "hr_promotion",
+        "rd_canary"
+      ],
+      "top1_score": 14.3543,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 0.24
+    },
+    {
+      "question": "高危漏洞要求多久内修复？",
+      "golden_documents": [
+        "ops_vuln_report"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "ops_vuln_report",
+        "rd_bug_severity",
+        "rd_release_hotfix",
+        "rd_release_window",
+        "cs_ticket_sla"
+      ],
+      "top1_score": 17.668,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.223
+    },
+    {
+      "question": "员工邮箱容量有多大？",
+      "golden_documents": [
+        "ops_mailbox"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "ops_mailbox",
+        "meeting_policy",
+        "sec_data_export",
+        "ops_password",
+        "training_policy"
+      ],
+      "top1_score": 13.8985,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.214
+    },
+    {
+      "question": "试用期一般是多长时间？",
+      "golden_documents": [
+        "hr_probation"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "hr_probation",
+        "hr_probation_extend",
+        "leave_policy",
+        "hr_offboarding",
+        "attendance_flex"
+      ],
+      "top1_score": 4.6236,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.202
+    },
+    {
+      "question": "公积金缴存比例是多少？",
+      "golden_documents": [
+        "hr_social_insurance"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "hr_social_insurance",
+        "fin_payment",
+        "bonus_policy",
+        "leave_policy",
+        "adm_parking_ev"
+      ],
+      "top1_score": 12.9142,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.238
+    },
+    {
+      "question": "每年体检额度是多少？",
+      "golden_documents": [
+        "hr_health_check"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "hr_health_check",
+        "adm_seat",
+        "fin_travel_advance",
+        "adm_team_building",
+        "fin_petty_cash"
+      ],
+      "top1_score": 10.6188,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.305
+    },
+    {
+      "question": "出差住宿超标了由谁审批，住宿标准在哪里查？",
+      "golden_documents": [
+        "expense_standard",
+        "fin_travel_advance"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "expense_standard",
+        "travel_policy_abroad",
+        "fin_travel_advance",
+        "reimbursement",
+        "reimbursement_daily"
+      ],
+      "top1_score": 20.8357,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.318
+    },
+    {
+      "question": "发布前要做哪些评审，封版后还能改什么？",
+      "golden_documents": [
+        "rd_requirement_review",
+        "rd_release_window"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "hr_promotion",
+        "rd_release_window",
+        "rd_requirement_review",
+        "rd_code_review",
+        "rd_release_hotfix"
+      ],
+      "top1_score": 8.7793,
+      "hit_rate": 1.0,
+      "mrr": 0.5,
+      "recall": 1.0,
+      "latency_ms": 0.322
+    },
+    {
+      "question": "导出数据需要谁审批，导出文件能保存多久？",
+      "golden_documents": [
+        "sec_data_export",
+        "sec_retention"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "sec_data_export",
+        "sec_data_class",
+        "ops_mailbox",
+        "sec_retention",
+        "info_security"
+      ],
+      "top1_score": 24.2495,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.261
+    },
+    {
+      "question": "离职时设备怎么归还，账号什么时候停用？",
+      "golden_documents": [
+        "it_equipment",
+        "hr_offboarding"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "hr_offboarding",
+        "it_equipment",
+        "ops_vpn",
+        "adm_seat",
+        "ops_mailbox"
+      ],
+      "top1_score": 12.0721,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.316
+    },
+    {
+      "question": "公司是否提供上下班通勤班车？",
+      "golden_documents": [],
+      "expect_no_answer": true,
+      "ranked_top_k": [
+        "attendance",
+        "hr_health_check",
+        "fin_invoice",
+        "training_policy",
+        "ops_wifi"
+      ],
+      "top1_score": 4.1319,
+      "hit_rate": null,
+      "mrr": null,
+      "recall": null,
+      "latency_ms": 0.225
+    },
+    {
+      "question": "年会抽奖的最高奖项是什么？",
+      "golden_documents": [],
+      "expect_no_answer": true,
+      "ranked_top_k": [
+        "adm_parking_ev",
+        "ops_password_service",
+        "rd_release_hotfix",
+        "fin_budget_adjust",
+        "hr_probation_extend"
+      ],
+      "top1_score": 0.0,
+      "hit_rate": null,
+      "mrr": null,
+      "recall": null,
+      "latency_ms": 0.221
+    },
+    {
+      "question": "办公区有健身房吗，开放到几点？",
+      "golden_documents": [],
+      "expect_no_answer": true,
+      "ranked_top_k": [
+        "adm_visitor",
+        "ops_wifi",
+        "adm_parking_ev",
+        "ops_password_service",
+        "hr_probation_extend"
+      ],
+      "top1_score": 3.6373,
+      "hit_rate": null,
+      "mrr": null,
+      "recall": null,
+      "latency_ms": 0.202
+    },
+    {
+      "question": "员工可以申请股票期权吗？",
+      "golden_documents": [],
+      "expect_no_answer": true,
+      "ranked_top_k": [
+        "leave_policy",
+        "training_policy",
+        "hr_social_insurance",
+        "remote_work",
+        "bonus_policy"
+      ],
+      "top1_score": 2.4588,
+      "hit_rate": null,
+      "mrr": null,
+      "recall": null,
+      "latency_ms": 0.24
+    },
+    {
+      "question": "员工食堂的午餐菜单在哪里看？",
+      "golden_documents": [],
+      "expect_no_answer": true,
+      "ranked_top_k": [
+        "work_hours",
+        "training_policy",
+        "hr_social_insurance",
+        "leave_policy",
+        "bonus_policy"
+      ],
+      "top1_score": 3.7873,
+      "hit_rate": null,
+      "mrr": null,
+      "recall": null,
+      "latency_ms": 0.192
+    },
+    {
+      "question": "公司允许带宠物上班吗？",
+      "golden_documents": [],
+      "expect_no_answer": true,
+      "ranked_top_k": [
+        "hr_health_check",
+        "adm_express",
+        "info_security",
+        "training_policy",
+        "ops_mailbox"
+      ],
+      "top1_score": 1.7378,
+      "hit_rate": null,
+      "mrr": null,
+      "recall": null,
+      "latency_ms": 0.184
+    },
+    {
+      "question": "我想出去玩几天，流程上要提前多久跟领导说？",
+      "golden_documents": [
+        "leave_policy"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "fin_budget_adjust",
+        "reimbursement",
+        "rd_requirement_review",
+        "hr_onboarding",
+        "fin_petty_cash"
+      ],
+      "top1_score": 2.4676,
+      "hit_rate": 0.0,
+      "mrr": 0.0,
+      "recall": 0.0,
+      "latency_ms": 0.247
+    },
+    {
+      "question": "自己先垫钱买的东西，怎么把钱拿回来？",
+      "golden_documents": [
+        "reimbursement"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_rollback",
+        "ops_wifi",
+        "fin_procurement",
+        "rd_canary",
+        "adm_parking_ev"
+      ],
+      "top1_score": 2.7231,
+      "hit_rate": 0.0,
+      "mrr": 0.0,
+      "recall": 0.0,
+      "latency_ms": 0.42
+    },
+    {
+      "question": "在家干活要连什么东西才能进公司系统？",
+      "golden_documents": [
+        "remote_work"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "ops_password",
+        "meeting_policy",
+        "attendance",
+        "hr_health_check",
+        "adm_visitor"
+      ],
+      "top1_score": 3.4073,
+      "hit_rate": 0.0,
+      "mrr": 0.0,
+      "recall": 0.0,
+      "latency_ms": 0.265
+    },
+    {
+      "question": "电脑坏了找谁换一台新的？",
+      "golden_documents": [
+        "it_equipment"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "hr_onboarding",
+        "ops_software_install",
+        "hr_social_insurance",
+        "info_security",
+        "it_equipment"
+      ],
+      "top1_score": 4.3983,
+      "hit_rate": 1.0,
+      "mrr": 0.2,
+      "recall": 1.0,
+      "latency_ms": 0.242
+    },
+    {
+      "question": "年底发的那笔钱是怎么算出来的？",
+      "golden_documents": [
+        "bonus_policy"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "adm_team_building",
+        "adm_parking_ev",
+        "rd_release_hotfix",
+        "ops_password_service",
+        "hr_probation_extend"
+      ],
+      "top1_score": 5.7301,
+      "hit_rate": 0.0,
+      "mrr": 0.0,
+      "recall": 0.0,
+      "latency_ms": 0.231
+    },
+    {
+      "question": "刚进来头几个月算正式员工吗？",
+      "golden_documents": [
+        "hr_probation"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "rd_api_version",
+        "sec_data_class_draft",
+        "bonus_policy",
+        "hr_social_insurance",
+        "hr_health_check"
+      ],
+      "top1_score": 5.3397,
+      "hit_rate": 0.0,
+      "mrr": 0.0,
+      "recall": 0.0,
+      "latency_ms": 0.222
+    },
+    {
+      "question": "公司网络连不上该找谁？",
+      "golden_documents": [
+        "ops_wifi"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "ops_wifi",
+        "hr_health_check",
+        "adm_express",
+        "info_security",
+        "training_policy"
+      ],
+      "top1_score": 8.8832,
+      "hit_rate": 1.0,
+      "mrr": 1.0,
+      "recall": 1.0,
+      "latency_ms": 0.222
+    },
+    {
+      "question": "代码改完怎么让别人看过再上线？",
+      "golden_documents": [
+        "rd_code_review"
+      ],
+      "expect_no_answer": false,
+      "ranked_top_k": [
+        "info_security",
+        "fin_contract_seal",
+        "rd_canary",
+        "ops_password",
+        "rd_code_review"
+      ],
+      "top1_score": 4.0341,
+      "hit_rate": 1.0,
+      "mrr": 0.2,
+      "recall": 1.0,
+      "latency_ms": 0.213
+    }
+  ]
+}

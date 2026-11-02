@@ -63,7 +63,9 @@ cd backend
 uv run python scripts/run_eval.py --report eval_report.json
 ```
 
-基于 `tests/evaluation/kb_eval_dataset.jsonl`（问题 + golden 文档）与 `eval_corpus.jsonl`（评估语料），使用与生产一致的 BM25 稀疏检索栈计算 hit_rate@5 / mrr@5 / recall@5，低于阈值（`EVAL_MIN_HIT_RATE` / `EVAL_MIN_MRR` / `EVAL_MIN_RECALL`，默认 0.8 / 0.5 / 0.5）时非零退出。同一逻辑以 `tests/evaluation/test_retrieval_quality.py` 纳入单测，CI 中另有独立 `rag-eval` job 输出指标报告并卡点。
+基于 `tests/evaluation/kb_eval_dataset.jsonl`（问题 + golden 文档）与 `eval_corpus.jsonl`（评估语料），使用与生产一致的 BM25 稀疏检索栈计算 hit_rate@5 / mrr@5 / recall@5，低于阈值（`EVAL_MIN_HIT_RATE` / `EVAL_MIN_MRR` / `EVAL_MIN_RECALL`，默认 0.85 / 0.80 / 0.85，取自 2026-11-02 基线减约 5pp）时非零退出。同一逻辑以 `tests/evaluation/test_retrieval_quality.py` 纳入单测，CI 中另有独立 `rag-eval` job 输出指标报告并卡点。
+
+评测集规模与基线数字见 [benchmarks/retrieval-baseline-2026-11-02.md](../benchmarks/retrieval-baseline-2026-11-02.md)：58 题 / 72 篇（含多跳、无答案、口语化问法），有答案题与无答案题分开统计。`--show-misses` 只打印未命中题目，改检索逻辑后先看这个。
 
 另有多查询检索离线 A/B（`scripts/run_multiquery_ab.py` + `tests/evaluation/mq_eval_dataset.jsonl`，16 题含 query_variants），实测无增益（RRF 口径），**多查询保持默认关闭**（`KB_MULTI_QUERY_ENABLED=false`）；CI `rag-eval` 中以信息性步骤运行（continue-on-error，产出 mq-ab-report），非卡点。
 

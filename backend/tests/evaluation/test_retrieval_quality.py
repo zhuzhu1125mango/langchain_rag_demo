@@ -41,6 +41,39 @@ def test_retrieval_quality_thresholds():
         )
 
 
+def test_eval_dataset_composition():
+    """数据集本身的守卫：别让人悄悄缩回 5 题。
+
+    2026-11-02 之前是 5 题 / 12 篇，hit_rate 恒为 1.0——指标再绿也发现不了退化。
+    这里固定住「有规模、有难例、golden 不出圈」三条底线。
+    """
+    dataset = load_jsonl(DEFAULT_DATASET)
+    corpus = load_jsonl(DEFAULT_CORPUS)
+
+    assert len(dataset) >= 40, f"题目太少（{len(dataset)}），指标会失去区分度"
+    assert len(corpus) >= 50, f"语料太少（{len(corpus)}），Top-5 命中会虚高"
+    assert any(len(q.get("golden_documents", [])) > 1 for q in dataset), "缺少多跳题（golden 两篇）"
+    assert any(not q.get("golden_documents") for q in dataset), "缺少无答案题"
+
+    corpus_ids = {doc["id"] for doc in corpus}
+    for sample in dataset:
+        for golden in sample.get("golden_documents", []):
+            assert golden in corpus_ids, f"golden 不在语料中: {golden}（题：{sample['question']}）"
+
+
+def test_metrics_split_answerable_and_no_answer():
+    """无答案题不得并入 hit/mrr/recall 的均值（否则召回率与拒答率被混成一个数）。"""
+    dataset = load_jsonl(DEFAULT_DATASET)
+    corpus = load_jsonl(DEFAULT_CORPUS)
+    metrics = evaluate(dataset, corpus, top_k=5)["metrics"]
+
+    assert metrics["num_answerable"] + metrics["num_no_answer"] == metrics["num_questions"]
+    assert metrics["num_no_answer"] > 0
+    assert "no_answer_separation" in metrics
+    # 分离度是比值，语料或题目变化时会漂移，这里只守住它是个有限数
+    assert isinstance(metrics["no_answer_separation"], float)
+
+
 def test_retrieval_metrics_helper():
     """指标计算 helper 的边界行为。"""
     results = ["doc1", "doc2", "doc3"]
