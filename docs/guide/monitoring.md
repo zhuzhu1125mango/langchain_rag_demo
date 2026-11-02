@@ -77,10 +77,12 @@
 
 ## 4. 告警规则（configs/prometheus/alerts.yml）
 
-共 10 条告警，分三组：
+共 12 条告警，分四组：
 
 | 组 | 告警 | 表达式（摘要） | 级别 | 含义 |
 |---|---|---|---|---|
+| scrape | ScrapeTargetDown（2026-11-02） | `up == 0` 持续 2m | critical | 任一抓取目标不可达；**`/metrics` 返回 5xx 也算 up=0**，指标会整页消失 |
+| scrape | PostgresDatabaseDown（2026-11-02） | `pg_up == 0` 持续 1m | critical | exporter 活着但连不上库 |
 | fastapi | FastAPIHighErrorRate | `rate(errors_total[1m]) / clamp_min(rate(request_total[1m]), 1e-9) > 0.05` | warning | 接口错误率 > 5%（比值口径） |
 | fastapi | FastAPILatencyHigh | P95 延迟 > 5s 持续 1m | critical | 接口整体变慢 |
 | fastapi | FastAPIDown | `up{job="fastapi-app"} == 0` 持续 30s | critical | 后端挂了/未启动 |
@@ -104,6 +106,11 @@
 - **SseStreamInterruptRate**：多为网络不稳或前端提前取消（用户主动停止生成）；持续高位需排查网关超时配置
 - **OllamaTimeoutRate / LLMCallErrors**：确认 Ollama 进程存活与模型已拉取；常见原因是模型未加载或显存/内存不足（按 `model_name` 标签定位具体模型）
 - **MilvusHighQueryLatency**：检查集合数据量增长、是否有 rebuild 任务在后台执行
+- **ScrapeTargetDown**：`curl <target>/metrics` 看是否 200。**别只看容器 `healthy`**——postgres-exporter 曾因挂载的 legacy `queries.yaml`（v0.20 已废弃该格式）让 `/metrics` 整页 500 数小时，容器一直「在跑」、PG 指标全无、也没有任何告警（当时没有 `up == 0` 规则）。排查顺序：`docker exec <exporter> wget -qO- localhost:9187/metrics | head` → 500 就去掉 `--extend.query-path` 再看
+
+> 修改 `alerts.yml` / `prometheus.yml` 后需 **重启 Prometheus** 生效（未开启 `--web.enable-lifecycle`，
+> `POST /-/reload` 返回 403）：`docker restart prometheus-prod`，随后 `/api/v1/rules` 核对规则数。
+> 改前先校验：`docker exec prometheus-prod /bin/promtool check rules /etc/prometheus/alerts.yml`。
 
 ## 5. 告警通知（Alertmanager）
 

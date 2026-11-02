@@ -259,9 +259,7 @@ services:
     container_name: postgres-exporter-dev
     environment:
       DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable"
-      PG_EXPORTER_EXTEND_QUERIES: "true"
-    volumes:
-      - ./configs/postgres/queries.yaml:/etc/postgres_exporter/queries.yaml
+      PG_EXPORTER_EXTEND_QUERIES: "false"   # v0.20 的旧 queries.yaml 格式已废弃，挂上会让整个 /metrics 500（见 docker-compose.yml 同段注释）
     networks:
       - monitoring
     restart: no

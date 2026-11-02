@@ -54,6 +54,32 @@ groups:
           summary: "SSE 流式中断过高"
           description: "过去 5 分钟 SSE 流中断速率超 1/s，当前 {{ $value }}/s（可能网络不稳或前端提前取消）"
 
+  # 抓取目标与指标缺席（2026-11-02 新增）
+  # 起因：postgres-exporter 的 /metrics 因废弃的 extend 查询格式整页返回 500，
+  # PostgreSQL 指标（连接数/锁/库大小）静默消失数小时无人发现——当时只有
+  # fastapi-app 与 milvus 两条 up 规则，postgresql 没有任何「缺席」告警。
+  - name: scrape_alerts
+    rules:
+      # 任一抓取目标不可达（含 /metrics 返回 4xx/5xx：Prometheus 记为 up=0）
+      - alert: ScrapeTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "抓取目标 {{ $labels.job }} 不可达"
+          description: "Prometheus 连续 2 分钟抓不到 {{ $labels.instance }}（job={{ $labels.job }}）。注意：目标存活但 /metrics 返回 5xx 同样记为 up=0——一个采集器出错会让整页失败。"
+
+      # exporter 活着但连不上库（pg_up 由 exporter 自己上报）
+      - alert: PostgresDatabaseDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL 不可达（exporter 视角）"
+          description: "postgres-exporter 无法连接数据库 {{ $labels.instance }}，pg_up=0"
+
   # Milvus 向量数据库告警组
   - name: milvus_alerts
     rules:

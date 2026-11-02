@@ -449,12 +449,15 @@ services:
     # DATA_SOURCE_NAME 无 *_FILE 原生支持：覆盖 entrypoint，运行时拼接
     # 连接串（user/db 为非敏感值仍走 env 插值，密码从 secrets 读取）
     entrypoint: ["/bin/sh", "-c"]
+    # ⚠️ 不要加回 `--extend.query-path=...`：v0.20 已废弃该格式（日志明说 DEPRECATED），
+    # 而它挂上后**整个 /metrics 返回 500**——不是「少几个 pg_stat_statements 指标」，
+    # 而是连接数/锁/库大小等全部默认指标一起消失，Prometheus 上表现为 target down，
+    # 告警静默失效（2026-11-02 实测：FailingStreak 371、wget 500；去掉该参数后 200）。
+    # 需要按 SQL 统计时，改写成 v0.20 的 config.file 格式并单独验证，别直接挂旧文件。
     command:
-      - 'export DATA_SOURCE_NAME="postgresql://${POSTGRES_USER}:$$(cat /run/secrets/POSTGRES_PASSWORD)@postgres:5432/${POSTGRES_DB}?sslmode=disable"; exec /bin/postgres_exporter --extend.query-path=/etc/postgres_exporter/queries.yaml'
+      - 'export DATA_SOURCE_NAME="postgresql://${POSTGRES_USER}:$$(cat /run/secrets/POSTGRES_PASSWORD)@postgres:5432/${POSTGRES_DB}?sslmode=disable"; exec /bin/postgres_exporter'
     environment:
       PG_EXPORTER_DISABLE_DEFAULT_METRICS: "false"
-    volumes:
-      - ./configs/postgres/queries.yaml:/etc/postgres_exporter/queries.yaml
     networks:
       - infra-net
     restart: unless-stopped

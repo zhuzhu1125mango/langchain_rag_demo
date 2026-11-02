@@ -74,6 +74,7 @@ _PROMQL_KEYWORDS = {
 # 设施指标；新增外部指标告警时须显式加入，防止拼写漂移恒不触发）
 _EXTERNAL_METRICS_WHITELIST = {
     "up",
+    "pg_up",  # postgres-exporter 自报：exporter 活着但连不上库时为 0（PostgresDatabaseDown）
     "milvus_proxy_sq_latency_milliseconds_sum",
     "milvus_proxy_sq_latency_milliseconds_count",
 }
