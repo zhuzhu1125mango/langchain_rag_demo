@@ -135,6 +135,37 @@
 > 实测：无缓存容器 100s 被杀（exit 137），带缓存容器 **1s 退出（exit 0）**。生产环境 `/app/data`
 > 是持久卷（当前 6.1G 缓存）不受影响；换机器部署前先让首启完成预热。
 
+### 2.2.3 离线语料放在镜像里，不放挂载卷（2026-11-02）
+
+中文 BM25 分词依赖 NLTK 的 `stopwords`（以及 `punkt_tab`），语料目录由 `NLTK_DATA` 指定。
+此前它指向挂载卷 `/app/data/nltk_data`，在 Windows Docker Desktop 下该目录一律呈现为
+`root:root 0777`，而 NLTK 的 `pathsec` 会**拒绝从「他人可写」的目录读语料**（视为投毒风险）。
+
+后果是**降级而不是报错**，这正是难发现的原因：
+
+1. `stopwords` 加载失败 → `LookupError`；
+2. BM25 持久化词表 `bm25_documents.json` 加载失败（分析器构造时就抛）→ `bm25_ef = None`；
+3. 首次插入语料时**重新 fit** → idf 词到维度的映射变了，与历史 sparse 向量编码空间不一致。
+
+现在语料随镜像发布到 `/app/nltk_data`（`backend/vendor/nltk_data`，4.2 MB，归属 `appuser`、
+权限 0755），由 `Dockerfile.prod` 设置 `ENV NLTK_DATA=/app/nltk_data`。验证：
+
+```bash
+docker exec backend-prod sh -c 'ls -ld $NLTK_DATA'
+# drwxr-xr-x 4 appuser appuser ... /app/nltk_data
+docker logs backend-prod 2>&1 | grep -E "BM25 词表已从磁盘加载|nltk_data"
+# 应看到「BM25 词表已从磁盘加载: /app/src/data/bm25/bm25_documents.json」，
+# 且**没有** "NLTK will not read data from" 的 RuntimeWarning
+```
+
+更新语料：替换 `backend/vendor/nltk_data/` 下的 zip 后重建镜像（`COPY` 会刷新该层）。
+
+> ⚠️ **已知边界**：`docker-compose.dev.yml` 仍指向挂载卷的 `/app/data/nltk_data`，
+> 开发栈会有同样的降级（日志出现 `nltk_data` 拒绝警告、BM25 词表重 fit）。
+> 修法同生产：`Dockerfile.dev` 复制 `vendor/nltk_data` 到镜像内路径（如 `/opt/nltk_data`，
+> 该路径不会被 `./backend:/app` 挂载覆盖），再把 dev compose 的 `NLTK_DATA` 指过去。
+> 未在本次执行（需重建 3.4 GB 的 dev 镜像）。
+
 ### 2.3 环境切换流程
 
 ```bash
