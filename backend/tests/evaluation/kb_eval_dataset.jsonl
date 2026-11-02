@@ -1,58 +1,70 @@
-{"question": "员工请假需要提前多久申请？", "golden_chunk_ids": [], "golden_documents": ["leave_policy"], "keywords": ["请假", "申请"]}
-{"question": "公司年终奖什么时候发放？", "golden_chunk_ids": [], "golden_documents": ["bonus_policy"], "keywords": ["年终奖", "发放"]}
-{"question": "试用期员工是否享受带薪年假？", "golden_chunk_ids": [], "golden_documents": ["leave_policy"], "keywords": ["试用期", "年假"]}
-{"question": "办公时间是什么时候？", "golden_chunk_ids": [], "golden_documents": ["work_hours"], "keywords": ["办公时间", "工作时间"]}
-{"question": "如何申请报销差旅费？", "golden_chunk_ids": [], "golden_documents": ["reimbursement"], "keywords": ["报销", "差旅费"]}
-{"question": "下一年度预算最晚什么时候提交？", "golden_chunk_ids": [], "golden_documents": ["fin_budget"], "keywords": ["预算", "提交"]}
-{"question": "报销对发票抬头有什么要求？", "golden_chunk_ids": [], "golden_documents": ["fin_invoice"], "keywords": ["发票", "抬头"]}
-{"question": "供应商付款一般多少天到账？", "golden_chunk_ids": [], "golden_documents": ["fin_payment"], "keywords": ["付款", "周期"]}
-{"question": "20万元以上的采购需要谁审批？", "golden_chunk_ids": [], "golden_documents": ["fin_procurement"], "keywords": ["采购", "审批"]}
-{"question": "合同用印前必须经过哪个部门审核？", "golden_chunk_ids": [], "golden_documents": ["fin_contract_seal"], "keywords": ["合同", "审核"]}
-{"question": "部门备用金的额度上限是多少？", "golden_chunk_ids": [], "golden_documents": ["fin_petty_cash"], "keywords": ["备用金", "额度"]}
-{"question": "固定资产多久盘点一次？", "golden_chunk_ids": [], "golden_documents": ["fin_fixed_asset"], "keywords": ["盘点", "固定资产"]}
-{"question": "出差借款最多能借多少比例？", "golden_chunk_ids": [], "golden_documents": ["fin_travel_advance"], "keywords": ["借款", "出差"]}
-{"question": "需求评审的结论有哪几种？", "golden_chunk_ids": [], "golden_documents": ["rd_requirement_review"], "keywords": ["评审", "结论"]}
-{"question": "常规发布窗口是每周哪几天？", "golden_chunk_ids": [], "golden_documents": ["rd_release_window"], "keywords": ["发布", "窗口"]}
-{"question": "灰度发布首批放量不能超过多少？", "golden_chunk_ids": [], "golden_documents": ["rd_canary"], "keywords": ["灰度", "放量"]}
-{"question": "核心模块的代码评审需要几个人通过？", "golden_chunk_ids": [], "golden_documents": ["rd_code_review"], "keywords": ["代码评审", "通过"]}
-{"question": "测试环境每天几点重置数据？", "golden_chunk_ids": [], "golden_documents": ["rd_test_env"], "keywords": ["测试环境", "重置"]}
-{"question": "P0 缺陷要求多久内恢复？", "golden_chunk_ids": [], "golden_documents": ["rd_bug_severity"], "keywords": ["缺陷", "恢复"]}
-{"question": "收到 P0 告警后几分钟内要确认？", "golden_chunk_ids": [], "golden_documents": ["rd_oncall"], "keywords": ["告警", "确认"]}
-{"question": "线上回滚需要事先审批吗？", "golden_chunk_ids": [], "golden_documents": ["rd_rollback"], "keywords": ["回滚", "审批"]}
-{"question": "日志里禁止打印哪些信息？", "golden_chunk_ids": [], "golden_documents": ["rd_log_spec"], "keywords": ["日志", "禁止"]}
-{"question": "对外接口下线要提前多久通知？", "golden_chunk_ids": [], "golden_documents": ["rd_api_version"], "keywords": ["接口", "下线"]}
-{"question": "数据分为哪几个等级？", "golden_chunk_ids": [], "golden_documents": ["sec_data_class"], "keywords": ["数据", "分级"]}
-{"question": "导出多少条以上数据需要审批？", "golden_chunk_ids": [], "golden_documents": ["sec_data_export"], "keywords": ["导出", "审批"]}
-{"question": "用户注销后多久要删除个人信息？", "golden_chunk_ids": [], "golden_documents": ["sec_privacy"], "keywords": ["注销", "删除"]}
-{"question": "审计日志保留多长时间？", "golden_chunk_ids": [], "golden_documents": ["sec_retention"], "keywords": ["审计日志", "保留"]}
-{"question": "发现数据泄露要在多久内上报？", "golden_chunk_ids": [], "golden_documents": ["sec_incident"], "keywords": ["泄露", "上报"]}
-{"question": "紧急工单多久内要首次响应？", "golden_chunk_ids": [], "golden_documents": ["cs_ticket_sla"], "keywords": ["工单", "响应"]}
-{"question": "客户投诉多久没解决要升级到总监？", "golden_chunk_ids": [], "golden_documents": ["cs_escalation"], "keywords": ["投诉", "升级"]}
-{"question": "退款金额超过多少需要财务复核？", "golden_chunk_ids": [], "golden_documents": ["cs_refund"], "keywords": ["退款", "复核"]}
-{"question": "客服录音保留多久？", "golden_chunk_ids": [], "golden_documents": ["cs_call_recording"], "keywords": ["录音", "保留"]}
-{"question": "密码多长时间必须更换一次？", "golden_chunk_ids": [], "golden_documents": ["ops_password"], "keywords": ["密码", "更换"]}
-{"question": "VPN 账号多久不用会被停用？", "golden_chunk_ids": [], "golden_documents": ["ops_vpn"], "keywords": ["VPN", "停用"]}
-{"question": "核心数据库多久做一次全量备份？", "golden_chunk_ids": [], "golden_documents": ["ops_backup"], "keywords": ["备份", "全量"]}
-{"question": "高危漏洞要求多久内修复？", "golden_chunk_ids": [], "golden_documents": ["ops_vuln_report"], "keywords": ["漏洞", "修复"]}
-{"question": "员工邮箱容量有多大？", "golden_chunk_ids": [], "golden_documents": ["ops_mailbox"], "keywords": ["邮箱", "容量"]}
-{"question": "试用期一般是多长时间？", "golden_chunk_ids": [], "golden_documents": ["hr_probation"], "keywords": ["试用期"]}
-{"question": "公积金缴存比例是多少？", "golden_chunk_ids": [], "golden_documents": ["hr_social_insurance"], "keywords": ["公积金", "比例"]}
-{"question": "每年体检额度是多少？", "golden_chunk_ids": [], "golden_documents": ["hr_health_check"], "keywords": ["体检", "额度"]}
-{"question": "出差住宿超标了由谁审批，住宿标准在哪里查？", "golden_chunk_ids": [], "golden_documents": ["expense_standard", "fin_travel_advance"], "keywords": ["住宿", "超标", "审批"]}
-{"question": "发布前要做哪些评审，封版后还能改什么？", "golden_chunk_ids": [], "golden_documents": ["rd_requirement_review", "rd_release_window"], "keywords": ["发布", "评审", "封版"]}
-{"question": "导出数据需要谁审批，导出文件能保存多久？", "golden_chunk_ids": [], "golden_documents": ["sec_data_export", "sec_retention"], "keywords": ["导出", "审批", "保留"]}
-{"question": "离职时设备怎么归还，账号什么时候停用？", "golden_chunk_ids": [], "golden_documents": ["it_equipment", "hr_offboarding"], "keywords": ["离职", "设备", "账号"]}
-{"question": "公司是否提供上下班通勤班车？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["班车", "通勤"], "expect_no_answer": true}
-{"question": "年会抽奖的最高奖项是什么？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["年会", "抽奖"], "expect_no_answer": true}
-{"question": "办公区有健身房吗，开放到几点？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["健身房"], "expect_no_answer": true}
-{"question": "员工可以申请股票期权吗？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["期权", "股票"], "expect_no_answer": true}
-{"question": "员工食堂的午餐菜单在哪里看？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["食堂", "菜单"], "expect_no_answer": true}
-{"question": "公司允许带宠物上班吗？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["宠物"], "expect_no_answer": true}
-{"question": "我想出去玩几天，流程上要提前多久跟领导说？", "golden_chunk_ids": [], "golden_documents": ["leave_policy"], "keywords": ["请假", "提前"]}
-{"question": "自己先垫钱买的东西，怎么把钱拿回来？", "golden_chunk_ids": [], "golden_documents": ["reimbursement"], "keywords": ["报销"]}
-{"question": "在家干活要连什么东西才能进公司系统？", "golden_chunk_ids": [], "golden_documents": ["remote_work"], "keywords": ["远程", "VPN"]}
-{"question": "电脑坏了找谁换一台新的？", "golden_chunk_ids": [], "golden_documents": ["it_equipment"], "keywords": ["设备", "更换"]}
-{"question": "年底发的那笔钱是怎么算出来的？", "golden_chunk_ids": [], "golden_documents": ["bonus_policy"], "keywords": ["年终奖"]}
-{"question": "刚进来头几个月算正式员工吗？", "golden_chunk_ids": [], "golden_documents": ["hr_probation"], "keywords": ["试用期"]}
-{"question": "公司网络连不上该找谁？", "golden_chunk_ids": [], "golden_documents": ["ops_wifi"], "keywords": ["网络", "接入"]}
-{"question": "代码改完怎么让别人看过再上线？", "golden_chunk_ids": [], "golden_documents": ["rd_code_review"], "keywords": ["代码评审"]}
+{"question": "员工请假需要提前多久申请？", "golden_chunk_ids": [], "golden_documents": ["leave_policy"], "keywords": ["请假", "申请"], "category": "policy"}
+{"question": "公司年终奖什么时候发放？", "golden_chunk_ids": [], "golden_documents": ["bonus_policy"], "keywords": ["年终奖", "发放"], "category": "policy"}
+{"question": "试用期员工是否享受带薪年假？", "golden_chunk_ids": [], "golden_documents": ["leave_policy"], "keywords": ["试用期", "年假"], "category": "policy"}
+{"question": "办公时间是什么时候？", "golden_chunk_ids": [], "golden_documents": ["work_hours"], "keywords": ["办公时间", "工作时间"], "category": "policy"}
+{"question": "如何申请报销差旅费？", "golden_chunk_ids": [], "golden_documents": ["reimbursement"], "keywords": ["报销", "差旅费"], "category": "policy"}
+{"question": "下一年度预算最晚什么时候提交？", "golden_chunk_ids": [], "golden_documents": ["fin_budget"], "keywords": ["预算", "提交"], "category": "policy"}
+{"question": "报销对发票抬头有什么要求？", "golden_chunk_ids": [], "golden_documents": ["fin_invoice"], "keywords": ["发票", "抬头"], "category": "policy"}
+{"question": "供应商付款一般多少天到账？", "golden_chunk_ids": [], "golden_documents": ["fin_payment"], "keywords": ["付款", "周期"], "category": "policy"}
+{"question": "20万元以上的采购需要谁审批？", "golden_chunk_ids": [], "golden_documents": ["fin_procurement"], "keywords": ["采购", "审批"], "category": "policy"}
+{"question": "合同用印前必须经过哪个部门审核？", "golden_chunk_ids": [], "golden_documents": ["fin_contract_seal"], "keywords": ["合同", "审核"], "category": "policy"}
+{"question": "部门备用金的额度上限是多少？", "golden_chunk_ids": [], "golden_documents": ["fin_petty_cash"], "keywords": ["备用金", "额度"], "category": "policy"}
+{"question": "固定资产多久盘点一次？", "golden_chunk_ids": [], "golden_documents": ["fin_fixed_asset"], "keywords": ["盘点", "固定资产"], "category": "policy"}
+{"question": "出差借款最多能借多少比例？", "golden_chunk_ids": [], "golden_documents": ["fin_travel_advance"], "keywords": ["借款", "出差"], "category": "policy"}
+{"question": "需求评审的结论有哪几种？", "golden_chunk_ids": [], "golden_documents": ["rd_requirement_review"], "keywords": ["评审", "结论"], "category": "policy"}
+{"question": "常规发布窗口是每周哪几天？", "golden_chunk_ids": [], "golden_documents": ["rd_release_window"], "keywords": ["发布", "窗口"], "category": "policy"}
+{"question": "灰度发布首批放量不能超过多少？", "golden_chunk_ids": [], "golden_documents": ["rd_canary"], "keywords": ["灰度", "放量"], "category": "policy"}
+{"question": "核心模块的代码评审需要几个人通过？", "golden_chunk_ids": [], "golden_documents": ["rd_code_review"], "keywords": ["代码评审", "通过"], "category": "policy"}
+{"question": "测试环境每天几点重置数据？", "golden_chunk_ids": [], "golden_documents": ["rd_test_env"], "keywords": ["测试环境", "重置"], "category": "policy"}
+{"question": "P0 缺陷要求多久内恢复？", "golden_chunk_ids": [], "golden_documents": ["rd_bug_severity"], "keywords": ["缺陷", "恢复"], "category": "policy"}
+{"question": "收到 P0 告警后几分钟内要确认？", "golden_chunk_ids": [], "golden_documents": ["rd_oncall"], "keywords": ["告警", "确认"], "category": "policy"}
+{"question": "线上回滚需要事先审批吗？", "golden_chunk_ids": [], "golden_documents": ["rd_rollback"], "keywords": ["回滚", "审批"], "category": "policy"}
+{"question": "日志里禁止打印哪些信息？", "golden_chunk_ids": [], "golden_documents": ["rd_log_spec"], "keywords": ["日志", "禁止"], "category": "policy"}
+{"question": "对外接口下线要提前多久通知？", "golden_chunk_ids": [], "golden_documents": ["rd_api_version"], "keywords": ["接口", "下线"], "category": "policy"}
+{"question": "数据分为哪几个等级？", "golden_chunk_ids": [], "golden_documents": ["sec_data_class"], "keywords": ["数据", "分级"], "category": "policy"}
+{"question": "导出多少条以上数据需要审批？", "golden_chunk_ids": [], "golden_documents": ["sec_data_export"], "keywords": ["导出", "审批"], "category": "policy"}
+{"question": "用户注销后多久要删除个人信息？", "golden_chunk_ids": [], "golden_documents": ["sec_privacy"], "keywords": ["注销", "删除"], "category": "policy"}
+{"question": "审计日志保留多长时间？", "golden_chunk_ids": [], "golden_documents": ["sec_retention"], "keywords": ["审计日志", "保留"], "category": "policy"}
+{"question": "发现数据泄露要在多久内上报？", "golden_chunk_ids": [], "golden_documents": ["sec_incident"], "keywords": ["泄露", "上报"], "category": "policy"}
+{"question": "紧急工单多久内要首次响应？", "golden_chunk_ids": [], "golden_documents": ["cs_ticket_sla"], "keywords": ["工单", "响应"], "category": "policy"}
+{"question": "客户投诉多久没解决要升级到总监？", "golden_chunk_ids": [], "golden_documents": ["cs_escalation"], "keywords": ["投诉", "升级"], "category": "policy"}
+{"question": "退款金额超过多少需要财务复核？", "golden_chunk_ids": [], "golden_documents": ["cs_refund"], "keywords": ["退款", "复核"], "category": "policy"}
+{"question": "客服录音保留多久？", "golden_chunk_ids": [], "golden_documents": ["cs_call_recording"], "keywords": ["录音", "保留"], "category": "policy"}
+{"question": "密码多长时间必须更换一次？", "golden_chunk_ids": [], "golden_documents": ["ops_password"], "keywords": ["密码", "更换"], "category": "policy"}
+{"question": "VPN 账号多久不用会被停用？", "golden_chunk_ids": [], "golden_documents": ["ops_vpn"], "keywords": ["VPN", "停用"], "category": "policy"}
+{"question": "核心数据库多久做一次全量备份？", "golden_chunk_ids": [], "golden_documents": ["ops_backup"], "keywords": ["备份", "全量"], "category": "policy"}
+{"question": "高危漏洞要求多久内修复？", "golden_chunk_ids": [], "golden_documents": ["ops_vuln_report"], "keywords": ["漏洞", "修复"], "category": "policy"}
+{"question": "员工邮箱容量有多大？", "golden_chunk_ids": [], "golden_documents": ["ops_mailbox"], "keywords": ["邮箱", "容量"], "category": "policy"}
+{"question": "试用期一般是多长时间？", "golden_chunk_ids": [], "golden_documents": ["hr_probation"], "keywords": ["试用期"], "category": "policy"}
+{"question": "公积金缴存比例是多少？", "golden_chunk_ids": [], "golden_documents": ["hr_social_insurance"], "keywords": ["公积金", "比例"], "category": "policy"}
+{"question": "每年体检额度是多少？", "golden_chunk_ids": [], "golden_documents": ["hr_health_check"], "keywords": ["体检", "额度"], "category": "policy"}
+{"question": "出差住宿超标了由谁审批，住宿标准在哪里查？", "golden_chunk_ids": [], "golden_documents": ["expense_standard", "fin_travel_advance"], "keywords": ["住宿", "超标", "审批"], "category": "multi_hop"}
+{"question": "发布前要做哪些评审，封版后还能改什么？", "golden_chunk_ids": [], "golden_documents": ["rd_requirement_review", "rd_release_window"], "keywords": ["发布", "评审", "封版"], "category": "multi_hop"}
+{"question": "导出数据需要谁审批，导出文件能保存多久？", "golden_chunk_ids": [], "golden_documents": ["sec_data_export", "sec_retention"], "keywords": ["导出", "审批", "保留"], "category": "multi_hop"}
+{"question": "离职时设备怎么归还，账号什么时候停用？", "golden_chunk_ids": [], "golden_documents": ["it_equipment", "hr_offboarding"], "keywords": ["离职", "设备", "账号"], "category": "multi_hop"}
+{"question": "公司是否提供上下班通勤班车？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["班车", "通勤"], "expect_no_answer": true, "category": "no_answer"}
+{"question": "年会抽奖的最高奖项是什么？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["年会", "抽奖"], "expect_no_answer": true, "category": "no_answer"}
+{"question": "办公区有健身房吗，开放到几点？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["健身房"], "expect_no_answer": true, "category": "no_answer"}
+{"question": "员工可以申请股票期权吗？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["期权", "股票"], "expect_no_answer": true, "category": "no_answer"}
+{"question": "员工食堂的午餐菜单在哪里看？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["食堂", "菜单"], "expect_no_answer": true, "category": "no_answer"}
+{"question": "公司允许带宠物上班吗？", "golden_chunk_ids": [], "golden_documents": [], "keywords": ["宠物"], "expect_no_answer": true, "category": "no_answer"}
+{"question": "我想出去玩几天，流程上要提前多久跟领导说？", "golden_chunk_ids": [], "golden_documents": ["leave_policy"], "keywords": ["请假", "提前"], "category": "colloquial"}
+{"question": "自己先垫钱买的东西，怎么把钱拿回来？", "golden_chunk_ids": [], "golden_documents": ["reimbursement"], "keywords": ["报销"], "category": "colloquial"}
+{"question": "在家干活要连什么东西才能进公司系统？", "golden_chunk_ids": [], "golden_documents": ["remote_work"], "keywords": ["远程", "VPN"], "category": "colloquial"}
+{"question": "电脑坏了找谁换一台新的？", "golden_chunk_ids": [], "golden_documents": ["it_equipment"], "keywords": ["设备", "更换"], "category": "colloquial"}
+{"question": "年底发的那笔钱是怎么算出来的？", "golden_chunk_ids": [], "golden_documents": ["bonus_policy"], "keywords": ["年终奖"], "category": "colloquial"}
+{"question": "刚进来头几个月算正式员工吗？", "golden_chunk_ids": [], "golden_documents": ["hr_probation"], "keywords": ["试用期"], "category": "colloquial"}
+{"question": "公司网络连不上该找谁？", "golden_chunk_ids": [], "golden_documents": ["ops_wifi"], "keywords": ["网络", "接入"], "category": "colloquial"}
+{"question": "代码改完怎么让别人看过再上线？", "golden_chunk_ids": [], "golden_documents": ["rd_code_review"], "keywords": ["代码评审"], "category": "colloquial"}
+{"question": "想换个座位找谁？", "golden_chunk_ids": [], "golden_documents": ["adm_seat"], "keywords": ["工位"], "category": "colloquial"}
+{"question": "部门聚餐的钱怎么报？", "golden_chunk_ids": [], "golden_documents": ["adm_team_building"], "keywords": ["团建"], "category": "colloquial"}
+{"question": "半夜系统报警谁爬起来处理？", "golden_chunk_ids": [], "golden_documents": ["rd_oncall"], "keywords": ["值班"], "category": "colloquial"}
+{"question": "发版出问题怎么退回去？", "golden_chunk_ids": [], "golden_documents": ["rd_rollback"], "keywords": ["回滚"], "category": "colloquial"}
+{"question": "客户闹到要赔钱找谁？", "golden_chunk_ids": [], "golden_documents": ["cs_escalation"], "keywords": ["投诉"], "category": "colloquial"}
+{"question": "合同要盖章找谁？", "golden_chunk_ids": [], "golden_documents": ["fin_contract_seal"], "keywords": ["用印"], "category": "colloquial"}
+{"question": "买台新电脑要走什么流程？", "golden_chunk_ids": [], "golden_documents": ["it_equipment"], "keywords": ["设备"], "category": "colloquial"}
+{"question": "离职前还有什么要交回去的？", "golden_chunk_ids": [], "golden_documents": ["hr_offboarding"], "keywords": ["交接"], "category": "colloquial"}
+{"question": "想升职要满足什么条件？", "golden_chunk_ids": [], "golden_documents": ["hr_promotion"], "keywords": ["晋升"], "category": "colloquial"}
+{"question": "试用期能不能延长？", "golden_chunk_ids": [], "golden_documents": ["hr_probation_extend"], "keywords": ["试用期"], "category": "colloquial"}
+{"question": "数据能拷到 U 盘带走吗？", "golden_chunk_ids": [], "golden_documents": ["sec_data_export"], "keywords": ["导出"], "category": "colloquial"}
+{"question": "监控报警太多了怎么少一点？", "golden_chunk_ids": [], "golden_documents": ["ops_monitor_alert"], "keywords": ["告警"], "category": "colloquial"}

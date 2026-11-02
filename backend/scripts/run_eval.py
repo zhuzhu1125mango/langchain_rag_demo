@@ -21,9 +21,10 @@ eval_corpus.jsonl（评估语料），使用与生产一致的 BM25 稀疏检索
     cd backend && uv run python scripts/run_eval.py --report eval_report.json
 
 阈值卡点（环境变量可覆盖）：
-    EVAL_MIN_HIT_RATE（默认 0.85，2026-11-02 基线 0.904，留约 5pp 回退空间）
-    EVAL_MIN_MRR（默认 0.80，基线 0.854）
-    EVAL_MIN_RECALL（默认 0.85，基线 0.904）
+    EVAL_MIN_HIT_RATE（默认 0.80，2026-11-02 基线 0.828——口语化题扩到 20 道后的真实值）
+    EVAL_MIN_MRR（默认 0.75，基线 0.775）
+    EVAL_MIN_RECALL（默认 0.80，基线 0.828）
+    留约 3pp（≈2 题）回退空间：再多就卡不住退化，再少会被无关波动弄红。
 低于任一阈值时进程以非零码退出，供 CI rag-eval job 卡点。
 阈值不是「行业标准」而是**本数据集上的基线减回退空间**：要调整就先改数据集、
 重跑、把新数字写进 docs/benchmarks/，再动阈值——顺序反了就成了「改阈值让指标好看」。
@@ -47,9 +48,9 @@ DEFAULT_CORPUS = BASE_DIR / "tests" / "evaluation" / "eval_corpus.jsonl"
 def get_thresholds() -> Dict[str, float]:
     """读取阈值（环境变量可覆盖默认值），调用时读取以便测试与 CI 覆盖。"""
     return {
-        "hit_rate": float(os.environ.get("EVAL_MIN_HIT_RATE", "0.85")),
-        "mrr": float(os.environ.get("EVAL_MIN_MRR", "0.80")),
-        "recall": float(os.environ.get("EVAL_MIN_RECALL", "0.85")),
+        "hit_rate": float(os.environ.get("EVAL_MIN_HIT_RATE", "0.80")),
+        "mrr": float(os.environ.get("EVAL_MIN_MRR", "0.75")),
+        "recall": float(os.environ.get("EVAL_MIN_RECALL", "0.80")),
     }
 
 

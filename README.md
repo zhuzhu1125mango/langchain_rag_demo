@@ -48,16 +48,17 @@ cd backend
 IN_DOCKER=false uv run pytest -q                       # 后端全量：1553 passed / 105 skipped（2026-11-02）
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
 uv run pytest tests/test_chat_run.py -q                # 续传/停止：29 例
-uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.904 / MRR 0.854（58 题 / 72 篇）
+uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.828 / MRR 0.775（70 题 / 72 篇）
 uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出报告不删（退出码 0/1/2）
 ```
 
 `consistency_audit.py` 的退出码是刻意的：**0=一致、1=有差异、2=巡检没跑成**。
 某一侧采集失败时它不会打印「未发现差异」——假阴性比不巡检更危险。
 
-检索指标同样给数字而不是形容词，报告见 [docs/benchmarks/retrieval-baseline-2026-11-02.md](docs/benchmarks/retrieval-baseline-2026-11-02.md)：
-58 道题里 5 道没命中，**全部是口语化问法**（「出去玩几天」 vs 文档里的「请假」）——
-这是稀疏通道的边界，不是凭感觉猜的。
+检索指标同样给数字而不是形容词，报告见 [docs/benchmarks/](docs/benchmarks/)：
+70 道题里 11 道没命中，**全部是口语化问法**（「出去玩几天」 vs 文档里的「请假」）；
+同数据集上稠密单通道 hit@5 = 0.953、RRF 混合 = 0.891、加 `bge-reranker-base` 重排 = 0.922 ——
+**生产默认的混合+重排，在这份语料上打不过不融合的稠密单通道**。这些都是量出来的，不是猜的。
 
 ## 🚧 边界（有意不做的事）
 
