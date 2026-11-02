@@ -274,7 +274,8 @@ start_services() {
     log_info "拉取/构建镜像中，请耐心等待..."
     echo ""
 
-    if $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" up -d --build; then
+    # 生产保留完整监控栈：告警链路（Alertmanager）是值班依赖，不能默认关掉
+if $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" --profile monitoring up -d --build; then
         echo ""
         log_ok "服务启动命令执行成功"
     else

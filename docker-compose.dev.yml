@@ -210,6 +210,9 @@ services:
 
   # prometheus — 指标采集与存储
   prometheus:
+    # 精简模式（demo / 个人使用）默认不启动监控栈：`docker compose up -d` 只起核心 7 个容器。
+    # 需要监控时显式启用：`docker compose --profile monitoring up -d`
+    profiles: ["monitoring"]
     image: prom/prometheus:v3.5.0
     container_name: prometheus-dev
     ports:
@@ -229,6 +232,9 @@ services:
 
   # grafana — 监控可视化面板
   grafana:
+    # 精简模式（demo / 个人使用）默认不启动监控栈：`docker compose up -d` 只起核心 7 个容器。
+    # 需要监控时显式启用：`docker compose --profile monitoring up -d`
+    profiles: ["monitoring"]
     image: grafana/grafana:12.0.2
     container_name: grafana-dev
     ports:
@@ -246,6 +252,9 @@ services:
 
   # postgres-exporter — 将 PostgreSQL 指标导出给 Prometheus
   postgres-exporter:
+    # 精简模式（demo / 个人使用）默认不启动监控栈：`docker compose up -d` 只起核心 7 个容器。
+    # 需要监控时显式启用：`docker compose --profile monitoring up -d`
+    profiles: ["monitoring"]
     image: prometheuscommunity/postgres-exporter:v0.20.1   # 与生产对齐的固定版本 tag，避免 latest 漂移
     container_name: postgres-exporter-dev
     environment:

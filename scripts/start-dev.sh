@@ -49,6 +49,12 @@ ENV_FILE="$SCRIPT_DIR/../.env.dev"
 COMPOSE_FILE="$SCRIPT_DIR/../docker-compose.dev.yml"
 COMPOSE_ARGS=(-f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 ENV_NAME="DEVELOPMENT"
+# 精简模式（P0-3）：默认只起核心 7 个服务，不含 prometheus/grafana/postgres-exporter。
+# 需要监控栈：INCLUDE_MONITORING=1 ./scripts/start-dev.sh
+PROFILE_ARGS=""
+if [ "${INCLUDE_MONITORING:-0}" = "1" ]; then
+    PROFILE_ARGS="--profile monitoring"
+fi
 MAX_WAIT_SECONDS=${MAX_WAIT_SECONDS:-120}
 WAIT_INTERVAL=${WAIT_INTERVAL:-5}
 
@@ -169,7 +175,7 @@ start_services() {
     log_info "拉取/构建镜像中，请耐心等待..."
     echo ""
 
-    if $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" up -d --build; then
+    if $DOCKER_COMPOSE_CMD "${COMPOSE_ARGS[@]}" $PROFILE_ARGS up -d --build; then
         echo ""
         log_ok "服务启动命令执行成功"
     else

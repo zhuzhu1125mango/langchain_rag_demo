@@ -94,6 +94,19 @@
 > 容器**内部**端口两栈一致（后端 8000、Milvus 19530 等），差异仅在宿主机映射。
 > 生产栈绑定回环地址意味着远程运维需走 SSH 隧道或反向代理。
 
+### 2.2.1 精简模式与服务 Profile（P0-3）
+
+监控栈（Prometheus / Alertmanager / Grafana / postgres-exporter）挂在 `monitoring` profile 下，**默认不启动**：`docker compose up -d` 只起 7 个核心服务（backend / frontend / postgres / redis / milvus / etcd / minio），镜像拉取量从 ~9.3 GB 降到 ~7.8 GB。
+
+| 场景 | 命令 | 容器数 |
+|---|---|---|
+| 个人使用 / demo / POC | `./scripts/start-dev.sh`（或 `docker compose -f docker-compose.dev.yml --env-file .env.dev up -d`） | **7** |
+| 本地开发 + 看监控 | `INCLUDE_MONITORING=1 ./scripts/start-dev.sh` | 10 |
+| 生产（默认带监控） | `./scripts/start-prod.sh`（脚本内已带 `--profile monitoring`） | 11 |
+
+> 生产脚本**始终**带监控：告警链路是值班依赖，不能因为「默认精简」而静默消失。
+> 手工在生产执行 `docker compose up -d` 会得到 7 个服务 —— 已在运行中的监控容器不会被动停止，> 但重建栈时（如换机器）需显式加 `--profile monitoring`。
+
 ### 2.3 环境切换流程
 
 ```bash

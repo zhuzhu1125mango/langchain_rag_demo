@@ -113,6 +113,13 @@
 
 ## 6. 常用操作
 
+> **监控栈现在是 opt-in（P0-3）**：默认 `docker compose up -d` 只起 7 个核心服务。
+> 需要指标/告警时，两种打开方式：
+> - 开发栈：`INCLUDE_MONITORING=1 ./scripts/start-dev.sh`
+> - 手工：`docker compose -f docker-compose.yml --env-file .env.prod --profile monitoring up -d`
+> - 生产脚本 `start-prod.*` 已内置该 profile，不受影响。
+
+
 ```bash
 # 查看监控栈状态
 docker compose ps prometheus grafana alertmanager

@@ -285,7 +285,8 @@ function Start-Services {
     Write-Info "拉取/构建镜像中，请耐心等待..."
     Write-Host ""
 
-    & docker @script:ComposeArgs up -d --build
+    # 生产保留完整监控栈：告警链路（Alertmanager）是值班依赖
+& docker @script:ComposeArgs --profile monitoring up -d --build
     if ($LASTEXITCODE -ne 0) {
         Write-Err "服务启动失败"
         Write-Info "请检查 Docker 日志: docker $script:ComposeArgs logs"

@@ -31,6 +31,9 @@ $script:EnvFile = Join-Path $script:ScriptDir "../.env.dev"
 $script:ComposeFile = Join-Path $script:ScriptDir "../docker-compose.dev.yml"
 $script:ComposeArgs = @("compose", "-f", $script:ComposeFile, "--env-file", $script:EnvFile)
 $script:EnvName = "DEVELOPMENT"
+# 精简模式（P0-3）：默认 7 个核心服务；$env:INCLUDE_MONITORING = "1" 时带监控栈
+$script:ProfileArgs = @()
+if ($env:INCLUDE_MONITORING -eq "1") { $script:ProfileArgs = @("--profile", "monitoring") }
 $script:MaxWaitSeconds = $env:MAX_WAIT_SECONDS ? [int]$env:MAX_WAIT_SECONDS : 120
 $script:WaitInterval = $env:WAIT_INTERVAL ? [int]$env:WAIT_INTERVAL : 5
 
@@ -171,7 +174,7 @@ function Start-Services {
     Write-Info "拉取/构建镜像中，请耐心等待..."
     Write-Host ""
 
-    & docker @script:ComposeArgs up -d --build
+    & docker @script:ComposeArgs @script:ProfileArgs up -d --build
     if ($LASTEXITCODE -ne 0) {
         Write-Err "服务启动失败"
         Write-Info "请检查 Docker 日志: docker $script:ComposeArgs logs"

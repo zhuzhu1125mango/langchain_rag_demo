@@ -35,9 +35,9 @@ cd langchain_rag_demo
 #    生产环境默认关注册，改用：python scripts/create_admin.py --username admin
 ```
 
-首次需要拉约 **9.3 GB** 镜像与 **5.6 GB** 模型，所以「10 分钟」指的是**已经拉过一次之后**。
-文档标称最低 8 GB 内存 / 4 核；compose 里各服务资源上限合计约 9.9 GB（含监控栈），
-实测基线尚未补齐——见下方「边界」。
+默认是**精简模式**：只起 7 个容器（后端 / 前端 / Postgres / Redis / Milvus / etcd / MinIO），首次拉约 **7.8 GB** 镜像 + **5.6 GB** 模型。监控栈（Prometheus / Grafana / Alertmanager）挂在 `monitoring` profile 下，需要时加 `INCLUDE_MONITORING=1`，镜像合计约 9.3 GB。
+
+所以「10 分钟」指的是**已经拉过一次之后**。文档标称最低 8 GB 内存 / 4 核；compose 资源上限合计约 9.9 GB（含监控栈），实测基线尚未补齐——见下方「边界」。
 
 ## 🔍 怎么验证上面那些说法
 

@@ -97,7 +97,7 @@
 |---|---|---|---|---|
 | **P0-1** | 镜像瘦身：chown 复制 | `Dockerfile.prod` 原在 `COPY .venv` 之后 `chown -R /app`，OverlayFS 把 1.9GB 的 venv 整个复制进新层（`docker history` 实测该层 2.01GB）。已改为「先建用户 + `COPY --chown`」 | 重建后 backend 镜像 ≤3.6GB，且 `docker history` 无 2GB 级层 | 0.5 天（含重建） |
 | **P0-2** ✅ | 身份最小闭环（2026-11-02 完成） | `users.is_admin` + 迁移 `d5e6f7a8b9c0`；`require_admin` 三通道（登录管理员 > 应急 `X-Admin-Key`（打 warning）> 开发模式），**每次查库而非写进 JWT**（降权立即生效）；空库首个注册用户自举为管理员；新增 `scripts/create_admin.py`（新建/提升/收回/列清单，弱密码拒绝，提权降权均写审计） | 空库可建号：临时库实跑 `--list` 见 `root`；迁移在真实 PG 上 upgrade/downgrade 双向验证；全量 **1527 passed / 105 skipped**（新增 17 例） | ✅ 已完成 |
-| **P0-3** | `--profile demo` | 新增 compose profile，只起 backend/frontend/postgres/redis/milvus/etcd/minio 共 **7 个容器**，去掉 grafana/prometheus/alertmanager/postgres-exporter（−1.5GB） | `docker compose --profile demo up -d` 起 7 容器且 `/health/ready` 四项 ok | 1 天 |
+| **P0-3** ✅ | `--profile demo` → 改为「精简即默认」（2026-11-02 完成） | 监控栈（prometheus/alertmanager/grafana/postgres-exporter）挂 `monitoring` profile，**默认不启动**；dev 与 prod 两栈默认均为 **7 个核心服务**；`start-prod.*` 显式带 `--profile monitoring` 保持 11（告警是值班依赖），`start-dev.*` 默认精简、`INCLUDE_MONITORING=1` 可选加监控 | `compose config --services`：默认 7 个，`--profile monitoring` 时 prod 11 / dev 10；镜像拉取 9.3→7.8GB | ✅ 已完成 |
 | **P0-4** | 优雅停机（非 HA） | `SIGTERM` → 停止接新请求 → `chat_run.drain()` + wiki 编译 `drain()` → 等在途落库 → 超时再退。现在 restart 直接杀进程，在途回答全丢 | 生成进行中执行 `docker restart backend-prod`，重启后该条回答完整落库（`stopped=false`） | 1 天 |
 | **P1-1** | 评测集扩容 + 基准 | 现有评测集仅 **5 题**，「准/快」没有任何数字。扩到 30~50 题（含多跳/数值/拒答），产出 hit@5 / MRR / P95 / 成功率 | `docs/benchmarks/` 一份带日期的报告 + 一条可复现命令 | 2~3 天 |
 | **P1-2** | 文档下载接口 | 现在只有元数据 JSON 导出（`account/export`），**拿不回原文 PDF**；`document/*` 无 download 端点 | 新增 `GET /documents/{id}/file`（走 MinIO 原文），前端可下载 | 0.5 天 |
