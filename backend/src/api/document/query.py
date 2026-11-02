@@ -1,14 +1,21 @@
-"""文档检索路由：搜索、列表、预览、分块、来源定位、详情。"""
+"""文档检索路由：搜索、列表、预览、分块、来源定位、下载原文、详情。"""
 
 import asyncio
 import logging
+import mimetypes
+import os
+import re
 import uuid
 from typing import List, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+from fastapi.responses import FileResponse, StreamingResponse
+from minio.error import S3Error
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
+from starlette.concurrency import iterate_in_threadpool
 
 from src.auth import CurrentUser, get_current_user, require_owner
 from src.config import settings
@@ -30,6 +37,50 @@ from .common import (
 logger = logging.getLogger("rag_system")
 
 router = APIRouter(tags=["documents"])
+
+
+# ---------------------------------------------------------------------------
+# 原文下载的响应头工具（P1-2）
+# ---------------------------------------------------------------------------
+
+def _safe_filename(filename: str) -> str:
+    """清洗响应头里的文件名。
+
+    文件名来自用户上传，直接拼进 `Content-Disposition` 有两个坑：
+    换行会把一个头切成两个（响应头注入），路径分隔符会让某些客户端
+    在保存时跳出用户选的目录。这里只做「能不能安全放进头里」，
+    不改中文、不截断扩展名。
+    """
+    name = (filename or "").replace("\\", "_").replace("/", "_")
+    name = re.sub(r"[\r\n\"\x00]", "", name).strip()
+    return name or "document"
+
+
+def _content_disposition(filename: str) -> str:
+    """同时给出 ASCII 兜底名与 RFC 5987 的 UTF-8 名。
+
+    只写 `filename="中文.pdf"` 时，非 Latin-1 的字节会被各家客户端按不同
+    编码解释（Windows 上常见乱码）；`filename*=UTF-8''...` 才是标准写法，
+    但老客户端不认，所以两个都给。
+
+    内部再走一遍 `_safe_filename`：调用方漏了清洗也不会造成响应头注入。
+    """
+    filename = _safe_filename(filename)
+    fallback = filename.encode("ascii", "ignore").decode().strip() or "document"
+    return f"attachment; filename=\"{fallback}\"; filename*=UTF-8''{quote(filename, safe='')}"
+
+
+def _guess_media_type(filename: str, file_type: str = "") -> str:
+    """按文件名推断 MIME；推不出就用二进制流（浏览器会走下载而不是预览）。"""
+    guessed, _ = mimetypes.guess_type(filename)
+    if guessed:
+        return guessed
+    ext = (file_type or "").lstrip(".").lower()
+    if ext:
+        guessed, _ = mimetypes.guess_type(f"x.{ext}")
+        if guessed:
+            return guessed
+    return "application/octet-stream"
 
 
 @router.get("/search", response_model=List[SearchResult])
@@ -267,6 +318,108 @@ async def preview_doc(
             page=page,
         )
         raise HTTPException(status_code=500, detail="预览文档失败，请稍后重试")
+
+
+@router.get("/{doc_id}/file")
+async def download_doc_file(
+    doc_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """下载文档原文（P1-2）。
+
+    此前只有元数据导出（`/account/export`）能拿到文档清单，**原文拿不回来**——
+    删除一致性做到能对账、缓存能校验来源，但用户想取回自己上传的 PDF 时没有入口。
+
+    实现要点：
+    - 走 MinIO 流式读取（`iterate_in_threadpool` 包装同步生成器），不落盘也不整块进内存；
+    - `Content-Disposition` 同时给 ASCII 兜底名与 RFC 5987 的 UTF-8 名，中文文件名不乱码；
+    - 对象缺失（对象存储里没了但 DB 还在 = 不一致）与存储不可用分开报：前者 404 且
+      REPORTABLE 上报，后者 503；两者的处置动作完全不同，不能都笼统叫「下载失败」。
+    """
+    doc = await _get_owned_document(db, doc_id, current_user)
+
+    if not doc.file_path:
+        raise HTTPException(status_code=404, detail="该文档没有保存原文")
+
+    filename = _safe_filename(doc.filename or "document")
+    media_type = _guess_media_type(filename, doc.file_type)
+    headers = {
+        "Content-Disposition": _content_disposition(filename),
+        # 原文不可变（同一 doc_id 的 source 对象只在上传时写入），允许前端缓存
+        "Cache-Control": "private, max-age=300",
+    }
+
+    if not doc.file_path.startswith("minio://"):
+        # 存量/本地导入的文档：file_path 是宿主路径
+        if os.path.isfile(doc.file_path):
+            return FileResponse(
+                doc.file_path,
+                media_type=media_type,
+                headers=headers,
+                filename=filename,
+            )
+        log_exception(
+            logger,
+            FileNotFoundError(doc.file_path),
+            action="document.download",
+            severity=ErrorSeverity.REPORTABLE,
+            message="原文在本地路径不存在（DB 有记录、磁盘无文件）",
+            doc_id=doc_id,
+            file_path=doc.file_path,
+        )
+        raise HTTPException(status_code=404, detail="原文已不存在")
+
+    from src.services.minio_service import MinioService
+
+    minio_service = await MinioService.get_instance()
+
+    try:
+        stat = await asyncio.to_thread(minio_service.stat_object, doc.file_path)
+    except S3Error as e:
+        if e.code in ("NoSuchKey", "NoSuchObject", "NoSuchBucket"):
+            # DB 有、对象存储没有：正是删除链路不一致的典型症状，必须能被运维看见
+            log_exception(
+                logger,
+                e,
+                action="document.download",
+                severity=ErrorSeverity.REPORTABLE,
+                message="原文在对象存储中缺失（DB 元数据与 MinIO 不一致，可跑 scripts/consistency_audit.py）",
+                doc_id=doc_id,
+                file_key=doc.file_path,
+            )
+            raise HTTPException(status_code=404, detail="原文已不存在（对象存储中缺失）")
+        log_exception(
+            logger,
+            e,
+            action="document.download",
+            severity=ErrorSeverity.REPORTABLE,
+            message="对象存储读取元信息失败",
+            doc_id=doc_id,
+            file_key=doc.file_path,
+        )
+        raise HTTPException(status_code=503, detail="对象存储暂不可用，请稍后重试")
+    except Exception as e:
+        log_exception(
+            logger,
+            e,
+            action="document.download",
+            severity=ErrorSeverity.REPORTABLE,
+            message="下载原文失败（连接对象存储异常）",
+            doc_id=doc_id,
+            file_key=doc.file_path,
+        )
+        raise HTTPException(status_code=503, detail="对象存储暂不可用，请稍后重试")
+
+    size = stat.get("size")
+    if size is not None:
+        headers["Content-Length"] = str(size)
+
+    return StreamingResponse(
+        iterate_in_threadpool(minio_service.open_object(doc.file_path)),
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 @router.get("/{doc_id}/chunks")

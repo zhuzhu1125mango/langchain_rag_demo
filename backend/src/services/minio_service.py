@@ -102,6 +102,40 @@ class MinioService(AsyncSingleton["MinioService"]):
         actual_key = file_key.replace(f"minio://{settings.minio.MINIO_BUCKET_NAME}/", "")
         self._client.remove_object(settings.minio.MINIO_BUCKET_NAME, actual_key)
 
+    def stat_object(self, file_key) -> dict:
+        """读取对象元信息（大小/类型），不下载内容。
+
+        下载接口需要先拿到 Content-Length 与 Content-Type 才能给出正确的响应头；
+        对象不存在时抛 ``S3Error``（``NoSuchKey``），由调用方翻译成 404。
+        """
+        actual_key = file_key.replace(f"minio://{settings.minio.MINIO_BUCKET_NAME}/", "")
+        stat = self._client.stat_object(settings.minio.MINIO_BUCKET_NAME, actual_key)
+        return {
+            "size": stat.size,
+            "content_type": stat.content_type,
+            "last_modified": stat.last_modified,
+        }
+
+    def open_object(self, file_key, chunk_size: int = 64 * 1024):
+        """流式产出对象内容（不落盘、不整块读进内存）。
+
+        返回的是**同步生成器**：调用方若在事件循环中消费，需要
+        ``starlette.concurrency.iterate_in_threadpool`` 包一层，
+        否则每读一块都会阻塞事件循环（大文件下载时会拖住整个 API）。
+
+        客户端中途断开时生成器会被 ``close()``，``finally`` 里释放连接，
+        避免连接泄漏到 urllib3 连接池里慢慢占满。
+        """
+        actual_key = file_key.replace(f"minio://{settings.minio.MINIO_BUCKET_NAME}/", "")
+        response = self._client.get_object(settings.minio.MINIO_BUCKET_NAME, actual_key)
+        try:
+            for chunk in response.stream(chunk_size):
+                if chunk:
+                    yield chunk
+        finally:
+            response.close()
+            response.release_conn()
+
     def iter_objects(self, prefix: str = "", max_objects: int = 0):
         """流式遍历桶内对象，逐个产出 ``(object_key, size)``。
 

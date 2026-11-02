@@ -1584,6 +1584,7 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | 文档 | DELETE | `/api/documents/{doc_id}` | 删除文档 |
 | 文档 | PUT | `/api/documents/{doc_id}/status` | 更新文档状态（SEC-4：下架删向量 / 上架后台重建） |
 | 文档 | GET | `/api/documents/{doc_id}/preview` | 文档预览 |
+| 文档 | GET | `/api/documents/{doc_id}/file` | **下载原文**（P1-2，MinIO 流式、`Content-Disposition` 支持中文名；对象缺失 404 / 存储不可用 503） |
 | 文档 | GET | `/api/documents/{doc_id}/chunks` | 获取分块列表 |
 | 文档 | GET | `/api/documents/{doc_id}/source/{chunk_index}` | 引用溯源到原文片段 |
 | 文档 | POST | `/api/documents/{doc_id}/reprocess` | 重新解析 |

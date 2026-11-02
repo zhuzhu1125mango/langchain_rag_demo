@@ -7,7 +7,17 @@
   >
     <div class="space-y-3">
       <div class="flex items-center justify-between text-sm text-gray-500">
-        <span>共 {{ totalPages }} 页</span>
+        <div class="flex items-center gap-2">
+          <span>共 {{ totalPages }} 页</span>
+          <AppButton
+            variant="ghost"
+            size="xs"
+            :loading="downloading"
+            @click="handleDownload"
+          >
+            下载原文
+          </AppButton>
+        </div>
         <div class="flex items-center gap-2">
           <AppButton
             variant="secondary"
@@ -52,6 +62,8 @@
  */
 import { ref, watch } from 'vue'
 import { api } from '@/utils/axios'
+import { downloadDocumentFile, extractDownloadError } from '@/utils/download'
+import { useToast } from '@/composables/useToast'
 import { AppButton, AppDialog } from '@/components/ui'
 
 // W6 #49：预览内容 LRU 缓存（模块级，跨弹窗开关保留）。key 为 docId+page，
@@ -93,7 +105,23 @@ const content = ref('')
 const page = ref(1)
 const totalPages = ref(1)
 const loading = ref(false)
+const downloading = ref(false)
 const displayFilename = ref('')
+
+const toast = useToast()
+
+/** 下载原文（P1-2）：预览看的是抽取出的纯文本，原文（PDF/DOCX）才带版式与图片。 */
+async function handleDownload() {
+  if (!props.docId || downloading.value) return
+  downloading.value = true
+  try {
+    await downloadDocumentFile(props.docId, displayFilename.value || props.filename || 'document')
+  } catch (error) {
+    toast.error('下载失败', await extractDownloadError(error))
+  } finally {
+    downloading.value = false
+  }
+}
 
 // 同步外部传入的文件名（搜索结果预览时初始为"加载中..."，随后由接口返回值覆盖）
 watch(() => props.filename, (val) => {
