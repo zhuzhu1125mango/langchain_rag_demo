@@ -45,14 +45,19 @@ cd langchain_rag_demo
 
 ```bash
 cd backend
-IN_DOCKER=false uv run pytest -q                       # 后端全量：1510 passed / 105 skipped（2026-11-02）
+IN_DOCKER=false uv run pytest -q                       # 后端全量：1553 passed / 105 skipped（2026-11-02）
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
 uv run pytest tests/test_chat_run.py -q                # 续传/停止：29 例
+uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.904 / MRR 0.854（58 题 / 72 篇）
 uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出报告不删（退出码 0/1/2）
 ```
 
 `consistency_audit.py` 的退出码是刻意的：**0=一致、1=有差异、2=巡检没跑成**。
 某一侧采集失败时它不会打印「未发现差异」——假阴性比不巡检更危险。
+
+检索指标同样给数字而不是形容词，报告见 [docs/benchmarks/retrieval-baseline-2026-11-02.md](docs/benchmarks/retrieval-baseline-2026-11-02.md)：
+58 道题里 5 道没命中，**全部是口语化问法**（「出去玩几天」 vs 文档里的「请假」）——
+这是稀疏通道的边界，不是凭感觉猜的。
 
 ## 🚧 边界（有意不做的事）
 
