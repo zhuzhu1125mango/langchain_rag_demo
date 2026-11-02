@@ -173,6 +173,27 @@ schtasks /Create /SC DAILY /ST 04:10 /TN "rag-consistency-audit" `
 > 操作 = `powershell.exe`，参数 = `-NoProfile -ExecutionPolicy Bypass -File <仓库>\scripts\nightly_consistency.ps1`，
 > 起始于 = 仓库根目录。
 
+**注册后必须验证（三步，缺一步都不算接好）**：
+
+```powershell
+# ① 手动跑一次：应 exit 0，且 backups\audit\ 下出现当天的 .json 与 .log
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\nightly_consistency.ps1; $LASTEXITCODE
+# ② 让计划任务立即触发一次，而不是等第二天
+schtasks /Run /TN "rag-consistency-audit"
+# ③ 次日核对：任务上次运行结果应为 0x0；日志时间戳是当天 04:10 前后
+schtasks /Query /TN "rag-consistency-audit" /V /FO LIST | Select-String "上次运行|上次结果"
+```
+
+前置条件与坑（2026-11-02 实测补充）：
+
+- **Docker Desktop 必须处于运行状态**，否则一次性容器创建失败 → 退出码 2；
+- 脚本文件必须是 **UTF-8 with BOM**：Windows PowerShell 5.1 对无 BOM 的 UTF-8 按 ANSI 解析，
+  中文会变成乱码（`涓€鑷存€у贰妫€`）。仓库里的 `nightly_consistency.ps1` 已是 BOM 版本，
+  用编辑器另存时别把 BOM 去掉；
+- 容器里的 Python 输出是 **LF 换行**，而 PS 5.1 的 `Get-Content` 只按 CRLF 切分，
+  整份日志会被当成一行回显（行全粘在一起）。脚本已改用 `[IO.File]::ReadAllLines` 读日志；
+  **日志文件本身是好的**，只是回显问题，别误判成巡检输出损坏。
+
 产物：`backups/audit/consistency_<日期>.json`（结构化，`kind` 稳定可直接做告警规则）与同名 `.log`。
 
 退出码：`0` 一致 / `1` 发现差异 / `2` 巡检未完整执行（连不上某侧存储）。

@@ -1,4 +1,4 @@
-# 每日一致性巡检（只读，Windows 计划任务入口）。
+﻿# 每日一致性巡检（只读，Windows 计划任务入口）。
 #
 # 与 nightly_consistency.sh 等价：用一次性容器跑 scripts/consistency_audit.py，
 # 复用 compose 的 env_file / environment / 网络，凭据不落到宿主机。
@@ -40,7 +40,11 @@ $cmd = 'cmd /c "docker compose --env-file .env.prod run --rm --no-deps -T ' +
 cmd /c $cmd
 $code = $LASTEXITCODE
 
-Get-Content $LogPath -Encoding UTF8 | Select-Object -Last 30 | Write-Host
+# 回显最后 30 行，方便手动执行时直接看到结论。
+# 不能用 Get-Content：Windows PowerShell 5.1 只按 CRLF 切分，而容器里的 Python
+# 写出的是 LF，整份日志会被当成一行，回显出来所有行粘在一起（实测如此）。
+[System.IO.File]::ReadAllLines($LogPath, [System.Text.Encoding]::UTF8) |
+    Select-Object -Last 30 | ForEach-Object { Write-Host $_ }
 
 Write-Host "[nightly] 结束 $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')  exit_code=$code  json=$OutDir\consistency_$Stamp.json"
 if ($code -eq 2) {
