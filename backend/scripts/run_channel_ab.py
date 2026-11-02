@@ -103,6 +103,13 @@ def score_arm(
 
     all_rows = [row for rows in buckets.values() for row in rows]
     result = {
+        # 逐题命中：事后做配对检验（McNemar）与翻转题定位靠它，
+        # 只有汇总值的话「0.938 vs 0.922」这种 1 题之差永远说不清。
+        "per_question": [
+            {"question": sample["question"], "hit": hit_at(rankings.get(sample["question"], []), sample["golden_documents"], top_k)}
+            for sample in dataset
+            if sample.get("golden_documents")
+        ],
         "num_answerable": len(all_rows),
         "hit_rate": round(_mean(all_rows, "hit"), 4),
         "mrr": round(_mean(all_rows, "mrr"), 4),
@@ -178,17 +185,63 @@ def cosine_rank(
     return [doc_id for doc_id, _ in scored[:top_k]]
 
 
+def cosine_rank_scored(
+    doc_vectors: List[List[float]],
+    query_vector: List[float],
+    ids: List[str],
+    top_k: int = 20,
+) -> List[Tuple[str, float]]:
+    """与 cosine_rank 同算法，但**保留相似度分数**。
+
+    融合策略需要分数而不只是名次：RRF 只看排名，会丢掉「这条到底有多像」，
+    而丢掉的那部分正是 dense 通道强于 sparse 的原因。
+    """
+    def _norm(v: List[float]) -> float:
+        return math.sqrt(sum(x * x for x in v)) or 1.0
+
+    qn = _norm(query_vector)
+    scored = []
+    for doc_id, vec in zip(ids, doc_vectors):
+        dot = sum(a * b for a, b in zip(vec, query_vector))
+        scored.append((doc_id, dot / (qn * _norm(vec))))
+    scored.sort(key=lambda item: item[1], reverse=True)
+    return scored[:top_k]
+
+
 # ---------------------------------------------------------------------------
 # 各臂
 # ---------------------------------------------------------------------------
 
-def arm_sparse(corpus: List[Dict], dataset: List[Dict], channel_top_k: int) -> Dict[str, List[str]]:
+def _ids_only(ranked: Dict[str, List[Tuple[str, float]]]) -> Dict[str, List[str]]:
+    return {q: [doc_id for doc_id, _ in rows] for q, rows in ranked.items()}
+
+
+def arm_sparse_scored(
+    corpus: List[Dict], dataset: List[Dict], channel_top_k: int
+) -> Dict[str, List[Tuple[str, float]]]:
     bm25_ef, doc_matrix = build_index(corpus)
     return {
-        s["question"]: [
-            doc_id for doc_id, _ in rank_with_index(bm25_ef, doc_matrix, corpus, s["question"], channel_top_k)
-        ]
+        s["question"]: rank_with_index(bm25_ef, doc_matrix, corpus, s["question"], channel_top_k)
         for s in dataset
+    }
+
+
+def arm_sparse(corpus: List[Dict], dataset: List[Dict], channel_top_k: int) -> Dict[str, List[str]]:
+    return _ids_only(arm_sparse_scored(corpus, dataset, channel_top_k))
+
+
+def arm_dense_scored(
+    corpus: List[Dict],
+    dataset: List[Dict],
+    channel_top_k: int,
+    embed: Callable[[List[str]], List[List[float]]],
+) -> Dict[str, List[Tuple[str, float]]]:
+    ids = [doc["id"] for doc in corpus]
+    doc_vectors = embed([f"{doc['title']} {doc['text']}" for doc in corpus])
+    query_vectors = embed([s["question"] for s in dataset])
+    return {
+        s["question"]: cosine_rank_scored(doc_vectors, qv, ids, channel_top_k)
+        for s, qv in zip(dataset, query_vectors)
     }
 
 
@@ -198,14 +251,7 @@ def arm_dense(
     channel_top_k: int,
     embed: Callable[[List[str]], List[List[float]]],
 ) -> Dict[str, List[str]]:
-    doc_texts = [f"{doc['title']} {doc['text']}" for doc in corpus]
-    ids = [doc["id"] for doc in corpus]
-    doc_vectors = embed(doc_texts)
-    query_vectors = embed([s["question"] for s in dataset])
-    return {
-        s["question"]: cosine_rank(doc_vectors, qv, ids, channel_top_k)
-        for s, qv in zip(dataset, query_vectors)
-    }
+    return _ids_only(arm_dense_scored(corpus, dataset, channel_top_k, embed))
 
 
 def arm_hybrid(
@@ -217,6 +263,60 @@ def arm_hybrid(
         question: rrf_fuse([sparse.get(question, []), dense.get(question, [])], k=RRF_K)[:channel_top_k]
         for question in sparse
     }
+
+
+def weighted_rrf_fuse(
+    sparse_ids: List[str],
+    dense_ids: List[str],
+    w_dense: float,
+    top_k: int,
+    k: int = RRF_K,
+) -> List[str]:
+    """加权 RRF：``score = w_d/(k+rank_d) + w_s/(k+rank_s)``。
+
+    等权 RRF（0.5/0.5）有个隐含假设：两路「共同认可」的文档更可信。
+    当弱通道本身的头部就是错的，这个假设反而变成负信号——错的文档被两路
+    「共同认可」顶到第一。本函数就是用来验证这个假设的。
+    """
+    scores: Dict[str, float] = {}
+    for rank, doc_id in enumerate(sparse_ids, start=1):
+        scores[doc_id] = scores.get(doc_id, 0.0) + (1.0 - w_dense) / (k + rank)
+    for rank, doc_id in enumerate(dense_ids, start=1):
+        scores[doc_id] = scores.get(doc_id, 0.0) + w_dense / (k + rank)
+    return [doc_id for doc_id, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)][:top_k]
+
+
+def _minmax(values: List[float]) -> List[float]:
+    """把一路分数映射到 [0.5, 1]。
+
+    为什么不映射到 [0, 1]：那样每路的最低分都是 0，而「只出现在另一路」的文档
+    在合并时也是 0 分，两者并列——谁排在前面由字典插入顺序决定。真实表现是
+    dense 权重拉到 1.0 时，sparse 的第 1 名仍会挤掉 dense 的第 3 名。
+    留一个 0.5 的下限等于声明「进过候选池的，都优于没进过的」，并列消失。
+    """
+    lo, hi = min(values), max(values)
+    if hi - lo < 1e-12:
+        return [1.0 for _ in values]
+    return [0.5 + 0.5 * (v - lo) / (hi - lo) for v in values]
+
+
+def minmax_fuse(
+    sparse_scored: List[Tuple[str, float]],
+    dense_scored: List[Tuple[str, float]],
+    w_dense: float,
+    top_k: int,
+) -> List[str]:
+    """分数融合：两路各自 min-max 归一化到 [0,1] 后加权求和再截断。
+
+    与 RRF 的差别：RRF 把第 1 名与第 10 名的差距压成 1/61 与 1/70（差 13%），
+    分数融合保留「这条到底有多像」。代价是弱通道的头也会被拉到 1.0。
+    """
+    scores: Dict[str, float] = {}
+    for (doc_id, _s), norm in zip(sparse_scored, _minmax([sc for _, sc in sparse_scored])):
+        scores[doc_id] = scores.get(doc_id, 0.0) + (1.0 - w_dense) * norm
+    for (doc_id, _s), norm in zip(dense_scored, _minmax([sc for _, sc in dense_scored])):
+        scores[doc_id] = scores.get(doc_id, 0.0) + w_dense * norm
+    return [doc_id for doc_id, _ in sorted(scores.items(), key=lambda kv: kv[1], reverse=True)][:top_k]
 
 
 def arm_rerank(
@@ -283,7 +383,16 @@ def main() -> int:
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     parser.add_argument("--top-k", type=int, default=5, help="最终截断的 K（与 CI 口径一致）")
     parser.add_argument("--channel-top-k", type=int, default=20, help="融合前各通道保留的候选数")
-    parser.add_argument("--arms", default="sparse,dense,hybrid,rerank", help="要跑的臂：sparse,dense,hybrid,rerank,union,dense_rerank")
+    parser.add_argument(
+        "--arms",
+        default="sparse,dense,hybrid,rerank",
+        help="要跑的臂：sparse,dense,hybrid,rerank,union,dense_rerank,weighted,scorefuse",
+    )
+    parser.add_argument(
+        "--dense-weights",
+        default="0.5,0.7,0.85",
+        help="融合臂中 dense 的权重（逗号分隔）；0.5 等价于等权 RRF，仅对 weighted/scorefuse 生效",
+    )
     parser.add_argument("--skip-rerank", action="store_true")
     parser.add_argument("--ollama", default=DEFAULT_OLLAMA)
     parser.add_argument("--embed-model", default=DEFAULT_EMBED_MODEL)
@@ -315,7 +424,7 @@ def main() -> int:
     if "sparse" in arms:
         _run("sparse", lambda: arm_sparse(corpus, dataset, args.channel_top_k))
 
-    need_dense = arms & {"dense", "hybrid", "rerank", "union", "dense_rerank"}
+    need_dense = arms & {"dense", "hybrid", "rerank", "union", "dense_rerank", "weighted", "scorefuse"}
     if need_dense:
         def _embed(texts: List[str]) -> List[List[float]]:
             return embed_texts(texts, model=args.embed_model, base_url=args.ollama)
@@ -329,12 +438,42 @@ def main() -> int:
 
         if "dense" in arms:
             _run("dense", lambda: arm_dense(corpus, dataset, args.channel_top_k, _embed))
-        if arms & {"hybrid", "rerank", "union", "dense_rerank"}:
+        if arms & {"hybrid", "rerank", "union", "dense_rerank", "weighted", "scorefuse"}:
             if "sparse" not in rankings:
                 _run("sparse", lambda: arm_sparse(corpus, dataset, args.channel_top_k))
             if "dense" not in rankings:
                 _run("dense", lambda: arm_dense(corpus, dataset, args.channel_top_k, _embed))
+        if arms & {"hybrid", "rerank"}:
             _run("hybrid", lambda: arm_hybrid(rankings["sparse"], rankings["dense"], args.channel_top_k))
+
+        if arms & {"weighted", "scorefuse"}:
+            # 融合臂只做纯计算，嵌入/BM25 已算过（dense 二次调用走磁盘缓存），
+            # 因此一次跑多个权重几乎不增加耗时——扫描比反复跑脚本划算。
+            weights = [float(w) for w in args.dense_weights.split(",") if w.strip()]
+            sparse_scored = arm_sparse_scored(corpus, dataset, args.channel_top_k) if "scorefuse" in arms else {}
+            dense_scored = (
+                arm_dense_scored(corpus, dataset, args.channel_top_k, _embed) if "scorefuse" in arms else {}
+            )
+            for w in weights:
+                tag = f"{int(round(w * 100)):02d}"
+                if "weighted" in arms:
+                    _run(
+                        f"wrrf{tag}",
+                        lambda w=w: {
+                            q: weighted_rrf_fuse(
+                                rankings["sparse"].get(q, []), rankings["dense"].get(q, []), w, args.top_k
+                            )
+                            for q in rankings["sparse"]
+                        },
+                    )
+                if "scorefuse" in arms:
+                    _run(
+                        f"sfuse{tag}",
+                        lambda w=w: {
+                            q: minmax_fuse(sparse_scored.get(q, []), dense_scored.get(q, []), w, args.top_k)
+                            for q in sparse_scored
+                        },
+                    )
 
         if arms & {"rerank", "union", "dense_rerank"}:
             predict = build_reranker(args.rerank_model)
@@ -366,7 +505,7 @@ def main() -> int:
     print("=" * 78)
     print(f"{'arm':<8}{'hit@' + str(args.top_k):>10}{'mrr':>8}{'recall':>8}   "
           f"{'policy':>8}{'colloquial':>12}{'multi_hop':>11}")
-    for name in ("sparse", "dense", "hybrid", "rerank", "union", "dense_rerank"):
+    for name in results:
         r = results.get(name)
         if not r:
             continue

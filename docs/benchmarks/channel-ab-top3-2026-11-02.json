@@ -1,0 +1,160 @@
+{
+  "generated_at": "2026-11-02T18:11:10",
+  "config": {
+    "top_k": 3,
+    "channel_top_k": 20,
+    "rrf_k": 60,
+    "embed_model": "bge-m3:latest",
+    "rerank_model": "BAAI/bge-reranker-base",
+    "corpus_docs": 72,
+    "questions": 70
+  },
+  "arms": {
+    "sparse": {
+      "num_answerable": 64,
+      "hit_rate": 0.7812,
+      "mrr": 0.7656,
+      "recall": 0.7734,
+      "by_category": {
+        "colloquial": {
+          "n": 20,
+          "hit_rate": 0.3,
+          "mrr": 0.3
+        },
+        "multi_hop": {
+          "n": 4,
+          "hit_rate": 1.0,
+          "mrr": 0.875
+        },
+        "policy": {
+          "n": 40,
+          "hit_rate": 1.0,
+          "mrr": 0.9875
+        }
+      }
+    },
+    "dense": {
+      "num_answerable": 64,
+      "hit_rate": 0.9219,
+      "mrr": 0.8984,
+      "recall": 0.9219,
+      "by_category": {
+        "colloquial": {
+          "n": 20,
+          "hit_rate": 0.75,
+          "mrr": 0.7
+        },
+        "multi_hop": {
+          "n": 4,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "policy": {
+          "n": 40,
+          "hit_rate": 1.0,
+          "mrr": 0.9875
+        }
+      }
+    },
+    "hybrid": {
+      "num_answerable": 64,
+      "hit_rate": 0.8594,
+      "mrr": 0.8125,
+      "recall": 0.8594,
+      "by_category": {
+        "colloquial": {
+          "n": 20,
+          "hit_rate": 0.55,
+          "mrr": 0.425
+        },
+        "multi_hop": {
+          "n": 4,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "policy": {
+          "n": 40,
+          "hit_rate": 1.0,
+          "mrr": 0.9875
+        }
+      }
+    },
+    "rerank": {
+      "num_answerable": 64,
+      "hit_rate": 0.9062,
+      "mrr": 0.888,
+      "recall": 0.9062,
+      "by_category": {
+        "colloquial": {
+          "n": 20,
+          "hit_rate": 0.7,
+          "mrr": 0.6667
+        },
+        "multi_hop": {
+          "n": 4,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "policy": {
+          "n": 40,
+          "hit_rate": 1.0,
+          "mrr": 0.9875
+        }
+      }
+    },
+    "dense_rerank": {
+      "num_answerable": 64,
+      "hit_rate": 0.9062,
+      "mrr": 0.888,
+      "recall": 0.9062,
+      "by_category": {
+        "colloquial": {
+          "n": 20,
+          "hit_rate": 0.7,
+          "mrr": 0.6667
+        },
+        "multi_hop": {
+          "n": 4,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "policy": {
+          "n": 40,
+          "hit_rate": 1.0,
+          "mrr": 0.9875
+        }
+      }
+    },
+    "union": {
+      "num_answerable": 64,
+      "hit_rate": 0.9062,
+      "mrr": 0.888,
+      "recall": 0.9062,
+      "by_category": {
+        "colloquial": {
+          "n": 20,
+          "hit_rate": 0.7,
+          "mrr": 0.6667
+        },
+        "multi_hop": {
+          "n": 4,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "policy": {
+          "n": 40,
+          "hit_rate": 1.0,
+          "mrr": 0.9875
+        }
+      }
+    }
+  },
+  "timings_seconds": {
+    "sparse": 9.66,
+    "dense": 0.48,
+    "hybrid": 0.0,
+    "rerank": 80.6,
+    "dense_rerank": 101.46,
+    "union": 175.02
+  }
+}
