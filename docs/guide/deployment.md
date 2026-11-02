@@ -96,7 +96,7 @@
 
 ### 2.2.1 精简模式与服务 Profile（P0-3）
 
-监控栈（Prometheus / Alertmanager / Grafana / postgres-exporter）挂在 `monitoring` profile 下，**默认不启动**：`docker compose up -d` 只起 7 个核心服务（backend / frontend / postgres / redis / milvus / etcd / minio），镜像拉取量从 ~9.3 GB 降到 ~7.8 GB。
+监控栈（Prometheus / Alertmanager / Grafana / postgres-exporter）挂在 `monitoring` profile 下，**默认不启动**：`docker compose up -d` 只起 7 个核心服务（backend / frontend / postgres / redis / milvus / etcd / minio），镜像合计从 ~6.7 GB 降到 ~5.2 GB（P0-1 修掉 chown 复制后，backend 单镜像 5.42→2.84 GB）。
 
 | 场景 | 命令 | 容器数 |
 |---|---|---|

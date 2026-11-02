@@ -95,7 +95,7 @@
 
 | 序 | 项 | 内容 | 验收物 | 预估 |
 |---|---|---|---|---|
-| **P0-1** | 镜像瘦身：chown 复制 | `Dockerfile.prod` 原在 `COPY .venv` 之后 `chown -R /app`，OverlayFS 把 1.9GB 的 venv 整个复制进新层（`docker history` 实测该层 2.01GB）。已改为「先建用户 + `COPY --chown`」 | 重建后 backend 镜像 ≤3.6GB，且 `docker history` 无 2GB 级层 | 0.5 天（含重建） |
+| **P0-1** ✅ | 镜像瘦身：chown 复制（2026-11-02 完成） | 根因：`Dockerfile.prod` 在 `COPY .venv` 之后 `chown -R /app`，OverlayFS 触发 copy-up，把 1.9GB 的 venv 整棵复制进新层（`docker history` 该层 2.01GB）。改为「先建用户 + `COPY --chown`」，chown 只作用于目录项 | **backend 5.42GB → 2.84GB（−2.58GB / −48%）**；`history` 中已无 2GB 级 chown 层；新镜像校验：`whoami=appuser`、`/app/.venv` 1.9G 完整、pypdf 6.21.4、prod 配置下导入 149 路由 | ✅ 已完成 |
 | **P0-2** ✅ | 身份最小闭环（2026-11-02 完成） | `users.is_admin` + 迁移 `d5e6f7a8b9c0`；`require_admin` 三通道（登录管理员 > 应急 `X-Admin-Key`（打 warning）> 开发模式），**每次查库而非写进 JWT**（降权立即生效）；空库首个注册用户自举为管理员；新增 `scripts/create_admin.py`（新建/提升/收回/列清单，弱密码拒绝，提权降权均写审计） | 空库可建号：临时库实跑 `--list` 见 `root`；迁移在真实 PG 上 upgrade/downgrade 双向验证；全量 **1527 passed / 105 skipped**（新增 17 例） | ✅ 已完成 |
 | **P0-3** ✅ | `--profile demo` → 改为「精简即默认」（2026-11-02 完成） | 监控栈（prometheus/alertmanager/grafana/postgres-exporter）挂 `monitoring` profile，**默认不启动**；dev 与 prod 两栈默认均为 **7 个核心服务**；`start-prod.*` 显式带 `--profile monitoring` 保持 11（告警是值班依赖），`start-dev.*` 默认精简、`INCLUDE_MONITORING=1` 可选加监控 | `compose config --services`：默认 7 个，`--profile monitoring` 时 prod 11 / dev 10；镜像拉取 9.3→7.8GB | ✅ 已完成 |
 | **P0-4** | 优雅停机（非 HA） | `SIGTERM` → 停止接新请求 → `chat_run.drain()` + wiki 编译 `drain()` → 等在途落库 → 超时再退。现在 restart 直接杀进程，在途回答全丢 | 生成进行中执行 `docker restart backend-prod`，重启后该条回答完整落库（`stopped=false`） | 1 天 |
@@ -103,7 +103,7 @@
 | **P1-2** | 文档下载接口 | 现在只有元数据 JSON 导出（`account/export`），**拿不回原文 PDF**；`document/*` 无 download 端点 | 新增 `GET /documents/{id}/file`（走 MinIO 原文），前端可下载 | 0.5 天 |
 | **P1-3** | 巡检接 nightly | `scripts/nightly_consistency.ps1` 已可跑，但 `schtasks` 被本机安全策略拦截，计划任务未注册 | owner 执行一条注册命令（见 [monitoring.md](guide/monitoring.md) §6.1） | owner 5 分钟 |
 | **P2-1** | 技术叙事 | 把「删除为什么可对账」「失败为什么可判定」写成长文——这是别人抄不走的素材 | 一篇 ≥3000 字文章（删除四类数据落点 + 三类静默失败 + 可复现命令） | 1~2 天 |
-| **P2-2** | 回补正式镜像 | 当前生产用覆盖镜像；标准 `docker compose build` 上次卡在 wheel 下载。待网络恢复后重建，顺带验证 P0-1 | 正式镜像 tag + DEPLOY-4 记录（含实测体积） | 0.5 天 |
+| **P2-2** ◐ | 回补正式镜像 | 标准 `docker compose build backend` 已跑通（builder 阶段命中缓存，约 2 分钟），`rag-prod-backend:latest` = `6a13b146`（2.84GB）；运行中的容器仍指向旧镜像，未切换 | **部署待执行**：切换前必须先 `alembic upgrade head`（P0-2 的 `users.is_admin`），否则 `/auth/me` 与管理员接口报错 | 待部署 |
 
 **不做（冻结，不排期）**
 
