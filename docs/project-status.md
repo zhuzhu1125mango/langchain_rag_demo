@@ -96,7 +96,7 @@
 | 序 | 项 | 内容 | 验收物 | 预估 |
 |---|---|---|---|---|
 | **P0-1** | 镜像瘦身：chown 复制 | `Dockerfile.prod` 原在 `COPY .venv` 之后 `chown -R /app`，OverlayFS 把 1.9GB 的 venv 整个复制进新层（`docker history` 实测该层 2.01GB）。已改为「先建用户 + `COPY --chown`」 | 重建后 backend 镜像 ≤3.6GB，且 `docker history` 无 2GB 级层 | 0.5 天（含重建） |
-| **P0-2** | 身份最小闭环 | `users.is_admin` 字段；`require_admin` 认「已登录且 is_admin」，全局 `X-Admin-Key` 降级为**应急引导通道**；新增 `scripts/create_admin.py`（配合 `alembic` 一次迁移） | 空库一条命令建出管理员并可登录；审计 actor 为真实用户而非空；新增测试覆盖越权与引导通道 | 1.5 天 |
+| **P0-2** ✅ | 身份最小闭环（2026-11-02 完成） | `users.is_admin` + 迁移 `d5e6f7a8b9c0`；`require_admin` 三通道（登录管理员 > 应急 `X-Admin-Key`（打 warning）> 开发模式），**每次查库而非写进 JWT**（降权立即生效）；空库首个注册用户自举为管理员；新增 `scripts/create_admin.py`（新建/提升/收回/列清单，弱密码拒绝，提权降权均写审计） | 空库可建号：临时库实跑 `--list` 见 `root`；迁移在真实 PG 上 upgrade/downgrade 双向验证；全量 **1527 passed / 105 skipped**（新增 17 例） | ✅ 已完成 |
 | **P0-3** | `--profile demo` | 新增 compose profile，只起 backend/frontend/postgres/redis/milvus/etcd/minio 共 **7 个容器**，去掉 grafana/prometheus/alertmanager/postgres-exporter（−1.5GB） | `docker compose --profile demo up -d` 起 7 容器且 `/health/ready` 四项 ok | 1 天 |
 | **P0-4** | 优雅停机（非 HA） | `SIGTERM` → 停止接新请求 → `chat_run.drain()` + wiki 编译 `drain()` → 等在途落库 → 超时再退。现在 restart 直接杀进程，在途回答全丢 | 生成进行中执行 `docker restart backend-prod`，重启后该条回答完整落库（`stopped=false`） | 1 天 |
 | **P1-1** | 评测集扩容 + 基准 | 现有评测集仅 **5 题**，「准/快」没有任何数字。扩到 30~50 题（含多跳/数值/拒答），产出 hit@5 / MRR / P95 / 成功率 | `docs/benchmarks/` 一份带日期的报告 + 一条可复现命令 | 2~3 天 |
@@ -273,6 +273,9 @@
 | SEC-21 | 文档边界诚实化 | ✅ 已完成 | README / architecture / deployment 已明确「单租户/LAN 推荐，公网需完成 SEC P1~5 并关注 P2」 |
 
 **红线**：SEC-1~5、SEC-6~15、SEC-16~21 已完成；公网多租户仍按「受控网络 + 最小权限」运营，TLS/HSTS 需按 [deployment.md](guide/deployment.md) §6.8.1 由前置反代实际启用后方可宣称完整企业级多租户安全。
+
+> ⚠️ **下次部署需执行 `alembic upgrade head`**：P0-2 新增迁移 `d5e6f7a8b9c0`（`users.is_admin`）。
+> 若只换代码不升级库，`/auth/me` 与 `require_admin` 会因缺列而失败（管理员接口按 fail-closed 全部 403）。
 
 ### 生产部署对齐（P0 · 2026-10-28 已执行完成）
 

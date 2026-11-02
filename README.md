@@ -31,6 +31,8 @@ cd langchain_rag_demo
 ./scripts/start-dev.sh        # Windows: .\scripts\start-dev.ps1
 
 # 2. 打开 http://localhost:5173 → 注册 → 建知识库 → 上传文档 → 提问
+#    空库时首个注册用户自动成为管理员（管理页/模型配置用它进）；
+#    生产环境默认关注册，改用：python scripts/create_admin.py --username admin
 ```
 
 首次需要拉约 **9.3 GB** 镜像与 **5.6 GB** 模型，所以「10 分钟」指的是**已经拉过一次之后**。

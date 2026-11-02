@@ -34,7 +34,8 @@ curl -X POST http://localhost:8000/api/chat/messages \
 
 - **开发模式放行**：未配置 `API_KEY` 且**非 Docker** 时允许匿名访问，身份记为 `default`
 - **管理操作**：`GET /api/config`、`GET /api/config/model`、`POST /api/config/*`、`POST /metrics/reset`
-  等还需携带 `X-Admin-Key: <ADMIN_KEY>`；生产模式未配置 `ADMIN_KEY` 时这些接口一律 403。
+  等要求**管理员身份**（`users.is_admin=true`）；`X-Admin-Key` 保留为应急引导通道（首次部署 / 管理员账号不可用时）。
+  生产模式既无管理员账号也未配置 `ADMIN_KEY` 时一律 403。
   返回原始模型名的配置接口仅管理员可读，普通用户请使用 `/api/config/processing` 与不含模型名的 `/api/config/info`
 - **对象级隔离**：资源（知识库/文档/会话/反馈）按 `owner_id` 隔离，非所有者访问返回 **403**；
   `owner_id` 为空的遗留数据对任意登录用户放行
@@ -173,7 +174,9 @@ curl -X POST http://localhost:8000/api/documents/upload \
 
 ### 0.4 获取当前用户
 
-**GET** `/api/auth/me` → `{ "user_id": "...", "username": "..." }`
+**GET** `/api/auth/me` → `{ "user_id": "...", "username": "...", "is_admin": false }`
+
+`is_admin` 供前端决定是否展示管理入口；真正的授权判定在 `require_admin`（每次查库，降权立即生效，不写进 JWT）。
 
 ### 0.5 账号导出与注销（SEC-14）
 
@@ -819,7 +822,7 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 
 前缀 `/api/learning`。**SEC-1 起**：
 - `/stats`、`/misclassification` 仅返回**当前用户**的样本与统计（按 `owner_id` 过滤）；
-- `/trigger`、`/config`、`/enable`、`/disable` 及 `/record-execution`、`/record-feedback` 均为 **`require_admin`**（生产需 `X-Admin-Key`），其中 `record-execution` 的 owner 由会话归属派生，不信任请求方传值。
+- `/trigger`、`/config`、`/enable`、`/disable` 及 `/record-execution`、`/record-feedback` 均为 **`require_admin`**（管理员账号，或应急 `X-Admin-Key`），其中 `record-execution` 的 owner 由会话归属派生，不信任请求方传值。
 
 ### 8.1 获取学习统计
 
@@ -1000,7 +1003,7 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 
 **GET** `/api/config`
 
-**鉴权**：管理员（`X-Admin-Key` 或开发模式）。响应包含原始模型名，普通用户不可读。
+**鉴权**：管理员（`users.is_admin`，或应急 `X-Admin-Key`，或开发模式）。响应包含原始模型名，普通用户不可读。
 
 **成功响应** (200):
 ```json
@@ -1072,7 +1075,7 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 
 **GET** `/api/config/model`
 
-**鉴权**：管理员（`X-Admin-Key` 或开发模式）。原始模型名会暴露底层模型/厂商，仅管理员可读。
+**鉴权**：管理员（`users.is_admin`，或应急 `X-Admin-Key`，或开发模式）。原始模型名会暴露底层模型/厂商，仅管理员可读。
 
 ### 10.5 重置配置
 
@@ -1231,7 +1234,7 @@ setInterval(() => ws.send(JSON.stringify({type: 'ping'})), 30000);
 | 201 | Created | 创建成功（仅 `POST /api/auth/register` 使用） |
 | 400 | Bad Request | 请求参数错误 / 非法 UUID |
 | 401 | Unauthorized | 未认证或凭据无效 |
-| 403 | Forbidden | 已认证但无权限（非资源所有者 / 缺少 `X-Admin-Key`） |
+| 403 | Forbidden | 已认证但无权限（非资源所有者 / 非管理员且未携带应急 `X-Admin-Key`） |
 | 404 | Not Found | 资源不存在 |
 | 413 | Payload Too Large | 上传文件超出 `MAX_UPLOAD_SIZE_MB` |
 | 422 | Unprocessable Entity | 请求体校验失败 |

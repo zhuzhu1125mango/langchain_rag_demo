@@ -558,25 +558,81 @@ def require_owner(owner_id: str, current_user: CurrentUser) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该资源")
 
 
+async def _is_admin_user(current_user: CurrentUser) -> bool:
+    """查询当前登录用户是否为管理员（P0-2）。
+
+    每次调用一次短会话查询，而不是把 ``is_admin`` 写进 JWT：
+    写进 token 意味着「降权」要等 token 过期才生效，而 JWT 吊销名单只覆盖
+    登出场景。管理员接口调用频率低（配置页/模型管理），一次索引查询的代价
+    远小于「用已撤销的管理员令牌继续改配置」的后果。
+
+    DB 故障时**按拒绝处理**（fail-closed）：这是授权判断，放行比报错更危险。
+
+    `user_id` 不是 UUID 的身份（开发默认用户 ``default``、全局 API Key 的
+    ``api_key_user``）一律不是管理员——它们没有对应的用户记录。
+    """
+    if not current_user.is_authenticated:
+        return False
+    try:
+        uid = uuid.UUID(current_user.user_id)
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+    from src.database import async_session_maker
+    from src.models import User
+
+    try:
+        async with async_session_maker() as db:
+            flag = await db.scalar(select(User.is_admin).where(User.id == uid))
+        return bool(flag)
+    except Exception as exc:  # noqa: BLE001 —— 授权路径需覆盖所有异常
+        log_exception(
+            logger,
+            exc,
+            action="auth.admin_lookup",
+            severity=ErrorSeverity.REPORTABLE,
+            message="管理员身份查询失败，按无权限处理",
+            user_id=current_user.user_id,
+        )
+        return False
+
+
 async def require_admin(
     current_user: CurrentUser = Depends(get_current_user),
     x_admin_key: Optional[str] = Security(admin_key_header),
 ) -> CurrentUser:
     """管理操作鉴权（全局配置修改、指标重置等）。
 
-    规则：
-    - 配置了 ``ADMIN_KEY``：请求须携带匹配的 ``X-Admin-Key`` 头（常量时间比较）；
-    - 未配置 ``ADMIN_KEY``：仅开发模式放行，生产模式一律 403，
-      避免任何认证用户篡改全局运行时配置。
+    三条通道，按优先级：
+
+    1. **登录用户且 ``users.is_admin``**（主通道）——权限挂在「人」上，
+       审计能记到具体账号；
+    2. **``X-Admin-Key`` 全局密钥**（应急引导）——仅用于首次部署、
+       ``create_admin`` 不可用、或管理员账号被锁死时的救援通道；
+    3. **开发模式且未配置 ``ADMIN_KEY``**（保持原有便利）——生产一律 403。
+
+    第 2 条不再是唯一入口：这正是此前的缺口——审计里没有「谁」，
+    且拿到一把 Key 就是全体管理员。
     """
+    if await _is_admin_user(current_user):
+        return current_user
+
     admin_key = getattr(settings.security, "ADMIN_KEY", None)
     if admin_key:
         if x_admin_key and hmac.compare_digest(x_admin_key.encode(), admin_key.encode()):
+            # 应急通道可被任何持有 Key 的调用方使用，必须留痕
+            logger.warning(
+                "管理接口经由全局 ADMIN_KEY 访问（非用户身份）: user_id=%s",
+                current_user.user_id,
+            )
             return current_user
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="需要有效的 X-Admin-Key")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要管理员账号或有效的 X-Admin-Key",
+        )
     if settings.IS_PRODUCTION:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="生产环境执行管理操作需配置 ADMIN_KEY 并携带 X-Admin-Key 头",
+            detail="生产环境执行管理操作需管理员账号（scripts/create_admin.py）或配置 ADMIN_KEY",
         )
     return current_user

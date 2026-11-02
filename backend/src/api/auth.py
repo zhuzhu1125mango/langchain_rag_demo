@@ -75,6 +75,8 @@ class MeResponse(BaseModel):
 
     user_id: str
     username: str
+    # P0-2：前端据此决定是否展示管理入口；真正的授权判定在 require_admin
+    is_admin: bool = False
 
 
 class DeleteAccountRequest(BaseModel):
@@ -118,7 +120,15 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
     except WeakPasswordError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    user = User(username=data.username, password_hash=hash_password(data.password))
+    # P0-2：空库时首个注册用户自举为管理员——否则装完没有任何人能进管理页。
+    # 存量部署升级后 users 非空，不会意外提权；生产默认关注册，管理员走
+    # scripts/create_admin.py。
+    is_first_user = (await db.scalar(select(func.count()).select_from(User))) == 0
+    user = User(
+        username=data.username,
+        password_hash=hash_password(data.password),
+        is_admin=is_first_user,
+    )
     db.add(user)
     await db.commit()
     await db.refresh(user)
@@ -129,10 +139,12 @@ async def register(data: RegisterRequest, request: Request, db: AsyncSession = D
         action="auth.register",
         resource_type="user",
         resource_id=str(user.id),
-        detail={"username": data.username},
+        detail={"username": data.username, "bootstrap_admin": is_first_user},
     )
 
-    logger.info(f"新用户注册: {data.username} ({user.id})")
+    logger.info(
+        "新用户注册: %s (%s) 管理员=%s", data.username, user.id, is_first_user
+    )
     return TokenResponse(access_token=create_access_token(str(user.id)), user_id=str(user.id))
 
 
@@ -250,10 +262,18 @@ async def me(current_user: CurrentUser = Depends(get_current_user), db: AsyncSes
         uid = uuid.UUID(current_user.user_id)
     except (ValueError, AttributeError):
         uid = None
+    is_admin = False
     if uid is not None:
         user = await db.scalar(select(User).where(User.id == uid))
-        username = user.username if user else None
-    return MeResponse(user_id=current_user.user_id, username=username or current_user.user_id)
+        if user:
+            username = user.username
+            # getattr：响应组装不该因对象缺字段而 500（迁移前的旧行 / 单测桩）
+            is_admin = bool(getattr(user, "is_admin", False))
+    return MeResponse(
+        user_id=current_user.user_id,
+        username=username or current_user.user_id,
+        is_admin=is_admin,
+    )
 
 
 # ---------------------------------------------------------------------------
