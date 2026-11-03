@@ -61,7 +61,7 @@ jobs:
 
       - name: Install uv
         # uvx 依赖 uv（W6 #64 首轮 CI 复盘：runner 无预装，exit 127）
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: false
 
@@ -132,7 +132,7 @@ jobs:
 
       - name: Install uv
         # 注意：setup-uv 自 v9 起无 v10/v9 主版本别名 tag，只能用完整版本 tag
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -216,7 +216,7 @@ jobs:
 
       - name: Install uv
         # 注意：setup-uv 自 v9 起无 v10/v9 主版本别名 tag，只能用完整版本 tag
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -304,7 +304,7 @@ jobs:
 
       - name: Install uv
         # 注意：setup-uv 自 v9 起无 v10/v9 主版本别名 tag，只能用完整版本 tag
-        uses: astral-sh/setup-uv@v10.3.2
+        uses: astral-sh/setup-uv@v10.3.3
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
