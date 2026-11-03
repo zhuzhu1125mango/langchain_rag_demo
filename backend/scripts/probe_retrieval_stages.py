@@ -288,6 +288,52 @@ def expand_ids(
     return out
 
 
+def _table_header_of(text: str) -> Optional[str]:
+    """若片段是「表头 + 一行」的行级表格块，返回表头行；否则 None。
+
+    生产切分器把 markdown 表格按行切开，每块 = heading_path + 表头 + 该行。
+    这正是「问『有哪些告警』却只拿到 3 行指标表」的成因：行级块对点查友好
+    （「X1 的重量」），但对列举型问题，三个名额换三行同一张表。
+    """
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    table_lines = [ln for ln in lines if ln.strip().startswith("|")]
+    # 只认「表头 + 一行」（外加可选的 heading_path 首行）：整表块不需要再回填，
+    # 否则会按表头去别的块里拉同表头的行，反而可能混进另一处的同名表。
+    if len(table_lines) == 2 and len(lines) <= 3:
+        return table_lines[0]
+    return None
+
+
+def table_refill(
+    ids: Sequence[str],
+    corpus: Sequence[Dict],
+    corpus_by_id: Dict[str, Dict],
+    cap_chars: int = 3000,
+) -> List[str]:
+    """把选中的表格行块回填成整张表（同文档 + 同表头）。
+
+    只做「同一张表的其它行」，不跨表——跨表等于把整章搬进上下文，
+    与「少而准」相反。用字符上限兜底：超大表格分多批，不至于撑爆上下文。
+    """
+    out: List[str] = list(ids)
+    used = sum(len(corpus_by_id[i]["text"]) for i in out)
+    for cid in ids:
+        header = _table_header_of(corpus_by_id[cid]["text"])
+        if not header:
+            continue
+        doc_prefix = cid.split("#")[0] + "#"
+        for other in corpus:
+            if not other["id"].startswith(doc_prefix) or other["id"] in out:
+                continue
+            if _table_header_of(other["text"]) != header:
+                continue
+            if used + len(other["text"]) > cap_chars:
+                continue
+            out.append(other["id"])
+            used += len(other["text"])
+    return out
+
+
 def best_fact_rank(ranked: Sequence[str], corpus_by_id: Dict[str, Dict], facts: Sequence[str]) -> Tuple[int | None, float]:
     """返回 (第一个含任一事实的片段名次, 该片段的覆盖率)；没有则 (None, 0.0)。
 
@@ -510,6 +556,55 @@ def main() -> int:
                 "chars": sum(len(corpus_by_id[c]["text"]) for c in expanded_div),
                 "ids": expanded_div,
             }
+
+            # 变体 E：**整表回填**——选中的表格行块补齐同表其它行（机制②）
+            refilled = table_refill(seed, corpus, corpus_by_id)
+            frac, hits = coverage([corpus_by_id[c]["text"] for c in refilled], facts)
+            row["stages"]["table_refill"] = {
+                "coverage": round(frac, 2),
+                "chars": sum(len(corpus_by_id[c]["text"]) for c in refilled),
+                "n_chunks": len(refilled),
+                "facts_hit": hits,
+            }
+            # 变体 F：整表回填 + 邻块回填（两个修法叠加）
+            refill_expand: List[str] = []
+            for cid in refilled:
+                for c2 in expand_ids(cid, corpus_by_id, args.expand, not args.expand_cross_heading):
+                    if c2 not in refill_expand:
+                        refill_expand.append(c2)
+            frac, _ = coverage([corpus_by_id[c]["text"] for c in refill_expand], facts)
+            row["stages"]["table_refill_expand"] = {
+                "coverage": round(frac, 2),
+                "chars": sum(len(corpus_by_id[c]["text"]) for c in refill_expand),
+            }
+            # 变体 G：**同表行只占 1 个名额**（机制②的精确修法）
+            # 与「按章节去冗余」的区别：只对「行级表格块」折叠，不惩罚正当的
+            # 相邻块（优雅停机的答案就是同章节相邻两块，按章节去冗余会把它挤走）。
+            seen_tables: set[tuple] = set()
+            picked_dt: List[str] = []
+            for c, _s in ranked_all:
+                header = _table_header_of(corpus_by_id[c]["text"])
+                if header:
+                    key = (c.split("#")[0], header)
+                    if key in seen_tables:
+                        continue
+                    seen_tables.add(key)
+                picked_dt.append(c)
+                if len(picked_dt) == args.final_k:
+                    break
+            frac, hits = coverage([corpus_by_id[c]["text"] for c in picked_dt], facts)
+            row["stages"]["dedupe_table"] = {
+                "coverage": round(frac, 2),
+                "picked": picked_dt,
+                "facts_hit": hits,
+            }
+            # 变体 H：同表折叠 + 整表回填（先选出不同表，再把选中的表补全）
+            dt_refill = table_refill(picked_dt, corpus, corpus_by_id)
+            frac, _ = coverage([corpus_by_id[c]["text"] for c in dt_refill], facts)
+            row["stages"]["dedupe_table_refill"] = {
+                "coverage": round(frac, 2),
+                "chars": sum(len(corpus_by_id[c]["text"]) for c in dt_refill),
+            }
         rows.append(row)
 
     # --- 汇总 ---
@@ -557,6 +652,18 @@ def main() -> int:
             bucket["coverage_diverse_expand"] = _mean(
                 [r["stages"]["diverse_expand"]["coverage"] for r in subset if r["stages"]]
             )
+            bucket["coverage_table_refill"] = _mean(
+                [r["stages"]["table_refill"]["coverage"] for r in subset if r["stages"]]
+            )
+            bucket["coverage_table_refill_expand"] = _mean(
+                [r["stages"]["table_refill_expand"]["coverage"] for r in subset if r["stages"]]
+            )
+            bucket["coverage_dedupe_table"] = _mean(
+                [r["stages"]["dedupe_table"]["coverage"] for r in subset if r["stages"]]
+            )
+            bucket["coverage_dedupe_table_refill"] = _mean(
+                [r["stages"]["dedupe_table_refill"]["coverage"] for r in subset if r["stages"]]
+            )
             chars = [r["stages"]["expand"]["chars"] for r in subset if r["stages"]]
             bucket["avg_expanded_chars"] = int(sum(chars) / len(chars)) if chars else 0
         summary["by_kind"][kind] = bucket
@@ -567,7 +674,8 @@ def main() -> int:
 
     header = f"{'题型':<8} {'问题':<30} {'sparse':>6} {'dense':>5} {'fused':>5}"
     if rerank_scores:
-        header += "".join(f"{'cov@' + str(n):>8}" for n in rerank_ns) + f"{'无目录':>8}{'+邻块':>8}{'去冗余':>8}{'去+扩':>8}"
+        header += ("".join(f"{'cov@' + str(n):>8}" for n in rerank_ns)
+                   + f"{'+邻块':>8}{'同表1':>8}{'同表+整表':>10}")
     print("\n" + header)
     print("-" * len(header))
     for r in rows:
@@ -575,10 +683,9 @@ def main() -> int:
         line = f"{r['kind']:<8} {(r['question'] + mark)[:28]:<30} {_fmt(r['sparse_rank']):>6} {_fmt(r['dense_rank']):>5} {_fmt(r['fused_rank']):>5}"
         if rerank_scores:
             line += "".join(f"{r['stages'][f'rerank_n{n}']['coverage']:>8.2f}" for n in rerank_ns)
-            line += (f"{r['stages']['notoc_n3']['coverage']:>8.2f}"
-                     f"{r['stages']['expand']['coverage']:>8.2f}"
-                     f"{r['stages']['diverse']['coverage']:>8.2f}"
-                     f"{r['stages']['diverse_expand']['coverage']:>8.2f}")
+            line += (f"{r['stages']['expand']['coverage']:>8.2f}"
+                     f"{r['stages']['dedupe_table']['coverage']:>8.2f}"
+                     f"{r['stages']['dedupe_table_refill']['coverage']:>10.2f}")
         print(line)
 
     print("\n[汇总] 事实点覆盖率（top-%d 拼起来覆盖了几个事实点）" % args.final_k)
@@ -591,8 +698,10 @@ def main() -> int:
             line += " | " + " ".join(f"n{n}={bucket[f'coverage_at_n{n}']:.2f}" for n in rerank_ns)
             line += (f" | 无目录={bucket['coverage_no_toc']:.2f}"
                      f" +邻块={bucket['coverage_expanded']:.2f}"
-                     f" 去冗余={bucket['coverage_diverse']:.2f}"
-                     f" 去冗余+邻块={bucket['coverage_diverse_expand']:.2f}"
+                     f" 整表={bucket['coverage_table_refill']:.2f}"
+                     f" 同表折叠={bucket['coverage_dedupe_table']:.2f}"
+                     f" 同表折叠+整表={bucket['coverage_dedupe_table_refill']:.2f}"
+                     f" | 已排除：去冗余={bucket['coverage_diverse']:.2f}"
                      f"（平均 {bucket['avg_expanded_chars']} 字符）")
         print(line)
 

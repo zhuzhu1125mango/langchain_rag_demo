@@ -125,3 +125,85 @@ def test_probe_dependencies_still_importable():
 
     assert callable(build_index) and callable(rank_with_index)
     assert callable(rrf_fuse) and callable(build_reranker)
+
+
+class TestTableHeaderOf:
+    """行级表格块识别：决定「整表回填」能不能触发，误判会把无关块拉进上下文。"""
+
+    def test_row_chunk_returns_header(self):
+        from probe_retrieval_stages import _table_header_of
+
+        text = "监控 > 指标\n| 指标 | 类型 |\n| rag_request_total | Counter |"
+        assert _table_header_of(text) == "| 指标 | 类型 |"
+
+    def test_full_table_chunk_is_not_row_chunk(self):
+        """三行以上的表格块已经是一整张表，不需要再回填。"""
+        from probe_retrieval_stages import _table_header_of
+
+        text = "监控 > 指标\n| 指标 | 类型 |\n| a | Counter |\n| b | Gauge |"
+        assert _table_header_of(text) is None
+
+    def test_prose_chunk_returns_none(self):
+        from probe_retrieval_stages import _table_header_of
+
+        assert _table_header_of("监控 > 概述\n这里是一段说明文字，没有表格。") is None
+
+    def test_heading_path_alone_is_not_table(self):
+        """只有 heading_path 没有正文时不能误判成表头。"""
+        from probe_retrieval_stages import _table_header_of
+
+        assert _table_header_of("监控 > 指标") is None
+
+
+class TestTableRefill:
+    def _corpus(self):
+        return [
+            # 同一张表的三行
+            _chunk("deployment.md", 0, "监控 > 指标", "监控 > 指标\n| 指标 | 类型 |\n| rag_request_total | Counter |"),
+            _chunk("deployment.md", 1, "监控 > 指标", "监控 > 指标\n| 指标 | 类型 |\n| rag_active_requests | Gauge |"),
+            _chunk("deployment.md", 2, "监控 > 指标", "监控 > 指标\n| 指标 | 类型 |\n| rag_llm_calls_total | Counter |"),
+            # 同文档的另一张表
+            _chunk("deployment.md", 3, "监控 > 告警", "监控 > 告警\n| 告警 | 触发条件 |\n| ScrapeTargetDown | up == 0 |"),
+            # 另一个文档的同名表头（不能跨文档回填）
+            _chunk("other.md", 0, "监控 > 指标", "监控 > 指标\n| 指标 | 类型 |\n| other_metric | Counter |"),
+        ]
+
+    def test_refills_same_table_only(self):
+        from probe_retrieval_stages import table_refill
+
+        corpus = self._corpus()
+        by_id = {c["id"]: c for c in corpus}
+
+        out = table_refill(["deployment.md#0"], corpus, by_id)
+
+        assert set(out) == {"deployment.md#0", "deployment.md#1", "deployment.md#2"}
+
+    def test_does_not_pull_other_tables_or_documents(self):
+        from probe_retrieval_stages import table_refill
+
+        corpus = self._corpus()
+        by_id = {c["id"]: c for c in corpus}
+
+        out = table_refill(["deployment.md#0"], corpus, by_id)
+
+        assert "deployment.md#3" not in out, "别的表不能混进来"
+        assert "other.md#0" not in out, "别的文档不能混进来"
+
+    def test_respects_char_cap(self):
+        """字符上限兜底：大表分多批，不能把上下文撑爆。"""
+        from probe_retrieval_stages import table_refill
+
+        corpus = self._corpus()
+        by_id = {c["id"]: c for c in corpus}
+
+        out = table_refill(["deployment.md#0"], corpus, by_id, cap_chars=80)
+
+        assert out == ["deployment.md#0"], "超出上限的兄弟行不该被拉进来"
+
+    def test_non_table_chunk_is_untouched(self):
+        from probe_retrieval_stages import table_refill
+
+        corpus = self._corpus() + [_chunk("deployment.md", 4, "监控 > 概述", "监控 > 概述\n纯文字段落。")]
+        by_id = {c["id"]: c for c in corpus}
+
+        assert table_refill(["deployment.md#4"], corpus, by_id) == ["deployment.md#4"]
