@@ -58,6 +58,26 @@ class KbStageMixin:
             queries=queries,
         )
 
+        # 标记「本次确实检索过」：即使下面判为不相关、docs 被清空，
+        # 生成阶段也要据此说「知识库里没有」，而不是切到纯聊天模式去编答案。
+        state.kb_retrieval_attempted = True
+
+        # C11：检索结果必须落 trace，且**必须在相关性判定之前**记录。
+        # 判定为「不相关」时下面会把 state.docs 清空，若在清空后才写，
+        # 恰好丢掉最需要复盘的那批题：看 trace 只见空结果，分不清
+        # 「没检索到」和「检索到但被判定不相关」——两者的修法完全不同。
+        # 只记候选与分数，不改变主链路行为；可观测性失败不能拖垮问答。
+        if state.trace is not None:
+            try:
+                state.trace.set_kb_results(state.docs)
+            except Exception as exc:  # noqa: BLE001 - best-effort
+                log_exception(
+                    logger,
+                    exc,
+                    action="pipeline.kb.trace_kb_results",
+                    message="检索结果写入 trace 失败（不影响问答）",
+                )
+
         kb_search_duration = int((time.time() - kb_search_start) * 1000)
         if state.docs and len(state.docs) > 0:
             _retrieval_score, has_relevant = await self._calculate_relevance(state.resolved_question, state.docs)

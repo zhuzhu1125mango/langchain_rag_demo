@@ -8,6 +8,7 @@ from src.services.context_builder import estimate_token_count
 from src.services.output_sanitizer import OutputSanitizer
 from src.services.pipeline.state import (
     KB_ANSWER_TEMPLATE,
+    KB_MISS_TEMPLATE,
     LLM_DIRECT_TEMPLATE,
     _PipelineState,
 )
@@ -45,6 +46,31 @@ def _kb_source_to_doc(src: dict):
             "score": src.get("score", 0.0),
         },
     )
+
+def _build_no_context_prompt(state) -> tuple[str, str]:
+    """没有检索上下文时选择提示词，返回 (answer_type, prompt)。
+
+    两种情况必须分开，因为对用户的含义完全不同：
+
+    - **检索过知识库但没命中**（``kb_retrieval_attempted``）：用户以为自己在问
+      这个知识库，模型若用自己的知识作答，答案看起来专业、实际没有出处。
+      必须显式声明「知识库中没有找到」，这是可验证的拒答，而不是免责声明。
+    - **压根没检索**（纯聊天/闲聊）：正常基于模型知识回答，无需声明。
+
+    此前两者共用 ``LLM_DIRECT_TEMPLATE``，而那句模板开头写的是
+    「本次联网搜索未能返回有效结果，请基于你已有的知识回答」——等于把
+    「知识库里没有」翻译成「请你编一个」，问系统架构就会答成泛泛而谈。
+    """
+    if state.kb_retrieval_attempted:
+        return "kb_miss", KB_MISS_TEMPLATE.format(
+            history=state.history_context,
+            question=state.resolved_question,
+        )
+    return "llm_direct", LLM_DIRECT_TEMPLATE.format(
+        history=state.history_context,
+        question=state.resolved_question,
+    )
+
 
 class GenerationStagesMixin:
     """阶段 9 答案生成，由 PipelineStagesMixin 组合。"""
@@ -194,11 +220,7 @@ class GenerationStagesMixin:
             if PROMETHEUS_AVAILABLE:
                 record_kb_query("llm_direct")
 
-            state.answer_type = "llm_direct"
-            prompt = LLM_DIRECT_TEMPLATE.format(
-                history=state.history_context,
-                question=state.resolved_question,
-            )
+            state.answer_type, prompt = _build_no_context_prompt(state)
             answer_generate_start = time.time()
             yield ("reasoning", self._reasoning_payload(
                 REASONING_STEP_ANSWER_GENERATE,

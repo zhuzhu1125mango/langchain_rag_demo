@@ -48,6 +48,18 @@ class FinalizeStagesMixin:
             _wiki_nav = summarize_wiki_nav(_request_wiki_nav.get())
             if _wiki_nav:
                 state.trace.add_stage("wiki_nav", "done", latency_ms=0, detail=_wiki_nav)
+            # C11：联网检索结果此前从不落库（set_search_results 定义了却无人调用）。
+            # web 来源在 agent / phase2 等多处赋值，逐个改点容易漏，统一在收尾补写。
+            if state.web_sources_for_citation:
+                try:
+                    state.trace.set_search_results(state.web_sources_for_citation)
+                except Exception as exc:  # noqa: BLE001 - 可观测性失败不影响问答
+                    log_exception(
+                        logger,
+                        exc,
+                        action="pipeline.finalize.trace_search_results",
+                        message="联网来源写入 trace 失败（忽略）",
+                    )
             state.trace.set_final_answer(state.final_answer)
             state.trace.finish()
             state.trace.save_background()
