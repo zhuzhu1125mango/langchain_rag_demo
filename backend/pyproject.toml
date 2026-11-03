@@ -12,8 +12,8 @@ classifiers = [
 dependencies = [
     "fastapi==0.136.3",
     "uvicorn==0.49.0",
-    "pydantic==2.14.1",
-    "pydantic-settings==2.16.1",
+    "pydantic==2.14.2",
+    "pydantic-settings==2.16.2",
     "python-multipart==0.0.32",
     "PyYAML>=6.0.2,<7",
     "click==8.5.0",
@@ -27,7 +27,7 @@ dependencies = [
     "langchain-core==1.4.1",
     "langchain-text-splitters==1.1.2",
     "langchain-ollama==1.1.0",
-    "langsmith==0.14.12",
+    "langsmith==0.14.16",
     "pymilvus==3.0.2",
     "pymilvus-model==0.3.2",
     "minio==7.2.20",
@@ -67,9 +67,9 @@ dependencies = [
     "tenacity==9.2.1",
     "backoff==2.2.1",
     "aiofiles==25.1.0",
-    "cachetools==7.2.4",
+    "cachetools==7.2.7",
     "python-dateutil==2.9.0.post0",
-    "pytz==2026.5",
+    "pytz==2026.6",
     "certifi==2026.10.23",
     "charset-normalizer==3.5.2",
     # OPS-6：filelock 4.x 修复 CVE-2026-112940，但 unstructured（含最新 0.27.x）
@@ -87,7 +87,7 @@ dependencies = [
     # gradio>=6.8 与主依赖冲突，故 4.x 的 3 条 CVE 在 .trivyignore 登记并限制加载来源。
     "pillow>=13.0.0",
     "urllib3>=2.8.0",
-    "grpcio==1.84.1",
+    "grpcio==1.85.1",
     "protobuf==7.36.2",
     "rich==15.0.0",
     "markdown-it-py==4.2.0",
@@ -112,13 +112,13 @@ start = "start:main"
 
 [dependency-groups]
 dev = [
-    "pytest==9.1.1",
-    "pytest-asyncio==1.4.0",
+    "pytest==9.2.0",
+    "pytest-asyncio==1.4.1",
     "pytest-cov==7.1.0",
     "pytest-mock==3.17.0",
     "black==26.10.1",
     "isort==9.0.2",
-    "flake8==7.4.1",
+    "flake8==7.5.0",
     "pytest-timeout>=2.4.0",
 ]
 demo = [
