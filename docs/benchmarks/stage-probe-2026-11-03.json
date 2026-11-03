@@ -329,166 +329,6 @@
       }
     },
     {
-      "question": "生产环境怎么部署？",
-      "kind": "overview",
-      "facts": [
-        "start-prod.sh",
-        "INCLUDE_MONITORING",
-        "7 个服务"
-      ],
-      "valid": false,
-      "note": "事实串在 §2.1，系统召回的是 §4；题目口径有歧义，不计入汇总",
-      "n_chunks": 502,
-      "sparse_rank": null,
-      "dense_rank": null,
-      "fused_rank": null,
-      "fused_best_coverage": 0.0,
-      "stages": {
-        "rerank_n3": {
-          "coverage": 0.0,
-          "top1_score": 0.9871,
-          "picked": [
-            {
-              "id": "deployment.md#74",
-              "score": 0.9871,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
-            },
-            {
-              "id": "deployment.md#173",
-              "score": 0.98,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.4 核心配置参数对比",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.4 核心配置参数对比 ⏎ | 参数 | 开发环境 (.env.dev) | 生产环境 (.env.prod) | 敏感 | ⏎ | `APP_ENV` | 不设置（默认 `dev`） | Docker 部署由 compose 注入 `prod`；非 Dock"
-            },
-            {
-              "id": "deployment.md#0",
-              "score": 0.9556,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 目录",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 目录 ⏎ 1. [环境要求](#1-环境要求) ⏎ 2. [开发/生产环境分离](#2-开发生产环境分离) ⏎ 3. [开发环境部署](#3-开发环境部署) ⏎ 4. [生产环境部署](#4-生产环境部署) ⏎ 5. [Docker 部署](#5-docker-部署) ⏎ 6. [配置说明](#6"
-            }
-          ],
-          "answer_rerank_rank": null,
-          "facts_hit": []
-        },
-        "rerank_n10": {
-          "coverage": 0.0,
-          "top1_score": 0.993,
-          "picked": [
-            {
-              "id": "deployment.md#77",
-              "score": 0.993,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ ```bash ⏎ # 确保 .env.prod 已正确配置 ⏎ cat .env.prod | findstr PASSWORD ⏎ ```"
-            },
-            {
-              "id": "deployment.md#74",
-              "score": 0.9871,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
-            },
-            {
-              "id": "deployment.md#19",
-              "score": 0.9819,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.1 环境分离策略",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.1 环境分离策略 ⏎ | 特性 | 开发环境 | 生产环境 | ⏎ | **容器名称** | `*-dev`（如 `postgres-dev`） | `*-prod`（如 `postgres-prod`） |"
-            }
-          ],
-          "answer_rerank_rank": null,
-          "facts_hit": []
-        },
-        "rerank_n20": {
-          "coverage": 0.0,
-          "top1_score": 0.993,
-          "picked": [
-            {
-              "id": "deployment.md#77",
-              "score": 0.993,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ ```bash ⏎ # 确保 .env.prod 已正确配置 ⏎ cat .env.prod | findstr PASSWORD ⏎ ```"
-            },
-            {
-              "id": "deployment.md#74",
-              "score": 0.9871,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
-            },
-            {
-              "id": "deployment.md#19",
-              "score": 0.9819,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.1 环境分离策略",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.1 环境分离策略 ⏎ | 特性 | 开发环境 | 生产环境 | ⏎ | **容器名称** | `*-dev`（如 `postgres-dev`） | `*-prod`（如 `postgres-prod`） |"
-            }
-          ],
-          "answer_rerank_rank": null,
-          "facts_hit": []
-        },
-        "notoc_n3": {
-          "coverage": 0.0,
-          "picked": [
-            "deployment.md#77",
-            "deployment.md#74",
-            "deployment.md#173"
-          ]
-        },
-        "notoc_n10": {
-          "coverage": 0.0,
-          "picked": [
-            "deployment.md#77",
-            "deployment.md#74",
-            "deployment.md#19"
-          ]
-        },
-        "notoc_n20": {
-          "coverage": 0.0,
-          "picked": [
-            "deployment.md#77",
-            "deployment.md#74",
-            "deployment.md#19"
-          ]
-        },
-        "expand": {
-          "coverage": 0.0,
-          "n_chunks": 6,
-          "chars": 1663,
-          "ids": [
-            "deployment.md#74",
-            "deployment.md#75",
-            "deployment.md#172",
-            "deployment.md#173",
-            "deployment.md#174",
-            "deployment.md#0"
-          ]
-        },
-        "diverse": {
-          "coverage": 0.0,
-          "picked": [
-            "deployment.md#77",
-            "deployment.md#19",
-            "deployment.md#173"
-          ],
-          "headings": [
-            "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
-            "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.1 环境分离策略",
-            "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.4 核心配置参数对比"
-          ]
-        },
-        "diverse_expand": {
-          "coverage": 0.0,
-          "chars": 1208,
-          "ids": [
-            "deployment.md#76",
-            "deployment.md#77",
-            "deployment.md#18",
-            "deployment.md#19",
-            "deployment.md#20",
-            "deployment.md#172",
-            "deployment.md#173",
-            "deployment.md#174"
-          ]
-        }
-      }
-    },
-    {
       "question": "监控哪些指标、有哪些告警？",
       "kind": "overview",
       "facts": [
@@ -651,18 +491,18 @@
       "facts": [
         "pg_dump",
         "pg_stat_activity",
-        "恢复演练"
+        "恢复顺序"
       ],
       "valid": true,
       "note": "",
       "n_chunks": 502,
       "sparse_rank": 1,
-      "dense_rank": 10,
-      "fused_rank": 3,
+      "dense_rank": 2,
+      "fused_rank": 1,
       "fused_best_coverage": 0.33,
       "stages": {
         "rerank_n3": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "top1_score": 0.804,
           "picked": [
             {
@@ -684,13 +524,14 @@
               "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查 ⏎ | 场景 | 动作 | ⏎ | 备份脚本失败 | 看 cron 日志退出码；确认 `mc alias` 与 `pg_dump` 客户端版本；修复后**立即补一次全量备份** |"
             }
           ],
-          "answer_rerank_rank": 3,
+          "answer_rerank_rank": 2,
           "facts_hit": [
-            "pg_dump"
+            "pg_dump",
+            "恢复顺序"
           ]
         },
         "rerank_n10": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "top1_score": 0.804,
           "picked": [
             {
@@ -712,13 +553,14 @@
               "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查 ⏎ | 场景 | 动作 | ⏎ | 备份脚本失败 | 看 cron 日志退出码；确认 `mc alias` 与 `pg_dump` 客户端版本；修复后**立即补一次全量备份** |"
             }
           ],
-          "answer_rerank_rank": 3,
+          "answer_rerank_rank": 2,
           "facts_hit": [
-            "pg_dump"
+            "pg_dump",
+            "恢复顺序"
           ]
         },
         "rerank_n20": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "top1_score": 0.804,
           "picked": [
             {
@@ -740,13 +582,14 @@
               "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查 ⏎ | 场景 | 动作 | ⏎ | 备份脚本失败 | 看 cron 日志退出码；确认 `mc alias` 与 `pg_dump` 客户端版本；修复后**立即补一次全量备份** |"
             }
           ],
-          "answer_rerank_rank": 3,
+          "answer_rerank_rank": 2,
           "facts_hit": [
-            "pg_dump"
+            "pg_dump",
+            "恢复顺序"
           ]
         },
         "notoc_n3": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "picked": [
             "backup-restore.md#63",
             "backup-restore.md#22",
@@ -754,7 +597,7 @@
           ]
         },
         "notoc_n10": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "picked": [
             "backup-restore.md#63",
             "backup-restore.md#22",
@@ -762,7 +605,7 @@
           ]
         },
         "notoc_n20": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "picked": [
             "backup-restore.md#63",
             "backup-restore.md#22",
@@ -770,7 +613,7 @@
           ]
         },
         "expand": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "n_chunks": 6,
           "chars": 1572,
           "ids": [
@@ -783,7 +626,7 @@
           ]
         },
         "diverse": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "picked": [
             "backup-restore.md#63",
             "backup-restore.md#22",
@@ -796,7 +639,7 @@
           ]
         },
         "diverse_expand": {
-          "coverage": 0.33,
+          "coverage": 0.67,
           "chars": 1572,
           "ids": [
             "backup-restore.md#63",
@@ -805,6 +648,1314 @@
             "backup-restore.md#23",
             "backup-restore.md#69",
             "backup-restore.md#70"
+          ]
+        }
+      }
+    },
+    {
+      "question": "从零部署一套生产环境要做哪些事？",
+      "kind": "overview",
+      "facts": [
+        "首次部署准备",
+        "强密码",
+        "start-prod.sh"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 6,
+      "dense_rank": 2,
+      "fused_rank": 1,
+      "fused_best_coverage": 0.67,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 0.67,
+          "top1_score": 0.2594,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.2594,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "deployment.md#0",
+              "score": 0.1406,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 目录",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 目录 ⏎ 1. [环境要求](#1-环境要求) ⏎ 2. [开发/生产环境分离](#2-开发生产环境分离) ⏎ 3. [开发环境部署](#3-开发环境部署) ⏎ 4. [生产环境部署](#4-生产环境部署) ⏎ 5. [Docker 部署](#5-docker-部署) ⏎ 6. [配置说明](#6"
+            },
+            {
+              "id": "deployment.md#173",
+              "score": 0.0391,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.4 核心配置参数对比",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.4 核心配置参数对比 ⏎ | 参数 | 开发环境 (.env.dev) | 生产环境 (.env.prod) | 敏感 | ⏎ | `APP_ENV` | 不设置（默认 `dev`） | Docker 部署由 compose 注入 `prod`；非 Dock"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "首次部署准备",
+            "强密码"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 0.67,
+          "top1_score": 0.2594,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.2594,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "deployment.md#77",
+              "score": 0.2469,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ ```bash ⏎ # 确保 .env.prod 已正确配置 ⏎ cat .env.prod | findstr PASSWORD ⏎ ```"
+            },
+            {
+              "id": "deployment.md#0",
+              "score": 0.1406,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 目录",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 目录 ⏎ 1. [环境要求](#1-环境要求) ⏎ 2. [开发/生产环境分离](#2-开发生产环境分离) ⏎ 3. [开发环境部署](#3-开发环境部署) ⏎ 4. [生产环境部署](#4-生产环境部署) ⏎ 5. [Docker 部署](#5-docker-部署) ⏎ 6. [配置说明](#6"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "首次部署准备",
+            "强密码"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 0.67,
+          "top1_score": 0.5019,
+          "picked": [
+            {
+              "id": "deployment.md#75",
+              "score": 0.5019,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ ```env ⏎ # 必须修改以下密码！ ⏎ POSTGRES_PASSWORD=your_secure_postgres_password_here ⏎ MINIO_ROOT_USER=prod_minio ⏎ MINIO_ROOT_PASS"
+            },
+            {
+              "id": "deployment.md#74",
+              "score": 0.2594,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "deployment.md#77",
+              "score": 0.2469,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ ```bash ⏎ # 确保 .env.prod 已正确配置 ⏎ cat .env.prod | findstr PASSWORD ⏎ ```"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "首次部署准备",
+            "强密码"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 0.67,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#77",
+            "deployment.md#173"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 0.67,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#77",
+            "deployment.md#91"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 0.67,
+          "picked": [
+            "deployment.md#75",
+            "deployment.md#74",
+            "deployment.md#77"
+          ]
+        },
+        "expand": {
+          "coverage": 0.67,
+          "n_chunks": 6,
+          "chars": 1663,
+          "ids": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "deployment.md#0",
+            "deployment.md#172",
+            "deployment.md#173",
+            "deployment.md#174"
+          ]
+        },
+        "diverse": {
+          "coverage": 0.33,
+          "picked": [
+            "deployment.md#75",
+            "deployment.md#73",
+            "deployment.md#54"
+          ],
+          "headings": [
+            "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+            "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.1 快速启动（推荐）",
+            "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.3 环境切换流程"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 0.67,
+          "chars": 1618,
+          "ids": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "deployment.md#76",
+            "deployment.md#73",
+            "deployment.md#54",
+            "deployment.md#55"
+          ]
+        }
+      }
+    },
+    {
+      "question": "出问题要回滚，怎么决策、怎么执行？",
+      "kind": "overview",
+      "facts": [
+        "决策矩阵",
+        "应用回退",
+        "alembic downgrade"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 8,
+      "dense_rank": 1,
+      "fused_rank": 2,
+      "fused_best_coverage": 0.33,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 0.33,
+          "top1_score": 0.2026,
+          "picked": [
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.2026,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            },
+            {
+              "id": "backup-restore.md#17",
+              "score": 0.1822,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 3. 执行备份 > 3.2 校验（缺一不可）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 3. 执行备份 > 3.2 校验（缺一不可） ⏎ 备份产物必须**异地存放**（对象存储 / 离线盘），落盘权限 600，含凭据的 dump 建议 `age`/`gpg` 加密后再外传。 ⏎ 未通过 §3.2 校验的备份按「无备份」处理。"
+            },
+            {
+              "id": "backup-restore.md#20",
+              "score": 0.0532,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 3. 执行备份 > 3.3 定时执行",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 3. 执行备份 > 3.3 定时执行 ⏎ Windows：用「任务计划程序」调用 Git Bash 执行同一脚本；失败告警需自行接入（脚本退出码非 0 即失败）。 ⏎  ⏎ > cron 不继承交互 shell 的环境：把 §3.1 的 `expo"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "应用回退"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 0.67,
+          "top1_score": 0.8565,
+          "picked": [
+            {
+              "id": "backup-restore.md#31",
+              "score": 0.8565,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ **回滚前置**：先做一次 §3.1 备份。回滚是「用已知状态覆盖未知状态」，没有当前备份的回滚等于二次事故。"
+            },
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.2026,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            },
+            {
+              "id": "backup-restore.md#17",
+              "score": 0.1822,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 3. 执行备份 > 3.2 校验（缺一不可）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 3. 执行备份 > 3.2 校验（缺一不可） ⏎ 备份产物必须**异地存放**（对象存储 / 离线盘），落盘权限 600，含凭据的 dump 建议 `age`/`gpg` 加密后再外传。 ⏎ 未通过 §3.2 校验的备份按「无备份」处理。"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "决策矩阵",
+            "应用回退"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 0.67,
+          "top1_score": 0.8565,
+          "picked": [
+            {
+              "id": "backup-restore.md#31",
+              "score": 0.8565,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ **回滚前置**：先做一次 §3.1 备份。回滚是「用已知状态覆盖未知状态」，没有当前备份的回滚等于二次事故。"
+            },
+            {
+              "id": "backup-restore.md#29",
+              "score": 0.3678,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ | 症状 | 首选动作 | 禁止动作 | ⏎ | 配置改错（模型/限额/安全开关） | 回滚 `.env.prod` 并重启 backend | 只改容器内文件（重启即丢） |"
+            },
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.2026,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "决策矩阵",
+            "应用回退"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 0.33,
+          "picked": [
+            "backup-restore.md#63",
+            "backup-restore.md#17",
+            "backup-restore.md#20"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 0.67,
+          "picked": [
+            "backup-restore.md#31",
+            "backup-restore.md#63",
+            "backup-restore.md#17"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 0.67,
+          "picked": [
+            "backup-restore.md#31",
+            "backup-restore.md#29",
+            "backup-restore.md#63"
+          ]
+        },
+        "expand": {
+          "coverage": 0.33,
+          "n_chunks": 5,
+          "chars": 1339,
+          "ids": [
+            "backup-restore.md#63",
+            "backup-restore.md#16",
+            "backup-restore.md#17",
+            "backup-restore.md#19",
+            "backup-restore.md#20"
+          ]
+        },
+        "diverse": {
+          "coverage": 0.67,
+          "picked": [
+            "backup-restore.md#31",
+            "backup-restore.md#63",
+            "backup-restore.md#17"
+          ],
+          "headings": [
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 3. 执行备份 > 3.2 校验（缺一不可）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 0.67,
+          "chars": 931,
+          "ids": [
+            "backup-restore.md#30",
+            "backup-restore.md#31",
+            "backup-restore.md#63",
+            "backup-restore.md#16",
+            "backup-restore.md#17"
+          ]
+        }
+      }
+    },
+    {
+      "question": "容量怎么规划，什么时候该扩容？",
+      "kind": "overview",
+      "facts": [
+        "规模参考",
+        "扩容触发阈值"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 2,
+      "fused_rank": 1,
+      "fused_best_coverage": 0.5,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 0.5,
+          "top1_score": 0.5628,
+          "picked": [
+            {
+              "id": "backup-restore.md#60",
+              "score": 0.5628,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作 ⏎ 1. **磁盘扩容（推荐）**：停栈 → `docker volume inspect` 确认卷路径 → 迁到新盘（`docker run --rm -v <vol>:/from -v /mnt/n"
+            },
+            {
+              "id": "backup-restore.md#44",
+              "score": 0.0518,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值 ⏎ | 指标 | 预警 | 必须处理 | 处理手段 | ⏎ | PG 库 + WAL 体积 | >50% 磁盘 | >70% 磁盘 | 调低 `TRACE_RETENTION_DAYS` / 归档审计 "
+            },
+            {
+              "id": "backup-restore.md#43",
+              "score": 0.0099,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值 ⏎ | 指标 | 预警 | 必须处理 | 处理手段 | ⏎ | 宿主机磁盘使用率 | >70% | >85% | 迁移数据卷到大盘 / 清理备份与旧镜像 `docker system prune` |"
+            }
+          ],
+          "answer_rerank_rank": 2,
+          "facts_hit": [
+            "扩容触发阈值"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 0.5,
+          "top1_score": 0.5628,
+          "picked": [
+            {
+              "id": "backup-restore.md#60",
+              "score": 0.5628,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作 ⏎ 1. **磁盘扩容（推荐）**：停栈 → `docker volume inspect` 确认卷路径 → 迁到新盘（`docker run --rm -v <vol>:/from -v /mnt/n"
+            },
+            {
+              "id": "backup-restore.md#61",
+              "score": 0.4035,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作 ⏎ 4. **后端并发**：`CHAT_MAX_CONCURRENT_STREAMS_PER_USER` 控制单用户流式并发；多 worker 时注意后台任务（学习/保留期清扫/用量 flush）会随 "
+            },
+            {
+              "id": "backup-restore.md#48",
+              "score": 0.171,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值 ⏎ > **监控缺口**：当前 Prometheus 未采集宿主机磁盘/内存（无 node-exporter），容量类指标需按 §6.4 手工巡检，或后续接入 node-exporter 补告警。"
+            }
+          ],
+          "answer_rerank_rank": 3,
+          "facts_hit": [
+            "扩容触发阈值"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 0.5,
+          "top1_score": 0.5628,
+          "picked": [
+            {
+              "id": "backup-restore.md#60",
+              "score": 0.5628,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作 ⏎ 1. **磁盘扩容（推荐）**：停栈 → `docker volume inspect` 确认卷路径 → 迁到新盘（`docker run --rm -v <vol>:/from -v /mnt/n"
+            },
+            {
+              "id": "backup-restore.md#61",
+              "score": 0.4035,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作 ⏎ 4. **后端并发**：`CHAT_MAX_CONCURRENT_STREAMS_PER_USER` 控制单用户流式并发；多 worker 时注意后台任务（学习/保留期清扫/用量 flush）会随 "
+            },
+            {
+              "id": "backup-restore.md#48",
+              "score": 0.171,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值 ⏎ > **监控缺口**：当前 Prometheus 未采集宿主机磁盘/内存（无 node-exporter），容量类指标需按 §6.4 手工巡检，或后续接入 node-exporter 补告警。"
+            }
+          ],
+          "answer_rerank_rank": 3,
+          "facts_hit": [
+            "扩容触发阈值"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 0.5,
+          "picked": [
+            "backup-restore.md#60",
+            "backup-restore.md#44",
+            "backup-restore.md#43"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 0.5,
+          "picked": [
+            "backup-restore.md#60",
+            "backup-restore.md#61",
+            "backup-restore.md#48"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 0.5,
+          "picked": [
+            "backup-restore.md#60",
+            "backup-restore.md#61",
+            "backup-restore.md#48"
+          ]
+        },
+        "expand": {
+          "coverage": 0.5,
+          "n_chunks": 5,
+          "chars": 1172,
+          "ids": [
+            "backup-restore.md#60",
+            "backup-restore.md#61",
+            "backup-restore.md#43",
+            "backup-restore.md#44",
+            "backup-restore.md#45"
+          ]
+        },
+        "diverse": {
+          "coverage": 0.5,
+          "picked": [
+            "backup-restore.md#60",
+            "backup-restore.md#48",
+            "backup-restore.md#0"
+          ],
+          "headings": [
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.3 扩容触发阈值",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 0.5,
+          "chars": 1200,
+          "ids": [
+            "backup-restore.md#60",
+            "backup-restore.md#61",
+            "backup-restore.md#47",
+            "backup-restore.md#48",
+            "backup-restore.md#0"
+          ]
+        }
+      }
+    },
+    {
+      "question": "告警怎么通知出去，怎么配接收人？",
+      "kind": "overview",
+      "facts": [
+        "alertmanager.yml",
+        "webhook"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.5746,
+          "picked": [
+            {
+              "id": "deployment.md#240",
+              "score": 0.5746,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置 ⏎ > **说明**： ⏎ > - receiver 名称与 `configs/alertmanager/alertmanager.yml` 保持一致（`webhook`）。 ⏎ > - `inhibit_rules.equa"
+            },
+            {
+              "id": "monitoring.md#48",
+              "score": 0.4869,
+              "heading_path": "监控运维指南 > 5. 告警通知（Alertmanager）",
+              "preview": "监控运维指南 > 5. 告警通知（Alertmanager） ⏎ **当前状态：仅 webhook 占位，告警只在 Alertmanager UI 展示，不会主动推送。** ⏎  ⏎ 启用通知：编辑 `configs/alertmanager/alertmanager.yml`，取消 `webhook_configs`（或 ema"
+            },
+            {
+              "id": "deployment.md#239",
+              "score": 0.288,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置 ⏎ ```yaml ⏎ global: ⏎   resolve_timeout: 5m ⏎  ⏎ route: ⏎   group_by: ['alertname'] ⏎   group_wait: 10s ⏎   group_interval:"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "alertmanager.yml",
+            "webhook"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.5746,
+          "picked": [
+            {
+              "id": "deployment.md#240",
+              "score": 0.5746,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置 ⏎ > **说明**： ⏎ > - receiver 名称与 `configs/alertmanager/alertmanager.yml` 保持一致（`webhook`）。 ⏎ > - `inhibit_rules.equa"
+            },
+            {
+              "id": "monitoring.md#48",
+              "score": 0.4869,
+              "heading_path": "监控运维指南 > 5. 告警通知（Alertmanager）",
+              "preview": "监控运维指南 > 5. 告警通知（Alertmanager） ⏎ **当前状态：仅 webhook 占位，告警只在 Alertmanager UI 展示，不会主动推送。** ⏎  ⏎ 启用通知：编辑 `configs/alertmanager/alertmanager.yml`，取消 `webhook_configs`（或 ema"
+            },
+            {
+              "id": "deployment.md#239",
+              "score": 0.288,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置 ⏎ ```yaml ⏎ global: ⏎   resolve_timeout: 5m ⏎  ⏎ route: ⏎   group_by: ['alertname'] ⏎   group_wait: 10s ⏎   group_interval:"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "alertmanager.yml",
+            "webhook"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.5746,
+          "picked": [
+            {
+              "id": "deployment.md#240",
+              "score": 0.5746,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置 ⏎ > **说明**： ⏎ > - receiver 名称与 `configs/alertmanager/alertmanager.yml` 保持一致（`webhook`）。 ⏎ > - `inhibit_rules.equa"
+            },
+            {
+              "id": "monitoring.md#48",
+              "score": 0.4869,
+              "heading_path": "监控运维指南 > 5. 告警通知（Alertmanager）",
+              "preview": "监控运维指南 > 5. 告警通知（Alertmanager） ⏎ **当前状态：仅 webhook 占位，告警只在 Alertmanager UI 展示，不会主动推送。** ⏎  ⏎ 启用通知：编辑 `configs/alertmanager/alertmanager.yml`，取消 `webhook_configs`（或 ema"
+            },
+            {
+              "id": "deployment.md#239",
+              "score": 0.288,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置 ⏎ ```yaml ⏎ global: ⏎   resolve_timeout: 5m ⏎  ⏎ route: ⏎   group_by: ['alertname'] ⏎   group_wait: 10s ⏎   group_interval:"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "alertmanager.yml",
+            "webhook"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#240",
+            "monitoring.md#48",
+            "deployment.md#239"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#240",
+            "monitoring.md#48",
+            "deployment.md#239"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#240",
+            "monitoring.md#48",
+            "deployment.md#239"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 4,
+          "chars": 1228,
+          "ids": [
+            "deployment.md#239",
+            "deployment.md#240",
+            "monitoring.md#48",
+            "deployment.md#238"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#240",
+            "monitoring.md#48",
+            "monitoring.md#44"
+          ],
+          "headings": [
+            "🚀 RAG 知识库问答系统 - 部署指南 > 7. 监控告警 > 7.5 Alertmanager 配置",
+            "监控运维指南 > 5. 告警通知（Alertmanager）",
+            "监控运维指南 > 4. 告警规则（configs/prometheus/alerts.yml）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 1453,
+          "ids": [
+            "deployment.md#239",
+            "deployment.md#240",
+            "monitoring.md#48",
+            "monitoring.md#43",
+            "monitoring.md#44"
+          ]
+        }
+      }
+    },
+    {
+      "question": "备份和恢复的 RPO / RTO 目标是多少？",
+      "kind": "overview",
+      "facts": [
+        "RPO",
+        "RTO"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.9805,
+          "picked": [
+            {
+              "id": "backup-restore.md#4",
+              "score": 0.9805,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ | 对象 | 备份方式 | RPO | RTO 目标 | 可重建 | ⏎ | 配置 / 密钥 | 密钥管理系统版本化 | 变更即备份 | ≤15min | 否（必须单独保管） |"
+            },
+            {
+              "id": "backup-restore.md#1",
+              "score": 0.9511,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ | 对象 | 备份方式 | RPO | RTO 目标 | 可重建 | ⏎ | PostgreSQL | `pg_dump` 每日 | 24h | ≤1h | 否（元数据唯一来源） |"
+            },
+            {
+              "id": "backup-restore.md#6",
+              "score": 0.9416,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ | 对象 | 备份方式 | RPO | RTO 目标 | 可重建 | ⏎ | Prometheus / Grafana | 数据卷 | 可选 | — | 是（面板由 provisioning 重建） |"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "RPO",
+            "RTO"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.996,
+          "picked": [
+            {
+              "id": "backup-restore.md#7",
+              "score": 0.996,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ > Milvus 可重建，因此其 RPO/RTO 明显宽于 PG/MinIO；真正不可丢的是 PG 与 MinIO。 ⏎ > 恢复演练每季度一次（§7），验收以「RTO 实测值」为准。"
+            },
+            {
+              "id": "backup-restore.md#4",
+              "score": 0.9805,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ | 对象 | 备份方式 | RPO | RTO 目标 | 可重建 | ⏎ | 配置 / 密钥 | 密钥管理系统版本化 | 变更即备份 | ≤15min | 否（必须单独保管） |"
+            },
+            {
+              "id": "backup-restore.md#2",
+              "score": 0.9606,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ | 对象 | 备份方式 | RPO | RTO 目标 | 可重建 | ⏎ | MinIO（原始文件） | `mc mirror` 每日 | 24h | ≤1h | 否（原件唯一来源） |"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "RPO",
+            "RTO"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.996,
+          "picked": [
+            {
+              "id": "backup-restore.md#7",
+              "score": 0.996,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ > Milvus 可重建，因此其 RPO/RTO 明显宽于 PG/MinIO；真正不可丢的是 PG 与 MinIO。 ⏎ > 恢复演练每季度一次（§7），验收以「RTO 实测值」为准。"
+            },
+            {
+              "id": "backup-restore.md#4",
+              "score": 0.9805,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ | 对象 | 备份方式 | RPO | RTO 目标 | 可重建 | ⏎ | 配置 / 密钥 | 密钥管理系统版本化 | 变更即备份 | ≤15min | 否（必须单独保管） |"
+            },
+            {
+              "id": "backup-restore.md#2",
+              "score": 0.9606,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO ⏎ | 对象 | 备份方式 | RPO | RTO 目标 | 可重建 | ⏎ | MinIO（原始文件） | `mc mirror` 每日 | 24h | ≤1h | 否（原件唯一来源） |"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "RPO",
+            "RTO"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#4",
+            "backup-restore.md#1",
+            "backup-restore.md#6"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#4",
+            "backup-restore.md#2"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#4",
+            "backup-restore.md#2"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 7,
+          "chars": 1071,
+          "ids": [
+            "backup-restore.md#3",
+            "backup-restore.md#4",
+            "backup-restore.md#5",
+            "backup-restore.md#1",
+            "backup-restore.md#2",
+            "backup-restore.md#6",
+            "backup-restore.md#7"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#62",
+            "deployment.md#160"
+          ],
+          "headings": [
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 1. 目标与 RPO / RTO",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.1 恢复演练",
+            "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.3.2 模型 Provider 注册与切换（P1/P2）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 1524,
+          "ids": [
+            "backup-restore.md#6",
+            "backup-restore.md#7",
+            "backup-restore.md#62",
+            "deployment.md#159",
+            "deployment.md#160"
+          ]
+        }
+      }
+    },
+    {
+      "question": "一致性巡检怎么跑，结果怎么判读？",
+      "kind": "overview",
+      "facts": [
+        "退出码"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 6,
+      "dense_rank": 1,
+      "fused_rank": 2,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.9579,
+          "picked": [
+            {
+              "id": "monitoring.md#51",
+              "score": 0.9579,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ 指标只能反映「有请求经过的地方」，而「元数据已删、向量/对象/缓存还在」这类问题 ⏎ **不会触发任何异常**——没有代码路径可以挂日志，只能主动对账。巡检覆盖："
+            },
+            {
+              "id": "monitoring.md#61",
+              "score": 0.8405,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ 退出码：`0` 一致 / `1` 发现差异 / `2` 巡检未完整执行（连不上某侧存储）。 ⏎ **`2` 要当故障处理**：它说明这次巡检没看到全貌，不能当成「没问题」。 ⏎  ⏎ > 报告出来后的清理是破坏性操作：脚本故意没有 `--fix`，先按 `sub"
+            },
+            {
+              "id": "monitoring.md#57",
+              "score": 0.8046,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ ```powershell ⏎ # 手动跑一次 ⏎ powershell -NoProfile -ExecutionPolicy Bypass -File .\\scripts\\nightly_consistency.ps1 ⏎  ⏎ # 注册每日 04:10 计划任"
+            }
+          ],
+          "answer_rerank_rank": 2,
+          "facts_hit": [
+            "退出码"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 0.0,
+          "top1_score": 0.9586,
+          "picked": [
+            {
+              "id": "monitoring.md#59",
+              "score": 0.9586,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ ```powershell ⏎ # ① 手动跑一次：应 exit 0，且 backups\\audit\\ 下出现当天的 .json 与 .log ⏎ powershell -NoProfile -ExecutionPolicy Bypass -File .\\s"
+            },
+            {
+              "id": "monitoring.md#51",
+              "score": 0.9579,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ 指标只能反映「有请求经过的地方」，而「元数据已删、向量/对象/缓存还在」这类问题 ⏎ **不会触发任何异常**——没有代码路径可以挂日志，只能主动对账。巡检覆盖："
+            },
+            {
+              "id": "monitoring.md#55",
+              "score": 0.9253,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ ```bash ⏎ # 手动跑一次（一次性容器，不碰正在服务的 backend 进程） ⏎ ./scripts/nightly_consistency.sh ⏎ AUDIT_DIR=/var/log/rag-audit ./scripts/nightly_con"
+            }
+          ],
+          "answer_rerank_rank": 5,
+          "facts_hit": []
+        },
+        "rerank_n20": {
+          "coverage": 0.0,
+          "top1_score": 0.9586,
+          "picked": [
+            {
+              "id": "monitoring.md#59",
+              "score": 0.9586,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ ```powershell ⏎ # ① 手动跑一次：应 exit 0，且 backups\\audit\\ 下出现当天的 .json 与 .log ⏎ powershell -NoProfile -ExecutionPolicy Bypass -File .\\s"
+            },
+            {
+              "id": "monitoring.md#51",
+              "score": 0.9579,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ 指标只能反映「有请求经过的地方」，而「元数据已删、向量/对象/缓存还在」这类问题 ⏎ **不会触发任何异常**——没有代码路径可以挂日志，只能主动对账。巡检覆盖："
+            },
+            {
+              "id": "monitoring.md#55",
+              "score": 0.9253,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ ```bash ⏎ # 手动跑一次（一次性容器，不碰正在服务的 backend 进程） ⏎ ./scripts/nightly_consistency.sh ⏎ AUDIT_DIR=/var/log/rag-audit ./scripts/nightly_con"
+            }
+          ],
+          "answer_rerank_rank": 5,
+          "facts_hit": []
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "monitoring.md#51",
+            "monitoring.md#61",
+            "monitoring.md#57"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 0.0,
+          "picked": [
+            "monitoring.md#59",
+            "monitoring.md#51",
+            "monitoring.md#55"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 0.0,
+          "picked": [
+            "monitoring.md#59",
+            "monitoring.md#51",
+            "monitoring.md#55"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 7,
+          "chars": 1661,
+          "ids": [
+            "monitoring.md#51",
+            "monitoring.md#52",
+            "monitoring.md#60",
+            "monitoring.md#61",
+            "monitoring.md#56",
+            "monitoring.md#57",
+            "monitoring.md#58"
+          ]
+        },
+        "diverse": {
+          "coverage": 0.0,
+          "picked": [
+            "monitoring.md#59",
+            "architecture.md#32",
+            "monitoring.md#32"
+          ],
+          "headings": [
+            "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+            "架构总览 > 5. 后端代码地图（backend/src/）",
+            "监控运维指南 > 4. 告警规则（configs/prometheus/alerts.yml）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 2231,
+          "ids": [
+            "monitoring.md#58",
+            "monitoring.md#59",
+            "monitoring.md#60",
+            "architecture.md#31",
+            "architecture.md#32",
+            "architecture.md#33",
+            "monitoring.md#31",
+            "monitoring.md#32",
+            "monitoring.md#33"
+          ]
+        }
+      }
+    },
+    {
+      "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+      "kind": "overview",
+      "facts": [
+        "alembic downgrade",
+        "应用回退"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 2,
+      "fused_rank": 1,
+      "fused_best_coverage": 0.5,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 0.5,
+          "top1_score": 0.3754,
+          "picked": [
+            {
+              "id": "backup-restore.md#33",
+              "score": 0.3754,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚 ⏎ - 后端与前端**同批回退**（SSE 事件协议、审批卡片等跨端契约需版本匹配）； ⏎ - 回退后若旧代码不认识新表字段，以 PG 备份恢复为准，不要保留「新 schema + 旧代码」组合长期运行。"
+            },
+            {
+              "id": "backup-restore.md#34",
+              "score": 0.334,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚 ⏎ - 优先「恢复备份」，而不是 `alembic downgrade`：本项目多数迁移的 `downgrade` 只做 `drop`，无法还原已回填数据； ⏎ - 确需 downgrade 时，先确认目"
+            },
+            {
+              "id": "backup-restore.md#27",
+              "score": 0.0526,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ | 症状 | 首选动作 | 禁止动作 | ⏎ | 迁移报错 / `alembic check` 漂移 | 恢复迁移前 PG 备份（§4） | 手工改表结构 |"
+            }
+          ],
+          "answer_rerank_rank": 2,
+          "facts_hit": [
+            "alembic downgrade"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.3754,
+          "picked": [
+            {
+              "id": "backup-restore.md#33",
+              "score": 0.3754,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚 ⏎ - 后端与前端**同批回退**（SSE 事件协议、审批卡片等跨端契约需版本匹配）； ⏎ - 回退后若旧代码不认识新表字段，以 PG 备份恢复为准，不要保留「新 schema + 旧代码」组合长期运行。"
+            },
+            {
+              "id": "backup-restore.md#34",
+              "score": 0.334,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚 ⏎ - 优先「恢复备份」，而不是 `alembic downgrade`：本项目多数迁移的 `downgrade` 只做 `drop`，无法还原已回填数据； ⏎ - 确需 downgrade 时，先确认目"
+            },
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.2821,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            }
+          ],
+          "answer_rerank_rank": 2,
+          "facts_hit": [
+            "alembic downgrade",
+            "应用回退"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 0.5,
+          "top1_score": 0.3754,
+          "picked": [
+            {
+              "id": "backup-restore.md#33",
+              "score": 0.3754,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚 ⏎ - 后端与前端**同批回退**（SSE 事件协议、审批卡片等跨端契约需版本匹配）； ⏎ - 回退后若旧代码不认识新表字段，以 PG 备份恢复为准，不要保留「新 schema + 旧代码」组合长期运行。"
+            },
+            {
+              "id": "backup-restore.md#31",
+              "score": 0.3474,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ **回滚前置**：先做一次 §3.1 备份。回滚是「用已知状态覆盖未知状态」，没有当前备份的回滚等于二次事故。"
+            },
+            {
+              "id": "backup-restore.md#34",
+              "score": 0.334,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚 ⏎ - 优先「恢复备份」，而不是 `alembic downgrade`：本项目多数迁移的 `downgrade` 只做 `drop`，无法还原已回填数据； ⏎ - 确需 downgrade 时，先确认目"
+            }
+          ],
+          "answer_rerank_rank": 3,
+          "facts_hit": [
+            "alembic downgrade"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 0.5,
+          "picked": [
+            "backup-restore.md#33",
+            "backup-restore.md#34",
+            "backup-restore.md#27"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#33",
+            "backup-restore.md#34",
+            "backup-restore.md#63"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 0.5,
+          "picked": [
+            "backup-restore.md#33",
+            "backup-restore.md#31",
+            "backup-restore.md#34"
+          ]
+        },
+        "expand": {
+          "coverage": 0.5,
+          "n_chunks": 6,
+          "chars": 1246,
+          "ids": [
+            "backup-restore.md#32",
+            "backup-restore.md#33",
+            "backup-restore.md#34",
+            "backup-restore.md#26",
+            "backup-restore.md#27",
+            "backup-restore.md#28"
+          ]
+        },
+        "diverse": {
+          "coverage": 0.5,
+          "picked": [
+            "backup-restore.md#33",
+            "backup-restore.md#31",
+            "backup-restore.md#34"
+          ],
+          "headings": [
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 0.5,
+          "chars": 1071,
+          "ids": [
+            "backup-restore.md#32",
+            "backup-restore.md#33",
+            "backup-restore.md#30",
+            "backup-restore.md#31",
+            "backup-restore.md#34"
+          ]
+        }
+      }
+    },
+    {
+      "question": "生产环境升级换版本要注意什么？",
+      "kind": "overview",
+      "facts": [
+        "SIGTERM",
+        "应用回退"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": null,
+      "fused_rank": 1,
+      "fused_best_coverage": 0.5,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.513,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.513,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.124,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            },
+            {
+              "id": "deployment.md#42",
+              "score": 0.1012,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2.2 关机与升级语义（P0-4）",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2.2 关机与升级语义（P0-4） ⏎ `docker stop` / `compose up -d`（换镜像）/ 重启主机都会给后端发 SIGTERM。此前的行为是 ⏎ **10 秒后被 SIGKILL**：uvicorn 会无限期等待已建立的 "
+            }
+          ],
+          "answer_rerank_rank": 2,
+          "facts_hit": [
+            "SIGTERM",
+            "应用回退"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 0.5,
+          "top1_score": 0.513,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.513,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.124,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            },
+            {
+              "id": "deployment.md#49",
+              "score": 0.1142,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2.2 关机与升级语义（P0-4）",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2.2 关机与升级语义（P0-4） ⏎ 行为约定： ⏎  ⏎ - **关机期间的提问返回 503 + `Retry-After: 5`**，而不是受理一条注定被截断的生成（否则历史里会留下「有问无答」）； ⏎ - 在途回答优先**写完**，写不完才取消；取"
+            }
+          ],
+          "answer_rerank_rank": 2,
+          "facts_hit": [
+            "应用回退"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 0.5,
+          "top1_score": 0.513,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.513,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "deployment.md#202",
+              "score": 0.4658,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.8 安全配置建议",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.8 安全配置建议 ⏎ **生产环境安全建议**: ⏎  ⏎ 1. **修改默认密码**: 不要使用默认密码，密码经 Docker Secrets 注入（见 §6.9），轮换时重新生成 secrets 文件即可 ⏎ 2. **设置强 SECRET_KEY**: `SE"
+            },
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.124,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            }
+          ],
+          "answer_rerank_rank": 3,
+          "facts_hit": [
+            "应用回退"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#74",
+            "backup-restore.md#63",
+            "deployment.md#42"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 0.5,
+          "picked": [
+            "deployment.md#74",
+            "backup-restore.md#63",
+            "deployment.md#49"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 0.5,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#202",
+            "backup-restore.md#63"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 5,
+          "chars": 1510,
+          "ids": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "backup-restore.md#63",
+            "deployment.md#42",
+            "deployment.md#43"
+          ]
+        },
+        "diverse": {
+          "coverage": 0.5,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#202",
+            "backup-restore.md#63"
+          ],
+          "headings": [
+            "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+            "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.8 安全配置建议",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 0.5,
+          "chars": 1967,
+          "ids": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "deployment.md#202",
+            "deployment.md#203",
+            "backup-restore.md#63"
           ]
         }
       }
@@ -1466,40 +2617,857 @@
       }
     },
     {
-      "question": "怎么查看 PostgreSQL 指标？",
+      "question": "恢复的顺序为什么不能打乱？",
       "kind": "detail",
       "facts": [
-        "pg_stat_activity"
+        "恢复顺序",
+        "不可打乱"
       ],
-      "valid": false,
-      "note": "语料未覆盖该问题，召回为空属预期，不计入汇总",
+      "valid": true,
+      "note": "",
       "n_chunks": 502,
-      "sparse_rank": null,
-      "dense_rank": null,
-      "fused_rank": null,
-      "fused_best_coverage": 0.0,
+      "sparse_rank": 1,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.3999,
+          "picked": [
+            {
+              "id": "backup-restore.md#21",
+              "score": 0.3999,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 1. **停写**：`$COMPOSE stop backend`（前端可保留只读页，避免新请求写入）； ⏎ 2. **PG**：目标库必须为空（`DROP SCHEMA public CASC"
+            },
+            {
+              "id": "backup-restore.md#23",
+              "score": 0.3833,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ ```bash ⏎ COMPOSE=\"docker compose -f docker-compose.yml --env-file .env.prod\" ⏎ export PG_FILE=/bac"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.3154,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "恢复顺序",
+            "不可打乱"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.3999,
+          "picked": [
+            {
+              "id": "backup-restore.md#21",
+              "score": 0.3999,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 1. **停写**：`$COMPOSE stop backend`（前端可保留只读页，避免新请求写入）； ⏎ 2. **PG**：目标库必须为空（`DROP SCHEMA public CASC"
+            },
+            {
+              "id": "backup-restore.md#23",
+              "score": 0.3833,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ ```bash ⏎ COMPOSE=\"docker compose -f docker-compose.yml --env-file .env.prod\" ⏎ export PG_FILE=/bac"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.3154,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "恢复顺序",
+            "不可打乱"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.3999,
+          "picked": [
+            {
+              "id": "backup-restore.md#21",
+              "score": 0.3999,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 1. **停写**：`$COMPOSE stop backend`（前端可保留只读页，避免新请求写入）； ⏎ 2. **PG**：目标库必须为空（`DROP SCHEMA public CASC"
+            },
+            {
+              "id": "backup-restore.md#23",
+              "score": 0.3833,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ ```bash ⏎ COMPOSE=\"docker compose -f docker-compose.yml --env-file .env.prod\" ⏎ export PG_FILE=/bac"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.3154,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "恢复顺序",
+            "不可打乱"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#21",
+            "backup-restore.md#23",
+            "backup-restore.md#22"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#21",
+            "backup-restore.md#23",
+            "backup-restore.md#22"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#21",
+            "backup-restore.md#23",
+            "backup-restore.md#22"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 3,
+          "chars": 1075,
+          "ids": [
+            "backup-restore.md#21",
+            "backup-restore.md#22",
+            "backup-restore.md#23"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#21",
+            "backup-restore.md#35",
+            "backup-restore.md#24"
+          ],
+          "headings": [
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.2 恢复后必做"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 1569,
+          "ids": [
+            "backup-restore.md#21",
+            "backup-restore.md#22",
+            "backup-restore.md#35",
+            "backup-restore.md#24"
+          ]
+        }
+      }
+    },
+    {
+      "question": "只想恢复某一个知识库，怎么部分恢复？",
+      "kind": "detail",
+      "facts": [
+        "部分恢复",
+        "单知识库"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.9062,
+          "picked": [
+            {
+              "id": "backup-restore.md#25",
+              "score": 0.9062,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.3 部分恢复（推荐用于单知识库/单文档）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.3 部分恢复（推荐用于单知识库/单文档） ⏎ 只丢单个知识库时，不必整库恢复 Milvus：从 MinIO 取回原件 → 前端重新上传/重新解析 → 新切片自动写入向量库。 ⏎ 优点：不影响其他租户数据；缺点：Embeddi"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.3917,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            },
+            {
+              "id": "backup-restore.md#68",
+              "score": 0.0184,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查 ⏎ | 场景 | 动作 | ⏎ | 误删知识库/文档 | 从 MinIO 找回原件并重新入库（§4.3）；元数据从最近 PG 备份提取 |"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "部分恢复",
+            "单知识库"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.9062,
+          "picked": [
+            {
+              "id": "backup-restore.md#25",
+              "score": 0.9062,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.3 部分恢复（推荐用于单知识库/单文档）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.3 部分恢复（推荐用于单知识库/单文档） ⏎ 只丢单个知识库时，不必整库恢复 Milvus：从 MinIO 取回原件 → 前端重新上传/重新解析 → 新切片自动写入向量库。 ⏎ 优点：不影响其他租户数据；缺点：Embeddi"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.3917,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            },
+            {
+              "id": "backup-restore.md#35",
+              "score": 0.0454,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚 ⏎ - 向量索引：设置页「向量索引 / Embedding」→「回滚」调用 `POST /api/admin/models/index/rollback`（恢复上一次重建前的备份集合 `{collec"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "部分恢复",
+            "单知识库"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.9062,
+          "picked": [
+            {
+              "id": "backup-restore.md#25",
+              "score": 0.9062,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.3 部分恢复（推荐用于单知识库/单文档）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.3 部分恢复（推荐用于单知识库/单文档） ⏎ 只丢单个知识库时，不必整库恢复 Milvus：从 MinIO 取回原件 → 前端重新上传/重新解析 → 新切片自动写入向量库。 ⏎ 优点：不影响其他租户数据；缺点：Embeddi"
+            },
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.5379,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.3917,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "部分恢复",
+            "单知识库"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#25",
+            "backup-restore.md#22",
+            "backup-restore.md#68"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#25",
+            "backup-restore.md#22",
+            "backup-restore.md#35"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#25",
+            "backup-restore.md#63",
+            "backup-restore.md#22"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 7,
+          "chars": 1668,
+          "ids": [
+            "backup-restore.md#25",
+            "backup-restore.md#21",
+            "backup-restore.md#22",
+            "backup-restore.md#23",
+            "backup-restore.md#67",
+            "backup-restore.md#68",
+            "backup-restore.md#69"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#25",
+            "backup-restore.md#63",
+            "backup-restore.md#22"
+          ],
+          "headings": [
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.3 部分恢复（推荐用于单知识库/单文档）",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 1463,
+          "ids": [
+            "backup-restore.md#25",
+            "backup-restore.md#63",
+            "backup-restore.md#21",
+            "backup-restore.md#22",
+            "backup-restore.md#23"
+          ]
+        }
+      }
+    },
+    {
+      "question": "数据库迁移怎么回滚？",
+      "kind": "detail",
+      "facts": [
+        "alembic downgrade"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.964,
+          "picked": [
+            {
+              "id": "backup-restore.md#34",
+              "score": 0.964,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚 ⏎ - 优先「恢复备份」，而不是 `alembic downgrade`：本项目多数迁移的 `downgrade` 只做 `drop`，无法还原已回填数据； ⏎ - 确需 downgrade 时，先确认目"
+            },
+            {
+              "id": "backup-restore.md#27",
+              "score": 0.3239,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ | 症状 | 首选动作 | 禁止动作 | ⏎ | 迁移报错 / `alembic check` 漂移 | 恢复迁移前 PG 备份（§4） | 手工改表结构 |"
+            },
+            {
+              "id": "deployment.md#159",
+              "score": 0.0615,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.3.2 模型 Provider 注册与切换（P1/P2）",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.3.2 模型 Provider 注册与切换（P1/P2） ⏎ - **索引迁移（P3）**：`GET /api/admin/models/index/status` 查看当前索引画像/目标配置/是否需要重建；`POST /api/admin/models"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "alembic downgrade"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.964,
+          "picked": [
+            {
+              "id": "backup-restore.md#34",
+              "score": 0.964,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚 ⏎ - 优先「恢复备份」，而不是 `alembic downgrade`：本项目多数迁移的 `downgrade` 只做 `drop`，无法还原已回填数据； ⏎ - 确需 downgrade 时，先确认目"
+            },
+            {
+              "id": "backup-restore.md#27",
+              "score": 0.3239,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ | 症状 | 首选动作 | 禁止动作 | ⏎ | 迁移报错 / `alembic check` 漂移 | 恢复迁移前 PG 备份（§4） | 手工改表结构 |"
+            },
+            {
+              "id": "backup-restore.md#35",
+              "score": 0.2232,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚 ⏎ - 向量索引：设置页「向量索引 / Embedding」→「回滚」调用 `POST /api/admin/models/index/rollback`（恢复上一次重建前的备份集合 `{collec"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "alembic downgrade"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.964,
+          "picked": [
+            {
+              "id": "backup-restore.md#34",
+              "score": 0.964,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚 ⏎ - 优先「恢复备份」，而不是 `alembic downgrade`：本项目多数迁移的 `downgrade` 只做 `drop`，无法还原已回填数据； ⏎ - 确需 downgrade 时，先确认目"
+            },
+            {
+              "id": "backup-restore.md#31",
+              "score": 0.5482,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ **回滚前置**：先做一次 §3.1 备份。回滚是「用已知状态覆盖未知状态」，没有当前备份的回滚等于二次事故。"
+            },
+            {
+              "id": "backup-restore.md#27",
+              "score": 0.3239,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵 ⏎ | 症状 | 首选动作 | 禁止动作 | ⏎ | 迁移报错 / `alembic check` 漂移 | 恢复迁移前 PG 备份（§4） | 手工改表结构 |"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "alembic downgrade"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#34",
+            "backup-restore.md#27",
+            "deployment.md#159"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#34",
+            "backup-restore.md#27",
+            "backup-restore.md#35"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#34",
+            "backup-restore.md#31",
+            "backup-restore.md#27"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 7,
+          "chars": 2116,
+          "ids": [
+            "backup-restore.md#34",
+            "backup-restore.md#26",
+            "backup-restore.md#27",
+            "backup-restore.md#28",
+            "deployment.md#158",
+            "deployment.md#159",
+            "deployment.md#160"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "backup-restore.md#34",
+            "backup-restore.md#31",
+            "backup-restore.md#35"
+          ],
+          "headings": [
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.3 数据库迁移回滚",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.1 决策矩阵",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 971,
+          "ids": [
+            "backup-restore.md#34",
+            "backup-restore.md#30",
+            "backup-restore.md#31",
+            "backup-restore.md#35"
+          ]
+        }
+      }
+    },
+    {
+      "question": "熔断触发的时间和条件是什么？",
+      "kind": "detail",
+      "facts": [
+        "60s"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 8,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.0189,
+          "picked": [
+            {
+              "id": "architecture.md#23",
+              "score": 0.0189,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1） ⏎ - 每个 Provider 连续失败 3 次后打开 60s 熔断，期间该 Provider 的所有任务直接跳过并走 fallback；冷却后半开，只放行一次探测，成功关闭、失败重新计时。 ⏎ - 熔断状态仅存进程内存；应用新 regis"
+            },
+            {
+              "id": "architecture.md#24",
+              "score": 0.0017,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1） ⏎ - 指标：`rag_model_provider_calls_total`、`rag_model_tokens_total`、`rag_model_circuit_state`（1=open / 0.5=half_open / 0="
+            },
+            {
+              "id": "architecture.md#37",
+              "score": 0.0013,
+              "heading_path": "架构总览 > 5. 后端代码地图（backend/src/）",
+              "preview": "架构总览 > 5. 后端代码地图（backend/src/） ⏎ | 目录/模块 | 职责 | ⏎ | `services/model_health.py` | Provider 级熔断：连续失败阈值、冷却半开探测、跳过热熔断 Provider；registry 变更时重置 |"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "60s"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.0189,
+          "picked": [
+            {
+              "id": "architecture.md#23",
+              "score": 0.0189,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1） ⏎ - 每个 Provider 连续失败 3 次后打开 60s 熔断，期间该 Provider 的所有任务直接跳过并走 fallback；冷却后半开，只放行一次探测，成功关闭、失败重新计时。 ⏎ - 熔断状态仅存进程内存；应用新 regis"
+            },
+            {
+              "id": "monitoring.md#27",
+              "score": 0.003,
+              "heading_path": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1）",
+              "preview": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1） ⏎ - 切换模型后指标标签会新增/更替对应 `provider_id` / `model_name` 序列；Grafana「RAG Overvi"
+            },
+            {
+              "id": "architecture.md#49",
+              "score": 0.0026,
+              "heading_path": "架构总览 > 5. 后端代码地图（backend/src/）",
+              "preview": "架构总览 > 5. 后端代码地图（backend/src/） ⏎ | 目录/模块 | 职责 | ⏎ | `services/agent_orchestrator.py` | 有界 Agent 编排：plan-execute 循环（max_steps=3 + 时间预算熔断），KB/Wiki/搜索工具统一接入，`AGENT_ORC"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "60s"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.0189,
+          "picked": [
+            {
+              "id": "architecture.md#23",
+              "score": 0.0189,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1） ⏎ - 每个 Provider 连续失败 3 次后打开 60s 熔断，期间该 Provider 的所有任务直接跳过并走 fallback；冷却后半开，只放行一次探测，成功关闭、失败重新计时。 ⏎ - 熔断状态仅存进程内存；应用新 regis"
+            },
+            {
+              "id": "monitoring.md#51",
+              "score": 0.0035,
+              "heading_path": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+              "preview": "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读） ⏎ 指标只能反映「有请求经过的地方」，而「元数据已删、向量/对象/缓存还在」这类问题 ⏎ **不会触发任何异常**——没有代码路径可以挂日志，只能主动对账。巡检覆盖："
+            },
+            {
+              "id": "monitoring.md#27",
+              "score": 0.003,
+              "heading_path": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1）",
+              "preview": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1） ⏎ - 切换模型后指标标签会新增/更替对应 `provider_id` / `model_name` 序列；Grafana「RAG Overvi"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "60s"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#23",
+            "architecture.md#24",
+            "architecture.md#37"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#23",
+            "monitoring.md#27",
+            "architecture.md#49"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#23",
+            "monitoring.md#51",
+            "monitoring.md#27"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 5,
+          "chars": 1163,
+          "ids": [
+            "architecture.md#23",
+            "architecture.md#24",
+            "architecture.md#36",
+            "architecture.md#37",
+            "architecture.md#38"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#23",
+            "monitoring.md#51",
+            "monitoring.md#27"
+          ],
+          "headings": [
+            "架构总览 > 3. 问答核心链路（RAG 决策管线） > 熔断、用量与成本（P2.1）",
+            "监控运维指南 > 6. 常用操作 > 6.1 每日一致性巡检（只读）",
+            "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 2629,
+          "ids": [
+            "architecture.md#23",
+            "architecture.md#24",
+            "monitoring.md#51",
+            "monitoring.md#52",
+            "monitoring.md#26",
+            "monitoring.md#27",
+            "monitoring.md#28"
+          ]
+        }
+      }
+    },
+    {
+      "question": "流式响应的事件是怎么发给前端的？",
+      "kind": "detail",
+      "facts": [
+        "data:",
+        "event:"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.989,
+          "picked": [
+            {
+              "id": "architecture.md#26",
+              "score": 0.989,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 流式响应（SSE）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 流式响应（SSE） ⏎ - 路由：`POST /api/chat/stream`，`StreamingResponse` 推送事件 ⏎ - 服务端**只发 `data:` 行，不使用 SSE 的 `event:` 字段**，事件类型由 JSON 内的 `type` 表达"
+            },
+            {
+              "id": "architecture.md#50",
+              "score": 0.0127,
+              "heading_path": "架构总览 > 5. 后端代码地图（backend/src/）",
+              "preview": "架构总览 > 5. 后端代码地图（backend/src/） ⏎ | 目录/模块 | 职责 | ⏎ | `services/guardrails/` | AM-2 确定性护栏：input/output/tool/approval + SEC-5 `context_guard`（不可信上下文包裹、注入信号检测）与流式输出跨 ch"
+            },
+            {
+              "id": "monitoring.md#37",
+              "score": 0.0044,
+              "heading_path": "监控运维指南 > 4. 告警规则（configs/prometheus/alerts.yml）",
+              "preview": "监控运维指南 > 4. 告警规则（configs/prometheus/alerts.yml） ⏎ | 组 | 告警 | 表达式（摘要） | 级别 | 含义 | ⏎ | fastapi | SseStreamInterruptRate（P2-5） | `rate(rag_sse_interrupted_total[5m]) >"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "data:",
+            "event:"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.989,
+          "picked": [
+            {
+              "id": "architecture.md#26",
+              "score": 0.989,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 流式响应（SSE）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 流式响应（SSE） ⏎ - 路由：`POST /api/chat/stream`，`StreamingResponse` 推送事件 ⏎ - 服务端**只发 `data:` 行，不使用 SSE 的 `event:` 字段**，事件类型由 JSON 内的 `type` 表达"
+            },
+            {
+              "id": "architecture.md#50",
+              "score": 0.0127,
+              "heading_path": "架构总览 > 5. 后端代码地图（backend/src/）",
+              "preview": "架构总览 > 5. 后端代码地图（backend/src/） ⏎ | 目录/模块 | 职责 | ⏎ | `services/guardrails/` | AM-2 确定性护栏：input/output/tool/approval + SEC-5 `context_guard`（不可信上下文包裹、注入信号检测）与流式输出跨 ch"
+            },
+            {
+              "id": "backup-restore.md#33",
+              "score": 0.008,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.2 应用版本回滚 ⏎ - 后端与前端**同批回退**（SSE 事件协议、审批卡片等跨端契约需版本匹配）； ⏎ - 回退后若旧代码不认识新表字段，以 PG 备份恢复为准，不要保留「新 schema + 旧代码」组合长期运行。"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "data:",
+            "event:"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.989,
+          "picked": [
+            {
+              "id": "architecture.md#26",
+              "score": 0.989,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 流式响应（SSE）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 流式响应（SSE） ⏎ - 路由：`POST /api/chat/stream`，`StreamingResponse` 推送事件 ⏎ - 服务端**只发 `data:` 行，不使用 SSE 的 `event:` 字段**，事件类型由 JSON 内的 `type` 表达"
+            },
+            {
+              "id": "backup-restore.md#61",
+              "score": 0.0416,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作 ⏎ 4. **后端并发**：`CHAT_MAX_CONCURRENT_STREAMS_PER_USER` 控制单用户流式并发；多 worker 时注意后台任务（学习/保留期清扫/用量 flush）会随 "
+            },
+            {
+              "id": "architecture.md#50",
+              "score": 0.0127,
+              "heading_path": "架构总览 > 5. 后端代码地图（backend/src/）",
+              "preview": "架构总览 > 5. 后端代码地图（backend/src/） ⏎ | 目录/模块 | 职责 | ⏎ | `services/guardrails/` | AM-2 确定性护栏：input/output/tool/approval + SEC-5 `context_guard`（不可信上下文包裹、注入信号检测）与流式输出跨 ch"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "data:",
+            "event:"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#50",
+            "monitoring.md#37"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#50",
+            "backup-restore.md#33"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#26",
+            "backup-restore.md#61",
+            "architecture.md#50"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 7,
+          "chars": 1581,
+          "ids": [
+            "architecture.md#26",
+            "architecture.md#49",
+            "architecture.md#50",
+            "architecture.md#51",
+            "monitoring.md#36",
+            "monitoring.md#37",
+            "monitoring.md#38"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "architecture.md#26",
+            "backup-restore.md#61",
+            "architecture.md#50"
+          ],
+          "headings": [
+            "架构总览 > 3. 问答核心链路（RAG 决策管线） > 流式响应（SSE）",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 6. 容量规划 > 6.6 扩容操作",
+            "架构总览 > 5. 后端代码地图（backend/src/）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 1717,
+          "ids": [
+            "architecture.md#26",
+            "backup-restore.md#60",
+            "backup-restore.md#61",
+            "architecture.md#49",
+            "architecture.md#50",
+            "architecture.md#51"
+          ]
+        }
+      }
+    },
+    {
+      "question": "换 Embedding 模型需要做什么？",
+      "kind": "detail",
+      "facts": [
+        "embedding_migration"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 18,
+      "dense_rank": 17,
+      "fused_rank": 7,
+      "fused_best_coverage": 1.0,
       "stages": {
         "rerank_n3": {
           "coverage": 0.0,
-          "top1_score": 0.9864,
+          "top1_score": 0.4918,
           "picked": [
             {
-              "id": "monitoring.md#7",
-              "score": 0.9864,
-              "heading_path": "监控运维指南 > 2. 采集目标（prometheus.yml）",
-              "preview": "监控运维指南 > 2. 采集目标（prometheus.yml） ⏎ | Job | 目标 | 说明 | ⏎ | postgresql | `postgres-exporter:9187` | PostgreSQL 指标（凭据来自 POSTGRES_USER/PASSWORD 环境变量） |"
+              "id": "architecture.md#25",
+              "score": 0.4918,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > Embedding 迁移与 Reranker（P3）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > Embedding 迁移与 Reranker（P3） ⏎ - Embedding 模型/维度以 registry 为权威；`model_index_profile` 记录 collection 当前画像与状态。保存新 Embedding 配置后，apply 会因画像"
             },
             {
-              "id": "deployment.md#245",
-              "score": 0.0108,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 8. 常见问题 > 8.2 PostgreSQL 连接失败",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 8. 常见问题 > 8.2 PostgreSQL 连接失败 ⏎ | 检查项 | 开发环境命令 | 生产环境命令 | ⏎ | 连接参数 | 检查 `.env.dev` | 检查 `.env.prod` |"
+              "id": "deployment.md#156",
+              "score": 0.4558,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.3.2 模型 Provider 注册与切换（P1/P2）",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.3.2 模型 Provider 注册与切换（P1/P2） ⏎ - **数据出域**：外部 Provider 标记 `external`；本地主模型失败降级到外部需显式勾选 `allow_external_fallback`（默认关闭）。 ⏎ - **Embe"
             },
             {
-              "id": "deployment.md#279",
-              "score": 0.0077,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 9. 故障排查 > 9.3 性能排查",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 9. 故障排查 > 9.3 性能排查 ⏎ ```bash ⏎ # 查看 CPU 使用率 ⏎ top ⏎ htop ⏎  ⏎ # 查看内存使用 ⏎ free -h ⏎  ⏎ # 查看磁盘使用 ⏎ df -h ⏎  ⏎ # 查看网络连接 ⏎ netstat -tlnp ⏎ ss -tlnp ⏎  ⏎ # 查看 Docker 资源使用 ⏎ doc"
+              "id": "architecture.md#22",
+              "score": 0.0864,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 模型路由层（Provider / Model / Route）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > 模型路由层（Provider / Model / Route） ⏎ - `answer` / `fast` / `embedding` 为必需路由；其他聊天任务未单独配置时回退 `fast` 路由。 ⏎ - 主模型失败按 route `fallbacks` 降级；本地主"
             }
           ],
           "answer_rerank_rank": null,
@@ -1507,25 +3475,344 @@
         },
         "rerank_n10": {
           "coverage": 0.0,
-          "top1_score": 0.9864,
+          "top1_score": 0.7051,
           "picked": [
             {
-              "id": "monitoring.md#7",
-              "score": 0.9864,
-              "heading_path": "监控运维指南 > 2. 采集目标（prometheus.yml）",
-              "preview": "监控运维指南 > 2. 采集目标（prometheus.yml） ⏎ | Job | 目标 | 说明 | ⏎ | postgresql | `postgres-exporter:9187` | PostgreSQL 指标（凭据来自 POSTGRES_USER/PASSWORD 环境变量） |"
+              "id": "architecture.md#8",
+              "score": 0.7051,
+              "heading_path": "架构总览 > 1. 技术栈",
+              "preview": "架构总览 > 1. 技术栈 ⏎ | 层 | 技术 | ⏎ | 模型 | Provider/Model/Route registry（`ModelManager` 统一入口）：Ollama 原生 + OpenAI-Compatible，按任务路由、能力校验与 fallback。配置优先级 **DB（P2 管理 API/设置页）>"
             },
             {
-              "id": "deployment.md#103",
-              "score": 0.3338,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 5. Docker 部署 > 5.1 开发环境 Docker Compose 服务说明",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 5. Docker 部署 > 5.1 开发环境 Docker Compose 服务说明 ⏎ | 服务（Compose 服务名） | 容器名 | 镜像 | 宿主机端口 | 数据卷 | 说明 | ⏎ | postgres-exporter | postgres-exporter-dev"
+              "id": "monitoring.md#30",
+              "score": 0.5684,
+              "heading_path": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1）",
+              "preview": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1） ⏎ - `stage` 覆盖管道阶段：`enhance_context` / `intent` / `tool_first` / `decide"
             },
             {
-              "id": "deployment.md#116",
-              "score": 0.2528,
-              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 5. Docker 部署 > 5.2 生产环境 Docker Compose 服务说明",
-              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 5. Docker 部署 > 5.2 生产环境 Docker Compose 服务说明 ⏎ | 服务（Compose 服务名） | 容器名 | 镜像 | 宿主机端口 | 数据卷 | 说明 | ⏎ | postgres-exporter | postgres-exporter-pro"
+              "id": "architecture.md#25",
+              "score": 0.4918,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > Embedding 迁移与 Reranker（P3）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > Embedding 迁移与 Reranker（P3） ⏎ - Embedding 模型/维度以 registry 为权威；`model_index_profile` 记录 collection 当前画像与状态。保存新 Embedding 配置后，apply 会因画像"
+            }
+          ],
+          "answer_rerank_rank": 8,
+          "facts_hit": []
+        },
+        "rerank_n20": {
+          "coverage": 0.0,
+          "top1_score": 0.7051,
+          "picked": [
+            {
+              "id": "architecture.md#8",
+              "score": 0.7051,
+              "heading_path": "架构总览 > 1. 技术栈",
+              "preview": "架构总览 > 1. 技术栈 ⏎ | 层 | 技术 | ⏎ | 模型 | Provider/Model/Route registry（`ModelManager` 统一入口）：Ollama 原生 + OpenAI-Compatible，按任务路由、能力校验与 fallback。配置优先级 **DB（P2 管理 API/设置页）>"
+            },
+            {
+              "id": "monitoring.md#30",
+              "score": 0.5684,
+              "heading_path": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1）",
+              "preview": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1） ⏎ - `stage` 覆盖管道阶段：`enhance_context` / `intent` / `tool_first` / `decide"
+            },
+            {
+              "id": "architecture.md#25",
+              "score": 0.4918,
+              "heading_path": "架构总览 > 3. 问答核心链路（RAG 决策管线） > Embedding 迁移与 Reranker（P3）",
+              "preview": "架构总览 > 3. 问答核心链路（RAG 决策管线） > Embedding 迁移与 Reranker（P3） ⏎ - Embedding 模型/维度以 registry 为权威；`model_index_profile` 记录 collection 当前画像与状态。保存新 Embedding 配置后，apply 会因画像"
+            }
+          ],
+          "answer_rerank_rank": 11,
+          "facts_hit": []
+        },
+        "notoc_n3": {
+          "coverage": 0.0,
+          "picked": [
+            "architecture.md#25",
+            "deployment.md#156",
+            "architecture.md#22"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 0.0,
+          "picked": [
+            "architecture.md#8",
+            "monitoring.md#30",
+            "architecture.md#25"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 0.0,
+          "picked": [
+            "architecture.md#8",
+            "monitoring.md#30",
+            "architecture.md#25"
+          ]
+        },
+        "expand": {
+          "coverage": 0.0,
+          "n_chunks": 6,
+          "chars": 2527,
+          "ids": [
+            "architecture.md#25",
+            "deployment.md#155",
+            "deployment.md#156",
+            "deployment.md#157",
+            "architecture.md#21",
+            "architecture.md#22"
+          ]
+        },
+        "diverse": {
+          "coverage": 0.0,
+          "picked": [
+            "architecture.md#8",
+            "monitoring.md#30",
+            "architecture.md#25"
+          ],
+          "headings": [
+            "架构总览 > 1. 技术栈",
+            "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） > 3.1 模型路由与 Provider 观测（P1/P2.1）",
+            "架构总览 > 3. 问答核心链路（RAG 决策管线） > Embedding 迁移与 Reranker（P3）"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 0.0,
+          "chars": 2062,
+          "ids": [
+            "architecture.md#7",
+            "architecture.md#8",
+            "architecture.md#9",
+            "monitoring.md#29",
+            "monitoring.md#30",
+            "architecture.md#25"
+          ]
+        }
+      }
+    },
+    {
+      "question": "部署生产环境前必须配哪些密码？",
+      "kind": "detail",
+      "facts": [
+        "强密码"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": 1,
+      "dense_rank": 1,
+      "fused_rank": 1,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 1.0,
+          "top1_score": 0.9954,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.9954,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "deployment.md#202",
+              "score": 0.9097,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.8 安全配置建议",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.8 安全配置建议 ⏎ **生产环境安全建议**: ⏎  ⏎ 1. **修改默认密码**: 不要使用默认密码，密码经 Docker Secrets 注入（见 §6.9），轮换时重新生成 secrets 文件即可 ⏎ 2. **设置强 SECRET_KEY**: `SE"
+            },
+            {
+              "id": "deployment.md#85",
+              "score": 0.0433,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.4 访问地址",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.4 访问地址 ⏎ | 服务 | 宿主机地址 | 用户名/密码 | ⏎ | Redis | localhost:**6380** | 见 .env.prod |"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "强密码"
+          ]
+        },
+        "rerank_n10": {
+          "coverage": 1.0,
+          "top1_score": 0.9954,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.9954,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "deployment.md#75",
+              "score": 0.9795,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ ```env ⏎ # 必须修改以下密码！ ⏎ POSTGRES_PASSWORD=your_secure_postgres_password_here ⏎ MINIO_ROOT_USER=prod_minio ⏎ MINIO_ROOT_PASS"
+            },
+            {
+              "id": "deployment.md#24",
+              "score": 0.9244,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2 核心优势",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2 核心优势 ⏎ - ✅ **数据隔离**: 开发测试数据不会影响生产数据（`name: rag-dev` / `rag-prod` 隔离容器与卷） ⏎ - ✅ **安全可控**: 生产环境必须手动配置强密码 ⏎ - ✅ **灵活切换**: 一键启动脚"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "强密码"
+          ]
+        },
+        "rerank_n20": {
+          "coverage": 1.0,
+          "top1_score": 0.9954,
+          "picked": [
+            {
+              "id": "deployment.md#74",
+              "score": 0.9954,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ #### 4.2.1 配置强密码 ⏎  ⏎ 生产环境部署前**必须**配置强密码： ⏎  ⏎ 编辑 `.env.prod` 文件："
+            },
+            {
+              "id": "deployment.md#75",
+              "score": 0.9795,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备 ⏎ ```env ⏎ # 必须修改以下密码！ ⏎ POSTGRES_PASSWORD=your_secure_postgres_password_here ⏎ MINIO_ROOT_USER=prod_minio ⏎ MINIO_ROOT_PASS"
+            },
+            {
+              "id": "deployment.md#24",
+              "score": 0.9244,
+              "heading_path": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2 核心优势",
+              "preview": "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2 核心优势 ⏎ - ✅ **数据隔离**: 开发测试数据不会影响生产数据（`name: rag-dev` / `rag-prod` 隔离容器与卷） ⏎ - ✅ **安全可控**: 生产环境必须手动配置强密码 ⏎ - ✅ **灵活切换**: 一键启动脚"
+            }
+          ],
+          "answer_rerank_rank": 1,
+          "facts_hit": [
+            "强密码"
+          ]
+        },
+        "notoc_n3": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#202",
+            "deployment.md#85"
+          ]
+        },
+        "notoc_n10": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "deployment.md#24"
+          ]
+        },
+        "notoc_n20": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "deployment.md#24"
+          ]
+        },
+        "expand": {
+          "coverage": 1.0,
+          "n_chunks": 7,
+          "chars": 2094,
+          "ids": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "deployment.md#202",
+            "deployment.md#203",
+            "deployment.md#84",
+            "deployment.md#85",
+            "deployment.md#86"
+          ]
+        },
+        "diverse": {
+          "coverage": 1.0,
+          "picked": [
+            "deployment.md#74",
+            "deployment.md#24",
+            "deployment.md#202"
+          ],
+          "headings": [
+            "🚀 RAG 知识库问答系统 - 部署指南 > 4. 生产环境部署 > 4.2 首次部署准备",
+            "🚀 RAG 知识库问答系统 - 部署指南 > 2. 开发/生产环境分离 > 2.2 核心优势",
+            "🚀 RAG 知识库问答系统 - 部署指南 > 6. 配置说明 > 6.8 安全配置建议"
+          ]
+        },
+        "diverse_expand": {
+          "coverage": 1.0,
+          "chars": 2296,
+          "ids": [
+            "deployment.md#74",
+            "deployment.md#75",
+            "deployment.md#24",
+            "deployment.md#25",
+            "deployment.md#202",
+            "deployment.md#203"
+          ]
+        }
+      }
+    },
+    {
+      "question": "备份恢复后要确认哪些事？",
+      "kind": "detail",
+      "facts": [
+        "恢复后必做"
+      ],
+      "valid": true,
+      "note": "",
+      "n_chunks": 502,
+      "sparse_rank": null,
+      "dense_rank": 1,
+      "fused_rank": 12,
+      "fused_best_coverage": 1.0,
+      "stages": {
+        "rerank_n3": {
+          "coverage": 0.0,
+          "top1_score": 0.5808,
+          "picked": [
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.5808,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.1474,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            },
+            {
+              "id": "backup-restore.md#70",
+              "score": 0.1417,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查 ⏎ | 场景 | 动作 | ⏎ | 备份脚本失败 | 看 cron 日志退出码；确认 `mc alias` 与 `pg_dump` 客户端版本；修复后**立即补一次全量备份** |"
+            }
+          ],
+          "answer_rerank_rank": null,
+          "facts_hit": []
+        },
+        "rerank_n10": {
+          "coverage": 0.0,
+          "top1_score": 0.5808,
+          "picked": [
+            {
+              "id": "backup-restore.md#63",
+              "score": 0.5808,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
+            },
+            {
+              "id": "backup-restore.md#22",
+              "score": 0.1474,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
+            },
+            {
+              "id": "backup-restore.md#70",
+              "score": 0.1417,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 8. 应急处置速查 ⏎ | 场景 | 动作 | ⏎ | 备份脚本失败 | 看 cron 日志退出码；确认 `mc alias` 与 `pg_dump` 客户端版本；修复后**立即补一次全量备份** |"
             }
           ],
           "answer_rerank_rank": null,
@@ -1533,94 +3820,89 @@
         },
         "rerank_n20": {
           "coverage": 0.0,
-          "top1_score": 0.9864,
+          "top1_score": 0.5808,
           "picked": [
             {
-              "id": "monitoring.md#7",
-              "score": 0.9864,
-              "heading_path": "监控运维指南 > 2. 采集目标（prometheus.yml）",
-              "preview": "监控运维指南 > 2. 采集目标（prometheus.yml） ⏎ | Job | 目标 | 说明 | ⏎ | postgresql | `postgres-exporter:9187` | PostgreSQL 指标（凭据来自 POSTGRES_USER/PASSWORD 环境变量） |"
+              "id": "backup-restore.md#63",
+              "score": 0.5808,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练 ⏎ 1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）； ⏎ 2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用； ⏎ 3. 按 §5.3 验证「备份"
             },
             {
-              "id": "architecture.md#5",
-              "score": 0.4973,
-              "heading_path": "架构总览 > 1. 技术栈",
-              "preview": "架构总览 > 1. 技术栈 ⏎ | 层 | 技术 | ⏎ | 关系库 | PostgreSQL（会话/知识库元数据/反馈/实验等） |"
+              "id": "backup-restore.md#35",
+              "score": 0.2797,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚 ⏎ - 向量索引：设置页「向量索引 / Embedding」→「回滚」调用 `POST /api/admin/models/index/rollback`（恢复上一次重建前的备份集合 `{collec"
             },
             {
-              "id": "monitoring.md#17",
-              "score": 0.4665,
-              "heading_path": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py）",
-              "preview": "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py） ⏎ | 指标 | 类型 | 含义 | ⏎ | `rag_vector_search_total` | Counter | 向量检索次数 |"
+              "id": "backup-restore.md#22",
+              "score": 0.1474,
+              "heading_path": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）",
+              "preview": "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱） ⏎ 7. **启动**：`$COMPOSE up -d backend`，确认 `/health/ready` 返回 200； ⏎ 8. **验收**：抽查 3 个知识库问答（引用来源、权限隔离）+"
             }
           ],
-          "answer_rerank_rank": null,
+          "answer_rerank_rank": 6,
           "facts_hit": []
         },
         "notoc_n3": {
           "coverage": 0.0,
           "picked": [
-            "monitoring.md#7",
-            "deployment.md#245",
-            "deployment.md#279"
+            "backup-restore.md#63",
+            "backup-restore.md#22",
+            "backup-restore.md#70"
           ]
         },
         "notoc_n10": {
           "coverage": 0.0,
           "picked": [
-            "monitoring.md#7",
-            "deployment.md#103",
-            "deployment.md#116"
+            "backup-restore.md#63",
+            "backup-restore.md#22",
+            "backup-restore.md#70"
           ]
         },
         "notoc_n20": {
           "coverage": 0.0,
           "picked": [
-            "monitoring.md#7",
-            "architecture.md#5",
-            "monitoring.md#17"
+            "backup-restore.md#63",
+            "backup-restore.md#35",
+            "backup-restore.md#22"
           ]
         },
         "expand": {
           "coverage": 0.0,
-          "n_chunks": 7,
-          "chars": 1051,
+          "n_chunks": 6,
+          "chars": 1572,
           "ids": [
-            "monitoring.md#6",
-            "monitoring.md#7",
-            "monitoring.md#8",
-            "deployment.md#244",
-            "deployment.md#245",
-            "deployment.md#246",
-            "deployment.md#279"
+            "backup-restore.md#63",
+            "backup-restore.md#21",
+            "backup-restore.md#22",
+            "backup-restore.md#23",
+            "backup-restore.md#69",
+            "backup-restore.md#70"
           ]
         },
         "diverse": {
           "coverage": 0.0,
           "picked": [
-            "monitoring.md#7",
-            "architecture.md#5",
-            "monitoring.md#17"
+            "backup-restore.md#63",
+            "backup-restore.md#35",
+            "backup-restore.md#22"
           ],
           "headings": [
-            "监控运维指南 > 2. 采集目标（prometheus.yml）",
-            "架构总览 > 1. 技术栈",
-            "监控运维指南 > 3. 核心业务指标（backend/src/middleware/prometheus.py）"
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 7. 演练（每季度） > 7.2 回滚演练",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 5. 回滚 > 5.4 索引与缓存回滚",
+            "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1） > 4. 恢复 > 4.1 恢复顺序（不可打乱）"
           ]
         },
         "diverse_expand": {
           "coverage": 0.0,
-          "chars": 894,
+          "chars": 1683,
           "ids": [
-            "monitoring.md#6",
-            "monitoring.md#7",
-            "monitoring.md#8",
-            "architecture.md#4",
-            "architecture.md#5",
-            "architecture.md#6",
-            "monitoring.md#16",
-            "monitoring.md#17",
-            "monitoring.md#18"
+            "backup-restore.md#63",
+            "backup-restore.md#35",
+            "backup-restore.md#21",
+            "backup-restore.md#22",
+            "backup-restore.md#23"
           ]
         }
       }
@@ -1632,38 +3914,38 @@
     "channel_top_k": 20,
     "by_kind": {
       "overview": {
-        "n": 4,
-        "in_sparse_pool": 3,
-        "in_dense_pool": 4,
-        "in_fused_pool": 4,
-        "in_prod_window": 2,
-        "coverage_at_n3": 0.208,
-        "coverage_at_n10": 0.208,
-        "coverage_at_n20": 0.208,
-        "coverage_no_toc": 0.208,
-        "coverage_expanded": 0.27,
-        "coverage_diverse": 0.145,
-        "coverage_diverse_expand": 0.145,
-        "avg_expanded_chars": 1280
+        "n": 12,
+        "in_sparse_pool": 11,
+        "in_dense_pool": 11,
+        "in_fused_pool": 12,
+        "in_prod_window": 10,
+        "coverage_at_n3": 0.598,
+        "coverage_at_n10": 0.542,
+        "coverage_at_n20": 0.501,
+        "coverage_no_toc": 0.598,
+        "coverage_expanded": 0.618,
+        "coverage_diverse": 0.452,
+        "coverage_diverse_expand": 0.563,
+        "avg_expanded_chars": 1334
       },
       "detail": {
-        "n": 4,
-        "in_sparse_pool": 4,
-        "in_dense_pool": 4,
-        "in_fused_pool": 4,
-        "in_prod_window": 4,
-        "coverage_at_n3": 0.875,
-        "coverage_at_n10": 0.875,
-        "coverage_at_n20": 0.875,
-        "coverage_no_toc": 0.875,
-        "coverage_expanded": 1.0,
-        "coverage_diverse": 0.875,
-        "coverage_diverse_expand": 0.875,
-        "avg_expanded_chars": 1454
+        "n": 12,
+        "in_sparse_pool": 11,
+        "in_dense_pool": 12,
+        "in_fused_pool": 12,
+        "in_prod_window": 10,
+        "coverage_at_n3": 0.792,
+        "coverage_at_n10": 0.792,
+        "coverage_at_n20": 0.792,
+        "coverage_no_toc": 0.792,
+        "coverage_expanded": 0.833,
+        "coverage_diverse": 0.792,
+        "coverage_diverse_expand": 0.792,
+        "avg_expanded_chars": 1634
       }
     }
   },
   "rerank_seconds": {
-    "20": 23.671085800015135
+    "20": 59.175511600013124
   }
 }

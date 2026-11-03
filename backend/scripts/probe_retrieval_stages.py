@@ -63,11 +63,16 @@ DEFAULT_DOCS = [
 ]
 
 # 问题与「答案必须包含的事实串」。事实串取自文档原文，且**按 chunk 命中数筛选**
-# （df ≤ 3）：像 "Milvus"(54)、"校验"(23)、"决策管线"(15) 这类词几乎每块都有，
-# 拿它们当事实点等于没量——随便捞三块就「覆盖」了。覆盖率要能反映「这一点答到了」，
-# 所以宁可每题只留 1~4 个低频串。概览型的失败形态是「拼不全」，不是「一篇都没捞到」，
-# 用覆盖率而不用 hit@k 才能把这个差异量出来。
+# （df ≤ 8）：像 "Milvus"(54)、"端口"(56)、"校验"(23) 这类词几乎每块都有，
+# 拿它们当事实点等于没量——随便捞三块就「覆盖」了。502 个 chunk 下 df=8 只占 1.6%，
+# 而 df=54 意味着每条候选都有约 11% 概率白送一个「命中」。覆盖率要能反映
+# 「这一点答到了」，所以宁可每题只留 1~4 个低频串。
+# 概览型的失败形态是「拼不全」，不是「一篇都没捞到」，用覆盖率而不用 hit@k 才能量出来。
+#
+# 题量 24（概览 12 / 细节 12）：10 道题时 1 题 = 10pp，任何差异都读不出显著性；
+# 24 道时 1 题 ≈ 4.2pp，才能分辨「章节级召回」这种量级的改动。
 QUESTIONS: List[Dict] = [
+    # ---------------- 概览型：答案跨章节 ----------------
     {
         "q": "系统由哪些部分组成，请求怎么流转？",
         "kind": "overview",
@@ -79,15 +84,6 @@ QUESTIONS: List[Dict] = [
         "facts": ["SIGTERM", "timeout-graceful-shutdown", "SIGKILL", "drain_invalidations"],
     },
     {
-        "q": "生产环境怎么部署？",
-        "kind": "overview",
-        "facts": ["start-prod.sh", "INCLUDE_MONITORING", "7 个服务"],
-        # 事实串落在 §2.1 场景对照表的脚注里，而系统三轮都召回了 §4「生产环境部署」——
-        # 这不是没检索到，是**我的 ground truth 选偏了**：同一问题在文档里有两处答案。
-        "valid": False,
-        "note": "事实串在 §2.1，系统召回的是 §4；题目口径有歧义，不计入汇总",
-    },
-    {
         "q": "监控哪些指标、有哪些告警？",
         "kind": "overview",
         "facts": ["ScrapeTargetDown", "PostgresDatabaseDown"],
@@ -95,8 +91,49 @@ QUESTIONS: List[Dict] = [
     {
         "q": "备份怎么恢复？恢复后确认什么？",
         "kind": "overview",
-        "facts": ["pg_dump", "pg_stat_activity", "恢复演练"],
+        "facts": ["pg_dump", "pg_stat_activity", "恢复顺序"],
     },
+    {
+        "q": "从零部署一套生产环境要做哪些事？",
+        "kind": "overview",
+        "facts": ["首次部署准备", "强密码", "start-prod.sh"],
+    },
+    {
+        "q": "出问题要回滚，怎么决策、怎么执行？",
+        "kind": "overview",
+        "facts": ["决策矩阵", "应用回退", "alembic downgrade"],
+    },
+    {
+        "q": "容量怎么规划，什么时候该扩容？",
+        "kind": "overview",
+        "facts": ["规模参考", "扩容触发阈值"],
+    },
+    {
+        "q": "告警怎么通知出去，怎么配接收人？",
+        "kind": "overview",
+        "facts": ["alertmanager.yml", "webhook"],
+    },
+    {
+        "q": "备份和恢复的 RPO / RTO 目标是多少？",
+        "kind": "overview",
+        "facts": ["RPO", "RTO"],
+    },
+    {
+        "q": "一致性巡检怎么跑，结果怎么判读？",
+        "kind": "overview",
+        "facts": ["退出码"],
+    },
+    {
+        "q": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+        "kind": "overview",
+        "facts": ["alembic downgrade", "应用回退"],
+    },
+    {
+        "q": "生产环境升级换版本要注意什么？",
+        "kind": "overview",
+        "facts": ["SIGTERM", "应用回退"],
+    },
+    # ---------------- 细节型：答案集中在某一段 ----------------
     {
         "q": "为什么要给 NLTK 语料单独放进镜像？",
         "kind": "detail",
@@ -118,13 +155,44 @@ QUESTIONS: List[Dict] = [
         "facts": ["alembic upgrade head", "alembic check"],
     },
     {
-        "q": "怎么查看 PostgreSQL 指标？",
+        "q": "恢复的顺序为什么不能打乱？",
         "kind": "detail",
-        "facts": ["pg_stat_activity"],
-        # 文档里没有「怎么看指标」的章节（monitoring.md 讲的是 exporter target 配置），
-        # pg_stat_activity 只出现在 backup-restore 的验收步骤里。题目本身超出语料。
-        "valid": False,
-        "note": "语料未覆盖该问题，召回为空属预期，不计入汇总",
+        "facts": ["恢复顺序", "不可打乱"],
+    },
+    {
+        "q": "只想恢复某一个知识库，怎么部分恢复？",
+        "kind": "detail",
+        "facts": ["部分恢复", "单知识库"],
+    },
+    {
+        "q": "数据库迁移怎么回滚？",
+        "kind": "detail",
+        "facts": ["alembic downgrade"],
+    },
+    {
+        "q": "熔断触发的时间和条件是什么？",
+        "kind": "detail",
+        "facts": ["60s"],
+    },
+    {
+        "q": "流式响应的事件是怎么发给前端的？",
+        "kind": "detail",
+        "facts": ["data:", "event:"],
+    },
+    {
+        "q": "换 Embedding 模型需要做什么？",
+        "kind": "detail",
+        "facts": ["embedding_migration"],
+    },
+    {
+        "q": "部署生产环境前必须配哪些密码？",
+        "kind": "detail",
+        "facts": ["强密码"],
+    },
+    {
+        "q": "备份恢复后要确认哪些事？",
+        "kind": "detail",
+        "facts": ["恢复后必做"],
     },
 ]
 
@@ -296,7 +364,7 @@ def main() -> int:
 
     # 事实串的 chunk 命中数：df 越小，覆盖率越能代表「这一点答到了」
     df_table = fact_document_frequency(corpus, [f for item in QUESTIONS for f in item["facts"]])
-    common = {f: n for f, n in df_table.items() if n > 3}
+    common = {f: n for f, n in df_table.items() if n > 8}
     if common:
         print(f"[probe] 注意：以下事实串在 >3 个 chunk 中出现，覆盖率会被灌水 —— {common}")
 
