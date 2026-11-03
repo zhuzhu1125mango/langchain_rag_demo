@@ -277,3 +277,182 @@ class TestInvalidationVisibility:
         result = await mod.drain_invalidations(timeout=5.0)
 
         assert result == {"pending": 1, "completed": 1, "cancelled": 0}
+
+
+# ---------------------------------------------------------------------------
+# 3. C12：删空 scope 后必须把索引成员摘掉
+# ---------------------------------------------------------------------------
+class _SetClient:
+    """能表达 hash 与 set 语义的假客户端（只实现被用到的那几个命令）。
+
+    与上面 `_Client` 的区别：那个只记录调用，无法表达「HDEL 最后一个字段时
+    Redis 会删掉整个 key」这一语义——而 C12 正是栽在这个语义上。
+    """
+
+    def __init__(self):
+        self.hashes = {}
+        self.sets = {}
+        self.srem_calls = []
+
+    async def hgetall(self, key):
+        return dict(self.hashes.get(key, {}))
+
+    async def hget(self, key, field):
+        return self.hashes.get(key, {}).get(field)
+
+    async def hdel(self, key, *fields):
+        bucket = self.hashes.get(key, {})
+        for field in fields:
+            bucket.pop(field, None)
+        # 真实 Redis：hash 变空即删除该 key
+        if not bucket:
+            self.hashes.pop(key, None)
+        return len(fields)
+
+    async def hlen(self, key):
+        return len(self.hashes.get(key, {}))
+
+    async def sadd(self, key, *members):
+        self.sets.setdefault(key, set()).update(members)
+        return len(members)
+
+    async def srem(self, key, *members):
+        self.srem_calls.append((key, list(members)))
+        bucket = self.sets.get(key, set())
+        for member in members:
+            bucket.discard(member)
+        return len(members)
+
+    async def smembers(self, key):
+        return set(self.sets.get(key, set()))
+
+    async def scard(self, key):
+        return len(self.sets.get(key, set()))
+
+    async def delete(self, key):
+        self.hashes.pop(key, None)
+        self.sets.pop(key, None)
+        return 1
+
+    async def expire(self, key, ttl):
+        return True
+
+    async def exists(self, key):
+        return 1 if (key in self.hashes or key in self.sets) else 0
+
+    async def scan_iter(self, match=None, count=None):
+        prefix = (match or "").rstrip("*")
+        for key in list(self.hashes) + list(self.sets):
+            if not match or key.startswith(prefix):
+                yield key
+
+
+class _SetCache:
+    available = True
+
+    def __init__(self):
+        self.client = _SetClient()
+
+
+def _json_entry(kb_ids, question="q", created_at=None):
+    import json
+    import time as _time
+
+    # 用 `is None` 而不是 `or`：created_at=0 是「很久以前」，`or` 会把它当缺省值
+    stamp = _time.time() if created_at is None else created_at
+    return json.dumps(
+        {"kb_ids": kb_ids, "question": question, "created_at": stamp},
+        ensure_ascii=False,
+    )
+
+
+class TestIndexPruning:
+    @pytest.mark.asyncio
+    async def test_invalidate_kb_prunes_index_when_scope_emptied(self, monkeypatch):
+        """删空 scope 后索引成员必须摘掉，否则巡检长期报 dangling_cache_index（C12）。"""
+        service = SemanticCacheService()
+        cache = _SetCache()
+        _patch_cache(monkeypatch, service, cache)
+        monkeypatch.setattr(mod, "_decode_entry", __import__("json").loads)
+
+        kb_id = "kb-1"
+        scope = f"rag:semcache:u-1:{_scope_hash([kb_id])}"
+        index_kb = f"{mod.INDEX_PREFIX}:kb:{kb_id}"
+        cache.client.hashes[scope] = {"exact:a": _json_entry([kb_id])}
+        cache.client.sets[index_kb] = {scope}
+        cache.client.sets[mod.INDEX_ALL] = {scope, "rag:semcache:u-2:other"}
+
+        deleted = await service.invalidate_kb(kb_id)
+
+        assert deleted == 1
+        assert scope not in cache.client.sets.get(index_kb, set())
+        assert scope not in cache.client.sets[mod.INDEX_ALL]
+        assert index_kb not in cache.client.sets, "空索引键应一并删除，否则每次失效都为它白跑 HGETALL"
+        assert mod.INDEX_ALL in cache.client.sets, "还有别的 scope 时不能删索引键"
+
+    @pytest.mark.asyncio
+    async def test_invalidate_kb_keeps_index_when_scope_survives(self, monkeypatch):
+        """scope 里还有别的条目不删时，索引成员必须保留——误删就等于以后按库失效永远扫不到它。"""
+        service = SemanticCacheService()
+        cache = _SetCache()
+        _patch_cache(monkeypatch, service, cache)
+        monkeypatch.setattr(mod, "_decode_entry", __import__("json").loads)
+
+        kb_id = "kb-1"
+        scope = f"rag:semcache:u-1:{_scope_hash([kb_id])}"
+        index_kb = f"{mod.INDEX_PREFIX}:kb:{kb_id}"
+        cache.client.hashes[scope] = {
+            "exact:a": _json_entry([kb_id]),
+            "exact:b": _json_entry(["kb-2"]),
+        }
+        cache.client.sets[index_kb] = {scope}
+
+        deleted = await service.invalidate_kb(kb_id)
+
+        assert deleted == 1
+        assert scope in cache.client.sets[index_kb]
+        assert not cache.client.srem_calls, "没有删空就不该碰索引"
+
+    @pytest.mark.asyncio
+    async def test_trim_prunes_index_when_all_entries_expired(self, monkeypatch):
+        """写时惰性清理把 scope 清空后，同样要摘索引成员。"""
+        service = SemanticCacheService()
+        cache = _SetCache()
+        _patch_cache(monkeypatch, service, cache)
+        monkeypatch.setattr(mod, "_decode_entry", __import__("json").loads)
+
+        scope = "rag:semcache:u-1:expired"
+        index_kb = f"{mod.INDEX_PREFIX}:kb:kb-9"
+        cache.client.hashes[scope] = {"exact:old": _json_entry(["kb-9"], created_at=0)}
+        cache.client.sets[index_kb] = {scope}
+
+        await service._trim(cache, scope)
+
+        assert scope not in cache.client.hashes
+        assert index_kb not in cache.client.sets
+
+    @pytest.mark.asyncio
+    async def test_prune_failure_is_recoverable_not_fatal(self, monkeypatch, caplog):
+        """摘索引失败不能把「条目已删」这个主结果变成失败：日志要能区分这两种情况。"""
+        service = SemanticCacheService()
+        cache = _SetCache()
+        _patch_cache(monkeypatch, service, cache)
+        monkeypatch.setattr(mod, "_decode_entry", __import__("json").loads)
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("redis srem timeout")
+
+        monkeypatch.setattr(cache.client, "srem", _boom)
+
+        kb_id = "kb-1"
+        scope = f"rag:semcache:u-1:{_scope_hash([kb_id])}"
+        cache.client.hashes[scope] = {"exact:a": _json_entry([kb_id])}
+        cache.client.sets[f"{mod.INDEX_PREFIX}:kb:{kb_id}"] = {scope}
+
+        with caplog.at_level(logging.WARNING, logger=mod.logger.name):
+            deleted = await service.invalidate_kb(kb_id)
+
+        assert deleted == 1, "条目确实删掉了，不能因为索引清理失败就报 0"
+        hits = [r for r in caplog.records if "action=semantic_cache.prune_index" in r.getMessage()]
+        assert hits, "索引残留必须留痕，否则巡检报出来时无从知道是谁留下的"
+        assert hits[0].levelno == logging.WARNING

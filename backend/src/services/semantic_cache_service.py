@@ -19,7 +19,7 @@ import logging
 import math
 import time
 from dataclasses import dataclass, field as dataclass_field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from src.config import settings
 
@@ -433,6 +433,9 @@ class SemanticCacheService:
             key = self.scope_key(user_id, kb_ids)
             field_id = self.exact_field_id(hit.question)
             await self._execute(cache, cache.client.hdel(key, field_id))
+            # 删掉最后一条时 Redis 会把这个 hash 整个删掉，索引里的成员随即悬空（C12）
+            if not await self._execute(cache, cache.client.hlen(key)):
+                await self._prune_empty_scopes(cache, [key])
             return True
         except Exception as exc:
             # 删不掉只是浪费一次校验，条目下次命中仍会被拦下
@@ -569,6 +572,9 @@ class SemanticCacheService:
 
         if expired:
             await self._execute(cache, cache.client.hdel(key, *expired))
+            # 与 invalidate_kb 同一个坑：把 scope 删空后索引成员会悬空
+            if len(raw) - len(expired) <= 0:
+                await self._prune_empty_scopes(cache, [key])
 
     async def _index_scope(self, cache, scope_key: str, kb_ids: Optional[List[str]]) -> None:
         """维护 kb_id → scope keys 索引（SEC-11）；失败不影响缓存读写。"""
@@ -611,6 +617,39 @@ class SemanticCacheService:
     # ------------------------------------------------------------------
     # 失效
     # ------------------------------------------------------------------
+    async def _prune_empty_scopes(self, cache, scopes: Sequence[str]) -> None:
+        """把已删空的 scope 从索引 SET 里摘掉，并清掉变空的索引键。
+
+        为什么必须做（C12）：HDEL 掉**最后一个字段**时 Redis 会直接把整个 hash
+        删掉，但索引 SET 里的成员不会跟着消失。于是巡检长期报 `dangling_cache_index`
+        ——一条永远消不掉的差异，把「exit 0 = 健康」这个信号稀释掉了；而且每次按
+        kb 失效都要为它白跑一次 HGETALL。
+
+        只传**确认已删空**的 scope，不做「逐成员校验存在性」的兜底扫描：
+        后者会在每次失效时对全部索引做 SMEMBERS + 每成员一次 EXISTS，
+        为了一条残留把常规路径变贵。存量残留由运维一次性清理（见 monitoring 巡检章节）。
+        """
+        if not scopes:
+            return
+        try:
+            index_keys: List[str] = []
+            async for key in cache.client.scan_iter(match=f"{INDEX_PREFIX}:*"):
+                index_keys.append(key)
+            for index_key in index_keys:
+                await self._execute(cache, cache.client.srem(index_key, *scopes))
+                size = await self._execute(cache, cache.client.scard(index_key))
+                if not size:
+                    await self._execute(cache, cache.client.delete(index_key))
+        except Exception as exc:
+            # 条目已经删掉了，这里失败只是留下一条索引残留（巡检会报出来），
+            # 不影响「已删内容不再被回放」这个主目标，所以是 RECOVERABLE 而非 REPORTABLE。
+            log_exception(
+                logger, exc, action="semantic_cache.prune_index",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="清理缓存 scope 索引残留失败：条目已删除，索引成员会留到索引键 TTL 到期",
+                scopes=len(scopes),
+            )
+
     async def invalidate_kb(self, kb_id: str) -> int:
         """知识库内容变更后失效相关条目。
 
@@ -634,6 +673,7 @@ class SemanticCacheService:
                 return 0
 
             deleted = 0
+            emptied: List[str] = []
             candidate = await self._candidate_scopes(cache, kb_id)
             if candidate:
                 keys = candidate
@@ -657,8 +697,12 @@ class SemanticCacheService:
                 if to_delete:
                     await self._execute(cache, cache.client.hdel(key, *to_delete))
                     deleted += len(to_delete)
+                    # 用「删前快照 − 本次删除数」判断是否删空，不再多发一次 HLEN
+                    if len(raw) - len(to_delete) <= 0:
+                        emptied.append(key)
             if deleted:
                 logger.info(f"语义缓存失效 [kb_id={kb_id}]: 删除 {deleted} 条")
+            await self._prune_empty_scopes(cache, emptied)
             return deleted
         except Exception as exc:
             # 失效没做成 = 已删/已下架内容在 TTL 内仍可能被回放，不是「下次重试就好」
