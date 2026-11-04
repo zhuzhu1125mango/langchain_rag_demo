@@ -23,6 +23,17 @@ set -euo pipefail
 # TARGET_EMPTY=0 允许往非空库导入（默认拒绝：非空库导入会因对象已存在而中断）
 : "${TARGET_EMPTY:=1}"
 
+# 宿主机没有 psql / pg_restore 时（Windows Git Bash 默认就没有），借用 postgres 容器执行。
+# backup.sh 早就有这个降级，但 restore.sh 一直缺——2026-11-04 的端到端演练第一次在
+# Git Bash 上按 runbook 恢复时才发现：文档写的命令在这台机器上根本跑不起来。
+: "${PG_CONTAINER:=postgres-prod}"
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+winpath() {
+  if have cygpath; then cygpath -w "$1"; else printf '%s' "$1"; fi
+}
+
 # MINIO_ONLY=1：只回灌原件，不动数据库（演练 / 单丢原件时用）
 : "${MINIO_ONLY:=0}"
 
@@ -38,9 +49,15 @@ if [[ "$MINIO_ONLY" != "1" ]]; then
 fi
 
 psql_run() {
-  PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
-    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    -v ON_ERROR_STOP=1 "$@"
+  if have psql; then
+    PGPASSWORD="${POSTGRES_PASSWORD:-}" psql \
+      -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      -v ON_ERROR_STOP=1 "$@"
+  else
+    # 容器模式：用容器自身的凭据与 unix socket，不需要把密码带到宿主机命令行
+    docker exec -i "$PG_CONTAINER" \
+      psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 "$@"
+  fi
 }
 
 if [[ "$MINIO_ONLY" == "1" ]]; then
@@ -64,11 +81,29 @@ fi
 magic=$(head -c 5 "$PG_FILE" 2>/dev/null || true)
 echo "[1/2] 恢复 PostgreSQL: $PG_FILE (格式: $([[ "$magic" == "PGDMP" ]] && echo custom || echo plain))"
 if [[ "$magic" == "PGDMP" ]]; then
-  PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_restore \
-    -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-    --no-owner --no-privileges --exit-on-error "$PG_FILE"
+  if have pg_restore; then
+    PGPASSWORD="${POSTGRES_PASSWORD:-}" pg_restore \
+      -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      --no-owner --no-privileges --exit-on-error "$PG_FILE"
+  else
+    echo "      借用容器 $PG_CONTAINER（宿主机未安装 pg_restore）"
+    docker cp "$(winpath "$PG_FILE")" "$PG_CONTAINER:/tmp/restore.dump"
+    docker exec "$PG_CONTAINER" \
+      pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+      --no-owner --no-privileges --exit-on-error /tmp/restore.dump
+    docker exec "$PG_CONTAINER" rm -f /tmp/restore.dump
+  fi
 else
-  gunzip -c "$PG_FILE" | psql_run
+  if have psql; then
+    gunzip -c "$PG_FILE" | psql_run
+  else
+    echo "      借用容器 $PG_CONTAINER（宿主机未安装 psql）"
+    docker cp "$(winpath "$PG_FILE")" "$PG_CONTAINER:/tmp/restore.sql.gz"
+    docker exec "$PG_CONTAINER" sh -c '
+      gunzip -c /tmp/restore.sql.gz | psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q -v ON_ERROR_STOP=1
+    '
+    docker exec "$PG_CONTAINER" rm -f /tmp/restore.sql.gz
+  fi
 fi
 
 fi  # MINIO_ONLY

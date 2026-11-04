@@ -276,7 +276,9 @@ curl -fsS http://127.0.0.1:8001/health/ready
 >   官方 `milvus-backup` 备份 → 起全新一套 etcd + MinIO + Milvus → `restore --rebuild_index` →
 >   校验条数/索引/抽样哈希/ANN 结果 → 自动清理。
 >
-> 仍未自动化：应用启动与问答抽查（需要完整依赖栈）。
+> 上述三条验证的是「**数据能恢复**」。还有一件它们都不覆盖：**恢复完整套服务能不能起来、
+> 能不能答对问题**——需要六个容器（PG/Redis/MinIO/etcd/Milvus/backend）一起才能验。
+> 这条为手工编排，步骤见 §7.4，2026-11-04 实测通过（未脚本化）。
 
 ### 7.1 恢复演练
 
@@ -293,14 +295,13 @@ curl -fsS http://127.0.0.1:8001/health/ready
 3. 按 §5.3 验证「备份恢复优先于 downgrade」的路径可行；
 4. 记录回退耗时与数据一致性检查结果。
 
-### 7.3 演练记录
-
-| 日期 | 演练类型 | 数据规模 | PG 恢复 | MinIO 恢复 | Milvus 恢复 | 总耗时（RTO） | 结论 | 改进项 |
+### 7.3 演练记录| 日期 | 演练类型 | 数据规模 | PG 恢复 | MinIO 恢复 | Milvus 恢复 | 总耗时（RTO） | 结论 | 改进项 |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-27 | 首次基线（文档化） | — | — | — | — | — | — | 待首次执行 |
 | **2026-11-04** | **PG 恢复（隔离库 `drill-pg`，端口 5547）** | **29 表 / 136KB / 0 文档 / 3 用户 / 82 trace** | **1s** | 未验（无镜像产物） | 未验（0 向量，可重建） | **6s**（含容器启动 4s） | **通过，但需补一步** | 见下 |
 | **2026-11-04** | **MinIO 整实例恢复（全新 `drill-minio` + 新卷 + 新凭据）** | **3 对象 / 1MB（含中文名与嵌套路径）** | 不适用 | **3/3 对象，哈希集合一致** | 未验（0 向量，可重建） | **4s**（含实例启动 2s） | **通过** | 见下 |
 | **2026-11-04** | **Milvus 整实例恢复（全新 etcd+MinIO+Milvus）** | **1000 条 128 维 + HNSW（备份 477KiB）** | 不适用 | 不适用 | **1000/1000，索引与 ANN 一致** | **29s**（备份 2s + 恢复 17s） | **通过，但默认参数会漏索引** | 见下 |
+| **2026-11-04** | **端到端：三套全恢复 + 起服务 + 问答** | **4 文档 / 532 chunk / 4 用户 / 111 trace / 4 对象** | **4 文档 532 chunk** | **4 对象，md5 与原文件一致** | **532 实体，检索命中** | **手工编排，未计时**（Milvus 恢复 15.7s、backend 到 ready 16s） | **通过** | 见下 |
 
 **2026-11-04 首次演练详情**（脚本：`scripts/restore_drill.sh`，可重复执行）：
 
@@ -412,6 +413,86 @@ collection.load() -> MilvusException(code=700, message=index not found[collectio
 生产 `documents` 里的真实对象（当前 0 文档）。Milvus 只验了 dense 索引，
 **`documents` 还有 `sparse_embedding` 字段，稀疏索引未验**——灌入真实文档后应重跑一次本脚本
 （脚本默认只跑 dense 的 drill 集合，若加 sparse 字段需同步扩展）。
+
+**2026-11-04 第五批：端到端（三套恢复 + 起服务 + 问答）通过**
+
+前三批各自证明「数据能恢复」，但都没回答一个问题：**恢复完之后，服务能不能起来、能不能答对？**
+这批把六个容器一起拉起来验证（步骤见 §7.4）。
+
+准备：在生产灌 4 份真实文档（`architecture.md` / `deployment.md` / `monitoring.md` /
+`backup-restore.md`）→ 4 文档 / **532 chunk** / Milvus 532 实体（含 `HNSW` 与
+`SPARSE_INVERTED_INDEX`）/ MinIO 4 对象。备份 PG 124KB + MinIO 4 对象 + Milvus 备份。
+
+恢复与结果（全部指向全新容器与卷，凭据从同一份 secrets 挂载）：
+
+| 项 | 结果 |
+|---|---|
+| PostgreSQL | 4 文档 / 532 chunk / 4 用户 / 111 trace，与源一致 |
+| MinIO | 4 对象；`GET /api/documents/{id}/file` 返回 **200 / 19903 B / md5 `f44065a8…`**，与本地原文件**完全一致** |
+| Milvus | 532 实体；`restore --rebuild_index` **15.7s** |
+| backend | 起容器到 `/health/ready` **16s**，四项 `database/redis/milvus/minio` 全 `ok` |
+| 问答（同一个问题） | 源 `knowledge_base` / 3 引用 / 293 字；恢复后 `knowledge_base` / 3 引用 / 367 字，内容一致（措辞不同属 LLM 非确定性） |
+
+**这批抓到的两个真问题：**
+
+1. **`restore.sh` 缺 psql 的容器降级。** `backup.sh` 早就支持「宿主机没 pg_dump 就借容器」，
+   但 `restore.sh` 一直直接用宿主机 `psql`/`pg_restore`——而 runbook 指定的 Git Bash 环境
+   两者都没有。也就是说：**按文档恢复，在这台机器上根本跑不起来**（和当初 `backup.sh`
+   一模一样的坑，只是当时只修了一半）。已补容器分支（`PG_CONTAINER`，默认 `postgres-prod`）。
+   ⚠️ **这条新分支只做了语法校验，未实测**——验证时要起临时库，被本机权限策略拦下，未绕过。
+
+2. **Windows 挂载 secrets 的畸形路径（极隐蔽）。** 在 Git Bash 里未设 `MSYS_NO_PATHCONV=1` 时，
+   `-v "$PWD/secrets/redis_password:/run/secrets/REDIS_PASSWORD"` 会被改写成
+   `C:\...\redis_password;C -> \Users\...\run\secrets\REDIS_PASSWORD`。**容器照常启动**，
+   但 `/run/secrets/REDIS_PASSWORD` 不存在 → `redis-server --requirepass "$(cat …)"` 拿到空串
+   → **Redis 以无密码启动**，而 backend 带密码连 → 报的是
+   `Redis 连接超时（3.0s），请检查 REDIS_HOST=… 和端口 6379 是否可达`。
+   这条报错会把排查引向网络，而真因是凭据文件根本没挂上。**挂载后用 `docker inspect` 核对
+   `Source` 是硬要求**，或用 `cygpath -w` 显式转路径。
+
+另附一条观察（与灾备无关但同批发现）：问「ScrapeTargetDown 是什么意思」时，检索**召回了**
+正确章节（`monitoring.md > 4. 告警规则`），但 rerank 分只有 **0.066**（另两块 0.0004 / 0.00004），
+低于 `KB_RELEVANCE_SCORE_THRESHOLD=0.3` → 判为 `kb_miss`。这与
+[stage-probe 报告](../benchmarks/stage-probe-2026-11-03.md) 的结论一致：
+**重排分不可跨题比较，阈值判据本身有问题**。不影响本次灾备结论。
+
+**本次仍没验到的**：Milvus 的 sparse 索引单独验证（问答走 dense+sparse 混合，间接覆盖）；
+回滚演练（§7.2）；真实规模下的 RTO（532 chunk 与 1 万文档不是一回事）。
+
+### 7.4 端到端演练步骤（手工编排，约 20 分钟）
+
+前提：生产已有数据；`docker` 可用；本机 Ollama 在跑（backend 要调 embedding 与 LLM）。
+
+```bash
+export MSYS_NO_PATHCONV=1                 # 必须：否则 -e /run/secrets/... 会被改写成 Windows 路径
+SECW=$(cygpath -w "$PWD/secrets")         # -v 的宿主路径用 winpath，避免 C:\...;C 畸形挂载
+
+# 1. 备份三套
+BACKUP_DIR=backups/drill-e2e MINIO_BUCKET=documents ./scripts/backup.sh
+#    Milvus 用 milvus-backup create（见 §7.3 第四批的 backup.yaml 写法，指向生产 Milvus + 生产 MinIO）
+
+# 2. 起新栈（全部独立卷、独立容器名，网络复用 rag-prod_infra-net）
+#    postgres:16.14 / redis:7.2-alpine / pgsty/minio / etcd v3.5.30 / milvus v2.6.17
+#    密码统一从 secrets 挂到 /run/secrets/，minio 用 *_FILE 且 **必须置空 MINIO_ACCESS_KEY_FILE 等**
+
+# 3. 恢复
+#    PG    : docker cp dump -> drill-pg，容器内 gunzip | psql（宿主机无 psql）
+#    MinIO : MINIO_ONLY=1 MINIO_CONTAINER=drill-minio MINIO_DIR=<镜像目录> ./scripts/restore.sh
+#    Milvus: milvus-backup restore -n <备份名> --rebuild_index（**不能省 --rebuild_index**）
+
+# 4. 起 backend：环境变量从生产导出后替换四个 HOST
+#    docker inspect backend-prod --format '{{range .Config.Env}}{{println .}}{{end}}' > backend.env
+#    POSTGRES_HOST=drill-pg / REDIS_HOST=drill-redis / MILVUS_HOST=drill-milvus
+#    MINIO_ENDPOINT=drill-minio:9000；/app/data 挂到独立目录；端口 8002
+
+# 5. 验收
+curl -s localhost:8002/health/ready          # 四项 ok
+# 同一个问题分别问 8001/8002，比较 answer_type / sources / 关键结论
+# 下载原件比对 md5：GET /api/documents/{id}/file
+```
+
+**验收判据**（不要只看 `restore success`）：`/health/ready` 四项 ok、同一问题的
+`answer_type` 与引用数与源一致、原件下载 md5 与本地文件一致。
 
 ## 8. 应急处置速查
 
