@@ -7,7 +7,13 @@
 #
 # 关键设计：**真的调用 scripts/restore.sh**（而不是在演练脚本里另写一套恢复逻辑）。
 # 否则演练验证的是演练脚本，不是运维真正会敲的那条命令。
-# 因为宿主机没有 psql/pg_restore，所以把脚本和备份一起拷进临时 PG 容器里执行。
+#
+# 两种调用方式（HOST_RESTORE）：
+#   0（默认）：把脚本拷进临时 PG 容器里执行 —— 容器内有 psql，走的是「宿主机有客户端」那条路
+#   1        ：在宿主机上执行 —— 宿主机没有 psql/pg_restore，**走的是容器降级分支**，
+#              也就是 runbook 让运维在 Git Bash 里实际会走的那条。默认值是 0 是因为
+#              它会往临时容器里 docker cp，CI/无 docker 的环境下更容易失败；但发布前
+#              必须用 1 跑一遍，否则降级分支永远没有执行过。
 #
 # 安全边界（刻意的）：
 #   - 只创建/删除名字以 drill- 开头的容器与卷；不碰任何生产容器与卷
@@ -33,6 +39,8 @@ DRILL_DB="app_drill"
 DRILL_USER="drill_user"
 DRILL_PW="drill_pw"          # 临时库，仅监听 127.0.0.1，演练结束即销毁
 KEEP="${KEEP:-0}"
+# 1 = 在宿主机上跑 restore.sh（无 psql → 走容器降级分支）；0 = 拷进容器里跑
+HOST_RESTORE="${HOST_RESTORE:-0}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
@@ -76,14 +84,22 @@ t_pg_up=$(( $(date +%s) - t0 ))
 echo "[1/4] 空库就绪（含容器启动）: ${t_pg_up}s"
 
 # ---------- 2. 调用真实 restore.sh ----------
-docker cp "$PG_FILE" "$DRILL_PG:/tmp/backup.bin" >/dev/null
-docker cp scripts/restore.sh "$DRILL_PG:/tmp/restore.sh" >/dev/null
 t1=$(date +%s)
-docker exec \
-  -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PORT=5432 \
-  -e "POSTGRES_DB=$DRILL_DB" -e "POSTGRES_USER=$DRILL_USER" -e "POSTGRES_PASSWORD=$DRILL_PW" \
-  -e PG_FILE=/tmp/backup.bin -e TARGET_EMPTY=1 \
-  "$DRILL_PG" bash /tmp/restore.sh
+if [[ "$HOST_RESTORE" == "1" ]]; then
+  echo "      模式: 宿主机执行 restore.sh（走容器降级分支）"
+  PG_CONTAINER="$DRILL_PG" PG_FILE="$PG_FILE" \
+    POSTGRES_DB="$DRILL_DB" POSTGRES_USER="$DRILL_USER" POSTGRES_PASSWORD="$DRILL_PW" \
+    TARGET_EMPTY=1 bash scripts/restore.sh
+else
+  echo "      模式: 容器内执行 restore.sh（模拟宿主机已有客户端）"
+  docker cp "$PG_FILE" "$DRILL_PG:/tmp/backup.bin" >/dev/null
+  docker cp scripts/restore.sh "$DRILL_PG:/tmp/restore.sh" >/dev/null
+  docker exec \
+    -e POSTGRES_HOST=127.0.0.1 -e POSTGRES_PORT=5432 \
+    -e "POSTGRES_DB=$DRILL_DB" -e "POSTGRES_USER=$DRILL_USER" -e "POSTGRES_PASSWORD=$DRILL_PW" \
+    -e PG_FILE=/tmp/backup.bin -e TARGET_EMPTY=1 \
+    "$DRILL_PG" bash /tmp/restore.sh
+fi
 t_restore=$(( $(date +%s) - t1 ))
 echo "[2/4] restore.sh 执行完成: ${t_restore}s"
 

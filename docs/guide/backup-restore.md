@@ -178,6 +178,15 @@ curl -fsS http://127.0.0.1:8001/health/ready
 
 - 后端与前端**同批回退**（SSE 事件协议、审批卡片等跨端契约需版本匹配）；
 - 回退后若旧代码不认识新表字段，以 PG 备份恢复为准，不要保留「新 schema + 旧代码」组合长期运行。
+- **实测（2026-11-04 回滚演练，§7.3）**：上一版镜像（`rag-backend:rollback-20261101b`）装在
+  已迁到 `d5e6f7a8b9c0` 的库上，`/health/ready` 四项 ok（冷启动 27~48s）、登录与知识库问答均正常
+  ——**加列式迁移的向后兼容成立**，回滚不需要先 `downgrade`，§5.3 的「恢复备份优先」也顺带被验证。
+- **但旧镜像里没有新迁移文件**：任何 `alembic` 命令都会直接报
+  `Can't locate revision identified by 'd5e6f7a8b9c0'`（连 `alembic current` 都不行）。
+  也就是说**回滚后不能靠旧镜像做任何迁移操作**，要迁移只能用新镜像——这条以前没写进文档。
+- **回滚会丢掉 P0-4 的优雅停机**：旧镜像没有 `--timeout-graceful-shutdown`，`docker stop`
+  时正在生成的 SSE 会被硬杀（ExitCode 137、客户端收不到 `end` 帧、答案截断）。回滚窗口内
+  请选低峰，并接受「重启会打断在途回答」。
 
 ### 5.3 数据库迁移回滚
 
@@ -265,16 +274,21 @@ curl -fsS http://127.0.0.1:8001/health/ready
 
 ## 7. 演练（每季度）
 
-> 已自动化，三条命令各管一半：
+> 已自动化，四条命令各管一段：
 >
 > - `./scripts/restore_drill.sh [备份文件]` —— **PostgreSQL**：起隔离 PG（端口 5547）、调用真实
 >   `restore.sh`、比对表数/行数与生产、输出 RTO，结束自动销毁 `drill-*` 容器与卷。
+>   加 `HOST_RESTORE=1` 则在**宿主机**执行 `restore.sh`（本机无 `psql`/`pg_restore` →
+>   走容器降级分支，也就是 runbook 让运维实际走的那条路）。
 > - `./scripts/restore_drill_minio.sh` —— **MinIO 整实例**：在源实例造种子对象 → `backup.sh`
 >   产出镜像 → 起一台**全新** MinIO（独立数据卷、独立凭据）→ `restore.sh MINIO_ONLY=1` 回灌 →
 >   校验文件数/文件名集合/内容哈希集合 → 用业务 SDK 复读 → 自动清理。
 > - `./scripts/restore_drill_milvus.sh` —— **Milvus 整实例**：源实例造 1000 条演练集合 →
 >   官方 `milvus-backup` 备份 → 起全新一套 etcd + MinIO + Milvus → `restore --rebuild_index` →
 >   校验条数/索引/抽样哈希/ANN 结果 → 自动清理。
+> - `./scripts/rollback_drill.sh` —— **回滚（§7.2）**：现打一份备份 → 隔离 PG 恢复 →
+>   把**上一版镜像**装上去（连 drill 的 PG/Redis、只读生产 Milvus/MinIO）→ 验 ready/登录/问答 →
+>   验「生成中被停」的行为 → 自动清理。`ROLLBACK_IMAGE=` 指定要回滚到的镜像。
 >
 > 上述三条验证的是「**数据能恢复**」。还有一件它们都不覆盖：**恢复完整套服务能不能起来、
 > 能不能答对问题**——需要六个容器（PG/Redis/MinIO/etcd/Milvus/backend）一起才能验。
@@ -290,10 +304,23 @@ curl -fsS http://127.0.0.1:8001/health/ready
 
 ### 7.2 回滚演练
 
-1. 在隔离环境部署「上一版本」镜像与当前版本数据（模拟升级后回退）；
-2. 按 §5.2 执行应用回退，确认旧版本可启动、SSE 正常、登录/知识库问答可用；
-3. 按 §5.3 验证「备份恢复优先于 downgrade」的路径可行；
-4. 记录回退耗时与数据一致性检查结果。
+```bash
+./scripts/rollback_drill.sh                    # 现打备份 → 隔离恢复 → 装上一版镜像 → 验功能与停机
+ROLLBACK_IMAGE=rag-backend:rollback-20261101 ./scripts/rollback_drill.sh
+PG_FILE=backups/xxx.sql.gz ./scripts/rollback_drill.sh   # 省一次 dump
+KEEP=1 ./scripts/rollback_drill.sh             # 保留现场排查
+```
+
+脚本做四件事，缺一件这次演练就不算数：
+
+1. **现打一份备份**并恢复进**隔离** PG（不是复制数据目录），顺带再验一次备份链路；
+2. 把**上一版镜像**装到这份**当前 schema** 的数据上（模拟「升级完发现不对」），
+   连 drill 的 PG/Redis，Milvus 与 MinIO 只读生产；
+3. 验 `health/ready`、登录、一次知识库问答——**能启动 ≠ 能用**，旧代码要能读新表；
+4. 验「生成中被停」：用 curl 拿到首帧后立刻 `docker stop`，看进程退出码与客户端有没有 `end` 帧。
+
+判定口径（2026-11-04 实测值见 §7.3）：第 1~3 条必须全绿；第 4 条只记录行为差异，
+因为「回滚会丢掉优雅停机」是**能力缺失**，不是每次都能撞上生成中的流。
 
 ### 7.3 演练记录| 日期 | 演练类型 | 数据规模 | PG 恢复 | MinIO 恢复 | Milvus 恢复 | 总耗时（RTO） | 结论 | 改进项 |
 |---|---|---|---|---|---|---|---|---|
@@ -302,6 +329,7 @@ curl -fsS http://127.0.0.1:8001/health/ready
 | **2026-11-04** | **MinIO 整实例恢复（全新 `drill-minio` + 新卷 + 新凭据）** | **3 对象 / 1MB（含中文名与嵌套路径）** | 不适用 | **3/3 对象，哈希集合一致** | 未验（0 向量，可重建） | **4s**（含实例启动 2s） | **通过** | 见下 |
 | **2026-11-04** | **Milvus 整实例恢复（全新 etcd+MinIO+Milvus）** | **1000 条 128 维 + HNSW（备份 477KiB）** | 不适用 | 不适用 | **1000/1000，索引与 ANN 一致** | **29s**（备份 2s + 恢复 17s） | **通过，但默认参数会漏索引** | 见下 |
 | **2026-11-04** | **端到端：三套全恢复 + 起服务 + 问答** | **4 文档 / 532 chunk / 4 用户 / 111 trace / 4 对象** | **4 文档 532 chunk** | **4 对象，md5 与原文件一致** | **532 实体，检索命中** | **手工编排，未计时**（Milvus 恢复 15.7s、backend 到 ready 16s） | **通过** | 见下 |
+| **2026-11-04** | **回滚：上一版镜像（11-01）+ 当前 schema 数据** | **4 用户 / 2 KB / 4 文档 / 532 chunk** | **2s 恢复，库 schema=`d5e6f7a8b9c0`** | 只读（未写入） | 只读（532 实体，问答命中） | **ready 27~48s**（冷启动加载模型），全流程 **77~101s**（含现打备份时约 101s） | **通过（回滚可行，但有两条代价）** | 见下 |
 
 **2026-11-04 首次演练详情**（脚本：`scripts/restore_drill.sh`，可重复执行）：
 
@@ -439,7 +467,10 @@ collection.load() -> MilvusException(code=700, message=index not found[collectio
    但 `restore.sh` 一直直接用宿主机 `psql`/`pg_restore`——而 runbook 指定的 Git Bash 环境
    两者都没有。也就是说：**按文档恢复，在这台机器上根本跑不起来**（和当初 `backup.sh`
    一模一样的坑，只是当时只修了一半）。已补容器分支（`PG_CONTAINER`，默认 `postgres-prod`）。
-   ⚠️ **这条新分支只做了语法校验，未实测**——验证时要起临时库，被本机权限策略拦下，未绕过。
+   ✅ **已在第六批补齐实测**（此前只做了语法校验）：`HOST_RESTORE=1 ./scripts/restore_drill.sh`
+   在宿主机（无 `psql`/`pg_restore`/`mc`）上分别跑 `.dump` 与 `.sql.gz` 两种产物，
+   两条容器分支都命中并通过（29 表 / 2s / 行数与生产一致）；回滚演练也走了同一条分支。
+   顺带修掉两个只在真跑时才暴露的缺陷（见第六批）。
 
 2. **Windows 挂载 secrets 的畸形路径（极隐蔽）。** 在 Git Bash 里未设 `MSYS_NO_PATHCONV=1` 时，
    `-v "$PWD/secrets/redis_password:/run/secrets/REDIS_PASSWORD"` 会被改写成
@@ -456,8 +487,47 @@ collection.load() -> MilvusException(code=700, message=index not found[collectio
 [stage-probe 报告](../benchmarks/stage-probe-2026-11-03.md) 的结论一致：
 **重排分不可跨题比较，阈值判据本身有问题**。不影响本次灾备结论。
 
+**2026-11-04 第六批：回滚演练通过（脚本 `scripts/rollback_drill.sh`，可重复执行）**
+
+备份恢复都验过，但**回滚**没验过——而事故里更常见的是「升级完发现不对，想退回去」。
+这批把「上一版镜像装在当前 schema 的数据上」跑了一遍。演练编排：现打一份生产备份 →
+隔离 PG 恢复 → 起 drill Redis → 装 `rag-backend:rollback-20261101b`（11-01 构建）→
+Milvus/MinIO 只读生产 → 验 ready / 登录 / 问答 / 停机。写操作只落在 `drill-rb-*` 的 PG 与 Redis。
+
+| 项 | 实测 |
+|---|---|
+| schema | 还原库 `d5e6f7a8b9c0`；回滚镜像内置 head 只到 `c4d5e6f7a8b9` → **库比镜像新**（回滚的常态） |
+| 启动 | `/health/ready` 200，**27s（热）/ 48s（冷）**，四项 `database/redis/milvus/minio` 全 ok |
+| 登录 | 200，token 272 字符（旧代码能读带 `is_admin` 列的新用户表） |
+| 问答 | `knowledge_base` / 3 引用 / 341~1159 字；多次跑答案长度波动属模型非确定性，与回滚无关（问题固定为「备份怎么恢复？恢复后要确认什么？」） |
+| 停机（生成中） | `docker stop` **3~4s**、**ExitCode 137**、客户端收到 **11~15KB 无 `end` 帧**、日志停在 `Waiting for connections to close` |
+
+**两条代价（已回写 §5.2）**：
+
+1. **旧镜像跑不了 alembic**：`Can't locate revision identified by 'd5e6f7a8b9c0'`，连
+   `alembic current` 都失败。回滚后要动迁移只能用新镜像，不能按习惯在旧镜像里 `upgrade head`。
+2. **丢掉 P0-4 的优雅停机**：旧镜像启动命令是 `uvicorn src.main:app --host 0.0.0.0 --port 8000`，
+   没有 `--timeout-graceful-shutdown`；生成中被停就是硬杀 + 残答。
+
+**这批抓到的三个缺陷（都已修）**：
+
+1. **`restore.sh` 的 `.sql.gz` 容器分支会导错库**（最危险的一条）：脚本把
+   `psql -U "$POSTGRES_USER" -d "$POSTGRES_DB"` 写在**单引号**里，这句实际由**容器的** `sh`
+   去展开，取到的是容器自己的 `POSTGRES_DB`。调用方指定另一个库名时，数据被静默导进容器默认库，
+   `psql` 照样 exit 0 —— 「恢复成功、目标库却是空的」。已改为 `docker exec -e PGU=… -e PGD=…`
+   显式传入。（`.dump` 分支一直是对的，所以只有纯文本产物会中招。）
+2. **读魔数会在恢复现场打一行吓人的警告**：`head -c 5` 读 gzip 时第 4 字节是 `0x00`，
+   bash 报 `ignored null byte in input`。改成走管道 + `tr -d '\000'`。
+3. **`pg_dump` 里的 `SELECT set_config(...)` 会把结果表打到屏幕**，恢复现场看到一张空表容易
+   误判成报错 → 导入时加 `-q -o /dev/null`。
+
+**一条方法学结论**：停机测试不能 `sleep 固定秒数` 再停。这道题 2~4 秒就答完，早先版本
+`sleep 3/4` 秒再 `docker stop`，测到的是「没有活跃连接」，结论在 `ExitCode 0` 与 `137` 之间
+摇摆（第一版就得到过 2s/0 的假结论）。改成 **curl 轮询到首帧后立刻 stop** 才稳定复现。
+
 **本次仍没验到的**：Milvus 的 sparse 索引单独验证（问答走 dense+sparse 混合，间接覆盖）；
-回滚演练（§7.2）；真实规模下的 RTO（532 chunk 与 1 万文档不是一回事）。
+真实规模下的 RTO（532 chunk 与 1 万文档不是一回事）；**前端**镜像的回滚（本次只验后端，
+§5.2 要求前后端同批回退，前端回滚目前只有构建与 `nginx.conf` 对比，没有端到端演练）。
 
 ### 7.4 端到端演练步骤（手工编排，约 20 分钟）
 

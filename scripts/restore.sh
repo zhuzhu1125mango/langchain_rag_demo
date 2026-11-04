@@ -78,7 +78,9 @@ fi
 
 # 2) 按魔数选恢复方式。custom 格式前 5 字节是 PGDMP；不要靠扩展名判断——
 #    实际产物里有叫 .dump 的，也有叫 .sql.gz 但内容是 custom 格式的历史残留。
-magic=$(head -c 5 "$PG_FILE" 2>/dev/null || true)
+#    读前几个字节走管道再进变量：gzip 头第 4 字节是 0x00，直接 $(head -c 5) 会让
+#    bash 打一句 "ignored null byte in input"，在恢复现场看起来像是出了问题。
+magic=$(head -c 5 "$PG_FILE" 2>/dev/null | tr -d '\000' || true)
 echo "[1/2] 恢复 PostgreSQL: $PG_FILE (格式: $([[ "$magic" == "PGDMP" ]] && echo custom || echo plain))"
 if [[ "$magic" == "PGDMP" ]]; then
   if have pg_restore; then
@@ -95,12 +97,17 @@ if [[ "$magic" == "PGDMP" ]]; then
   fi
 else
   if have psql; then
-    gunzip -c "$PG_FILE" | psql_run
+    # -o /dev/null：pg_dump 里会有 SELECT set_config(...) 之类的语句，结果表会打到屏幕上，
+    # 恢复现场看到一张空表容易误判成报错。
+    gunzip -c "$PG_FILE" | psql_run -q -o /dev/null
   else
     echo "      借用容器 $PG_CONTAINER（宿主机未安装 psql）"
     docker cp "$(winpath "$PG_FILE")" "$PG_CONTAINER:/tmp/restore.sql.gz"
-    docker exec "$PG_CONTAINER" sh -c '
-      gunzip -c /tmp/restore.sql.gz | psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -q -v ON_ERROR_STOP=1
+    # 目标库/用户必须由本脚本显式传进去，不能在单引号里留 $POSTGRES_DB 让容器的 sh 去展开：
+    # 那样取到的是**容器自己的** POSTGRES_DB，调用方指定别的库时会静默导进错的库
+    # （psql 照样 exit 0，看起来「恢复成功」而目标库仍是空的）。
+    docker exec -e "PGU=$POSTGRES_USER" -e "PGD=$POSTGRES_DB" "$PG_CONTAINER" sh -c '
+      gunzip -c /tmp/restore.sql.gz | psql -U "$PGU" -d "$PGD" -q -o /dev/null -v ON_ERROR_STOP=1
     '
     docker exec "$PG_CONTAINER" rm -f /tmp/restore.sql.gz
   fi
