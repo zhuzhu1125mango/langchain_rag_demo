@@ -265,15 +265,18 @@ curl -fsS http://127.0.0.1:8001/health/ready
 
 ## 7. 演练（每季度）
 
-> 已自动化，两条命令各管一半：
+> 已自动化，三条命令各管一半：
 >
 > - `./scripts/restore_drill.sh [备份文件]` —— **PostgreSQL**：起隔离 PG（端口 5547）、调用真实
 >   `restore.sh`、比对表数/行数与生产、输出 RTO，结束自动销毁 `drill-*` 容器与卷。
 > - `./scripts/restore_drill_minio.sh` —— **MinIO 整实例**：在源实例造种子对象 → `backup.sh`
 >   产出镜像 → 起一台**全新** MinIO（独立数据卷、独立凭据）→ `restore.sh MINIO_ONLY=1` 回灌 →
 >   校验文件数/文件名集合/内容哈希集合 → 用业务 SDK 复读 → 自动清理。
+> - `./scripts/restore_drill_milvus.sh` —— **Milvus 整实例**：源实例造 1000 条演练集合 →
+>   官方 `milvus-backup` 备份 → 起全新一套 etcd + MinIO + Milvus → `restore --rebuild_index` →
+>   校验条数/索引/抽样哈希/ANN 结果 → 自动清理。
 >
-> 仍未自动化：Milvus 快照恢复、应用启动与问答抽查（需要完整依赖栈）。
+> 仍未自动化：应用启动与问答抽查（需要完整依赖栈）。
 
 ### 7.1 恢复演练
 
@@ -297,6 +300,7 @@ curl -fsS http://127.0.0.1:8001/health/ready
 | 2026-10-27 | 首次基线（文档化） | — | — | — | — | — | — | 待首次执行 |
 | **2026-11-04** | **PG 恢复（隔离库 `drill-pg`，端口 5547）** | **29 表 / 136KB / 0 文档 / 3 用户 / 82 trace** | **1s** | 未验（无镜像产物） | 未验（0 向量，可重建） | **6s**（含容器启动 4s） | **通过，但需补一步** | 见下 |
 | **2026-11-04** | **MinIO 整实例恢复（全新 `drill-minio` + 新卷 + 新凭据）** | **3 对象 / 1MB（含中文名与嵌套路径）** | 不适用 | **3/3 对象，哈希集合一致** | 未验（0 向量，可重建） | **4s**（含实例启动 2s） | **通过** | 见下 |
+| **2026-11-04** | **Milvus 整实例恢复（全新 etcd+MinIO+Milvus）** | **1000 条 128 维 + HNSW（备份 477KiB）** | 不适用 | 不适用 | **1000/1000，索引与 ANN 一致** | **29s**（备份 2s + 恢复 17s） | **通过，但默认参数会漏索引** | 见下 |
 
 **2026-11-04 首次演练详情**（脚本：`scripts/restore_drill.sh`，可重复执行）：
 
@@ -364,10 +368,50 @@ curl -fsS http://127.0.0.1:8001/health/ready
    `pipefail` 下 `tr ... | head -c 24` 会让赋值返回 141，`set -e` 在打出第一行之前就终止脚本
    （表现为「exit 0、输出全空」）。
 
-**本次仍没验到的**：Milvus 快照恢复（无 `milvus-backup` 产物，当前 0 向量，可重建）；
-应用启动 + `/health/ready` + 问答抽查（需要完整依赖栈，未在隔离环境起后端）；
-生产 `documents` 里的真实对象（当前 0 个，客观上验不了）。
-**下次必做**：Milvus 快照恢复演练，以及在灌入真实文档后重跑一次本脚本。
+**2026-11-04 第四批：Milvus 整实例恢复通过**（脚本：`scripts/restore_drill_milvus.sh`）
+
+一直写着「Milvus 未验，0 向量可重建」。但「可重建」意味着重新灌库 + 重新算 embedding，
+成本远高于 PG/MinIO，不能靠这句话糊过去。这批用**官方 `milvus-backup`**（不是自研导出，
+自研只能导「我想得到的字段」）跑通整条链：
+
+- 源实例（就是生产 `milvus-standalone-prod`，真实事故也是它）建临时集合 `drill_docs`：
+  1000 条 128 维随机向量 + HNSW/COSINE 索引；
+- `create` 备份 → 477KiB / 8 对象，**2s**；
+- 起**全新一套**：新 etcd（独立卷）+ 新 MinIO（独立卷、独立凭据）+ 新 Milvus（同镜像
+  `v2.6.17`），确认恢复前集合数为 0；
+- `restore --rebuild_index` → **17s**；RTO（起实例→恢复完成）**29s**；
+- 五项校验全过：条数 1000/1000、索引 `vec:HNSW/COSINE` 一致、抽样 100 条的
+  标量+向量哈希一致（`5c802f2f871cd96c`）、ANN top-5 id 与分数**逐位一致**。
+
+**这批最有价值的发现：默认参数恢复会丢索引，而日志说「成功」。**
+
+```
+restore backup success        # 日志如此
+indexes: []                   # 实际
+collection.load() -> MilvusException(code=700, message=index not found[collection=drill_docs])
+```
+
+也就是说：恢复完集合在、数据在、`num_entities` 也正确，但**应用连不上**——`load()` 直接失败。
+必须带 `--rebuild_index`（脚本里已经固定）。这条以前没有任何文档提过。
+
+其余踩到的坑（都写进脚本注释）：
+
+1. **不要给新 Milvus 设 `COMMON_STORAGETYPE=minio`**：2.6.17 会 panic，
+   `Failed to init arrow filesystem: Invalid: Unsupported storage type: minio`（Exit 134）。
+   默认本来就是 minio，设了反而错。
+2. **`enable_dynamic_field` 的集合需要 etcd 段才会被完整备份**：create 时若 config 没配
+   `milvus.etcd`，日志会打 `skip backup collection dynamic field, etcd client is not initialized`。
+   本项目 `documents` 与 `drill_docs` 的 `enable_dynamic_field` 都是 `false`，所以无影响；
+   以后若启用 dynamic field，必须补 etcd 段。
+3. 备份名与集合名同规则（字母数字下划线），`drill-20261104-155448` 会被拒
+   （`Error: invalid backup name`）。
+4. 官方文档给的镜像是 `ghcr.io/zilliz/milvus-backup`，**本机 ghcr.io 返回 denied**；
+   `docker.io/milvusdb/milvus-backup` 可用（本次用的 v0.6.1）。
+
+**本次仍没验到的**：应用启动 + `/health/ready` + 问答抽查（需完整依赖栈，未在隔离环境起后端）；
+生产 `documents` 里的真实对象（当前 0 文档）。Milvus 只验了 dense 索引，
+**`documents` 还有 `sparse_embedding` 字段，稀疏索引未验**——灌入真实文档后应重跑一次本脚本
+（脚本默认只跑 dense 的 drill 集合，若加 sparse 字段需同步扩展）。
 
 ## 8. 应急处置速查
 
