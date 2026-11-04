@@ -39,17 +39,33 @@
 
 生产栈的 compose 调用必须带项目文件与 env 文件（凭据来自 `secrets/`，不在 `.env.prod`）：
 
-```bash
-COMPOSE="docker compose -f docker-compose.yml --env-file .env.prod"
+**两种执行模式，脚本自动选择**：
 
+| 你的宿主机 | 模式 | 条件 |
+|---|---|---|
+| 装了 `pg_dump` / `mc`（Linux 生产机） | host | 直连数据库与对象存储 |
+| **没装**（Windows Git Bash 默认如此） | docker | 借用 `postgres-prod` / `minio-prod` 容器里的客户端 |
+
+> **2026-11-04 发现**：本机 `pg_dump` 与 `mc` **都不存在**，`backup.sh` 按老版本根本跑不起来——
+> 这就是 `backups/` 里连一份 `.sql.gz` 都没有的真正原因（历史备份全是部署时手工 `pg_dump -Fc`）。
+> 现在没客户端会走容器模式，凭据从容器的 `/run/secrets/MINIO_ROOT_*` 读（生产是 `*_FILE` 注入，
+> 环境变量里并没有 `MINIO_ROOT_*`）。
+
+```bash
+# 最简：容器模式，默认 postgres-prod / minio-prod / bucket=documents
+./scripts/backup.sh
+
+# 显式指定（Linux 生产机，host 模式）
 export POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=5434 POSTGRES_DB=app_prod POSTGRES_USER=prod_user
 export POSTGRES_PASSWORD="$(cat secrets/postgres_password)"   # 由 Docker Secrets 提供，勿写入 shell 历史
 export MINIO_ALIAS=local MINIO_BUCKET=documents BACKUP_DIR=/backup
-
 mc alias set local http://127.0.0.1:9002 \
   "$(cat secrets/minio_root_user)" "$(cat secrets/minio_root_password)"
 ./scripts/backup.sh
 ```
+
+可覆盖项：`PG_CONTAINER`、`MINIO_CONTAINER`、`MINIO_INTERNAL_URL`（容器内是 `127.0.0.1:9000`，
+不是宿主机映射的 9002）、`BACKUP_DIR`、`MINIO_BUCKET`。
 
 Milvus（`milvus-backup` 版本需与 Milvus 2.6.x 兼容）：
 
@@ -298,10 +314,21 @@ curl -fsS http://127.0.0.1:8001/health/ready
   3. 演练脚本在 Git Bash 下把容器内 `/tmp/restore.sh` 改写成 Windows 路径而失败
      （runbook 指定的正是 Git Bash）→ 已加 `MSYS_NO_PATHCONV=1`。
 
-**本次没验到的（下次必做）**：MinIO 原件回灌（无镜像产物，当前 0 对象所以风险暂为 0）、
-Milvus 快照恢复（可重建，当前 0 向量）、应用启动 + `/health/ready` + 问答抽查
-（需要完整依赖栈，未在隔离环境起后端）。**下次演练至少要把 MinIO 回灌补上**——
-原件不可重建，它才是真正丢不起的那一半。
+**2026-11-04 第二批：备份链路与 MinIO 往返也跑通了**
+
+- **`backup.sh` 首次真正执行**（此前 `ls backups/*.sql.gz` 为 0，脚本化备份从未跑过）。
+  第一次就撞上「宿主机没有 `pg_dump`/`mc`」——runbook 指定的 Git Bash 环境两项都不具备。
+  已给 `backup.sh` / `restore.sh` 加**容器模式降级**：没客户端就借用 `postgres-prod` / `minio-prod`
+  里的二进制，凭据从 `/run/secrets/MINIO_ROOT_*` 读。
+- **MinIO 往返实测**（专用 bucket，不用 `documents`，避免碰生产数据）：
+  放 2 个对象（1MB 随机二进制 + 中文名文本）→ `backup.sh` 镜像 → `restore.sh MINIO_ONLY=1`
+  回灌到另一个 bucket → **逐对象 sha256 完全一致**（含中文文件名）。
+- **PG 的 `.sql.gz` 分支也验了**：用刚生成的 dump 再走一次隔离恢复，
+  **29 表 / 1s / 行数 4|1|0|107 与生产完全一致**（这次备份是几分钟前的，所以没有迁移差）。
+- 顺带暴露的两个脚本缺陷：`restore.sh` 强制要求 `MINIO_DIR`（只想恢复 PG 时没法用）→ 改为可选
+  并新增 `MINIO_ONLY=1`；MinIO 镜像里没有 `grep`/`sed`，脚本里不能依赖这些工具。
+
+**本次没验到的（下次必做）**：MinIO 回灌只在**同一个 MinIO 实例内换了 bucket**（`drill-src` → `drill-dst`），没有验「实例整体丢失后向全新 MinIO 恢复」，也没有验生产 `documents` bucket 里的真实对象（当前 0 个）。Milvus 快照恢复未验（无 `milvus-backup` 产物，当前 0 向量，可重建）。应用启动 + `/health/ready` + 问答抽查未验（需要完整依赖栈，未在隔离环境起后端）。**下次至少补一条**：起一个全新 MinIO，从镜像目录回灌并比对对象数。
 
 ## 8. 应急处置速查
 

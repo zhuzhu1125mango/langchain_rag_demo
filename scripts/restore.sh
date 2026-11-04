@@ -23,13 +23,18 @@ set -euo pipefail
 # TARGET_EMPTY=0 允许往非空库导入（默认拒绝：非空库导入会因对象已存在而中断）
 : "${TARGET_EMPTY:=1}"
 
-if [[ -z "${PG_FILE:-}" ]]; then
-  echo "必须指定 PG_FILE（backup.sh 的 .sql.gz，或 pg_dump -Fc 的 .dump）" >&2
-  exit 1
-fi
-if [[ ! -f "$PG_FILE" ]]; then
-  echo "PG_FILE 不存在: $PG_FILE" >&2
-  exit 1
+# MINIO_ONLY=1：只回灌原件，不动数据库（演练 / 单丢原件时用）
+: "${MINIO_ONLY:=0}"
+
+if [[ "$MINIO_ONLY" != "1" ]]; then
+  if [[ -z "${PG_FILE:-}" ]]; then
+    echo "必须指定 PG_FILE（backup.sh 的 .sql.gz，或 pg_dump -Fc 的 .dump）；只恢复原件请设 MINIO_ONLY=1" >&2
+    exit 1
+  fi
+  if [[ ! -f "$PG_FILE" ]]; then
+    echo "PG_FILE 不存在: $PG_FILE" >&2
+    exit 1
+  fi
 fi
 
 psql_run() {
@@ -38,6 +43,9 @@ psql_run() {
     -v ON_ERROR_STOP=1 "$@"
 }
 
+if [[ "$MINIO_ONLY" == "1" ]]; then
+  echo "[1/2] 跳过 PostgreSQL（MINIO_ONLY=1）"
+else
 # 1) 目标库必须为空（runbook §4.1 第 2 步）：非空库直接导入会中途失败，
 #    留下「一半有数据」的状态，比不恢复更难排查。
 if [[ "$TARGET_EMPTY" == "1" ]]; then
@@ -63,6 +71,8 @@ else
   gunzip -c "$PG_FILE" | psql_run
 fi
 
+fi  # MINIO_ONLY
+
 # 3) MinIO 可选：只恢复 PG（例如演练或只丢元数据）时不必提供
 if [[ -n "${MINIO_DIR:-}" ]]; then
   if [[ ! -d "$MINIO_DIR" ]]; then
@@ -70,7 +80,26 @@ if [[ -n "${MINIO_DIR:-}" ]]; then
     exit 1
   fi
   echo "[2/2] 恢复 MinIO: $MINIO_DIR -> $MINIO_ALIAS/$MINIO_BUCKET"
-  mc mirror --overwrite "$MINIO_DIR" "$MINIO_ALIAS/$MINIO_BUCKET"
+  if command -v mc >/dev/null 2>&1; then
+    mc mirror --overwrite "$MINIO_DIR" "$MINIO_ALIAS/$MINIO_BUCKET"
+  else
+    # 宿主机没有 mc（Windows Git Bash 默认没有）：借 minio 容器执行。
+    # 注意容器内地址是 127.0.0.1:9000，不是宿主机映射的 9002。
+    : "${MINIO_CONTAINER:=minio-prod}"
+    : "${MINIO_INTERNAL_URL:=http://127.0.0.1:9000}"
+    echo "      借用容器 $MINIO_CONTAINER（宿主机未安装 mc）"
+    docker exec "$MINIO_CONTAINER" rm -rf /tmp/restore_src >/dev/null 2>&1 || true
+    docker cp "$MINIO_DIR/." "$MINIO_CONTAINER:/tmp/restore_src/"
+    docker exec "$MINIO_CONTAINER" sh -c "
+      set -e
+      u=\$(cat /run/secrets/MINIO_ROOT_USER 2>/dev/null || echo \"\$MINIO_ROOT_USER\")
+      p=\$(cat /run/secrets/MINIO_ROOT_PASSWORD 2>/dev/null || echo \"\$MINIO_ROOT_PASSWORD\")
+      mc alias set bklocal '$MINIO_INTERNAL_URL' \"\$u\" \"\$p\" >/dev/null
+      mc mb --ignore-existing 'bklocal/$MINIO_BUCKET' >/dev/null
+      mc mirror --overwrite /tmp/restore_src 'bklocal/$MINIO_BUCKET'
+      rm -rf /tmp/restore_src
+    "
+  fi
 else
   echo "[2/2] 跳过 MinIO（未提供 MINIO_DIR）；若原件也在事故中丢失，必须从备份回灌"
 fi
