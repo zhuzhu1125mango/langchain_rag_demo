@@ -288,7 +288,7 @@ def expand_ids(
     return out
 
 
-def _table_header_of(text: str) -> Optional[str]:
+def _table_header_of(text: str) -> str | None:
     """若片段是「表头 + 一行」的行级表格块，返回表头行；否则 None。
 
     生产切分器把 markdown 表格按行切开，每块 = heading_path + 表头 + 该行。
