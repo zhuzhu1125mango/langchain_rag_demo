@@ -100,11 +100,25 @@ Windows：用「任务计划程序」调用 Git Bash 执行同一脚本；失败
 
 ```bash
 COMPOSE="docker compose -f docker-compose.yml --env-file .env.prod"
-export PG_FILE=/backup/postgres_<stamp>.sql.gz MINIO_DIR=/backup/minio_<stamp>
+
+# PG_FILE 两种格式都行，脚本按文件头自动识别（不需要你区分）：
+#   .sql.gz  = backup.sh 产出（纯文本 + gzip）
+#   .dump    = pg_dump -Fc 产出（custom 格式）
+export PG_FILE=/backup/postgres_<stamp>.sql.gz
+export MINIO_DIR=/backup/minio_<stamp>     # 只需恢复 PG 时可不设
 ./scripts/restore.sh
+
 $COMPOSE stop backend && $COMPOSE up -d backend
 curl -fsS http://127.0.0.1:8001/health/ready
 ```
+
+> **2026-11-04 演练暴露的坑（脚本已修）**：仓库 `backups/` 里的 4 份备份全部是部署时
+> 手工 `pg_dump -Fc` 的 `.dump`，而 `restore.sh` 当时只会 `gunzip | psql`——按本文档恢复
+> 会立刻报 `gzip: not in gzip format`，极易被误判成「备份损坏」。
+> 现在脚本按**文件头魔数**（`PGDMP`）选择 `pg_restore` / `psql`，并默认拒绝往非空库导入
+> （非空库导入会中途失败，留下「一半有数据」的状态，比不恢复更难排查）。
+> 另外：`backup.sh` 的 `.sql.gz` 产物在本机**一份都没有**，说明这条脚本化备份链路
+> 从未真正跑过——见 §7.3 演练记录。
 
 ### 4.2 恢复后必做
 
@@ -235,6 +249,10 @@ curl -fsS http://127.0.0.1:8001/health/ready
 
 ## 7. 演练（每季度）
 
+> 已自动化：`./scripts/restore_drill.sh [备份文件]` —— 起隔离 PG（端口 5547）、调用真实
+> `restore.sh`、比对表数/行数与生产、输出 RTO，结束自动销毁 `drill-*` 容器与卷。
+> 它覆盖第 1~3 步（PG 部分），MinIO/Milvus/应用启动仍需人工按下面步骤补。
+
 ### 7.1 恢复演练
 
 1. 隔离环境起空 PG/MinIO/Milvus（不要指向生产卷）；
@@ -250,11 +268,40 @@ curl -fsS http://127.0.0.1:8001/health/ready
 3. 按 §5.3 验证「备份恢复优先于 downgrade」的路径可行；
 4. 记录回退耗时与数据一致性检查结果。
 
-### 7.3 演练记录模板
+### 7.3 演练记录
 
 | 日期 | 演练类型 | 数据规模 | PG 恢复 | MinIO 恢复 | Milvus 恢复 | 总耗时（RTO） | 结论 | 改进项 |
 |---|---|---|---|---|---|---|---|---|
 | 2026-10-27 | 首次基线（文档化） | — | — | — | — | — | — | 待首次执行 |
+| **2026-11-04** | **PG 恢复（隔离库 `drill-pg`，端口 5547）** | **29 表 / 136KB / 0 文档 / 3 用户 / 82 trace** | **1s** | 未验（无镜像产物） | 未验（0 向量，可重建） | **6s**（含容器启动 4s） | **通过，但需补一步** | 见下 |
+
+**2026-11-04 首次演练详情**（脚本：`scripts/restore_drill.sh`，可重复执行）：
+
+用了最新的 `backups/app_prod_pre_p0deploy_20261102_1058.dump`，在隔离 PG 上调用**真实的
+`scripts/restore.sh`** 恢复（不是演练脚本里另写一套，否则验证的是演练脚本）。
+
+结果：
+
+- **PG 恢复 1s、29 张表全部导入**；总 RTO **6s**（含临时容器启动 4s）。数据量小，
+  这个数字**不能外推到真实规模**——它证明的是「链路通、dump 可恢复」，不是「1 万文档也 6 秒」。
+- **行数对得上，差额可解释**：还原 `users=3 / kb=1 / docs=0 / traces=82`，
+  生产 `4 / 1 / 0 / 107`。差额来自备份之后的新增（`ops-admin` 与 25 条 trace），属预期。
+- **schema 落后一个迁移，必须补 `alembic upgrade head`**：还原库 `alembic_version=c4d5e6f7a8b9`，
+  生产是 `d5e6f7a8b9c0`；逐列比对后差异**只有 `users.is_admin` 一列**。
+  也就是说：**恢复完直接起应用会在管理接口上报错**，§4.1 第 3 步不是可选项。
+- **发现并修掉 3 个真问题**：
+  1. `restore.sh` 只会 `gunzip | psql`，而 `backups/` 里 4 份备份全是 `pg_dump -Fc` 的 `.dump`
+     → 按 runbook 恢复会报 `gzip: not in gzip format`，极易误判成备份损坏。已改为按魔数
+     （`PGDMP`）自动选 `pg_restore`，并默认拒绝往非空库导入。
+  2. `backup.sh` 的 `.sql.gz` 产物在本机**一份都没有**（`ls backups/*.sql.gz | wc -l` = 0），
+     说明脚本化备份链路从未真正跑过，历史备份都是部署时手工打的。
+  3. 演练脚本在 Git Bash 下把容器内 `/tmp/restore.sh` 改写成 Windows 路径而失败
+     （runbook 指定的正是 Git Bash）→ 已加 `MSYS_NO_PATHCONV=1`。
+
+**本次没验到的（下次必做）**：MinIO 原件回灌（无镜像产物，当前 0 对象所以风险暂为 0）、
+Milvus 快照恢复（可重建，当前 0 向量）、应用启动 + `/health/ready` + 问答抽查
+（需要完整依赖栈，未在隔离环境起后端）。**下次演练至少要把 MinIO 回灌补上**——
+原件不可重建，它才是真正丢不起的那一半。
 
 ## 8. 应急处置速查
 
