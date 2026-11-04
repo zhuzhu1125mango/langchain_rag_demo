@@ -222,7 +222,7 @@
 |---|---|---|---|---|
 | AGT-1 | 会话可恢复 + 可取消（AM-4） | ✅ **已实施（2026-11-01）**：生成与 HTTP 连接解耦——`chat_run.py` 持有带序号的运行缓冲，断连只结束订阅、不再取消生成；新增 `GET /chat/runs/{id}/stream?after=`（续传，认 `Last-Event-ID`）、`POST /chat/runs/{id}/stop`（取消并等部分答案落库）、`GET /chat/runs/active`（刷新/换设备找回在途运行）；前端停止改为「先停服务端再断连」、静默中断按游标自动续传、刷新时占位等答完重拉历史；空闲心跳 15s 防代理掐断，关机 `drain()` 取消在途并落库。边界：缓冲在进程内，跨重启恢复仍属 AM-4，见 [agt1-resumable-stream.md](design/agt1-resumable-stream.md)。**已上线（DEPLOY-3）并在生产实测断连续传/停止落库通过** | P1 | ✅ 已完成（已部署） |
 | AGT-2 | trace → 回归样例闭环（AM-1④） | 只有离线 A/B，无线上抽样、失败转回归、门禁 | P1 | 开发 |
-| AGT-3 | 评测可信度补齐 | `hybrid_01` 双源改硬保证；`hybrid_04` 拒答复核；非 Agent 路径跳过判分 | P1 | 开发 |
+| **AGT-3** ✅ | 评测可信度补齐（2026-11-04 完成） | ① `hybrid` 类题考察的是「KB 与 Web **两个来源都用到**」，但工具维按「期望工具被调用的比例」打分，只调一个得 0.5，四维均值里与「调对一个」几乎不可分——双源退化成任一源 ② `hybrid_04` 此前记录为「KB+web 都调用但模型仍拒答」，需复核是真缺陷还是评测口径问题 | ① 硬约束：`_rule_tool_selection(require_all=)`，缺一即 0；数据集 6 道 `hybrid_*` 标 `expected_tools_mode: "all"`（其余题保持弱约束，**既有基线不变**）；结果新增 `missing_tools` 便于定位；**8 例单测**（含「默认仍是弱约束」的回归钉）② `hybrid_04` 复核：用 `work_hours`+`attendance_flex` 建临时库 + 开启联网复现 → **不再拒答**（`hybrid_search`，5 来源），双源**都到了**（web 抓到 12348 法律网「不定时工作制不受《劳动法》第 41 条限制」，KB 抓到公司办公时间）→ 但答案只**复述公司制度、没回答「是否冲突」**，并自加「可信度较低、未在多个独立来源验证」提示。判定：**不是评测口径问题，是 4B 模型在「对比+推理」上的能力问题**；不改期望去掩盖，作为已知限制记录。顺带两个对账陷阱：Milvus `num_entities` 含**软删除标记**（删库后 534 vs 实际 532，巡检用 `count()` 口径正确）；`request_traces.tool_calls` 存的是**工具输出**（网页结果）而非工具名 | ✅ 已完成 |
 | AGT-4 | 产物工作区（Artifacts） | 仅 Markdown 气泡 + 来源卡；无预览 / 修订 / 下载 / 版本 diff | P2 | 开发 |
 | AGT-5 | MCP 客户端（AM-3） | 工具只能自研，无外部工具互操作 | P2 | 开发 |
 | AGT-6 | 记忆 / 上下文工程（AM-5） | 仅会话摘要且默认关；无压缩、大结果落盘、长期 store | P2 | 开发 |
@@ -348,7 +348,7 @@
 - **测试基线**：后端 **1326 passed / 87 skipped**（与台账一致）。首次跑出 9 failed 系本机 shell 注入 `IN_DOCKER=1` → `IS_PRODUCTION=True` 污染；`env -u IN_DOCKER` 后 9/9 通过，**非代码回归**。
 - **本次核实后闭环（从待办移除）**：E2（已实现，仅剩灰度验收）、W0 的 minio license（文件已不存在）、HG 的 axios 非幂等重试（已修 + 6 单测）。
 - **数字漂移（已按实测更新）**：CODE-1/SA 行数、CODE-2 334→**408**、CODE-4 967→948、§五 HEAD。
-- **确认仍未动**：UX-1 编辑重发、AGT-2 在线抽样/回归门禁、AGT-3 双源硬保证与 `hybrid_04` 复核、AGT-4 Artifacts、AGT-5/AM-3 MCP、AGT-6/AM-5 记忆、AGT-7 多模态、UX-5/6/7、OPS-4 nightly 与迁移回滚演练、MODEL-P4 成本上限/429、AM-6 工具治理、AM-7 同名跨档页合并、Office/HTML/EPUB loader 迁移。
+- **确认仍未动**：UX-1 编辑重发、AGT-2 在线抽样/回归门禁、AGT-4 Artifacts、AGT-5/AM-3 MCP、AGT-6/AM-5 记忆、AGT-7 多模态、UX-5/6/7、OPS-4 nightly 与迁移回滚演练、MODEL-P4 成本上限/429、AM-6 工具治理、AM-7 同名跨档页合并、Office/HTML/EPUB loader 迁移。
 
 ---
 

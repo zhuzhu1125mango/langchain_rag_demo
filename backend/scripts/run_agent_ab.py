@@ -324,6 +324,9 @@ async def _run_one(
                     expected_tools=sample.get("expected_tools"),
                     expected_answer_points=_expected_points(sample),
                     expected_max_steps=sample.get("expected_max_steps"),
+                    # 双源题（hybrid）用硬约束：KB 与 Web 必须都调到，缺一即 0；
+                    # 其余题保持弱约束，不影响既有基线（AGT-3，2026-11-04）。
+                    require_all_tools=sample.get("expected_tools_mode") == "all",
                 )
                 record.update({f"traj_{k}": v for k, v in tr.to_dict().items()})
         except Exception as e:  # noqa: BLE001

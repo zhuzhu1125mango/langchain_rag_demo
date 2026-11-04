@@ -176,6 +176,8 @@ class TrajectoryEvalResult:
     compliance: float = 0.0
     reason: str = ""
     passed: bool = False
+    # 硬约束下具体缺了哪些工具：只给 0 分不够，报告里要能看出「缺 web 还是缺 kb」
+    missing_tools: List[str] = field(default_factory=list)
 
     @property
     def score(self) -> float:
@@ -191,6 +193,7 @@ class TrajectoryEvalResult:
             "score": round(self.score, 4),
             "passed": self.passed,
             "reason": self.reason,
+            "missing_tools": list(self.missing_tools),
         }
 
 
@@ -209,12 +212,21 @@ class TrajectoryEvaluator:
 
     @staticmethod
     def _rule_tool_selection(
-        expected_tools: Optional[Sequence[str]], actual_tools: Sequence[str]
+        expected_tools: Optional[Sequence[str]],
+        actual_tools: Sequence[str],
+        require_all: bool = False,
     ) -> float:
-        """工具选择的确定性判定（弱约束：只罚「该调未调」）。
+        """工具选择的确定性判定（默认弱约束，`require_all` 时改为硬约束）。
 
         - 无期望（未标注）→ 1.0（不约束）
-        - 否则 = 期望工具中被实际调用的比例
+        - 弱约束（默认）= 期望工具中被实际调用的比例，"多调不罚"
+        - 硬约束（`require_all=True`）= 必须**全部**调到，否则 0.0
+
+        为什么要两种（2026-11-04 AGT-3）：`hybrid` 类题的考察目标就是「KB 与 Web
+        **两个来源都用到**」。按比例算时只调一个得 0.5，在四维均值里与「调对一个」
+        几乎不可区分，题目对「双源」失去约束力——等于把双源退化成任一源。
+        需要硬保证的题在数据集里标 `expected_tools_mode: "all"`，其余保持弱约束不动
+        （既有基线不受影响）。
 
         说明：该维曾交由 LLM 判定，但 3B judge 会误判「明明调了却说没调」
         （2026-10-20 基线实证），故改为规则判定。
@@ -223,7 +235,17 @@ class TrajectoryEvaluator:
         if not expected:
             return 1.0
         actual = set(actual_tools or [])
-        return sum(1 for t in expected if t in actual) / len(expected)
+        hit = sum(1 for t in expected if t in actual)
+        if require_all:
+            return 1.0 if hit == len(expected) else 0.0
+        return hit / len(expected)
+
+    @staticmethod
+    def _missing_tools(
+        expected_tools: Optional[Sequence[str]], actual_tools: Sequence[str]
+    ) -> List[str]:
+        actual = set(actual_tools or [])
+        return [t for t in (expected_tools or []) if t and t not in actual]
 
     @staticmethod
     def _rule_step_efficiency(n_steps: int, max_steps: int) -> float:
@@ -312,16 +334,25 @@ class TrajectoryEvaluator:
         expected_tools: Optional[Sequence[str]] = None,
         expected_answer_points: Optional[Sequence[str]] = None,
         expected_max_steps: Optional[int] = None,
+        require_all_tools: bool = False,
     ) -> TrajectoryEvalResult:
-        """对单条轨迹判分（确定性，无外部依赖、不抛异常）。"""
+        """对单条轨迹判分（确定性，无外部依赖、不抛异常）。
+
+        `require_all_tools=True` 时工具维改为硬约束：期望工具必须全部调用到，
+        缺一个即 0 分（并在 `missing_tools` 里列出缺的是哪些）。
+        """
         if trajectory is None:
             return TrajectoryEvalResult(reason="轨迹为空")
         max_steps = expected_max_steps or getattr(settings.search, "SEARCH_REACT_MAX_STEPS", 3)
+        actual_tools = trajectory.tools()
         result = TrajectoryEvalResult(
-            tool_selection=self._rule_tool_selection(expected_tools, trajectory.tools()),
+            tool_selection=self._rule_tool_selection(
+                expected_tools, actual_tools, require_all=require_all_tools
+            ),
             step_efficiency=self._rule_step_efficiency(len(trajectory.steps), max_steps),
             info_coverage=self._rule_info_coverage(expected_answer_points, trajectory.final_answer),
             compliance=self._rule_compliance(trajectory.final_answer),
+            missing_tools=self._missing_tools(expected_tools, actual_tools),
         )
         result.passed = result.score >= self.pass_threshold
         result.reason = self._build_reason(trajectory, result, max_steps)
@@ -339,6 +370,7 @@ class TrajectoryEvaluator:
                 expected_tools=sample.get("expected_tools"),
                 expected_answer_points=sample.get("expected_answer_points"),
                 expected_max_steps=sample.get("expected_max_steps"),
+                require_all_tools=bool(sample.get("require_all_tools")),
             )
             results.append(result.to_dict())
 

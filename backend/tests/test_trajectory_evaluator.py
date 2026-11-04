@@ -8,6 +8,7 @@ import pytest
 from src.services.evaluation.trajectory_evaluator import (
     DIGEST_CHARS,
     Trajectory,
+    TrajectoryEvalResult,
     TrajectoryEvaluator,
     TrajectoryStep,
     build_trajectory_from_agent_loop,
@@ -193,3 +194,81 @@ class TestRuleDimensions:
         assert f("   ") == 0.0
         assert f("无法找到相关信息。") == 0.5  # 拒答/无据
         assert f("请先选择知识库后再提问。") == 0.5
+
+
+# ----------------------------------------------------------------------
+# AGT-3：双源题的工具选择改为硬约束
+# ----------------------------------------------------------------------
+class TestHardToolConstraint:
+    """`hybrid` 类题考察的是「KB 与 Web 两个来源都用到」。
+
+    弱约束下只调一个得 0.5，四维均值里与「调对一个」几乎分不开，等于退化成任一源。
+    这里钉住「硬约束 = 缺一即 0」，并保留弱约束行为不变（既有基线不受影响）。
+    """
+
+    def test_hard_requires_all(self):
+        f = TrajectoryEvaluator._rule_tool_selection
+        assert f(["kb_search", "web_search"], ["kb_search", "web_search"], require_all=True) == 1.0
+        assert f(["kb_search", "web_search"], ["kb_search"], require_all=True) == 0.0
+        assert f(["kb_search", "web_search"], ["web_search"], require_all=True) == 0.0
+        assert f(["kb_search", "web_search"], [], require_all=True) == 0.0
+
+    def test_hard_still_allows_extra_tools(self):
+        """多调不罚这条对硬约束同样成立：只要期望的全在，额外工具不算错。"""
+        assert TrajectoryEvaluator._rule_tool_selection(
+            ["kb_search", "web_search"], ["kb_search", "weather", "web_search"], require_all=True
+        ) == 1.0
+
+    def test_hard_without_expectation_is_unconstrained(self):
+        assert TrajectoryEvaluator._rule_tool_selection(None, ["kb_search"], require_all=True) == 1.0
+        assert TrajectoryEvaluator._rule_tool_selection([], [], require_all=True) == 1.0
+
+    def test_weak_constraint_unchanged_by_default(self):
+        """默认仍走弱约束——这次改动不能悄悄改掉其它题的分。"""
+        assert TrajectoryEvaluator._rule_tool_selection(
+            ["kb_search", "web_search"], ["kb_search"]
+        ) == 0.5
+
+    def test_missing_tools_lists_what_is_absent(self):
+        f = TrajectoryEvaluator._missing_tools
+        assert f(["kb_search", "web_search"], ["kb_search"]) == ["web_search"]
+        assert f(["kb_search", "web_search"], ["kb_search", "web_search"]) == []
+        assert f(None, ["kb_search"]) == []
+
+    @pytest.mark.asyncio
+    async def test_evaluate_passes_require_all_through(self):
+        evaluator = TrajectoryEvaluator()
+        traj = Trajectory(
+            question="公司弹性打卡制度与法定工作时间制度是否冲突？",
+            steps=[TrajectoryStep(index=0, tool="kb_search", ok=True)],
+            final_answer="公司实行弹性打卡，具体见制度。",
+        )
+
+        weak = await evaluator.evaluate(traj, expected_tools=["kb_search", "web_search"])
+        hard = await evaluator.evaluate(
+            traj, expected_tools=["kb_search", "web_search"], require_all_tools=True
+        )
+
+        assert weak.tool_selection == pytest.approx(0.5)
+        assert hard.tool_selection == 0.0
+        assert hard.missing_tools == ["web_search"]
+        assert hard.score < weak.score  # 硬约束只可能更严
+
+    @pytest.mark.asyncio
+    async def test_evaluate_batch_honours_require_all_flag(self):
+        evaluator = TrajectoryEvaluator()
+        traj = Trajectory(
+            steps=[TrajectoryStep(index=0, tool="kb_search", ok=True)],
+            final_answer="答案。",
+        )
+        out = await evaluator.evaluate_batch([
+            {"trajectory": traj, "expected_tools": ["kb_search", "web_search"],
+             "require_all_tools": True},
+            {"trajectory": traj, "expected_tools": ["kb_search", "web_search"]},
+        ])
+        assert out["samples"][0]["tool_selection"] == 0.0
+        assert out["samples"][1]["tool_selection"] == pytest.approx(0.5)
+
+    def test_to_dict_exposes_missing_tools(self):
+        result = TrajectoryEvalResult(tool_selection=0.0, missing_tools=["web_search"])
+        assert result.to_dict()["missing_tools"] == ["web_search"]
