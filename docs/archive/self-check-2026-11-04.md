@@ -56,7 +56,7 @@ backend/scripts/probe_retrieval_stages.py:291:36: F821 Undefined name `Optional`
 
 已修：`tests/conftest.py` 显式 `os.environ["IN_DOCKER"] = "false"`
 （**不能用 `setdefault`**，宿主已设时它不生效），需要容器语义的用例继续在用例内 monkeypatch
-（`test_health_check` / `test_websocket_auth` 已这样做）。复跑：**1622 passed / 105 skipped**，
+（`test_health_check` / `test_websocket_auth` 已这样做）。复跑：**1641 passed / 105 skipped**，
 且在 `IN_DOCKER=1` 仍在环境里的情况下全过。
 
 ### A3 🟡 生产环境没有管理员（台账未记）
@@ -72,7 +72,10 @@ P0-2 把「身份最小闭环」标成 ✅，但现场是：
 也就是说模型 Provider/路由管理页在真实环境里**进不去**。实现是对的，缺的是「谁来当管理员」
 这一步。台账只记了「能力已实现」，没记「生产上没人能用」。
 
-处理：未擅自改生产数据，已在台账新增 **P0-5 ◐**，附一条 owner 命令与验收口径（见第 4 节）。
+**已处置（当日）**：用 `scripts/create_admin.py` 创建 **ops-admin**（随机 20 位密码，经安全通道
+交给 owner，未写入任何文件）。验收实测：`/api/auth/login` → **200**（token 272 字节），
+带 token `GET /api/admin/models/providers` → **200**。台账 **P0-5 → ✅**。
+遗留一条建议：`test2` / `smoke_deploy` 两个验证账号按需停用。
 
 ### A4 🟢 README 与启动脚本的等待时间不一致
 
@@ -106,7 +109,7 @@ P0-2 把「身份最小闭环」标成 ✅，但现场是：
 
 | 项 | 实测 |
 |---|---|
-| 后端单测 | **1622 passed / 105 skipped**（`IN_DOCKER=1` 环境下也通过） |
+| 后端单测 | **1641 passed / 105 skipped**（`IN_DOCKER=1` 环境下也通过） |
 | 前端 | typecheck 通过 / ESLint 0 / **146 passed（20 文件）** |
 | 静态检查 | `uvx ruff@0.9.3 check --select E9,F63,F7,F82 backend` → All checks passed |
 | 环境一致性 | `check_env_consistency.py` 通过（106 键 / 7+2 插值 / 224 字段） |
@@ -123,14 +126,20 @@ P0-2 把「身份最小闭环」标成 ✅，但现场是：
 
 ## 4. 需要 owner 动作（3 项，都不需要写代码）
 
-| # | 项 | 命令 / 动作 | 验收 |
-|---|---|---|---|
-| 1 | **建生产管理员**（A3，新） | `docker exec backend-prod python scripts/create_admin.py --username admin --promote` | 带该身份 GET `/api/admin/models/providers` → 200 |
-| 2 | 注册巡检计划任务（P1-3） | `schtasks /Create`（本机 Command Security 拦截，不可绕过） | `schtasks /Query` 可见；次日 `backups/audit/` 有新产物 |
-| 3 | 确认是否保留 `smoke_deploy` 账号 | 视需要停用 | 用户列表只剩预期账号 |
+原先列了 3 项，其中 2 项在当日的「解决问题」里已由 AI 直接完成（A3 建管理员、P1-3 巡检调度）。
+剩下的都不紧急：
 
-> 顺带一条观察：`backups/audit/` 里最新的产物是 **11-02**，11-03/11-04 没有新文件——
-> 与「计划任务未注册」一致，不是脚本坏了。
+| # | 项 | 动作 | 验收 |
+|---|---|---|---|
+| 1 | **改 ops-admin 密码**（已完成建号，密码随机发给 owner） | 首次登录后在设置页改密 | 新密码可登录，旧密码失效 |
+| 2 | 停用验证账号 | `test2` / `smoke_deploy` 按需停用 | 用户列表只剩预期账号 |
+| 3 | 观察首日巡检 | 次日看 `backend/data/consistency/` 是否出现新文件 | 文件名日期是当天；`issue_count` 为 0 |
+
+> **P1-3 为什么不再需要 `schtasks`**：`schtasks` 在受限机器上被安全策略直接拦死（不可绕过），
+> 原方案于是把「每天巡检」挂在某台机器的任务计划里——自检发现 `backups/audit/` 最新产物停在
+> **11-02**，两天没人发现。现在巡检跑在 backend 进程内（`CONSISTENCY_AUDIT_INTERVAL_HOURS=24`），
+> 容器在跑巡检就在跑，报告落 `backend/data/consistency/`，有差异走 WARNING 供告警捕获。
+> `scripts/nightly_consistency.*` 保留为备选方案（多副本部署或需要严格单实例时用）。
 
 ---
 
