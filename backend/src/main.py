@@ -476,6 +476,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Wiki lint 周期调度启动失败（不影响主流程）: {e}")
 
+    # P1-3：一致性巡检周期调度（CONSISTENCY_AUDIT_INTERVAL_HOURS=0 时不启动）。
+    # 取代原先依赖 Windows 计划任务的做法——schtasks 在受限机器上被安全策略拦死，
+    # 而「每天巡检一次」不该挂在某台机器的任务计划里。
+    try:
+        from src.services.consistency_scheduler import start_scheduler as start_audit
+
+        if start_audit() is not None:
+            logger.info("一致性巡检周期调度已启动")
+    except Exception as e:
+        logger.warning(f"一致性巡检周期调度启动失败（不影响主流程）: {e}")
+
     yield
 
     # 应用关闭时取消后台任务
@@ -583,6 +594,18 @@ async def lifespan(app: FastAPI):
             stop_err,
             action="startup.shutdown.wiki_lint_stop",
             message="Wiki lint 调度器停止失败，后台循环可能在资源关闭后继续运行",
+        )
+
+    try:
+        from src.services.consistency_scheduler import stop_scheduler as stop_audit
+
+        await stop_audit()
+    except Exception as stop_err:
+        log_exception(
+            logger,
+            stop_err,
+            action="startup.shutdown.consistency_audit_stop",
+            message="一致性巡检调度器停止失败，后台循环可能在资源关闭后继续运行",
         )
 
 

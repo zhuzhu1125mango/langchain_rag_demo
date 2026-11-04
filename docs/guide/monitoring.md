@@ -158,6 +158,54 @@ AUDIT_DIR=/var/log/rag-audit ./scripts/nightly_consistency.sh --skip-minio
 10 4 * * * cd /opt/langchain_rag_demo && /usr/bin/env bash scripts/nightly_consistency.sh >> /var/log/rag-audit.log 2>&1
 ```
 
+Windows 宿主机（Docker Desktop）**优先用下面这条「进程内调度」**，不要先考虑计划任务：
+
+#### 方案 A（推荐）：进程内周期调度，不依赖宿主机
+
+巡检跑在 backend 进程里（`CONSISTENCY_AUDIT_INTERVAL_HOURS`），容器在跑巡检就在跑。
+这样做的原因很实际：`schtasks` 在受限机器上会被安全策略直接拦死（不可绕过），
+一旦「每天巡检」挂在某台机器的任务计划里，换台机器、换个人就静默消失，
+而台账上还写着「脚本已验证」——本项目在 2026-11-04 的自检里就撞到了这个坑
+（`backups/audit/` 最新产物停在两天前，没人发现）。
+
+```bash
+# .env.prod（或 .env.dev）开一次即可；0 = 关闭，默认关闭
+CONSISTENCY_AUDIT_INTERVAL_HOURS=24      # 间隔小时
+CONSISTENCY_AUDIT_OUTPUT_DIR=            # 留空 = backend/data/consistency（生产已挂载到宿主机）
+CONSISTENCY_AUDIT_KEEP_FILES=30          # 保留最近 30 份
+CONSISTENCY_AUDIT_TIMEOUT_SECONDS=1800   # 单轮超时，防止扫描卡住占死循环
+
+# 生效
+docker compose up -d backend
+```
+
+三个行为要点（都在单测里钉住了）：
+
+- **启动不无条件补跑**：先读 Redis 的 `rag:audit:last_run`，间距未到只等剩余时间；
+  没有记录才在 60s 后跑一次。否则「容器每天重启一次」会让每轮都从头计时，永远等不到窗口。
+- **有差异记 WARNING**：后台循环没有退出码，日志是唯一能被告警抓到的出口，
+  所以 WARNING 行里带 `issues=` 与各存储的 `sections=`。
+- **报告落在 `backend/data/consistency/`**（容器内 `/app/data` 已挂载），按文件名轮转。
+
+验证（同样三步）：
+
+```bash
+# ① 启动日志里应有「一致性巡检周期调度已启动」与「下次执行将在 N 分钟后」
+docker logs backend-prod 2>&1 | grep -E "一致性巡检"
+
+# ② 触发一轮：删掉上次执行记录 + 重启，60s 后应出现「一致性巡检通过/发现差异」
+docker exec redis-prod redis-cli DEL rag:audit:last_run
+docker compose restart backend
+
+# ③ 产物：宿主机 backend/data/consistency/ 下应有当天的 consistency_*.json
+docker exec backend-prod ls -l /app/data/consistency | tail -3
+```
+
+> 进程内版本的**已知边界**：多副本部署时每个副本都会跑一遍（只读对账，重复无害但浪费）；
+> 需要严格单实例请关掉该开关，改用下面的 cron/计划任务方案。
+
+#### 方案 B（备选）：宿主机计划任务
+
 Windows 宿主机（Docker Desktop）用 PowerShell 版本 + 计划任务：
 
 ```powershell

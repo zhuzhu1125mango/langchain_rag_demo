@@ -646,6 +646,26 @@ class ExperimentSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 
+class ConsistencyAuditSettings(BaseSettings):
+    """一致性巡检周期调度（P1-3）。默认关闭，由部署侧显式开启。
+
+    为什么不靠 Windows 计划任务：`schtasks` 在受限机器上会被安全策略直接拦死
+    （不可绕过），于是「每天巡检一次」这件事就挂在了某台机器的任务计划里——
+    换台机器、换个人就静默消失。放进进程内循环，巡检跟着服务走。
+    """
+
+    # 间隔小时数；0 = 关闭（默认），生产建议 24
+    CONSISTENCY_AUDIT_INTERVAL_HOURS: int = 0
+    # 报告输出目录；空 = <backend>/data/consistency（生产 /app/data 已挂载到宿主机）
+    CONSISTENCY_AUDIT_OUTPUT_DIR: str = ""
+    # 保留最近多少份报告（按文件名排序，超出即删）
+    CONSISTENCY_AUDIT_KEEP_FILES: int = 30
+    # 单轮超时（秒）：扫描卡住时不能把后台循环永久占住
+    CONSISTENCY_AUDIT_TIMEOUT_SECONDS: int = 1800
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
+
+
 class LoggingSettings(BaseSettings):
     """结构化日志配置（OPS-3）。"""
 
@@ -680,6 +700,7 @@ class Settings(BaseSettings):
     evaluation: EvaluationSettings = EvaluationSettings()
     ocr: OcrSettings = OcrSettings()
     experiment: ExperimentSettings = ExperimentSettings()
+    consistency_audit: ConsistencyAuditSettings = ConsistencyAuditSettings()
 
     IN_DOCKER: bool = False
     # 显式环境标记：dev | prod（与上方模块级 APP_ENV 同源）。未设置时按 IN_DOCKER 推断。
