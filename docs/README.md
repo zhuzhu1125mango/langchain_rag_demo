@@ -31,10 +31,20 @@ docs/
 ├── architecture.md      # 架构总览：服务拓扑、RAG 决策管线、代码地图
 ├── api.md               # API 参考：全部接口说明
 ├── project-status.md    # 项目状态与待办台账（跨专项：已完成 / 剩余待办 / 阻塞项 / 红线）
+├── e2e-verification-2026-11-03.md # 端到端真机验证报告（10 个真实问题、4 好/2 偏/4 差、两个缺陷）
+├── articles/            # 对外可读的长文（叙事性，非规范文档）
+│   └── silent-failures.md   #   删除可对账 / 失败可判定 / 断连可续（参考实现的技术叙事）
+├── benchmarks/          # 评测与实测数据（结论 + 可复现的 JSON）
+│   ├── quality-and-cost-2026-11-04.md  # 汇总页：四份评测收成一页，含「不显著不写成结论」的口径
+│   ├── retrieval-baseline-2026-11-02.md    # 90 题合成集基线（hit@5 0.869 / MRR@5 0.739）
+│   ├── channel-ab-2026-11-02.md            # 通道 A/B（10 个臂）
+│   ├── channel-fusion-2026-11-02.md        # 融合策略 + McNemar 显著性
+│   └── stage-probe-2026-11-03.md           # 真实文档逐级探针：概览题丢在哪一级（24 题 / 6 个修法）
 ├── guide/               # 操作指南
 │   ├── deployment.md    #   部署（开发/生产环境）
 │   ├── development.md   #   开发与测试（含踩坑记录）
 │   ├── monitoring.md    #   监控运维（指标、告警、处置）
+│   ├── quickstart-verification-2026-11-04.md # 干净目录复现验证记录（7 轮，找出 7 处问题）
 │   └── backup-restore.md #  备份 / 恢复 / 回滚 / 容量与演练（运维 Runbook）
 ├── design/              # 设计文档（对标 RFC），状态见下表
 │   ├── improvement-roadmap.md
@@ -71,6 +81,7 @@ docs/
     ├── code-review-2026-09-24.md   # 代码审查报告（已全部修复：W1~W6 全部落地）
     ├── fix-plan-2026-09-24.md      # 四份评审综合修复计划（2026-09-29 收官，78 项 P2 全部落账）
     ├── project-readthrough-2026-09-30.md  # 项目通读报告（2026-09-30 只读代码审查）
+    ├── self-check-2026-11-04.md    # 项目自检报告（收尾后对抗性核对；查出 CI 红、测试未隔离、生产无管理员）
     └── direct-model-switch-plan-2026-10-03.md  # 直答模型切换与 A/B 验证（已完结计划，2026-10-15 归档）
 ```
 

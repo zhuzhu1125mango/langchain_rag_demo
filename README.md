@@ -54,7 +54,7 @@ CHECK_ONLY=1 ./scripts/start-dev.sh        # Windows: $env:CHECK_ONLY="1"; .\scr
 
 ```bash
 cd backend
-IN_DOCKER=false uv run pytest -q                       # 后端全量：1610 passed / 105 skipped（2026-11-04）
+IN_DOCKER=false uv run pytest -q                       # 后端全量：1622 passed / 105 skipped（2026-11-04）
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
 uv run pytest tests/test_chat_run.py -q                # 续传/停止：35 例
 uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.869 / MRR 0.739（90 题 / 78 篇）
@@ -266,7 +266,7 @@ cd langchain_rag_demo
 - ✅ 自动检测 Docker / Docker Compose 安装状态
 - ✅ 自动检查 `.env.dev` 配置文件
 - ✅ 经 `--env-file .env.dev` 启动（compose project: `rag-dev`），无需复制 `.env`
-- ✅ 启动后自动进行容器健康检查（最多 120s）
+- ✅ 启动后自动进行容器健康检查（最多 240s，可用 `MAX_WAIT_SECONDS` 覆盖）
 - ✅ 彩色进度日志，直观展示每个服务状态
 - ✅ 启动完成后汇总显示所有服务访问地址
 

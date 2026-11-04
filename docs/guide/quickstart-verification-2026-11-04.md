@@ -114,7 +114,7 @@ Ollama 不在 compose 内。后端启动时校验三个模型是否存在，缺�
 
 | 项 | README 原值 | 实测 |
 |---|---|---|
-| 后端全量 | 1553 | **1610** |
+| 后端全量 | 1553 | **1622**（当日又补 4 例 CORS 解析 + 自检修正 `IN_DOCKER` 隔离后，8 例不再误报失败） |
 | `test_chat_run.py` | 29 | **35** |
 
 （`test_error_handling` 93、`test_consistency_delete_chain` 13、`test_consistency_audit` 29 三处核对无误。）
