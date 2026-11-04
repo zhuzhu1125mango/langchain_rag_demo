@@ -34,7 +34,8 @@ $script:EnvName = "DEVELOPMENT"
 # 精简模式（P0-3）：默认 7 个核心服务；$env:INCLUDE_MONITORING = "1" 时带监控栈
 $script:ProfileArgs = @()
 if ($env:INCLUDE_MONITORING -eq "1") { $script:ProfileArgs = @("--profile", "monitoring") }
-$script:MaxWaitSeconds = $env:MAX_WAIT_SECONDS ? [int]$env:MAX_WAIT_SECONDS : 120
+# 默认 240s：干净机器首次启动要等镜像构建 + 模型预热，实测 backend 到 healthy 约 3~4 分钟
+$script:MaxWaitSeconds = $env:MAX_WAIT_SECONDS ? [int]$env:MAX_WAIT_SECONDS : 240
 $script:WaitInterval = $env:WAIT_INTERVAL ? [int]$env:WAIT_INTERVAL : 5
 
 # ==============================================================================
@@ -120,13 +121,25 @@ function Invoke-PreflightChecks {
     if (Test-Path $script:EnvFile) {
         Write-OK "配置文件 $script:EnvFile 存在"
     } else {
-        Write-Err "配置文件 $script:EnvFile 不存在"
-        Write-Info "请创建 .env.dev 文件，可参考以下必要变量:"
-        Write-Host "  POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD"
-        Write-Host "  MINIO_ROOT_USER, MINIO_ROOT_PASSWORD"
-        Write-Host "  MINIO_ACCESS_KEY, MINIO_SECRET_KEY"
-        Write-Host "  GF_SECURITY_ADMIN_PASSWORD"
-        exit 1
+        # 首次运行自动生成：全新 clone 里没有 .env.dev（.gitignore 排除 .env*），
+        # 而 README 承诺「10 分钟上手」——让用户自己去凑 184 个键，这个承诺就不成立。
+        # 只有 dev 这么干：生产必须由人显式配置强密码，脚本不替它猜。
+        $exampleFile = Join-Path $script:ScriptDir "../.env.example"
+        if (-not (Test-Path $exampleFile)) {
+            Write-Err "既没有 $script:EnvFile 也没有 .env.example，无法自动生成配置"
+            exit 1
+        }
+        Copy-Item $exampleFile $script:EnvFile
+
+        # SECRET_KEY 必须生成：留空时签发 JWT 会抛 ValueError（auth.py），
+        # 表现是「注册/登录直接失败」，而 .env.example 里它本来就是空值。
+        $chars = (48..57) + (65..90) + (97..122)
+        $secret = -join (1..64 | ForEach-Object { [char]($chars | Get-Random) })
+        $content = Get-Content $script:EnvFile -Raw -Encoding UTF8
+        $content = [regex]::Replace($content, '(?m)^SECRET_KEY=.*$', "SECRET_KEY=$secret")
+        Set-Content -Path $script:EnvFile -Value $content -Encoding UTF8 -NoNewline
+        Write-OK "已从 .env.example 生成 $script:EnvFile，并随机生成 SECRET_KEY"
+        Write-Info "如需改端口/密码，编辑 $script:EnvFile 后重跑本脚本"
     }
 
     # Check docker daemon is running
@@ -171,6 +184,23 @@ function Load-EnvVars {
 
 function Start-Services {
     Write-Step "3/5" "启动 Docker Compose 服务..."
+
+    # CHECK_ONLY=1：只跑预检（配置文件、compose 解析、服务清单），不起容器。
+    # 用于「别人能不能跑起来」的复现验证与 CI——否则验证这一步要真拉一遍镜像。
+    if ($env:CHECK_ONLY -eq "1") {
+        Write-Info "CHECK_ONLY=1，仅校验配置，不启动容器"
+        $services = & docker @script:ComposeArgs @script:ProfileArgs config --services 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "compose 解析失败："
+            $services | ForEach-Object { Write-Host "    $_" }
+            exit 1
+        }
+        $list = @($services | Where-Object { $_ -and $_.Trim() })
+        Write-OK "compose 解析通过，服务数 $($list.Count)："
+        $list | ForEach-Object { Write-Host "    - $_" }
+        exit 0
+    }
+
     Write-Info "拉取/构建镜像中，请耐心等待..."
     Write-Host ""
 
@@ -327,10 +357,66 @@ function Print-AccessInfo {
 # Main
 # ==============================================================================
 
+function Test-OllamaModels {
+    # Ollama 不在 compose 里（本机安装），后端启动时会校验模型是否存在，缺失即拒绝启动。
+    # 不预先检查的话，用户看到的是「7 个容器起来了但 backend unhealthy」，
+    # 而真实原因是模型没拉——这一步只是把那个报错提前成一句人话。
+    if ($env:CHECK_ONLY -eq "1") {
+        Write-Info "CHECK_ONLY=1，跳过 Ollama 模型检查"
+        return
+    }
+    if ($env:SKIP_OLLAMA_CHECK -eq "1") {
+        Write-Warn "SKIP_OLLAMA_CHECK=1，跳过模型检查（缺失将导致后端启动失败）"
+        return
+    }
+
+    $map = @{}
+    foreach ($line in Get-Content $script:EnvFile -Encoding UTF8) {
+        if ($line -match '^(EMBEDDING_MODEL_NAME|OLLAMA_DIRECT_MODEL_NAME|OLLAMA_MODEL_NAME)=(.+)$') {
+            # 去掉行内注释：# .env.example 里写的是 `OLLAMA_MODEL_NAME=qwen3:4b  # 说明`，
+            # 不去注释会把说明文字当成模型名，结果是「模型明明装了却报缺失」
+            $map[$matches[1]] = ($matches[2].Split('#')[0]).Trim().Trim('"')
+        }
+    }
+    $wanted = @($map.Values | Where-Object { $_ })
+
+    if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+        Write-Err "未找到 ollama 命令：Ollama 不在 compose 内，需要单独安装并启动"
+        Write-Info "安装：https://ollama.com/download"
+        Write-Info "装好后拉取模型（见 README「上手」一节），或设 `$env:SKIP_OLLAMA_CHECK=1 跳过本检查"
+        exit 1
+    }
+
+    $tags = & ollama list 2>$null | Select-Object -Skip 1 | ForEach-Object { ($_ -split '\s+')[0] }
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "无法读取 ollama 模型列表（Ollama 服务可能没启动）"
+        Write-Info "先执行 ollama serve，或检查 Docker Desktop 内 Ollama 是否运行"
+        exit 1
+    }
+
+    $missing = @()
+    foreach ($want in $wanted) {
+        $base = ($want -split ':')[0]   # 忽略 tag 差异：bge-m3 与 bge-m3:latest 视为同一个
+        if (-not ($tags -contains $want -or $tags -contains "$base`:latest" -or $tags -contains $base)) {
+            $missing += $want
+        }
+    }
+
+    if ($missing.Count -gt 0) {
+        Write-Err "缺少 Ollama 模型：$($missing -join ', ')"
+        Write-Info "按下面几条补齐（约 5.6GB，首次下载较慢）："
+        $missing | ForEach-Object { Write-Host "    ollama pull $_" }
+        Write-Info "只想先看配置对不对，可用 `$env:CHECK_ONLY=1 跳过启动"
+        exit 1
+    }
+    Write-OK "Ollama 模型齐全：$($wanted -join ', ')"
+}
+
 function Main {
     Print-Banner
     Invoke-PreflightChecks
     Load-EnvVars
+    Test-OllamaModels
     Start-Services
     $healthResult = Wait-ForHealth
     Print-AccessInfo

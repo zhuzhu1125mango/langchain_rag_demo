@@ -9,7 +9,7 @@
 |---|---|---|---|
 | **删除真的删干净了吗** | 删 DB 行就算删完。向量、对象存储、语义缓存里仍留着内容——用户以为删了，检索还能命中 | 删除按 **DB / 向量 / 对象 / 缓存** 四类数据落点逐一对齐，失败带 `phase` 可定位；另有**只读对账工具**主动比对 Milvus↔DB、MinIO↔DB、Redis↔DB | `backend/src/services/consistency_audit.py`<br>`backend/scripts/consistency_audit.py`<br>`backend/tests/test_consistency_delete_chain.py`（13 例）<br>`backend/tests/test_consistency_audit.py`（29 例） |
 | **出错了，日志能判定能不能重试吗** | 一律 `except: logger.error(...)`，或把异常压成默认值（打分失败 → 0 分 → 被当成「不相关」） | 三级严重度（`RECOVERABLE` / `REPORTABLE` / `PROGRAMMING`），**异常类型优先于文案**；「后果优先」——底层是连接错误但会导致结论错误的，显式抬级 | `backend/src/utils/error_handling.py`<br>**369 处调用点 / 约 393 个 handler**<br>`backend/tests/test_error_handling.py`（93 例） |
-| **回答生成到一半断网了怎么办** | 生成器就是响应体，客户端一断连 `CancelledError` 直接杀掉生成，只落半截答案；切网/刷新=重问一次 | 运行与连接解耦：事件进带序号的缓冲，断连只结束订阅；凭 `run_id` + 游标续传，可显式停止并保留已生成部分 | `backend/src/services/chat_run.py`<br>`backend/src/api/chat/runs.py`<br>`backend/tests/test_chat_run.py`（29 例） |
+| **回答生成到一半断网了怎么办** | 生成器就是响应体，客户端一断连 `CancelledError` 直接杀掉生成，只落半截答案；切网/刷新=重问一次 | 运行与连接解耦：事件进带序号的缓冲，断连只结束订阅；凭 `run_id` + 游标续传，可显式停止并保留已生成部分 | `backend/src/services/chat_run.py`<br>`backend/src/api/chat/runs.py`<br>`backend/tests/test_chat_run.py`（35 例） |
 
 三件事都有一个共同点：**它们的失败是静默的**。不报错、不告警、看起来一切正常，直到有人发现
 「删掉的东西还能搜到」或者「知识库明明有内容却答没有」。这个项目的大部分工程量，花在把这些
@@ -35,6 +35,15 @@ cd langchain_rag_demo
 #    生产环境默认关注册，改用：python scripts/create_admin.py --username admin
 ```
 
+首次运行会自动从 `.env.example` 生成 `.env.dev`（184 个键）并随机生成 `SECRET_KEY`——
+**只有开发环境这么干**，生产必须由人显式配置强密码。启动前还会检查 Ollama 的
+三个模型是否已拉取，缺哪个就把 `ollama pull` 命令直接打出来，而不是让你对着一堆
+`unhealthy` 猜原因。只想先校验配置、不起容器：
+
+```bash
+CHECK_ONLY=1 ./scripts/start-dev.sh        # Windows: $env:CHECK_ONLY="1"; .\scripts\start-dev.ps1
+```
+
 默认是**精简模式**：只起 7 个容器（后端 / 前端 / Postgres / Redis / Milvus / etcd / MinIO），镜像合计约 **5.2 GB**，另需 **5.6 GB** 模型。监控栈（Prometheus / Grafana / Alertmanager）挂在 `monitoring` profile 下，需要时加 `INCLUDE_MONITORING=1`，镜像合计约 6.7 GB。
 
 所以「10 分钟」指的是**已经拉过一次之后**。文档标称最低 8 GB 内存 / 4 核；compose 资源上限合计约 9.9 GB（含监控栈），实测基线尚未补齐——见下方「边界」。
@@ -45,9 +54,9 @@ cd langchain_rag_demo
 
 ```bash
 cd backend
-IN_DOCKER=false uv run pytest -q                       # 后端全量：1553 passed / 105 skipped（2026-11-02）
+IN_DOCKER=false uv run pytest -q                       # 后端全量：1610 passed / 105 skipped（2026-11-04）
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
-uv run pytest tests/test_chat_run.py -q                # 续传/停止：29 例
+uv run pytest tests/test_chat_run.py -q                # 续传/停止：35 例
 uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.869 / MRR 0.739（90 题 / 78 篇）
 uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出报告不删（退出码 0/1/2）
 ```
