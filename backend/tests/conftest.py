@@ -10,6 +10,13 @@ import sys
 # 配额逻辑由 tests/test_quota.py 直接覆盖。
 os.environ.setdefault("QUOTA_ENFORCEMENT_ENABLED", "false")
 
+# 单测假定「非生产」运行。`Settings.IS_PRODUCTION` 在未设 APP_ENV 时按 IN_DOCKER 推导，
+# 所以宿主若导出了 IN_DOCKER=1（在容器里跑测试、或 shell 里残留），配置暴露、
+# /metrics 重置、JWT 开发态兜底、配额等 8 例会失败——报错看着像功能回归，实际是环境差异。
+# 这里显式钉住（不能用 setdefault：宿主已设时它不生效）；需要容器/生产语义的用例
+# 在用例内 monkeypatch settings.IN_DOCKER（test_health_check / test_websocket_auth 等已这样做）。
+os.environ["IN_DOCKER"] = "false"
+
 import pytest
 
 # 添加项目路径到Python路径
