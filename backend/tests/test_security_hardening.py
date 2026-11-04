@@ -144,6 +144,34 @@ class TestCorsDefaults:
         assert "Content-Type" in cors.ALLOW_HEADERS
 
 
+class TestCorsEnvParsing:
+    """CORS 列表字段的两种写法都要能解析。
+
+    这里守的是一个真实事故：`.env.example` 一直写逗号分隔（`ALLOWED_ORIGINS=a,b`），
+    而 pydantic-settings 对 List[str] 会在**取值阶段**先做 JSON 解码，逗号值直接抛
+    SettingsError —— 于是 `_split_csv` 这个 before-validator 永远不被调用。
+    表现是全新 clone 起容器时 backend 直接退出（error parsing value for field
+    "ALLOWED_ORIGINS"），而本地已有 .env 的开发机完全看不到。
+    """
+
+    def _parse(self, monkeypatch, value: str):
+        monkeypatch.setenv("ALLOWED_ORIGINS", value)
+        return CorsSettings().ALLOWED_ORIGINS
+
+    def test_comma_separated(self, monkeypatch):
+        assert self._parse(monkeypatch, "http://a,http://b") == ["http://a", "http://b"]
+
+    def test_json_array(self, monkeypatch):
+        assert self._parse(monkeypatch, '["http://a","http://b"]') == ["http://a", "http://b"]
+
+    def test_single_value(self, monkeypatch):
+        assert self._parse(monkeypatch, "http://only-one") == ["http://only-one"]
+
+    def test_broken_json_falls_back_to_comma(self, monkeypatch):
+        """写成半截 JSON 时按逗号切，不要连启动都失败。"""
+        assert self._parse(monkeypatch, "[http://a") == ["[http://a"]
+
+
 def _fake_request(ip: str = "1.2.3.4") -> StarletteRequest:
     """构造带 client 地址的最小 Request（限流键取 client.host）。"""
     return StarletteRequest({"type": "http", "client": (ip, 12345)})

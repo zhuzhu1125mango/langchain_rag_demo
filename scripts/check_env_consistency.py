@@ -151,6 +151,50 @@ def main() -> int:
             + "\n  ".join(missing_config)
         )
 
+    # 校验 D：空值 + 行内注释（`KEY=    # 说明`）是模板里的隐形炸弹
+    #
+    # compose 的 env_file 解析**不**剥行内注释：`KB_RERANK_MAX_LENGTH=   # 说明` 会被
+    # 当成值 `# 说明` 注入容器，于是 pydantic 抛 int_parsing，backend 启动即退出。
+    # 之前的 config 默认值 / field_validator 都救不了（值到不了校验层）。
+    # CI 只校验「键是否齐全」，所以这类问题从没被发现——直到真的在干净目录起一次栈。
+    empty_with_comment = []
+    with open(ENV_EXAMPLE, encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, start=1):
+            if re.match(r"^[A-Z][A-Z0-9_]*=\s+#", line):
+                empty_with_comment.append(f"{lineno}: {line.split('#')[0].strip()}")
+    if empty_with_comment:
+        failures.append(
+            "校验 D 失败: 以下行是「空值 + 行内注释」，compose 会把注释当成值注入 "
+            f"({len(empty_with_comment)} 行)。把注释挪到上一行，本行只留 `KEY=`:\n  "
+            + "\n  ".join(empty_with_comment)
+        )
+
+    # 校验 E：被 compose `${VAR}` 插值的键，模板里不能带行内注释
+    #
+    # 两套解析器行为不同，同一个变量在两端会取到不同的值：
+    #   - compose 的 `--env-file` 插值：**不**剥行内注释 → `dev_minio    # 管理员账号`
+    #   - 容器 `env_file:` 注入：剥行内注释 → `dev_minio`
+    # 于是 minio 服务端认 `dev_minio    # 管理员账号`、后端拿 `dev_minio`，
+    # 后端 /health/ready 直接 503（InvalidAccessKeyId），容器 healthy 起不来。
+    # 这个坑在干净目录起栈时才暴露，CI 原来只校验键集合，管不到值。
+    interpolated: set = set()
+    for compose_path, _env_path in COMPOSE_ENV_PAIRS:
+        interpolated |= read_compose_vars(compose_path)
+
+    inline_commented = []
+    with open(ENV_EXAMPLE, encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, start=1):
+            m = re.match(r"^([A-Z][A-Z0-9_]*)=[^#\n]*\s+#", line)
+            if m and m.group(1) in interpolated:
+                inline_commented.append(f"{lineno}: {m.group(1)}")
+    if inline_commented:
+        failures.append(
+            "校验 E 失败: 以下键被 compose `${VAR}` 插值引用，却带行内注释 —— "
+            "compose 不剥注释、env_file 会剥，两端取值不一致 "
+            f"({len(inline_commented)} 个)。把注释挪到上一行:\n  "
+            + "\n  ".join(inline_commented)
+        )
+
     if failures:
         for failure in failures:
             print(failure)

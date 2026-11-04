@@ -5,9 +5,10 @@
 容器内由 compose 显式注入环境变量，优先级高于 env 文件）。
 """
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, SettingsConfigDict, NoDecode
 from pydantic import field_validator
-from typing import Optional, List, Dict
+from typing import Annotated, Optional, List, Dict
+import json
 import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -190,10 +191,14 @@ class CorsSettings(BaseSettings):
     覆盖前端实际使用的 Authorization / Content-Type / X-API-Key 等头。
     """
 
-    ALLOWED_ORIGINS: List[str] = ["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173"]
+    # NoDecode：否则 pydantic-settings 会在**取值阶段**就对 List[str] 做 JSON 解码，
+    # 逗号分隔直接抛 SettingsError，根本轮不到下面的 _split_csv 兜底。
+    # 这是「.env.example 里写逗号、validator 却永远不被调用」的根因——
+    # 全新 clone 起容器时 backend 直接退出（error parsing value for field "ALLOWED_ORIGINS"）。
+    ALLOWED_ORIGINS: Annotated[List[str], NoDecode] = ["http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:5173"]
     ALLOW_CREDENTIALS: bool = True
-    ALLOW_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-    ALLOW_HEADERS: List[str] = [
+    ALLOW_METHODS: Annotated[List[str], NoDecode] = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+    ALLOW_HEADERS: Annotated[List[str], NoDecode] = [
         "Authorization",
         "Content-Type",
         "Accept",
@@ -205,13 +210,22 @@ class CorsSettings(BaseSettings):
     @field_validator("ALLOWED_ORIGINS", "ALLOW_METHODS", "ALLOW_HEADERS", mode="before")
     @classmethod
     def _split_csv(cls, v):
-        """pydantic-settings 对 List[str] 默认按 JSON 解析 .env 值，会拒绝逗号分隔字符串。
+        """兼容 JSON 数组与逗号分隔两种写法。
 
-        常见的 .env 写法一直是 ``ALLOWED_ORIGINS=a,b``，这里降级：非列表值按逗号分隔成列表，
-        兼容 JSON 数组与逗号分隔两种写法。
+        常见的 .env 写法一直是 ``ALLOWED_ORIGINS=a,b``，但 pydantic-settings 对 List[str]
+        默认按 JSON 解析取值，非 JSON 直接抛 SettingsError（字段类型标了 ``NoDecode``
+        才轮到这里）。两种写法都收：以 ``[`` 开头先按 JSON 试，失败再按逗号切。
         """
         if isinstance(v, str):
-            return [item.strip() for item in v.split(",") if item.strip()]
+            text = v.strip()
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, list):
+                        return [str(item).strip() for item in parsed]
+                except json.JSONDecodeError:
+                    pass
+            return [item.strip() for item in text.split(",") if item.strip()]
         return v
 
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
