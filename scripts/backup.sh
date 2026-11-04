@@ -30,6 +30,14 @@ mkdir -p "$BACKUP_DIR"
 
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# docker cp 的宿主机路径：Git Bash 下 `/c/...` 需要转成 `C:\...`，否则 docker 会当成
+# 容器内路径。不能依赖 MSYS_NO_PATHCONV——调用方（如 restore_drill_minio.sh）为了保住
+# 容器内 /tmp 路径会把它设成 1，环境变量会被继承进来，于是 docker cp 报
+# 「directory "C:\c\MyCode\..." does not exist」。显式转换最稳。
+winpath() {
+  if have cygpath; then cygpath -w "$1"; else printf '%s' "$1"; fi
+}
+
 # ---------- 1. PostgreSQL ----------
 PG_OUT="$BACKUP_DIR/postgres_$STAMP.sql.gz"
 if have pg_dump; then
@@ -67,7 +75,7 @@ else
   # 空 bucket 时 mirror 不产生文件，docker cp 会报错——先判断，避免把「没有对象」
   # 误报成「备份失败」。空备份本身是合法结果（当前生产就是 0 对象）。
   if docker exec "$MINIO_CONTAINER" sh -c '[ -n "$(ls -A /tmp/backup_mirror 2>/dev/null)" ]'; then
-    docker cp "$MINIO_CONTAINER:/tmp/backup_mirror/." "$MINIO_OUT/"
+    docker cp "$MINIO_CONTAINER:/tmp/backup_mirror/." "$(winpath "$MINIO_OUT")/"
   fi
   docker exec "$MINIO_CONTAINER" rm -rf /tmp/backup_mirror
 fi

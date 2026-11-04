@@ -88,8 +88,15 @@ if [[ -n "${MINIO_DIR:-}" ]]; then
     : "${MINIO_CONTAINER:=minio-prod}"
     : "${MINIO_INTERNAL_URL:=http://127.0.0.1:9000}"
     echo "      借用容器 $MINIO_CONTAINER（宿主机未安装 mc）"
+    # docker cp 的宿主机路径要显式转成 Windows 形式：调用方若设了 MSYS_NO_PATHCONV=1
+    # （为保住容器内 /tmp 路径不被改写），该变量会被继承进来，`/c/...` 就变成了容器路径。
+    if command -v cygpath >/dev/null 2>&1; then
+      host_dir="$(cygpath -w "$MINIO_DIR")"
+    else
+      host_dir="$MINIO_DIR"
+    fi
     docker exec "$MINIO_CONTAINER" rm -rf /tmp/restore_src >/dev/null 2>&1 || true
-    docker cp "$MINIO_DIR/." "$MINIO_CONTAINER:/tmp/restore_src/"
+    docker cp "$host_dir/." "$MINIO_CONTAINER:/tmp/restore_src/"
     docker exec "$MINIO_CONTAINER" sh -c "
       set -e
       u=\$(cat /run/secrets/MINIO_ROOT_USER 2>/dev/null || echo \"\$MINIO_ROOT_USER\")
