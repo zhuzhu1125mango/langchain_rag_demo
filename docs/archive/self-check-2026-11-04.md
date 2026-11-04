@@ -39,7 +39,8 @@ backend/scripts/probe_retrieval_stages.py:291:36: F821 Undefined name `Optional`
 - **为什么不影响运行**：文件有 `from __future__ import annotations`，注解不求值，
   所以脚本能正常执行——这是一个**只有静态检查能抓到的**错误。
 - **已修**：改为 `str | None`（与文件内其它注解风格一致），并用 CI 同款命令复验
-  `All checks passed!`。
+  `All checks passed!`。提交 `99fd498` 推送后 **CI 7/7 全绿**（run 41767968709，
+  Lint & Typecheck 28s）。
 - **流程教训**：自查清单里必须包含「跑一遍 CI 的 lint 命令」，否则本地绿灯没有意义。
   已把 `uvx ruff@0.9.3 check --select E9,F63,F7,F82 backend` 写进本文第 5 节。
 
