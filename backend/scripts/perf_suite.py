@@ -332,8 +332,11 @@ def main() -> int:
     print(markdown)
 
     if args.summary:
+        # 追加而不是覆盖：CI 里这个文件在跑本脚本之前已经有「runner 信息」了，
+        # 覆盖会把那部分丢掉，事后复盘就分不清「代码慢了」还是「runner 忙」。
         args.summary.parent.mkdir(parents=True, exist_ok=True)
-        args.summary.write_text(markdown + "\n", encoding="utf-8")
+        with open(args.summary, "a", encoding="utf-8") as handle:
+            handle.write(markdown + "\n")
 
     if failures:
         print("\n[FAIL] 性能退化：\n  " + "\n  ".join(failures), file=sys.stderr)
