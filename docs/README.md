@@ -40,7 +40,8 @@ docs/
 │   ├── channel-ab-2026-11-02.md            # 通道 A/B（10 个臂）
 │   ├── channel-fusion-2026-11-02.md        # 融合策略 + McNemar 显著性
 │   ├── stage-probe-2026-11-03.md           # 真实文档逐级探针：概览题丢在哪一级（24 题 / 6 个修法）
-│   └── rto-scale-2026-11-05.md             # 真实规模 RTO：PG 915MB/22s、Milvus 2 万向量/29~33s、MinIO 195MB/18s
+│   ├── rto-scale-2026-11-05.md             # 真实规模 RTO：PG 915MB/22s、Milvus 2 万向量/29~33s、MinIO 195MB/18s
+│   └── perf-baseline.md                    # 性能基线与夜间回归：量什么、怎么判、红了怎么查（附 perf-baseline.json）
 ├── guide/               # 操作指南
 │   ├── deployment.md    #   部署（开发/生产环境）
 │   ├── development.md   #   开发与测试（含踩坑记录）

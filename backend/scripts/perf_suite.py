@@ -275,6 +275,14 @@ def render_markdown(report: Dict, failures: List[str], notes: List[str], baselin
         lines += [f"- {f}" for f in failures]
     elif baseline_missing:
         lines.append("**➖ 判定：记录模式**（该 profile 还没有基线，本次不卡点）")
+        # 直接给出可粘贴的片段：这一步需要人做，但人不该手抄数字（抄错一位，
+        # 后面每次跑都在跟一个假基线比）。
+        lines.append("")
+        lines.append(f"把下面这段合并进 `docs/benchmarks/perf-baseline.json` 的 `profiles.{report['profile']}` 后开始卡点：")
+        lines.append("")
+        lines.append("```json")
+        lines.append(json.dumps(report["timings"], ensure_ascii=False, indent=2))
+        lines.append("```")
     else:
         lines.append("**✅ 判定：通过**")
     if notes:
