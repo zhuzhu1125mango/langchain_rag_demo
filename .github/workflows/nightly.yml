@@ -1,0 +1,100 @@
+name: Nightly Perf
+
+# 夜间性能回归（OPS-4）：CI 只在 push 时看「质量阈值」，从来没人看「快不快」。
+# 这个工作流每天跑一次，用计数器（确定性）卡算法退化、用耗时（按 profile）看趋势。
+#
+# 为什么不用 push 触发：性能数字的价值在**趋势**，每次提交都测会让基线噪声掩盖真实变化；
+# 每天固定时间测一次，diff 与「昨天」比，人更容易判断。
+#
+# 手动触发：gh workflow run nightly.yml
+
+on:
+  schedule:
+    # 18:30 UTC = 02:30 CST，避开白天的高负载时段（本机/托管 runner 都一样）
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-perf
+  cancel-in-progress: false
+
+jobs:
+  perf:
+    name: Perf Regression
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # 与 backend-unit 一致：config 无内置模型名默认值（A2），缺省会走不同分支；
+      # SKIP_OLLAMA_CHECK 短路 Ollama 连接校验（runner 上没有 Ollama）
+      OLLAMA_MODEL_NAME: ci_placeholder_model
+      FAST_LLM_MODEL_NAME: ci_placeholder_model
+      EMBEDDING_MODEL_NAME: ci_placeholder_model
+      SKIP_OLLAMA_CHECK: "true"
+      MINIO_SECURE: "false"
+      UV_HTTP_TIMEOUT: "120"
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.3.2
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # 托管 runner 是共享的：看到红线时先确认不是邻居在抢 CPU。
+      # 这几个数字会进 artifact，事后复盘用得上。
+      - name: Record runner info
+        run: |
+          echo "### Runner" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          nproc; grep -m1 "model name" /proc/cpuinfo || true
+          uptime; free -m | head -2
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      # 计数器不符（切分块数 / 融合条数 / 打分文档数）或耗时超阈（默认 1.6×）时非零退出。
+      # profile=ci 的基线单独存档：同一段代码在 2 核 runner 上比 16 核本机慢好几倍，
+      # 跨机器比绝对值没有意义。
+      - name: Perf suite (counters hard-gate, timings soft-gate)
+        run: uv run python scripts/perf_suite.py --profile ci --report perf_report.json --summary "$GITHUB_STEP_SUMMARY"
+
+      # 质量侧已有阈值卡点，这里顺带把 latency_p50/p95 落到同一个 artifact 里，
+      # 让「质量没退、但慢了」这种情况在同一份报告里能看出来。
+      - name: Retrieval eval (quality gate + latency record)
+        run: uv run python scripts/run_eval.py --report eval_report.json
+
+      - name: Append eval latency
+        if: always()
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json, pathlib
+          p = pathlib.Path("eval_report.json")
+          if not p.exists():
+              print("\n### 检索质量\n\n（本次没有 eval 报告：上一步失败）")
+              raise SystemExit(0)
+          m = json.loads(p.read_text(encoding="utf-8"))["metrics"]
+          print("\n### 检索质量与延迟（run_eval，BM25 离线）\n")
+          print("| 指标 | 值 |\n|---|---|")
+          print(f"| hit_rate@5 | {m['hit_rate']:.3f} |")
+          print(f"| mrr@5 | {m['mrr']:.3f} |")
+          print(f"| 单题 p50 | {m['latency_p50_ms']}ms |")
+          print(f"| 单题 p95 | {m['latency_p95_ms']}ms |")
+          PY
+
+      - name: Upload perf artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nightly-perf
+          path: |
+            backend/perf_report.json
+            backend/eval_report.json
+          retention-days: 90
