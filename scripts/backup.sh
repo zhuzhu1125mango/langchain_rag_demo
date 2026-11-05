@@ -54,6 +54,13 @@ else
 fi
 
 # ---------- 2. MinIO ----------
+# BACKUP_SKIP_MINIO=1：只备份 PG（规模测试、或 MinIO 另行单独演练时用）。
+# 少了这个开关，「量 PG 备份耗时」会被 MinIO 镜像时间污染。
+: "${BACKUP_SKIP_MINIO:=0}"
+if [[ "$BACKUP_SKIP_MINIO" == "1" ]]; then
+  echo "[2/3] 跳过 MinIO（BACKUP_SKIP_MINIO=1）"
+  MINIO_OUT=""
+else
 MINIO_OUT="$BACKUP_DIR/minio_$STAMP"
 mkdir -p "$MINIO_OUT"
 if have mc; then
@@ -79,6 +86,7 @@ else
   fi
   docker exec "$MINIO_CONTAINER" rm -rf /tmp/backup_mirror
 fi
+fi   # BACKUP_SKIP_MINIO
 
 # ---------- 3. Milvus ----------
 echo "[3/3] Milvus backup（如已配置 milvus-backup）"
@@ -92,8 +100,13 @@ fi
 echo "--- 产物校验 ---"
 gzip -t "$PG_OUT"
 pg_size=$(du -h "$PG_OUT" | cut -f1)
-obj_count=$(find "$MINIO_OUT" -type f | wc -l | tr -d '[:space:]')
 echo "  PG   : $PG_OUT ($pg_size, gzip 完整)"
+if [[ -z "$MINIO_OUT" ]]; then
+  echo "  MinIO: 已跳过"
+  echo "备份完成：$BACKUP_DIR（$STAMP）"
+  exit 0
+fi
+obj_count=$(find "$MINIO_OUT" -type f | wc -l | tr -d '[:space:]')
 echo "  MinIO: $obj_count 个对象 -> $MINIO_OUT"
 if [[ "$obj_count" == "0" ]]; then
   echo "  注意：bucket「$MINIO_BUCKET」当前没有对象，镜像为空属正常；若预期有对象请先排查。"

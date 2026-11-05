@@ -290,6 +290,10 @@ curl -fsS http://127.0.0.1:8001/health/ready
 >   把**上一版后端镜像**装上去（连 drill 的 PG/Redis、只读生产 Milvus/MinIO）→ 验 ready/登录/问答 →
 >   再接**上一版前端镜像**验入口页/静态资源/API 代理/SSE 不缓冲 → 验「生成中被停」→ 自动清理。
 >   `ROLLBACK_IMAGE=` / `FRONTEND_IMAGE=` 分别指定要回滚到的镜像。
+> - `./scripts/scale_rto_drill.sh` —— **规模 RTO**：把 PG / Milvus / MinIO 分别灌到
+>   万级（默认 1 万文档 + 20 万 trace / 2 万向量 / 1000 对象），量备份与恢复的真实耗时。
+>   `MODE=pg|milvus|minio|all`，各规模的默认值都能用环境变量覆盖。结果见
+>   [`benchmarks/rto-scale-2026-11-05.md`](../benchmarks/rto-scale-2026-11-05.md)。
 >
 > 上述三条验证的是「**数据能恢复**」。还有一件它们都不覆盖：**恢复完整套服务能不能起来、
 > 能不能答对问题**——需要六个容器（PG/Redis/MinIO/etcd/Milvus/backend）一起才能验。
@@ -576,8 +580,11 @@ Milvus/MinIO 只读生产 → 验 ready / 登录 / 问答 / 停机。写操作�
 2. Git Bash + `MSYS_NO_PATHCONV=1` 下 **`curl -o /dev/null` 会写失败（退出码 23）却照样打印 200**，
    脚本因此静默退出；要用 `cygpath -w /dev/null` 得到的 `\\.\NUL`。
 
-**仍未验到的**：真实规模下的 RTO（532 chunk 与 1 万文档不是一回事）；生产 `documents`
-的真实对象量级（当前 4 篇）。
+**规模**：这一族的数字原先全是 532 chunk 级，**已于 2026-11-05 补测**
+（`scripts/scale_rto_drill.sh`）：PG **915MB / 60 万行 → 恢复 22s**、Milvus **2 万向量 → RTO 29~33s**、
+MinIO **1000 对象 / 195MB → RTO 18s**，并给了 312MB↔915MB 两个点的斜率。
+结论与边界见 [`docs/benchmarks/rto-scale-2026-11-05.md`](../benchmarks/rto-scale-2026-11-05.md)。
+**仍未验到的**：生产 `documents` 的真实对象量级（当前 4 篇）。
 
 ### 7.4 端到端演练步骤（手工编排，约 20 分钟）
 

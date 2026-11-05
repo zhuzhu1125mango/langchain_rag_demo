@@ -67,3 +67,47 @@ def test_rollback_drill_converts_curl_output_path() -> None:
 def test_rollback_drill_uses_a_separate_question_for_proxy_check() -> None:
     """经 nginx 的 SSE 不能复用刚问过的问题：命中语义缓存会「秒回且完整」，看起来像通过。"""
     assert "ASK_Q_PROXY=" in ROLLBACK
+
+
+# ---------------------------------------------------------------------------
+# 规模演练脚本：三条「会让结论假通过」的写法
+# ---------------------------------------------------------------------------
+
+SCALE = (Path(__file__).resolve().parents[2] / "scripts" / "scale_rto_drill.sh").read_text(
+    encoding="utf-8"
+)
+
+
+def test_scale_drill_hashes_on_host_not_in_minio_container() -> None:
+    """minio 镜像里没有 sha256sum，在容器里算得到的是空输入。
+
+    两侧都会退化成 `e3b0c442…`（空串的 sha256），于是「哈希一致」——其实一个字节都没比。
+    现在的写法是：容器里只 mc mirror 到 /tmp/chk，`docker cp` 回宿主机再算。
+    """
+    assert 'docker cp "$MINIO_DST:/tmp/chk/."' in SCALE
+    # 容器内不许再出现 sha256sum
+    for line in SCALE.splitlines():
+        if "sha256sum" in line:
+            assert "docker exec" not in line, f"哈希又在容器里算了: {line}"
+
+
+def test_scale_drill_rejects_empty_hash() -> None:
+    """空串哈希必须被判为「本次结论不成立」，否则退化后仍会打印「一致」。"""
+    assert "empty_hash=$(printf '' | sha256sum" in SCALE
+    assert '"$src_list" == "$empty_hash"' in SCALE
+    assert "校验无效" in SCALE
+
+
+def test_scale_drill_does_not_bulk_delete_seed_or_backup_dirs() -> None:
+    """删上千个文件的 `rm -rf` 会撞批量删除策略，脚本静默退出（第一次跑就死在这）。
+
+    种子同名覆盖写即可，备份目录带时间戳，都不需要先清空。
+    """
+    assert 'src_dir="$WORK/minio_src"; rm -rf' not in SCALE
+    assert 'bdir="$WORK/minio_backup"; rm -rf' not in SCALE
+    assert "minio_backup_$(date +%H%M%S)" in SCALE
+
+
+def test_scale_drill_keeps_results_per_mode() -> None:
+    """三个模式共用一个 results.md 会互相覆盖（Milvus 的数字就这样被 MinIO 清掉过）。"""
+    assert 'RESULTS="$WORK/results-$MODE.md"' in SCALE

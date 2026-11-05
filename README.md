@@ -54,7 +54,7 @@ CHECK_ONLY=1 ./scripts/start-dev.sh        # Windows: $env:CHECK_ONLY="1"; .\scr
 
 ```bash
 cd backend
-IN_DOCKER=false uv run pytest -q                       # 后端全量：1655 passed / 105 skipped（2026-11-05）
+IN_DOCKER=false uv run pytest -q                       # 后端全量：1659 passed / 105 skipped（2026-11-05）
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
 uv run pytest tests/test_chat_run.py -q                # 续传/停止：35 例
 uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.869 / MRR 0.739（90 题 / 78 篇）

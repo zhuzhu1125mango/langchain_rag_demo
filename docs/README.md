@@ -39,7 +39,8 @@ docs/
 │   ├── retrieval-baseline-2026-11-02.md    # 90 题合成集基线（hit@5 0.869 / MRR@5 0.739）
 │   ├── channel-ab-2026-11-02.md            # 通道 A/B（10 个臂）
 │   ├── channel-fusion-2026-11-02.md        # 融合策略 + McNemar 显著性
-│   └── stage-probe-2026-11-03.md           # 真实文档逐级探针：概览题丢在哪一级（24 题 / 6 个修法）
+│   ├── stage-probe-2026-11-03.md           # 真实文档逐级探针：概览题丢在哪一级（24 题 / 6 个修法）
+│   └── rto-scale-2026-11-05.md             # 真实规模 RTO：PG 915MB/22s、Milvus 2 万向量/29~33s、MinIO 195MB/18s
 ├── guide/               # 操作指南
 │   ├── deployment.md    #   部署（开发/生产环境）
 │   ├── development.md   #   开发与测试（含踩坑记录）
