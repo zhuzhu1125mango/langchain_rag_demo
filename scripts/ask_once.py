@@ -51,9 +51,15 @@ def main(argv: list[str]) -> int:
     answer: list[str] = []
     end_frame: dict = {}
     frames = 0
+    # 首帧耗时是判断「代理有没有缓冲」的唯一可靠信号：nginx 一旦开了 proxy_buffering，
+    # 客户端在整段回答写完前一个字节都收不到，first_frame_ms 会等于总耗时。
+    t0 = time.monotonic()
+    first_frame_ms: int | None = None
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
             for line in resp:
+                if first_frame_ms is None:
+                    first_frame_ms = int((time.monotonic() - t0) * 1000)
                 if read_delay:
                     time.sleep(read_delay)
                 line = line.decode("utf-8", "ignore").strip()
@@ -91,6 +97,8 @@ def main(argv: list[str]) -> int:
                 "answer_len": len(text),
                 "frames": frames,
                 "finished": finished,
+                "first_frame_ms": first_frame_ms,
+                "total_ms": int((time.monotonic() - t0) * 1000),
                 "answer": text[:240].replace("\n", " "),
             },
             ensure_ascii=False,

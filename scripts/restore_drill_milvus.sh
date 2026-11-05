@@ -14,7 +14,12 @@
 #   KEEP=1 ./scripts/restore_drill_milvus.sh   # 保留 drill-* 容器，便于人工检查
 #
 # 注意：**源就是生产 Milvus**（真实场景就是它出事）。脚本会在源实例建一个
-# 独立集合 `drill_docs`（1000 条 128 维随机向量），结束时删除；不碰 documents。
+# 独立集合 `drill_docs`（1000 条：128 维 dense + sparse 稀疏向量），结束时删除；不碰 documents。
+#
+# 为什么必须带 sparse（2026-11-05）：`documents` 有两个向量字段——dense（HNSW/COSINE）
+# 与 sparse（SPARSE_INVERTED_INDEX/IP，BM25 词权重）。早先的演练集合只有 dense，
+# 于是文档里只能写「稀疏索引未验，问答走混合检索间接覆盖」。间接覆盖不算证据：
+# 混合检索会把 dense 的结果兜住，稀疏索引真丢了也可能看不出来。
 #
 # 三个已经踩过的坑，改这个脚本前务必读：
 #   1) 不要给 drill-milvus 设 `COMMON_STORAGETYPE=minio`：2.6.17 会 panic
@@ -98,8 +103,9 @@ except Exception as e:
 }
 trap cleanup EXIT
 
-# 通过 backend 容器执行一段 python（它已经装了 pymilvus，不必再造一个环境）
-py() { docker exec -i "$BACKEND" python -; }
+# 通过 backend 容器执行一段 python（它已经装了 pymilvus，不必再造一个环境）。
+# -W ignore：pymilvus 3.0 的 ORM 接口会逐行打 DeprecationWarning，把校验结果淹没掉。
+py() { docker exec -i "$BACKEND" python -W ignore -; }
 
 step "0/7 前置检查"
 for c in "$SRC_MILVUS" "$SRC_MINIO" "$BACKEND"; do
@@ -114,7 +120,7 @@ mkdir -p "$WORK_DIR"
 echo "源实例: $SRC_MILVUS（会在其上加临时集合 $COLL）"
 echo "备份工具: $BACKUP_TOOL_IMAGE"
 
-step "1/7 在源实例造演练集合（$COLL，1000 条 128 维 + HNSW 索引）"
+step "1/7 在源实例造演练集合（$COLL，1000 条：128 维 dense + sparse，各建索引）"
 py <<PY
 import random
 from pymilvus import connections, utility, Collection, CollectionSchema, FieldSchema, DataType
@@ -127,18 +133,29 @@ fields = [
     FieldSchema("text", DataType.VARCHAR, max_length=512),
     FieldSchema("category", DataType.VARCHAR, max_length=64),
     FieldSchema("vec", DataType.FLOAT_VECTOR, dim=128),
+    # 与 documents 同构：稀疏字段 + SPARSE_INVERTED_INDEX/IP（BM25 权重形态）
+    FieldSchema("sparse", DataType.SPARSE_FLOAT_VECTOR),
 ]
 col = Collection("$COLL", CollectionSchema(fields, description="drill only"), consistency_level="Strong")
 random.seed(42)
 ids = list(range(1000))
+dense = [[random.random() for _ in range(128)] for _ in ids]
+# 每行 3~8 个非零维，维度落在 30000 内（模拟词表规模），值 0.1~1.0
+random.seed(43)
+sparse = []
+for _ in ids:
+    dims = random.sample(range(30000), random.randint(3, 8))
+    sparse.append({d: round(random.uniform(0.1, 1.0), 4) for d in dims})
 col.insert([ids, [f"drill document {i}" for i in ids],
             [("alpha", "beta", "gamma")[i % 3] for i in ids],
-            [[random.random() for _ in range(128)] for _ in ids]])
+            dense, sparse])
 col.flush()
 col.create_index("vec", {"index_type": "HNSW", "metric_type": "COSINE",
                          "params": {"M": 8, "efConstruction": 64}})
+col.create_index("sparse", {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"})
 col.load()
-print(f"  entities={col.num_entities} indexes={[i.params.get('index_type') for i in col.indexes]}")
+print(f"  entities={col.num_entities}")
+print("  indexes=" + ", ".join(f"{i.field_name}:{i.params.get('index_type')}/{i.params.get('metric_type')}" for i in col.indexes))
 PY
 
 step "2/7 生成 backup.yaml（凭据取自 secrets/，不打印）"
@@ -332,7 +349,7 @@ grep -E "restore backup success|duration:" "$WORK_DIR/restore.log" | sed 's/^/  
 RESTORE_END=$(date +%s)
 echo "  恢复耗时 $(( RESTORE_END - RESTORE_START ))s"
 
-step "6/7 校验：条数 / 索引 / 标量与向量哈希 / ANN 检索"
+step "6/7 校验：条数 / 双索引 / 标量与两种向量哈希 / dense 与 sparse 检索"
 py <<PY
 import hashlib
 from pymilvus import connections, Collection
@@ -342,21 +359,34 @@ def probe(alias, host):
     c = Collection("$COLL", using=alias)
     c.load()
     idx = sorted(f"{i.field_name}:{i.params.get('index_type')}/{i.params.get('metric_type')}" for i in c.indexes)
-    rows = c.query(expr="id < 100", output_fields=["id", "text", "category", "vec"], using=alias)
+    rows = c.query(expr="id < 100", output_fields=["id", "text", "category", "vec", "sparse"], using=alias)
     rows.sort(key=lambda r: r["id"])
-    blob = "|".join(f"{r['id']}:{r['text']}:{r['category']}:" + ",".join(f"{v:.6f}" for v in r["vec"]) for r in rows)
+    # 稀疏向量也要进哈希：只比 dense 的话，稀疏数据丢了照样「一致」
+    blob = "|".join(
+        f"{r['id']}:{r['text']}:{r['category']}:"
+        + ",".join(f"{v:.6f}" for v in r["vec"])
+        + ":"
+        + ",".join(f"{k}={r['sparse'][k]:.4f}" for k in sorted(r["sparse"]))
+        for r in rows
+    )
     hits = c.search([[0.5] * 128], "vec", {"metric_type": "COSINE", "params": {"ef": 64}}, limit=5, using=alias)
+    # 用同一行（id=0）的稀疏维造查询串，两侧一致、可复现
+    q = {k: 1.0 for k in list(sorted(rows[0]["sparse"]))[:5]}
+    shits = c.search([q], "sparse", {"metric_type": "IP", "params": {}}, limit=5, using=alias)
     return dict(n=c.num_entities, idx=idx, sampled=len(rows),
                 hash=hashlib.sha256(blob.encode()).hexdigest()[:16],
-                top=[h.id for h in hits[0]])
+                top=[h.id for h in hits[0]],
+                stop=[h.id for h in shits[0]],
+                sq=list(q))
 
 src = probe("src", "$SRC_MILVUS")
 dst = probe("dst", "$DRILL_MILVUS")
 bad = 0
-for k in ("n", "idx", "sampled", "hash", "top"):
+for k in ("n", "idx", "sampled", "hash", "top", "stop", "sq"):
     ok = src[k] == dst[k]
     bad += 0 if ok else 1
     print(("  OK   " if ok else "  DIFF ") + f"{k}: 源={src[k]} 目标={dst[k]}")
+print(f"  sparse 索引存在: {'sparse:SPARSE_INVERTED_INDEX/IP' in src['idx']}")
 raise SystemExit(1 if bad else 0)
 PY
 
@@ -365,4 +395,5 @@ elapsed=$(( RESTORE_END - DRILL_START ))
 echo "  备份大小：$(docker exec "$SRC_MINIO" sh -c 'u=$(cat /run/secrets/MINIO_ROOT_USER); p=$(cat /run/secrets/MINIO_ROOT_PASSWORD); mc alias set bk http://127.0.0.1:9000 "$u" "$p" >/dev/null; mc du "bk/'"$BACKUP_BUCKET"'"' 2>/dev/null | tail -1)"
 echo "  备份 ${BACKUP_SECS}s / 恢复 $(( RESTORE_END - RESTORE_START ))s"
 echo "  RTO（起实例 -> 恢复完成）：${elapsed}s"
-echo "  说明：1000 条 128 维的样本，不能外推到真实数据量；建索引的耗时随集合规模上升明显。"
+echo "  说明：1000 条（128 维 dense + sparse）的样本，不能外推到真实数据量；建索引耗时随集合规模上升明显。"
+echo "  稀疏索引：SPARSE_INVERTED_INDEX/IP 已随备份恢复，稀疏检索 top-k 与源实例一致（见 6/7）。"

@@ -287,8 +287,9 @@ curl -fsS http://127.0.0.1:8001/health/ready
 >   官方 `milvus-backup` 备份 → 起全新一套 etcd + MinIO + Milvus → `restore --rebuild_index` →
 >   校验条数/索引/抽样哈希/ANN 结果 → 自动清理。
 > - `./scripts/rollback_drill.sh` —— **回滚（§7.2）**：现打一份备份 → 隔离 PG 恢复 →
->   把**上一版镜像**装上去（连 drill 的 PG/Redis、只读生产 Milvus/MinIO）→ 验 ready/登录/问答 →
->   验「生成中被停」的行为 → 自动清理。`ROLLBACK_IMAGE=` 指定要回滚到的镜像。
+>   把**上一版后端镜像**装上去（连 drill 的 PG/Redis、只读生产 Milvus/MinIO）→ 验 ready/登录/问答 →
+>   再接**上一版前端镜像**验入口页/静态资源/API 代理/SSE 不缓冲 → 验「生成中被停」→ 自动清理。
+>   `ROLLBACK_IMAGE=` / `FRONTEND_IMAGE=` 分别指定要回滚到的镜像。
 >
 > 上述三条验证的是「**数据能恢复**」。还有一件它们都不覆盖：**恢复完整套服务能不能起来、
 > 能不能答对问题**——需要六个容器（PG/Redis/MinIO/etcd/Milvus/backend）一起才能验。
@@ -305,22 +306,32 @@ curl -fsS http://127.0.0.1:8001/health/ready
 ### 7.2 回滚演练
 
 ```bash
-./scripts/rollback_drill.sh                    # 现打备份 → 隔离恢复 → 装上一版镜像 → 验功能与停机
+./scripts/rollback_drill.sh                    # 现打备份 → 隔离恢复 → 装上一版镜像 → 验功能/前端/停机
 ROLLBACK_IMAGE=rag-backend:rollback-20261101 ./scripts/rollback_drill.sh
+FRONTEND_IMAGE=rag-frontend:rollback-20261101b ./scripts/rollback_drill.sh
 PG_FILE=backups/xxx.sql.gz ./scripts/rollback_drill.sh   # 省一次 dump
 KEEP=1 ./scripts/rollback_drill.sh             # 保留现场排查
+DEBUG=1 ./scripts/rollback_drill.sh            # 出错时打印行号（Git Bash 下很多坑不报错就退出）
 ```
 
-脚本做四件事，缺一件这次演练就不算数：
+脚本做五件事，缺一件这次演练就不算数：
 
 1. **现打一份备份**并恢复进**隔离** PG（不是复制数据目录），顺带再验一次备份链路；
-2. 把**上一版镜像**装到这份**当前 schema** 的数据上（模拟「升级完发现不对」），
+2. 把**上一版后端镜像**装到这份**当前 schema** 的数据上（模拟「升级完发现不对」），
    连 drill 的 PG/Redis，Milvus 与 MinIO 只读生产；
 3. 验 `health/ready`、登录、一次知识库问答——**能启动 ≠ 能用**，旧代码要能读新表；
-4. 验「生成中被停」：用 curl 拿到首帧后立刻 `docker stop`，看进程退出码与客户端有没有 `end` 帧。
+4. 把**上一版前端镜像**接到这个 drill 后端上（§5.2 要求前后端同批回退）：验入口页、
+   `/assets` 带 hash 的 JS、`/api` 代理登录、以及**经 nginx 的 SSE 是否边生成边下发**
+   （判据是首帧耗时，缓冲的话首帧会等于总耗时）；
+5. 验「生成中被停」：curl 拿到首帧后立刻 `docker stop`，看退出码与客户端有没有 `end` 帧。
 
-判定口径（2026-11-04 实测值见 §7.3）：第 1~3 条必须全绿；第 4 条只记录行为差异，
+判定口径（实测值见 §7.3）：第 1~4 条必须全绿；第 5 条只记录行为差异，
 因为「回滚会丢掉优雅停机」是**能力缺失**，不是每次都能撞上生成中的流。
+
+> 两个容易自己骗自己的坑（都踩过）：
+> ① 前端那条别用同一道题——刚问过会命中语义缓存，「秒回且完整」看起来像 SSE 正常，其实没在生成；
+> ② 原生 `curl -o /dev/null` 在 Git Bash + `MSYS_NO_PATHCONV=1` 下会写失败（退出码 23）却照样
+> 打印 200，用 `cygpath -w /dev/null` 转过的 `\\.\NUL` 才可靠。
 
 ### 7.3 演练记录| 日期 | 演练类型 | 数据规模 | PG 恢复 | MinIO 恢复 | Milvus 恢复 | 总耗时（RTO） | 结论 | 改进项 |
 |---|---|---|---|---|---|---|---|---|
@@ -329,7 +340,8 @@ KEEP=1 ./scripts/rollback_drill.sh             # 保留现场排查
 | **2026-11-04** | **MinIO 整实例恢复（全新 `drill-minio` + 新卷 + 新凭据）** | **3 对象 / 1MB（含中文名与嵌套路径）** | 不适用 | **3/3 对象，哈希集合一致** | 未验（0 向量，可重建） | **4s**（含实例启动 2s） | **通过** | 见下 |
 | **2026-11-04** | **Milvus 整实例恢复（全新 etcd+MinIO+Milvus）** | **1000 条 128 维 + HNSW（备份 477KiB）** | 不适用 | 不适用 | **1000/1000，索引与 ANN 一致** | **29s**（备份 2s + 恢复 17s） | **通过，但默认参数会漏索引** | 见下 |
 | **2026-11-04** | **端到端：三套全恢复 + 起服务 + 问答** | **4 文档 / 532 chunk / 4 用户 / 111 trace / 4 对象** | **4 文档 532 chunk** | **4 对象，md5 与原文件一致** | **532 实体，检索命中** | **手工编排，未计时**（Milvus 恢复 15.7s、backend 到 ready 16s） | **通过** | 见下 |
-| **2026-11-04** | **回滚：上一版镜像（11-01）+ 当前 schema 数据** | **4 用户 / 2 KB / 4 文档 / 532 chunk** | **2s 恢复，库 schema=`d5e6f7a8b9c0`** | 只读（未写入） | 只读（532 实体，问答命中） | **ready 27~48s**（冷启动加载模型），全流程 **77~101s**（含现打备份时约 101s） | **通过（回滚可行，但有两条代价）** | 见下 |
+| **2026-11-05** | **回滚：上一版后端 + 前端镜像（11-01）+ 当前 schema 数据** | **4 用户 / 2 KB / 4 文档 / 532 chunk** | **2s 恢复，库 schema=`d5e6f7a8b9c0`** | 只读（未写入） | 只读（532 实体，问答命中） | **ready 27~48s**；前端 `/`、`/assets`、`/api` 代理均正常；全流程 **83~101s** | **通过（前后端同批回退可行；三条代价见下）** | 见第七批 |
+| **2026-11-05** | **Milvus 双索引恢复（dense + sparse）** | **1000 条：128 维 + 稀疏（每行 3~8 维）** | 不适用 | 不适用 | **1000/1000，两个索引与两类检索全一致** | **37s**（备份 3s + 恢复 20s） | **通过（稀疏索引不再只是「间接覆盖」）** | 见 Milvus 补记与第七批 |
 
 **2026-11-04 首次演练详情**（脚本：`scripts/restore_drill.sh`，可重复执行）：
 
@@ -438,9 +450,25 @@ collection.load() -> MilvusException(code=700, message=index not found[collectio
    `docker.io/milvusdb/milvus-backup` 可用（本次用的 v0.6.1）。
 
 **本次仍没验到的**：应用启动 + `/health/ready` + 问答抽查（需完整依赖栈，未在隔离环境起后端）；
-生产 `documents` 里的真实对象（当前 0 文档）。Milvus 只验了 dense 索引，
-**`documents` 还有 `sparse_embedding` 字段，稀疏索引未验**——灌入真实文档后应重跑一次本脚本
-（脚本默认只跑 dense 的 drill 集合，若加 sparse 字段需同步扩展）。
+生产 `documents` 里的真实对象（当前 0 文档）。Milvus 当时只验了 dense 索引。
+
+**2026-11-05 补：稀疏索引也验了**（脚本已扩为 dense + sparse 双索引）
+
+原来只能写「`documents` 还有 `sparse_embedding`，稀疏索引未验，问答走混合检索间接覆盖」——
+但间接覆盖不算证据：混合检索会把 dense 的结果兜住，稀疏索引真丢了也未必看得出来。
+演练集合改成 1000 条 `vec(128)` + `sparse`（每行 3~8 个非零维）两个字段、两个索引
+（`HNSW/COSINE` + `SPARSE_INVERTED_INDEX/IP`），校验项从 5 项加到 7 项：
+
+| 校验 | 结果 |
+|---|---|
+| 条数 | 1000 / 1000 |
+| 双索引 | 源=目标=`['sparse:SPARSE_INVERTED_INDEX/IP', 'vec:HNSW/COSINE']` |
+| 抽样 100 行的**密+疏**哈希 | `954cdfa9278c93cd` 一致 |
+| dense ANN top-5 | `[965, 278, 200, 944, 707]` 一致 |
+| **sparse 检索 top-k** | `[0, 461]` 一致（查询串 `[9374, 22813, 24991]` 两侧相同） |
+
+备份 3s（513KiB / 9 objects）、恢复 20s、**RTO 37s**。结论：`milvus-backup` 的 binlog
+粒度备份对稀疏字段同样无损，`--rebuild_index` 会按原索引类型重建稀疏索引。
 
 **2026-11-04 第五批：端到端（三套恢复 + 起服务 + 问答）通过**
 
@@ -525,9 +553,31 @@ Milvus/MinIO 只读生产 → 验 ready / 登录 / 问答 / 停机。写操作�
 `sleep 3/4` 秒再 `docker stop`，测到的是「没有活跃连接」，结论在 `ExitCode 0` 与 `137` 之间
 摇摆（第一版就得到过 2s/0 的假结论）。改成 **curl 轮询到首帧后立刻 stop** 才稳定复现。
 
-**本次仍没验到的**：Milvus 的 sparse 索引单独验证（问答走 dense+sparse 混合，间接覆盖）；
-真实规模下的 RTO（532 chunk 与 1 万文档不是一回事）；**前端**镜像的回滚（本次只验后端，
-§5.2 要求前后端同批回退，前端回滚目前只有构建与 `nginx.conf` 对比，没有端到端演练）。
+**2026-11-05 第七批：前端回滚（无差异）**
+
+§5.2 要求「前后端同批回退」，但此前只验过后端。本批把上一版前端镜像
+`rag-frontend:rollback-20261101b`（10 月构建）接到 drill 后端上跑了一遍：
+
+| 项 | 结果 |
+|---|---|
+| 入口页 | `/` 200，`index.html` 含 app 挂载点 |
+| 静态资源 | `/assets/index-IfbkY4xH.js` 200、`Content-Type: application/javascript`（旧构建自身完整，不会缺 chunk） |
+| API 代理 | 经 nginx `POST /api/auth/login` 200（upstream 与转发正确） |
+| SSE | 经 nginx 首帧 **41ms** / 总 **15.6s** / **325 帧** / 有 `end` 帧 → 未缓冲 |
+| 安全头 | 与当前前端**逐项一致**：CSP=yes、XFO=yes、HSTS=no（HSTS 只在 `X-Forwarded-Proto=https` 时下发，HTTP 直连没有是对的） |
+
+结论：**前后端同批回退没有额外风险**。之前两次「前端镜像落后于仓库」都是部署问题
+（DEPLOY-3 时 `nginx.conf` 缺 SEC-16），不是回滚问题——这次用实测把这条区分开了。
+
+**两条方法学**（都踩过）：
+
+1. 前端那条**不能用同一道题**：刚问过的题命中语义缓存会「秒回且完整」，看起来像 SSE 正常，
+   实际没在生成（第一版就得到 8 帧 / 63ms 的假通过）。换一道题或清缓存，二者选一。
+2. Git Bash + `MSYS_NO_PATHCONV=1` 下 **`curl -o /dev/null` 会写失败（退出码 23）却照样打印 200**，
+   脚本因此静默退出；要用 `cygpath -w /dev/null` 得到的 `\\.\NUL`。
+
+**仍未验到的**：真实规模下的 RTO（532 chunk 与 1 万文档不是一回事）；生产 `documents`
+的真实对象量级（当前 4 篇）。
 
 ### 7.4 端到端演练步骤（手工编排，约 20 分钟）
 
