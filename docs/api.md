@@ -675,7 +675,10 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 | `date_to` | date | — | 上界（含当天，`YYYY-MM-DD`） |
 
 四个筛选参数都可省略，不传时行为与此前完全一致。筛选之间是 AND 关系。
-`q` 对消息正文的匹配是把 JSONB 转 text 后做 `ILIKE`（无索引，万级会话下可接受）。
+`q` 对消息正文的匹配是把 JSONB 转 text 后做 `ILIKE`。**这条路径没有索引**：
+`sessions` 表当前只有主键索引，`EXPLAIN` 显示为 `Seq Scan`（连列表查询也是），
+成本随消息总量增长而非会话数。**规模上限未测量**——不要假设万级可用，
+详见 [audit/adversarial-2026-11-07.md](audit/adversarial-2026-11-07.md) P0-1。
 
 **成功响应** (200):
 ```json

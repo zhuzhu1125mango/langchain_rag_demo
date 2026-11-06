@@ -257,6 +257,7 @@ langchain_rag_demo/
 | 想知道 | 读 |
 |---|---|
 | **结项结论**：做到了什么 / 没做什么 / 遗留风险 | [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) |
+| **已知不足**：对抗性检查查出的 8 个问题与修法 | [docs/audit/adversarial-2026-11-07.md](docs/audit/adversarial-2026-11-07.md) |
 | 系统怎么组织的、代码在哪 | [docs/architecture.md](docs/architecture.md) |
 | 接口有哪些、参数是什么 | [docs/api.md](docs/api.md) |
 | 部署、环境分离、升级与关机语义、踩坑 | [docs/guide/deployment.md](docs/guide/deployment.md) |
