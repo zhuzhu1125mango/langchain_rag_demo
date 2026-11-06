@@ -232,7 +232,7 @@
 | UX-2 | 移动端适配 | ✅ **已实施（2026-10-23）**：桌面侧栏在 `<lg` 改为抽屉 + 移动顶栏/遮罩；聊天（头部动作图标化、消息区与输入区内边距、停止按钮）、历史、知识库（移动端下拉切换 + 新建入口）、设置（菜单横滑）、追踪页完成响应式收口；对比面板/图谱详情窄屏改覆盖层；Markdown 表格窄屏内部滚动 | 已完成 | 前端 |
 | UX-3 | 可访问性基础 | ✅ **已实施（2026-10-23）**：跳转主内容链接 + 全局 `:focus-visible` 焦点环 + `prefers-reduced-motion`；移动端抽屉关闭时 `inert/aria-hidden`；消息区 `role=log` + `aria-live`；图标按钮统一 `aria-label`、评分 `aria-pressed`、思考面板 `aria-expanded`；知识库/历史卡片支持键盘操作；Toast/错误边界补 `role` | 已完成 | 前端 |
 | UX-4 | 三态组件体系 | ✅ **已实施（2026-10-24）**：新增 `AppStateView`（loading/empty/error + icon/title/description/action + error 重试）与 `AppSkeleton`；接入聊天知识库、历史、分类、标签、实验、反馈、学习、API 密钥、链路追踪、知识图谱、Wiki、全文搜索、来源弹窗等 14+ 处状态；知识图谱补内联错误态与重试；补 5 项单测（总 126）；lint / vue-tsc / build / E2E 5 项全绿 + 空/错态浅深色截图复核 | 已完成 | 前端 |
-| UX-5 | 历史页搜索 / 筛选 / 导出 | 仅批量删除，无检索与导出入口 | P2 | 前端 |
+| UX-5 | 历史页搜索 / 筛选 / 导出 | ✅ **已完成（2026-11-06）**：列表接口新增 `q`（标题+消息正文关键词，`%`/`_` 转义、≤100 字）/ `kb_id` / `date_from` / `date_to`（AND 组合，不传即旧行为）；新增 `GET /api/sessions/{id}/export`（markdown/json，RFC 5987 中文文件名，只导正文+来源摘要，**不导思维链与打分元数据**）。前端历史页加防抖搜索框、知识库下拉、日期范围、清空筛选、导出按钮，并区分「暂无历史」与「没有匹配」两种空态；筛选态下「清空全部」改为「删除筛选结果」并在确认框写明范围。验证：单测 23 例（导出渲染 15 + 筛选 SQL 8）、集成 12 例，并用真 PG 逐条核对「只返回本人/标题命中/正文命中/kb 过滤/日期下界/`100%` 不误匹配」 | ✅ 已完成 | 前端 |
 | UX-6 | 长会话性能 | 无虚拟滚动，消息 + Markdown 全量渲染 | P2 | 前端 |
 | UX-7 | 体验细节 | 引用悬浮预览、消息内搜索、导出 Markdown、快捷键、新手引导；**对比度全量审计**（灰阶正文/次要文字） | P3 | 前端 |
 | VIS-1 | 设计 token 层 | ✅ **已实施（2026-10-24）**：`style.css` 建立语义化 token（page/surface/content/line/status + radius + shadow），浅色为默认值、`.dark` 统一覆盖；全局组件类（card/btn/input/badge/markdown/scrollbar）改用 `var()`；35 个前端文件将 `bg-white dark:bg-dark-800` 等成对类迁移为 `bg-surface` / `text-content` / `border-line`；KnowledgeGraph SVG 与 MarkdownRenderer 硬编码色改走 token；lint / vue-tsc / 110 单测 / build / E2E 5 项全绿 | 已完成 | 前端 |

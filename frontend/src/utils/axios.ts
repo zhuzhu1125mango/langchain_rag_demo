@@ -136,9 +136,18 @@ export async function tryRefreshToken(): Promise<boolean> {
   }
 }
 
+// 请求级开关：默认拦截器把响应解包成 data（现有调用方都按 `const res = await api.get<T>()` 写）。
+// 少数场景（下载文件要读 Content-Disposition 里的文件名）需要完整响应，用这个开关显式索取。
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    rawResponse?: boolean
+  }
+}
+
 // 响应拦截器：提取 data、处理 401 与网络错误重试
 api.interceptors.response.use(
   (response: AxiosResponse) => {
+    if (response.config?.rawResponse) return response
     return response.data
   },
   async (error) => {

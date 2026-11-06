@@ -663,12 +663,19 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 
 **GET** `/api/sessions`
 
-**查询参数**（SEC-18）：
+**查询参数**（SEC-18 分页 + UX-5 筛选）：
 
 | 参数 | 类型 | 默认 | 说明 |
 |---|---|---|---|
 | `skip` | int | 0 | 跳过数量（≥0） |
 | `limit` | int | 100 | 每页数量（1~500） |
+| `q` | str | — | 关键词，匹配**标题或任一消息正文**（不区分大小写）；上限 100 字，`%`/`_` 按普通字符处理 |
+| `kb_id` | uuid | — | 只返回关联了该知识库的会话 |
+| `date_from` | date | — | 按**最近活动**时间筛选，下界（含当天，`YYYY-MM-DD`） |
+| `date_to` | date | — | 上界（含当天，`YYYY-MM-DD`） |
+
+四个筛选参数都可省略，不传时行为与此前完全一致。筛选之间是 AND 关系。
+`q` 对消息正文的匹配是把 JSONB 转 text 后做 `ILIKE`（无索引，万级会话下可接受）。
 
 **成功响应** (200):
 ```json
@@ -685,7 +692,27 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 ]
 ```
 
-### 4.2 获取会话详情
+### 4.2 导出会话
+
+**GET** `/api/sessions/{session_id}/export`
+
+**查询参数**：
+
+| 参数 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `format` | str | `markdown` | `markdown` / `json`（其它值 422） |
+
+**响应**：
+
+- `format=markdown` → `text/markdown; charset=utf-8`，带下载头
+  `Content-Disposition: attachment; filename="session-xxxxxxxx.md"; filename*=UTF-8''<编码后的标题>.md`
+- `format=json` → `{"session": {...}, "messages": [...]}`
+
+导出内容只含标题、时间、消息正文与**来源摘要**（每条来源折叠空白后截断 80 字）。
+不导出 `reasoning`（思维链）与 `source_metadata`（内部打分）——那是调试信息。
+仅能导出自己的会话（他人会话 403 / 不存在 404 / 非 UUID 400）。
+
+### 4.3 获取会话详情
 
 **GET** `/api/sessions/{session_id}`
 
@@ -701,7 +728,7 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 
 > 响应**不包含** `user_id`（避免回显归属信息）；非会话所有者返回 403。
 
-### 4.3 更新会话标题
+### 4.4 更新会话标题
 
 **PUT** `/api/sessions/{session_id}`
 
@@ -712,7 +739,7 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 }
 ```
 
-### 4.4 删除会话
+### 4.5 删除会话
 
 **DELETE** `/api/sessions/{session_id}`
 
@@ -1594,6 +1621,7 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | 会话 | GET | `/api/sessions` | 获取会话列表 |
 | 会话 | GET | `/api/sessions/quick_questions` | 获取快捷问题 |
 | 会话 | GET | `/api/sessions/{session_id}` | 获取会话详情 |
+| 会话 | GET | `/api/sessions/{session_id}/export` | 导出会话（markdown / json） |
 | 会话 | PUT | `/api/sessions/{session_id}` | 更新会话 |
 | 会话 | DELETE | `/api/sessions/{session_id}` | 删除会话 |
 | 会话 | POST | `/api/sessions/batch-delete` | 批量删除会话 |

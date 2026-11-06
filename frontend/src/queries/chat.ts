@@ -1,4 +1,5 @@
-import { computed } from 'vue'
+import { computed, toValue, type MaybeRefOrGetter } from 'vue'
+import type { AxiosResponse } from 'axios'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { api } from '@/utils/axios'
 import { useAppStore } from '@/stores/app'
@@ -131,18 +132,88 @@ export interface Message {
   }
 }
 
-/** 获取会话列表（仅在已登录时启用，避免未登录路由跳转期的 401 噪音）。 */
-export function useSessions() {
+/** 会话列表筛选条件（全部可选，都不传时行为与旧版一致）。 */
+export interface SessionFilters {
+  /** 关键词：匹配会话标题与消息正文。 */
+  q?: string
+  /** 只返回关联了该知识库的会话。 */
+  kb_id?: string
+  /** 最近活动日期下界（YYYY-MM-DD，含当天）。 */
+  date_from?: string
+  /** 最近活动日期上界（YYYY-MM-DD，含当天）。 */
+  date_to?: string
+}
+
+/** 去掉空值：`q=` 这类空参数后端会当没传，但会让 URL 与缓存键变脏。 */
+function compactFilters(filters?: SessionFilters): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(filters ?? {})) {
+    if (typeof value === 'string' && value.trim()) out[key] = value.trim()
+  }
+  return out
+}
+
+/**
+ * 获取会话列表（仅在已登录时启用，避免未登录路由跳转期的 401 噪音）。
+ *
+ * `filters` 传响应式值时，筛选条件会进 queryKey——否则改了筛选命中缓存，
+ * 界面会一直显示上一次的结果。
+ */
+export function useSessions(filters?: MaybeRefOrGetter<SessionFilters | undefined>) {
   const appStore = useAppStore()
+  const params = computed(() => compactFilters(toValue(filters)))
   return useQuery({
-    queryKey: ['sessions'],
+    queryKey: computed(() => ['sessions', params.value]),
     queryFn: async (): Promise<Session[]> => {
-      const res = await api.get<Session[]>('/sessions/')
+      const res = await api.get<Session[]>('/sessions/', { params: params.value })
       return res
     },
     staleTime: 5 * 60 * 1000,
     enabled: computed(() => !!appStore.currentUser)
   })
+}
+
+/**
+ * 从 Content-Disposition 解析文件名。
+ *
+ * 后端按 RFC 5987 给了 `filename*=UTF-8''...`，中文标题只有走这条才能正确解码；
+ * 解析不出来就返回 null，由调用方回退到「标题 + .md」。
+ */
+function filenameFromDisposition(disposition?: string): string | null {
+  if (!disposition) return null
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)
+  if (encoded?.[1]) {
+    try {
+      return decodeURIComponent(encoded[1])
+    } catch {
+      return null
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition)
+  return plain?.[1] ?? null
+}
+
+/** 导出单条会话为 Markdown 并触发浏览器下载。 */
+export async function exportSessionMarkdown(sessionId: string, title?: string): Promise<void> {
+  // rawResponse：需要读 Content-Disposition 才能拿到后端生成的文件名（含中文截断规则）
+  const response = (await api.get(`/sessions/${sessionId}/export`, {
+    params: { format: 'markdown' },
+    responseType: 'blob',
+    rawResponse: true
+  })) as unknown as AxiosResponse<Blob>
+  const disposition = response.headers?.['content-disposition'] as string | undefined
+  const fallback = `${(title || `session-${sessionId.slice(0, 8)}`).replace(/[\\/:*?"<>|]/g, '')}.md`
+  const filename = filenameFromDisposition(disposition) ?? fallback
+
+  const url = URL.createObjectURL(response.data)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  // 立刻 revoke 会让部分浏览器取消下载，延迟到下一轮事件循环
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 /** 删除单个会话。 */

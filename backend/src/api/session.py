@@ -13,10 +13,14 @@ import logging
 import asyncio
 import hashlib
 from collections import OrderedDict
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
+from urllib.parse import quote
+
 from fastapi import APIRouter, Depends, HTTPException, Body, Query
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, delete
+from sqlalchemy import Text, cast, delete, or_, select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 from typing import List, Optional
@@ -26,6 +30,7 @@ from src.database import get_db
 from src.auth import get_current_user, CurrentUser, require_owner
 from src.models import Session as SessionModel, Feedback as FeedbackModel
 from src.services.rag_chain import RAGChain
+from src.services.session_export import build_export_filename, render_session_markdown
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,64 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 # SEC-18：会话列表单页上限（默认 100）；批量删除上限见 settings.security.BATCH_DELETE_MAX_IDS
 SESSION_LIST_MAX_LIMIT = 500
+
+# UX-5：搜索关键词长度上限。LIKE 模式越长越慢，用户也不会输入 200 字去搜历史。
+SESSION_SEARCH_MAX_KEYWORD = 100
+
+
+def _escape_like(value: str) -> str:
+    """转义 LIKE 通配符。
+
+    用户搜「100%」时，`%` 不该被当成通配符——否则会匹配到所有以 100 开头的内容。
+    反斜杠必须**最先**替换，否则会把后面新加进去的反斜杠再转义一遍。
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _build_session_filters(
+    user_id: str,
+    keyword: Optional[str],
+    kb_id: Optional[str],
+    date_from: Optional[date],
+    date_to: Optional[date],
+) -> list:
+    """组装会话列表的 WHERE 条件（全部以 AND 组合）。
+
+    拆成独立函数是为了让「筛选口径」只有一处：以后加导出、加统计都复用同一份，
+    否则容易出现「列表按标题搜、导出按标题+正文搜」这种对不上的情况。
+    """
+    conditions = [SessionModel.user_id == user_id]
+
+    if keyword:
+        kw = keyword.strip()[:SESSION_SEARCH_MAX_KEYWORD]
+        if kw:
+            pattern = f"%{_escape_like(kw)}%"
+            # 标题或消息正文命中即可。messages 是 JSONB，转 text 后整段匹配：
+            # 没有索引，但会话表在万级量下可接受，换来的是「能搜到聊天内容」这个能力。
+            conditions.append(
+                or_(
+                    SessionModel.title.ilike(pattern, escape="\\"),
+                    cast(SessionModel.messages, Text).ilike(pattern, escape="\\"),
+                )
+            )
+
+    if kb_id:
+        # kb_ids 列是 JSON（不是 JSONB），必须转成 JSONB 才能用包含运算符 @>
+        conditions.append(cast(SessionModel.kb_ids, JSONB).contains([kb_id]))
+
+    # 日期按「最近活动」筛（updated_at），与列表排序口径一致
+    if date_from:
+        conditions.append(
+            SessionModel.updated_at >= datetime.combine(date_from, time.min, tzinfo=timezone.utc)
+        )
+    if date_to:
+        # 含当天：用「次日零点」做开区间上界，避免 23:59:59 这类边界把当天数据漏掉
+        conditions.append(
+            SessionModel.updated_at
+            < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
+        )
+
+    return conditions
 
 # 快捷问题缓存：key 为历史问题哈希，value 为 (缓存时间, 问题列表)
 # OrderedDict 实现 LRU：命中移到末尾，超限时从头部（最久未使用）淘汰
@@ -158,24 +221,40 @@ async def create_session(
 async def list_sessions(
     skip: int = Query(0, ge=0, description="跳过数量（分页参数）"),
     limit: int = Query(100, ge=1, le=SESSION_LIST_MAX_LIMIT, description="每页数量（分页参数）"),
+    q: Optional[str] = Query(
+        None,
+        max_length=SESSION_SEARCH_MAX_KEYWORD,
+        description="关键词（匹配标题与消息正文，不区分大小写）",
+    ),
+    kb_id: Optional[str] = Query(None, description="按关联知识库筛选"),
+    date_from: Optional[date] = Query(None, description="按最近活动日期筛选（含当天的开始）"),
+    date_to: Optional[date] = Query(None, description="按最近活动日期筛选（含当天的结束）"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """
     获取当前用户的会话列表（SEC-18：分页返回，避免大会话历史一次性拉全）
 
+    UX-5 起支持筛选：`q` 关键词、`kb_id` 知识库、`date_from`/`date_to` 日期范围。
+    四个参数都可省略，不传时行为与之前完全一致（只按更新时间倒序分页）。
+
     Args:
         skip: 跳过数量
         limit: 每页数量（默认 100，上限见 SESSION_LIST_MAX_LIMIT）
+        q: 关键词，匹配标题或任一消息内容
+        kb_id: 只返回关联了该知识库的会话
+        date_from: 最近活动时间下界（含）
+        date_to: 最近活动时间上界（含当天）
         db: 数据库会话
         current_user: 当前认证用户
 
     Returns:
         list: 会话列表（按更新时间倒序）
     """
+    conditions = _build_session_filters(current_user.user_id, q, kb_id, date_from, date_to)
     result = await db.execute(
         select(SessionModel)
-        .filter(SessionModel.user_id == current_user.user_id)
+        .filter(*conditions)
         .order_by(SessionModel.updated_at.desc())
         .offset(skip)
         .limit(limit)
@@ -377,6 +456,64 @@ async def delete_session(
         return {"message": "删除成功"}
     except ValueError:
         raise HTTPException(status_code=400, detail="无效的会话ID")
+
+
+@router.get("/{session_id}/export")
+async def export_session(
+    session_id: str,
+    format: str = Query("markdown", pattern="^(markdown|md|json)$", description="导出格式：markdown / json"),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """
+    导出单条会话（UX-5）
+
+    Markdown 用于「贴到别处」；JSON 用于程序处理（含完整消息字段）。
+    两者都只导出当前用户自己的会话。
+
+    Args:
+        session_id: 会话ID
+        format: markdown（默认）/ json
+        db: 数据库会话
+        current_user: 当前认证用户
+
+    Returns:
+        Markdown 文本（带 Content-Disposition 下载头）或 JSON
+    """
+    try:
+        result = await db.execute(select(SessionModel).filter(SessionModel.id == uuid.UUID(session_id)))
+        session = result.scalar_one_or_none()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="无效的会话ID")
+
+    if not session:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    require_owner(session.user_id, current_user)
+
+    meta = {
+        "id": str(session.id),
+        "title": session.title,
+        "created_at": session.created_at.isoformat() if session.created_at else "",
+        "updated_at": session.updated_at.isoformat() if session.updated_at else "",
+    }
+    messages = session.messages or []
+
+    if format == "json":
+        return JSONResponse({"session": meta, "messages": messages})
+
+    markdown = render_session_markdown(meta, messages)
+    filename = build_export_filename(session.title, session.id)
+    # 中文文件名必须走 RFC 5987 的 filename*，否则浏览器拿到的是乱码或被截断；
+    # 同时保留一个纯 ASCII 的 filename 作为老客户端回退。
+    disposition = (
+        f'attachment; filename="session-{str(session.id)[:8]}.md"; '
+        f"filename*=UTF-8''{quote(filename)}"
+    )
+    return PlainTextResponse(
+        markdown,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": disposition},
+    )
 
 
 @router.post("/batch-delete")
