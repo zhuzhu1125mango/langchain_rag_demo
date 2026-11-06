@@ -6,7 +6,8 @@
 
 | 目录 | 职责 | 归档/流转规则 |
 |---|---|---|
-| 顶层（`architecture.md`、`api.md`、`project-status.md`） | 随代码持续维护的核心参考；`project-status.md` 另承担「已完成 / 剩余待办」台账职责 | 代码结构或接口变更时必须同步更新 |
+| 顶层（`architecture.md`、`api.md`、`FINAL-REPORT.md`） | 核心参考；`FINAL-REPORT.md` 是结项说明（是什么 / 做到了什么 / 没做什么），2026-11-07 冻结 | 代码结构或接口变更时必须同步更新；结项说明不再改 |
+| 顶层 `project-status.md` | **已归档**的跳转页，全文见 `archive/project-status-2026-11-07.md` | 不再更新（保留原路径以免旧链接 404） |
 | `guide/` | 操作指南（部署、开发、监控、备份/回滚/容量） | 与实际操作流程保持一致，流程变更即更新 |
 | `design/` | 设计文档（对标 RFC），一文一事 | 遵循「设计先行 → 确认后实施」；实施完成后回写实施记录章节并更新状态；完全落地且不再单独演进后可移入 `archive/` |
 | `archive/` | 归档（一次性报告、已完结文档） | 只读封存，不再更新；文件名可带日期后缀 |
@@ -30,7 +31,8 @@ docs/
 ├── README.md            # 本索引
 ├── architecture.md      # 架构总览：服务拓扑、RAG 决策管线、代码地图
 ├── api.md               # API 参考：全部接口说明
-├── project-status.md    # 项目状态与待办台账（跨专项：已完成 / 剩余待办 / 阻塞项 / 红线）
+├── FINAL-REPORT.md      # ★ 结项说明（2026-11-07）：是什么 / 做到了什么 / 没做什么 / 遗留风险
+├── project-status.md    # 已归档跳转页 —— 全文见 archive/project-status-2026-11-07.md（417 行台账，冻结）
 ├── e2e-verification-2026-11-03.md # 端到端真机验证报告（10 个真实问题、4 好/2 偏/4 差、两个缺陷）
 ├── articles/            # 对外可读的长文（叙事性，非规范文档）
 │   └── silent-failures.md   #   删除可对账 / 失败可判定 / 断连可续（参考实现的技术叙事）
@@ -44,6 +46,7 @@ docs/
 │   └── perf-baseline.md                    # 性能基线与夜间回归：量什么、怎么判、红了怎么查（附 perf-baseline.json）
 ├── guide/               # 操作指南
 │   ├── deployment.md    #   部署（开发/生产环境）
+│   ├── configuration.md #   配置（env 文件加载机制、全量参数、端口）
 │   ├── development.md   #   开发与测试（含踩坑记录）
 │   ├── monitoring.md    #   监控运维（指标、告警、处置）
 │   ├── quickstart-verification-2026-11-04.md # 干净目录复现验证记录（7 轮，找出 7 处问题）
@@ -84,6 +87,8 @@ docs/
     ├── fix-plan-2026-09-24.md      # 四份评审综合修复计划（2026-09-29 收官，78 项 P2 全部落账）
     ├── project-readthrough-2026-09-30.md  # 项目通读报告（2026-09-30 只读代码审查）
     ├── self-check-2026-11-04.md    # 项目自检报告（收尾后对抗性核对；查出 CI 红、测试未隔离、生产无管理员）
+    ├── project-status-2026-11-07.md # 项目状态台账全文（417 行，P0-1~P2-3 全部条目 + DEPLOY 记录 + 红线表），结项冻结
+    ├── README-dev-2026-11-07.md    # 旧版开发向 README 全文（三种启动方式逐步说明、脚本参数、项目结构树）
     └── direct-model-switch-plan-2026-10-03.md  # 直答模型切换与 A/B 验证（已完结计划，2026-10-15 归档）
 ```
 
@@ -126,12 +131,12 @@ docs/
 
 | 场景 | 阅读顺序 |
 |---|---|
-| 新人上手 | 根 [README](../README.md) → [architecture.md](architecture.md) → [guide/deployment.md](guide/deployment.md) |
+| 新人上手 | 根 [README](../README.md) → [FINAL-REPORT.md](FINAL-REPORT.md)（先看哪些没做）→ [architecture.md](architecture.md) → [guide/deployment.md](guide/deployment.md) |
 | 本地开发/跑测试 | [guide/development.md](guide/development.md) |
 | 排查线上问题 | [guide/monitoring.md](guide/monitoring.md) → [guide/development.md](guide/development.md) 踩坑记录 |
 | 备份/恢复/回滚/扩容 | [guide/backup-restore.md](guide/backup-restore.md)（RPO/RTO、恢复顺序、回滚矩阵、容量模型与演练） |
 | 查接口 | [api.md](api.md)（另有 Swagger UI: `http://localhost:8000/docs`） |
 | 配置/切换模型 | 设置 → 模型服务（`/settings/models`）→ [design/model-provider-registry-2026-10.md](design/model-provider-registry-2026-10.md) → [guide/deployment.md](guide/deployment.md) §6.3.2 |
-| 了解技术决策/规划 | [project-status.md](project-status.md) → [design/special-projects-2026-09.md](design/special-projects-2026-09.md) → [design/improvement-roadmap.md](design/improvement-roadmap.md) |
-| 跟进实施状态 | [project-status.md](project-status.md)（已完成/待办台账）→ 本文件「design/ 文档状态表」→ 对应文档的实施记录章节 |
-| 公网上线/安全评估 | [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) → [project-status.md](project-status.md)「安全与多租户加固专项」→ [agent-guardrails-hitl.md](design/agent-guardrails-hitl.md) |
+| 了解技术决策/规划 | [FINAL-REPORT.md](FINAL-REPORT.md) §3（没做什么与原因）→ [design/special-projects-2026-09.md](design/special-projects-2026-09.md) → [design/improvement-roadmap.md](design/improvement-roadmap.md) |
+| 跟进实施状态 | [archive/project-status-2026-11-07.md](archive/project-status-2026-11-07.md)（已冻结的台账全文）→ 本文件「design/ 文档状态表」→ 对应文档的实施记录章节 |
+| 公网上线/安全评估 | [security-multitenancy-hardening-2026-10.md](design/security-multitenancy-hardening-2026-10.md) → [archive/project-status-2026-11-07.md](archive/project-status-2026-11-07.md)「安全与多租户加固专项」→ [agent-guardrails-hitl.md](design/agent-guardrails-hitl.md) |

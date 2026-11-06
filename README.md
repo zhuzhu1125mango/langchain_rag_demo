@@ -1,5 +1,10 @@
 # 知澜 · 一个把「可验证」做进 RAG 的知识库
 
+> **结项版 README（2026-11-07）**。结论与遗留风险见 [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md)；
+> 开发过程与逐项验收见 [归档台账](docs/archive/project-status-2026-11-07.md)；
+> 这份 README 之前的完整开发版（含三种部署方式逐步说明）保留在
+> [docs/archive/README-dev-2026-11-07.md](docs/archive/README-dev-2026-11-07.md)。
+
 **知澜**是一个可私有化部署的 RAG 知识问答系统：LangChain + Ollama + Milvus，默认完全离线，
 数据不出内网。它不是一个「接上大模型就能问答」的 demo——它关心的是另外三件事：
 
@@ -14,6 +19,21 @@
 三件事都有一个共同点：**它们的失败是静默的**。不报错、不告警、看起来一切正常，直到有人发现
 「删掉的东西还能搜到」或者「知识库明明有内容却答没有」。这个项目的大部分工程量，花在把这些
 静默失败变成可判定的信号上。
+
+---
+
+## 📌 结项状态（2026-11-07）
+
+| 维度 | 状态 |
+|---|---|
+| 定型 | **工程化参考实现**，不是产品：无真实用户、无 SLA、无采购方 |
+| 测试 | 后端 **1691 passed / 117 skipped**；前端 154 passed；CI **7/7 绿** |
+| 生产 | 11 容器全 healthy、`/health/ready` 四项 ok、OpenAPI **117** 条路由 |
+| 运维链路 | 备份/恢复/回滚四类演练 + 规模 RTO + 夜间性能门禁，全部有脚本、有实测数字 |
+| 未做 | 多租户/SSO、真 HA、桌面端、企业级压测（详见「边界」与结项说明 §3） |
+
+**「企业级」一词仍然冻结**：三条门槛只过了两条（恢复演练 ✅、≥50 题标注集 ✅ 90 题），
+**容量实测（X 并发下 P95 与成功率）没做**。在此之前它就是个打折的形容词。
 
 ---
 
@@ -48,6 +68,9 @@ CHECK_ONLY=1 ./scripts/start-dev.sh        # Windows: $env:CHECK_ONLY="1"; .\scr
 
 所以「10 分钟」指的是**已经拉过一次之后**。文档标称最低 8 GB 内存 / 4 核；compose 资源上限合计约 9.9 GB（含监控栈），实测基线尚未补齐——见下方「边界」。
 
+生产部署、环境分离、离线语料、升级与关机语义见 [docs/guide/deployment.md](docs/guide/deployment.md)；
+环境变量与端口见 [docs/guide/configuration.md](docs/guide/configuration.md)。
+
 ## 🔍 怎么验证上面那些说法
 
 不要求你相信 README，跑这几条：
@@ -58,16 +81,34 @@ IN_DOCKER=false uv run pytest -q                       # 后端全量：1691 pas
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
 uv run pytest tests/test_chat_run.py -q                # 续传/停止：35 例
 uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.869 / MRR 0.739（90 题 / 78 篇）
-uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出报告不删（退出码 0/1/2）
+uv run python scripts/consistency_audit.py --sample 5   # 三方对账，只出报告不删（退出码 0/1/2）
+
+# 运维链路：任一条约 1 分钟，起隔离实例、跑真实脚本、自动清理
+cd .. && ./scripts/restore_drill.sh          # PostgreSQL 恢复（29 表 / 6s）
+./scripts/restore_drill_milvus.sh             # Milvus 恢复（dense+sparse 双索引）
+./scripts/rollback_drill.sh                   # 回滚到上一版镜像（含前端与「生成中停机」）
+./scripts/scale_rto_drill.sh MODE=pg          # 真实规模 RTO（默认 1 万文档 / 20 万 trace）
 ```
 
 `consistency_audit.py` 的退出码是刻意的：**0=一致、1=有差异、2=巡检没跑成**。
 某一侧采集失败时它不会打印「未发现差异」——假阴性比不巡检更危险。
 
-检索指标同样给数字而不是形容词，报告见 [docs/benchmarks/](docs/benchmarks/)：
-90 道题里 11 道没命中，**全部是口语化问法**（「出去玩几天」 vs 文档里的「请假」）；制度题与产品参数题 100% 命中；
-同数据集上稠密单通道 hit@5 = 0.953、RRF 混合 = 0.891、加 `bge-reranker-base` 重排 = 0.922 ——
-**生产默认的混合+重排，在这份语料上打不过不融合的稠密单通道**。这些都是量出来的，不是猜的。
+## 📊 做到了什么：一页数字
+
+每条都能指到脚本或报告，不是估计值。
+
+| 维度 | 结论 | 出处 |
+|---|---|---|
+| 检索质量 | 90 题 **hit@5 0.869 / MRR 0.739**；未命中的 11 题**全是口语化问法**，制度题与参数题 100% 命中 | [benchmarks/retrieval-baseline](docs/benchmarks/retrieval-baseline-2026-11-02.md) |
+| 真实文档探针 | 24 题：概览题 0.598 / 细节题 0.792；加宽重排窗口**反而更低**（0.598→0.501） | [benchmarks/stage-probe](docs/benchmarks/stage-probe-2026-11-03.md) |
+| 延迟 | 知识库问答整链 wall **0.9~1.5s**（全本地，零 API 费） | trace stage detail |
+| 恢复 RTO | PG 915MB **22s** / Milvus 2 万向量 **29~33s** / MinIO 195MB **18s** | [benchmarks/rto-scale](docs/benchmarks/rto-scale-2026-11-05.md) |
+| 性能门禁 | 计数器硬卡点（切分块数 792、融合条数 60）+ 耗时按 profile 卡 1.6× | [benchmarks/perf-baseline](docs/benchmarks/perf-baseline.md) |
+| 回滚 | 上一版镜像可在当前 schema 上跑通（ready 27~48s）；代价是**跑不了 alembic** 且**丢掉优雅停机** | [guide/backup-restore §7](docs/guide/backup-restore.md) |
+
+**一个诚实的负面结论**：在同一份语料上，稠密单通道 hit@5 = 0.953、RRF 混合 = 0.891、
+混合+重排 = 0.922 —— **生产默认的混合检索打不过不融合的稠密单通道**。原因是 78 篇语料太小、
+BM25 引入噪声。没改成默认稠密，因为换语料后结论可能反转，但这条一直留在文档里。
 
 ## 🚧 边界（有意不做的事）
 
@@ -78,7 +119,7 @@ uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出�
 | 多租户 / 组织层级 / SSO | 现有隔离按 `owner` 做，够单个组织内网使用；加租户层是另一个量级的改造 |
 | 高可用 / 多副本 | 9 处进程内状态（运行缓冲、Wiki 去抖、进度表、限流桶…）会互相打架；单机是当前唯一自洽的形态 |
 | 桌面端 / 免登录单用户版 | 需要第二套存储抽象（SQLite + 嵌入式向量），成本是重写而不是优化 |
-| 「企业级」这个词 | 等三条可验证门槛达标后再用：容量实测、质量标注集、恢复演练。**在此之前它就是打折的形容词** |
+| 「企业级」这个词 | 三条可验证门槛：恢复演练 ✅、质量标注集 ✅（90 题）、**容量实测 ❌**。在此之前它就是打折的形容词 |
 
 这是个人的实践项目，没有真实用户，因此也没有 SLA。它的价值主张是**可复现的严谨**：
 每一条声称都能指到文件、指到测试、指到一条能跑的命令。
@@ -96,41 +137,36 @@ uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出�
 | 🖼️ **扫描版 PDF OCR** | 扫描版检测 + 双后端（MinerU / PaddleOCR）可选依赖分流，失败回退内置解析 | ✅ |
 | 🔍 **智能检索** | 混合检索（BM25 稀疏 + 向量稠密 + RRF 融合）+ Cross-Encoder 重排 | ✅ |
 | 🧩 **结构化分块** | 按类型路由分块策略（Markdown / HTML / Word / 代码 / 表格行），保留标题层级 | ✅ |
-| ⚡ **语义缓存** | 高相似度问题直接回放答案，Redis 不可用时 fail-open | ✅ |
+| ⚡ **语义缓存** | 高相似度问题直接回放答案，Redis 不可用时 fail-open；按 KB 索引失效 | ✅ |
 | 📖 **LLM-Wiki 编译层** | 将文档预编译为结构化页面（增量编译 / 交叉链接 / 一致性检查） | ✅ |
-| 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG（遗留，可切换），Query 改写 + 重排 + Redis 缓存 | ✅ |
-| 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启，多工具/多步推理）＋原生 Function Calling / ReAct 作为回退路径 | ✅ |
-| 🛡️ **Agent 安全护栏** | 输入（提示注入/越权/超长）拦截、工具参数与 URL 安全校验、输出凭证/系统提示脱敏；高危工具可开启人工审批（SSE 审批卡片 + 回执 API，`AGENT_APPROVAL_MODE` 默认 off）；SEC-5：检索/网页内容按不可信上下文隔离、工具域名/DLP 策略、`fetch_webpage` 默认关闭 | ✅ |
-| 🔐 **隔离、安全与配额（owner 级）** | SEC-1~5：学习样本与资源按 owner 隔离（单组织多用户，非多租户）；生产默认关闭开放注册；聊天 RPM/并发/日额度 + 上传文件数/单批总量/日字节配额；受信代理 IP + Redis 滑动窗口限流；下架/移动 KB 与向量索引、语义缓存保持一致。SEC P2/P3：实验/通知隔离、分类标签 admin 写、SSRF fail-closed + 连接层固定 IP、JWT 登出吊销、语义缓存按 KB 索引失效、live/ready 探针、账号导出/注销与日志脱敏、评估配额、会话分页/批量上限、CSP/HSTS、ToolGuard DNS | ✅ |
-| 📊 **Agent 评测** | 轨迹级四维确定性评测 + 答案级判分器 + A/B 门槛与离线 harness（`AGENT_TRAJ_EVAL_ENABLED` 默认关；在线抽样待办） | ✅ |
-| 💬 **流式输出** | 实时打字效果；**生成与连接解耦**（AGT-1）：断网/刷新不丢回答，重连按 `run_id` 续传、可显式停止并保留已生成部分 | ✅ |
+| 🌐 **联网搜索** | 支持 Tavily（默认）/ DuckDuckGo / SearXNG，Query 改写 + 重排 + Redis 缓存 | ✅ |
+| 🤖 **搜索 Agent** | 有界 Agent 编排（DECIDE-ACT-OBSERVE，默认开启）＋ 原生 Function Calling / ReAct 作为回退路径 | ✅ |
+| 🛡️ **Agent 安全护栏** | 输入拦截、工具参数与 URL 校验、输出凭证/系统提示脱敏；高危工具可开人工审批（SSE 审批卡片 + 回执 API）；检索/网页内容按不可信上下文隔离、域名/DLP 策略、`fetch_webpage` 默认关闭 | ✅ |
+| 🔐 **隔离、安全与配额（owner 级）** | SEC-1~21：owner 隔离、生产默认关注册、聊天 RPM/并发/日额度 + 上传配额、受信代理 IP + Redis 滑动窗口限流、SSRF fail-closed + 连接层固定 IP、JWT 登出吊销、账号导出/注销与日志脱敏、CSP/HSTS | ✅ |
+| 📊 **Agent 评测** | 轨迹级四维确定性评测 + 答案级判分器 + A/B 门槛与离线 harness（`AGENT_TRAJ_EVAL_ENABLED` 默认关；在线抽样未做） | ✅ |
+| 💬 **流式输出** | 实时打字效果；**生成与连接解耦**：断网/刷新不丢回答，重连按 `run_id` 续传、可显式停止并保留已生成部分 | ✅ |
 | 🏷️ **智能会话命名** | 首条消息发送后自动调用 LLM 生成会话标题 | ✅ |
 | 🧹 **问候过滤** | 你好 / hi / 在吗 等日常对话直接走 LLM，跳过知识库检索 | ✅ |
-| 🧭 **产品身份口径** | “你是谁 / 你是什么模型 / 谁开发了你”等身份问题统一以知澜回答，避免底层模型自曝 Qwen/阿里云 | ✅ |
-| 🔄 **多模型 Provider** | 支持 Ollama 原生 + OpenAI-Compatible（OpenAI/DeepSeek/通义兼容/Kimi/vLLM/LM Studio 等），按任务路由、能力校验、fallback 与热切换；P2 提供 DB 配置、加密 Key、管理 API 与设置页「模型服务」；现有 `OLLAMA_*` 配置自动兼容 | ✅ |
+| 🧭 **产品身份口径** | “你是谁 / 你是什么模型”等身份问题统一以知澜回答，避免底层模型自曝 | ✅ |
+| 🔄 **多模型 Provider** | Ollama 原生 + OpenAI-Compatible（OpenAI/DeepSeek/通义兼容/Kimi/vLLM/LM Studio）；按任务路由、能力校验、fallback 与热切换；DB 配置 + 加密 Key + 管理 API + 设置页 | ✅ |
 | 🔗 **来源展示** | 前端同时展示知识库片段与网页搜索来源（标题/URL） | ✅ |
-| 🔒 **完全离线（默认）** | 使用本地 Ollama 模型，无需付费 API；外部 OpenAI-Compatible Provider 为可选能力，需管理员显式启用，本地→外部降级默认禁止；联网搜索默认走 Tavily 在线 API（可选，`SEARCH_PROVIDER` 可切换） | ✅ |
+| 🔒 **完全离线（默认）** | 本地 Ollama 模型，无需付费 API；外部 Provider 需管理员显式启用，本地→外部降级默认禁止 | ✅ |
 | 🖥️ **界面支持** | Vue3 + Tailwind/Element Plus 设计系统：语义 token、组件 primitive、三态组件、响应式布局与暗色模式 | ✅ |
-| 🧭 **系统能力状态** | 设置页只读展示默认关闭/需运维开启的能力（Wiki 编译、网页抓取、高危审批、A-B 聊天分流、学习权重回载、轨迹评测）及风险与开启方式 | ✅ |
-| 📊 **实验框架** | A/B 实验管理 API（创建/分流/度量）；**已接入 chat 链路**（变体白名单覆盖 decision/检索参数 + response_time 指标回收），灰度开关 `AB_EXPERIMENT_CHAT_ENABLED` 默认关 | ✅ |
-| 🧠 **动态学习** | 基于用户反馈的规则学习引擎；**写回闭环已接入**（单例权重回载 + KB 短路路径样本补采），灰度开关 `LEARNING_WEIGHT_RELOAD_ENABLED` / `LEARNING_SAMPLE_COLLECT_BG_ENABLED` 默认关 | ✅ |
+| 🧭 **系统能力状态** | 设置页只读展示默认关闭/需运维开启的能力及风险与开启方式 | ✅ |
+| 📊 **实验框架** | A/B 实验管理 API + chat 链路分流（变体白名单覆盖 decision/检索参数 + response_time 回收），`AB_EXPERIMENT_CHAT_ENABLED` 默认关 | ✅ |
+| 🧠 **动态学习** | 基于反馈的规则学习引擎；写回闭环已接入（单例权重回载 + KB 短路样本补采），开关默认关 | ✅ |
 | 🔎 **答案可信度** | 引用补全（embedding 匹配补 `[n]`）+ 数值幻觉校验 + 分档置信度提示 | ✅ |
 | 🧭 **意图路由** | 规则 + Embedding 分类 + LLM 路由三层，置信度门控与歧义澄清 | ✅ |
-| 📈 **监控告警** | 集成 Prometheus + Alertmanager + Grafana（rag_overview 仪表盘已 provision） | ✅ |
+| 📈 **监控告警** | Prometheus + Alertmanager + Grafana（rag_overview 仪表盘已 provision） | ✅ |
 | 🧾 **请求追踪** | 每次问答的完整链路耗时记录，经 `/api/traces` 查询 | ✅ |
-| 🏷️ **标签分类** | 文档分类和标签管理 | ✅ |
-| ⭐ **评价反馈** | 用户评价收集和反馈学习 | ✅ |
-| ⚙️ **系统配置** | 支持在线调整分块、检索、模型等处理配置 | ✅ |
-| 🔔 **实时通知** | WebSocket 实时推送知识库/文档/上传任务变更 | ✅ |
+| 🏷️ **标签分类 / ⭐ 反馈 / ⚙️ 系统配置 / 🔔 实时通知** | 文档分类与标签、评价反馈收集、在线调参、WebSocket 推送变更 | ✅ |
+| 🔎 **历史会话** | 关键词搜索（标题 + 消息正文）、按知识库/日期筛选、导出 Markdown/JSON（UX-5，2026-11-07 上线） | ✅ |
 
 ---
 
 ## 🛠️ 技术栈
 
-### 核心技术
-
-版本以 `backend/pyproject.toml`（Python 依赖，uv 锁定）、`frontend/package.json`（前端）
-与 compose 镜像 tag 为准。
+版本以 `backend/pyproject.toml`（uv 锁定）、`frontend/package.json` 与 compose 镜像 tag 为准。
 
 | 分类 | 技术 | 版本 | 说明 |
 |------|------|------|------|
@@ -140,903 +176,100 @@ uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出�
 | 向量数据库客户端 | pymilvus | 3.0.2 | 与上者版本号不同步，注意区分 |
 | LLM 集成 | Ollama（Python 客户端） | 0.6.3 | 本地模型运行 |
 | 嵌入模型 | bge-m3 | latest | 离线多语言向量嵌入，1024 维 |
-| 对象存储 | MinIO（pgsty/minio 社区 fork） | RELEASE.2026-06-18T00-00-00Z（镜像 tag） | 官方 2025-10 停发镜像并归档仓库，改用仍在维护的 drop-in 兼容 fork |
+| 对象存储 | MinIO（pgsty/minio 社区 fork） | RELEASE.2026-06-18（镜像 tag） | 官方 2025-10 停发镜像并归档仓库，改用仍在维护的 drop-in 兼容 fork |
 | 前端框架 | Vue 3 | ^3.5.44 | 现代前端框架 |
 | 状态管理 | Pinia | ^3.0.4 | 状态管理 |
 | 数据缓存 | Vue Query | ^5.104.5 | 客户端数据缓存 |
 | UI 组件 | Element Plus | ^2.14.7 | 企业级组件库 |
 | 缓存服务 | Redis（Python 客户端） | 8.1.0 | 缓存与语义缓存 |
-| 监控系统 | Prometheus | v3.5.0（镜像 tag） | 监控指标采集 |
-| 可视化 | Grafana | v12.0.2（镜像 tag） | 监控仪表盘 |
+| 监控系统 | Prometheus / Grafana | v3.5.0 / v12.0.2 | 指标采集与仪表盘 |
 
-> 依赖清单以 `pyproject.toml` / `package.json` 为唯一事实来源，本表仅为速览；
-> 两者不一致时以后者为准。
+**支持的文档格式**：TXT / MD / PDF / DOCX / DOC / XLSX / XLS / PPTX / PPT / CSV / JSON / HTML / EPUB
+（扫描版 PDF 走 OCR 双后端；各格式的分块策略不同，见 [guide/development.md](docs/guide/development.md)）。
 
-### 支持的文档格式
+### 模型分工
 
-| 类别 | 格式 | 说明 |
-|------|------|------|
-| 文本文档 | TXT, MD, MARKDOWN | 纯文本文件 |
-| PDF | PDF | 便携式文档格式 |
-| Word | DOCX, DOC | Microsoft Word |
-| Excel | XLSX, XLS | Microsoft Excel |
-| PowerPoint | PPTX, PPT | Microsoft PowerPoint |
-| 数据文件 | CSV, JSON | 结构化数据 |
-| 网页 | HTML, HTM | 网页文件 |
-| 电子书 | EPUB | 电子出版物 |
-
----
-
-## 🧠 模型分工
-
-系统在 Ollama 本地部署多个模型，按任务特点分工协作，降低主模型负载并提升响应速度。
-
-> ⚠️ **legacy 模式**下模型名没有内置默认值（A2 去硬编码），必须由 `.env` 提供；启动时会经 `/api/tags`
-> 校验存在性，缺失或未 pull 则**拒绝启动**。下表为**开发栈 legacy 取值**，供参考而非固定值；使用
-> 文件/DB registry 后以 registry 的任务路由为准（见下节「模型自由切换」）：
+模型名没有内置默认值（去硬编码），必须由 `.env` 提供；启动时经 `/api/tags` 校验存在性，
+缺失则**拒绝启动**。下表是开发栈 legacy 取值，用 registry 后以任务路由为准：
 
 | 任务 | 配置项 | 开发栈取值 | 说明 |
 |------|--------|-----------|------|
-| 主生成模型 | `OLLAMA_MODEL_NAME` | `qwen3:4b` | 复杂推理、RAG 最终答案生成、Agent / Function Calling |
-| 非思考模型 | `OLLAMA_DIRECT_MODEL_NAME` | `qwen2.5:3b-instruct` | 关闭深度思考时使用（直答）；留空则回退主模型并绑定 `reasoning=false` |
-| 轻量任务模型 | `FAST_LLM_MODEL_NAME` | `qwen2.5:3b-instruct` | 意图路由、会话标题生成、Query 改写等结构化/低延迟任务；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致以避免同请求内多模型换载 |
-| Embedding 模型 | `EMBEDDING_MODEL_NAME` | `bge-m3:latest` | 多语言文档向量化，输出 1024 维稠密向量（维度须与 `EMBEDDING_DIMENSION` 一致） |
-| 重排序模型 | `KB_RERANK_MODEL` / `SEARCH_RERANK_MODEL` | `BAAI/bge-reranker-base` | 知识库检索与网页搜索结果精排；`KB_RERANK_PROVIDER` 可选 `sentence_transformers` 或 `ollama` |
+| 主生成模型 | `OLLAMA_MODEL_NAME` | `qwen3:4b` | 复杂推理、RAG 最终答案、Agent / Function Calling |
+| 非思考模型 | `OLLAMA_DIRECT_MODEL_NAME` | `qwen2.5:3b-instruct` | 关闭深度思考时使用（直答） |
+| 轻量任务模型 | `FAST_LLM_MODEL_NAME` | `qwen2.5:3b-instruct` | 意图路由、标题生成、Query 改写；须与上一项一致以避免同请求内换载 |
+| Embedding | `EMBEDDING_MODEL_NAME` | `bge-m3:latest` | 1024 维，须与 `EMBEDDING_DIMENSION` 一致 |
+| 重排序 | `KB_RERANK_MODEL` / `SEARCH_RERANK_MODEL` | `BAAI/bge-reranker-base` | 精排；provider 可选 `sentence_transformers` / `ollama` |
 
-> 混合思考模型（如 `qwen3:4b`）无法通过提示词真正跳过思考，故「深度思考关闭」路径
-> 依赖 `OLLAMA_DIRECT_MODEL_NAME` 指向一个非思考模型。若主模型本身不支持思考
-> （如 `qwen2.5`），应设 `OLLAMA_SUPPORTS_THINKING=false`，否则会触发 Ollama 400 错误。
+**为什么 4B 只有一个入口**：4GB 显存下 4B（3.9GiB）驻留会驱逐 3B 直答模型，形成换载拉锯。
+所以 **4B 唯一入口 = `deep_thinking=on` 的主回答链**，辅助任务全部归 `fast_llm`。
 
-通过环境变量可灵活调整：
-
-```env
-OLLAMA_MODEL_NAME=qwen3:4b
-OLLAMA_DIRECT_MODEL_NAME=qwen2.5:3b-instruct
-FAST_LLM_MODEL_NAME=qwen2.5:3b-instruct
-EMBEDDING_MODEL_NAME=bge-m3:latest
-EMBEDDING_DIMENSION=1024
-KB_RERANK_MODEL=BAAI/bge-reranker-base
-SEARCH_RERANK_MODEL=BAAI/bge-reranker-base
-```
-
-> ⚠️ **Embedding 维度变更注意**：默认 Embedding 从 `nomic-embed-text`（768 维）切换为 `bge-m3`（1024 维）。现有 Milvus 集合会在服务启动时自动检测维度不一致并重建，旧知识库数据将丢失。请在启动前运行 `cd backend && uv run python scripts/migrate_embedding_model.py --backup` 备份并重新上传文档。
-
-### 🔄 模型自由切换（P1/P2）
-
-聊天模型可按任务自由切换，**无需重启**；配置按以下优先级生效：
-
-1. **PostgreSQL**（设置 → 模型服务，管理员保存后点「校验并应用」）——最高优先级，启动时自动加载
-2. **`MODEL_REGISTRY_FILE`**（或默认 `backend/data/model_registry.json`）——JSON registry，按 mtime 热加载
-3. **`.env` 的 `OLLAMA_*`**——legacy 兜底，现有部署零改动
-
-- **管理入口**：`设置 → 模型服务`（`/settings/models`）。生产环境需 `ADMIN_KEY`（`X-Admin-Key`）；Provider Key 在 DB 中 Fernet 加密、只写不读（仅回显末四位）。
-- **供应商**：Ollama 原生 + 任意 OpenAI-Compatible（OpenAI、DeepSeek、通义兼容、Kimi、vLLM、LM Studio 等）；外部 Provider 标记 `external`，本地主模型降级到外部需显式开启 `allow_external_fallback`（默认关闭，避免数据出域）。
-- **路由与能力**：`answer` / `fast` / `embedding` 为必需路由；`agent_decision` 必须选声明 `tools` 的模型；每条路由可配 fallbacks。
-- **故障隔离与成本（P2.1）**：同一 Provider 连续失败 3 次自动熔断 60s，期间直接走 fallback，冷却后自动半开探测；模型可配置每 1K tokens 输入/输出单价与币种，设置页「模型服务」直接查看最近 7/30/90 天调用数、失败、Token、平均延迟、估算成本与未定价次数；用量按天落库到 `model_usage_daily`，重启不丢已落库数据。管理员也可调用 `GET /api/admin/models/usage?days=7`。
-- **Embedding 迁移（P3）**：Embedding 模型/维度以 registry 为权威；切换后在设置页「向量索引 / Embedding」重建，系统会用新模型重新向量化全部切片、原子切换并保留旧索引备份，失败自动保留线上索引，可一键回滚；重建完成自动应用新配置并失效语义缓存。可选 `rerank` 路由支持 Ollama 托管重排序模型热切换。
-- **Embedding 不能热切**：切换模型/维度必须重建 Milvus 索引（设置页已提供重建与回滚）；重建完成前历史向量与新查询不可比。
-- 完整配置格式、API 与回滚见 [design/model-provider-registry-2026-10.md](docs/design/model-provider-registry-2026-10.md) 与 [deployment.md §6.3.2](docs/guide/deployment.md)。
+模型可热切换、无需重启（DB → `MODEL_REGISTRY_FILE` → `.env` 三级优先级），
+Provider Key 在 DB 中加密、只写不读；同 Provider 连续失败 3 次熔断 60s。
+细节见 [design/model-provider-registry-2026-10.md](docs/design/model-provider-registry-2026-10.md)。
 
 ---
 
-## 🚀 快速开始
-
-### 环境分离说明
-
-项目采用**开发/生产环境完全隔离**策略：两套 Docker Compose 使用各自的 project name、env 文件、端口与数据卷，容器/网络/数据卷互不重叠，**可同时运行（双栈并存）**。
-
-| 环境 | Docker 配置 | env 文件 | Project Name | 容器后缀 | 数据卷 | 适用场景 |
-|------|-----------|---------|--------------|---------|--------|---------|
-| **开发环境** | `docker-compose.dev.yml` | `.env.dev`（`--env-file` 注入） | `rag-dev` | `-dev` | `*_dev` | 本地开发、测试、调试 |
-| **生产环境** | `docker-compose.yml` | `.env.prod`（`--env-file` 注入） | `rag-prod` | `-prod` | `*_prod` | 正式部署 |
-
-**核心特性：**
-- ✅ 开发/生产数据完全隔离，双栈可并存运行（端口完全错开，见下文「Docker 服务端口」）
-- ✅ 业务配置统一由 env 文件经 compose `env_file:` 注入；compose 文件仅保留 Docker 网络路由覆盖项
-- ✅ 开发环境包含完整应用栈（后端 + 前端 + 基础设施），支持代码热重载
-- ✅ 生产环境包含完整监控体系（含 Alertmanager），启动脚本自动执行 `alembic upgrade head` 数据库迁移
-
----
-
-### 方式一：开发环境快速启动（推荐开发）
-
-使用 `scripts/start-dev.ps1`（Windows PowerShell 7）、`scripts/start-dev.bat`（Windows Batch）或 `scripts/start-dev.sh`（Linux/Mac）一键启动开发环境，**包含完整应用栈**。推荐在 Windows 上使用 PowerShell 7 获得最佳彩色输出体验。
-
-**一键启动：**
-```bash
-# 进入项目目录
-cd langchain_rag_demo
-
-# Windows (PowerShell 7，推荐)：一键启动开发环境
-.\scripts\start-dev.ps1
-
-# Windows (Batch)：一键启动开发环境（自动检测 PowerShell 7）
-.\scripts\start-dev.bat
-
-# Linux/Mac：一键启动开发环境
-./scripts/start-dev.sh
-
-# 可选：跳过健康检查等待
-# Windows PowerShell 7: .\scripts\start-dev.ps1 -SkipWait
-# Windows Batch: set SKIP_WAIT=1 && .\scripts\start-dev.bat
-# Linux/Mac: SKIP_WAIT=1 ./scripts/start-dev.sh
-```
-
-**脚本功能特性：**
-- ✅ 自动检测 Docker / Docker Compose 安装状态
-- ✅ 自动检查 `.env.dev` 配置文件
-- ✅ 经 `--env-file .env.dev` 启动（compose project: `rag-dev`），无需复制 `.env`
-- ✅ 启动后自动进行容器健康检查（最多 240s，可用 `MAX_WAIT_SECONDS` 覆盖）
-- ✅ 彩色进度日志，直观展示每个服务状态
-- ✅ 启动完成后汇总显示所有服务访问地址
-
-**开发环境服务：**
-- 后端 API（FastAPI，源码挂载，支持热重载）
-- 前端界面（Vite 开发服务器，源码挂载）
-- PostgreSQL（数据库）
-- MinIO（对象存储）
-- Milvus（向量数据库）
-- etcd（Milvus 依赖）
-- Redis（缓存服务）
-- Prometheus（监控）
-- Grafana（监控面板）
-- PostgreSQL Exporter（数据库监控导出器）
-
-**访问地址：**
-- 后端 API: `http://localhost:8000`
-- API 文档: `http://localhost:8000/docs`
-- 前端界面: `http://localhost:5173`
-- PostgreSQL: `localhost:5433`
-- MinIO 控制台: `http://localhost:9001`
-- Milvus: `localhost:19530`
-- Redis: `localhost:6379`
-- Prometheus: `http://localhost:9090`
-- Grafana: `http://localhost:3000`
-
-**查看后端日志（观察热重载输出）：**
-```bash
-# Windows PowerShell 7
-.\scripts\logs-dev.ps1 backend
-# Windows Batch
-.\scripts\logs-dev.bat backend
-# Linux/Mac
-./scripts/logs-dev.sh backend
-# 或直接查看
-docker logs -f backend-dev
-```
-
-**查看前端日志（观察 Vite 输出）：**
-```bash
-# Windows PowerShell 7
-.\scripts\logs-dev.ps1 frontend
-# Windows Batch
-.\scripts\logs-dev.bat frontend
-# Linux/Mac
-./scripts/logs-dev.sh frontend
-# 或直接查看
-docker logs -f frontend-dev
-```
-
-**查看所有服务实时日志：**
-```bash
-# Windows PowerShell 7
-.\scripts\logs-dev.ps1
-# Windows Batch
-.\scripts\logs-dev.bat
-# Linux/Mac
-./scripts/logs-dev.sh
-```
-
-**停止开发环境：**
-```bash
-# Windows PowerShell 7
-.\scripts\stop-dev.ps1
-# Windows Batch
-.\scripts\stop-dev.bat
-# Linux/Mac
-./scripts/stop-dev.sh
-```
-
-**清理开发环境（包括数据）：**
-```bash
-# Windows PowerShell 7
-.\scripts\stop-dev.ps1 -Clean
-# Windows Batch
-.\scripts\stop-dev.bat --clean
-# Linux/Mac
-./scripts/stop-dev.sh --clean
-```
-
----
-
-### 方式二：生产环境部署（推荐部署）
-
-使用 `scripts/start-prod.ps1`（Windows PowerShell 7）、`scripts/start-prod.bat`（Windows Batch）或 `scripts/start-prod.sh`（Linux/Mac）启动完整生产环境，包含所有服务。推荐在 Windows 上使用 PowerShell 7 获得最佳彩色输出体验。
-
-**启动前准备：**
-1. 基于 `.env.example` 创建并配置 `.env.prod` 文件
-2. 务必为所有密码项设置强密码（POSTGRES_PASSWORD / MINIO_ROOT_PASSWORD / MINIO_ACCESS_KEY / MINIO_SECRET_KEY / GF_SECURITY_ADMIN_PASSWORD）
-3. 设置 `AUTH_ALLOW_REGISTRATION=false`（生产默认安全值；若确需开放注册，必须同时设置 `ALLOW_OPEN_REGISTRATION_IN_PROD=true`，否则后端拒绝启动）
-4. 设置强随机 `ADMIN_KEY`（学习写入、系统配置、指标重置等管理接口使用）
-
-**一键启动：**
-```bash
-# 进入项目目录
-cd langchain_rag_demo
-
-# Windows (PowerShell 7，推荐)：启动生产环境（会提示确认）
-.\scripts\start-prod.ps1
-
-# Windows (Batch)：启动生产环境（自动检测 PowerShell 7）
-.\scripts\start-prod.bat
-
-# Linux/Mac：启动生产环境
-./scripts/start-prod.sh
-
-# 可选参数：
-#   PowerShell 7: -SkipWait -Force（跳过健康检查等待，跳过确认提示）
-#   Batch: set SKIP_WAIT=1 && set FORCE_START=1 && .\scripts\start-prod.bat
-#   Linux/Mac: SKIP_WAIT=1 ./scripts/start-prod.sh / FORCE_START=1 ./scripts/start-prod.sh
-```
-
-**脚本功能特性：**
-- ⚠️ 启动前确认提示（避免误操作）
-- ✅ 自动检测 Docker / Docker Compose 安装状态
-- ✅ 安全检查：验证关键密码变量已设置且非默认值
-- ✅ 经 `--env-file .env.prod` 启动（compose project: `rag-prod`），不再复制/备份 `.env`
-- ✅ 启动后自动进行容器健康检查（最多 180s）
-- ✅ 健康检查通过后自动执行数据库迁移（在 backend 容器内运行 `alembic upgrade head`）
-- ✅ 彩色进度日志，直观展示每个服务状态
-- ✅ **密码安全**：生产环境不显示实际密码值，仅显示变量名
-
-**生产环境服务：**
-- 后端 API 服务（FastAPI，镜像构建）
-- 前端界面（Nginx 静态服务，镜像构建）
-- PostgreSQL
-- MinIO
-- Milvus
-- etcd
-- Redis（搜索结果与网页内容缓存）
-- Prometheus
-- Grafana
-- Alertmanager（生产专用，告警通知）
-- PostgreSQL Exporter
-
-**访问地址：**
-- 前端界面: `http://localhost`（Nginx，80 端口）
-- API 文档: `http://localhost:8001/docs`（仅回环绑定）
-- PostgreSQL: `localhost:5434`
-- MinIO 控制台: `http://localhost:9003`（S3 API `127.0.0.1:9002`）
-- Milvus: `localhost:19531`
-- Redis: `localhost:6380`
-- Grafana: `http://localhost:3001`
-- Prometheus: `http://localhost:9094`
-- Alertmanager: `http://localhost:9095`
-
-> 生产栈基础设施端口仅绑定 `127.0.0.1` 回环地址，不对局域网暴露；远程访问请走 SSH 隧道或反向代理。
-
-**查看服务日志：**
-```bash
-# Windows PowerShell 7（查看所有日志）
-.\scripts\logs-prod.ps1
-# Windows PowerShell 7（查看指定服务日志）
-.\scripts\logs-prod.ps1 backend
-
-# Windows Batch（查看所有日志）
-.\scripts\logs-prod.bat
-# Windows Batch（查看指定服务日志）
-.\scripts\logs-prod.bat backend
-
-# Linux/Mac（查看所有日志）
-./scripts/logs-prod.sh
-# Linux/Mac（查看指定服务日志）
-./scripts/logs-prod.sh backend
-```
-
-**停止生产环境：**
-```bash
-# Windows PowerShell 7
-.\scripts\stop-prod.ps1
-# Windows Batch
-.\scripts\stop-prod.bat
-# Linux/Mac
-./scripts/stop-prod.sh
-```
-
-**清理生产环境（危险操作，会删除所有数据）：**
-```bash
-# Windows PowerShell 7（需要输入 DELETE 确认）
-.\scripts\stop-prod.ps1 -Clean
-# Windows Batch（需要输入 DELETE 确认）
-.\scripts\stop-prod.bat --clean
-# Linux/Mac（需要输入 DELETE 确认）
-./scripts/stop-prod.sh --clean
-```
-
----
-
-### 方式三：本地开发模式（前后端本地运行）
-
-依赖服务在 Docker 容器中运行，前后端在本地命令行运行（适合深入调试）：
-
-#### 1. 启动依赖服务
-
-```bash
-cd langchain_rag_demo
-
-# 启动数据库与搜索基础设施（不含前后端；--env-file 提供 ${VAR} 插值）
-docker compose -f docker-compose.dev.yml --env-file .env.dev up -d postgres minio etcd milvus-standalone redis prometheus grafana postgres-exporter
-
-# 等待服务就绪（Milvus 首次启动需要 1-2 分钟）
-```
-
-#### 2. 配置环境变量
-
-```bash
-cd backend
-
-# 本地裸跑无需复制任何文件：config.py 默认 APP_ENV=dev，直接读项目根目录的 .env.dev
-# 如需以生产配置本地裸跑：设置 APP_ENV=prod（PowerShell: $env:APP_ENV="prod"），将读取 .env.prod 并启用生产级启动强校验
-
-# 确保环境变量正确指向容器映射的宿主机端口
-# 本地开发时 .env.dev 已默认使用 localhost:5433 / localhost:9000 / localhost:19530 / localhost:6379 / localhost:8080
-```
-
-#### 3. 启动后端
-
-```bash
-cd backend
-
-# 同步依赖（自动创建 .venv 虚拟环境，按 uv.lock 锁定版本安装）
-uv sync
-
-# 启动服务（推荐方式）
-uv run python start.py
-
-# 开发模式启动（代码改动后自动热重载，无需手动重启）
-uv run python start.py --reload
-
-# API文档: http://localhost:8000/docs
-```
-
-**开发热重载说明：**
-
-| 启动命令 | 模式 | 适用场景 |
-|---------|------|---------|
-| `uv run python start.py` | 普通模式 | 调试断点、性能测试、首次启动检查 |
-| `uv run python start.py --reload` | 热重载模式 | 日常开发迭代（推荐） |
-
-热重载模式基于 uvicorn `--reload`，保存 `backend/src/` 下任意 `.py` 文件后约 1-2 秒自动重启服务。
-
-> ⚠️ 注意事项：
-> - 仅限本地开发使用，生产/Docker 环境不要启用
-> - 修改 `config.py`、`.env.dev` 等配置文件后，部分单例（如 OllamaEmbeddings 客户端）可能不会重建，若发现"改了没生效"请手动重启一次
-> - 首次启动仍会执行 Ollama / PostgreSQL / MinIO / Milvus 连通性检查
-> - 也可通过环境变量启用：`$env:RELOAD_MODE="true"; uv run python start.py`
-
-#### 4. 启动前端
-
-```bash
-cd frontend
-
-# 安装依赖
-pnpm install
-
-# 开发模式启动
-pnpm dev
-
-# 访问前端: http://localhost:5173
-```
-
----
-
-## 📁 项目结构
+## 📁 项目结构（顶层）
 
 ```
 langchain_rag_demo/
-├── docker-compose.yml        # Docker Compose 配置（生产环境）
-├── docker-compose.dev.yml    # Docker Compose 配置（开发环境，含应用）
-├── .env.example              # 环境变量模板（全部可配置项 + 中文注释）
-├── .env.dev                  # 开发环境变量配置（compose 经 env_file 引用）
-├── .env.prod                 # 生产环境变量配置（compose 经 env_file 引用）
-├── scripts/                  # 根目录脚本（开发/生产启停）
-│   ├── start-dev.ps1         # 开发环境启动脚本（PowerShell 7，推荐）
-│   ├── start-prod.ps1        # 生产环境启动脚本（PowerShell 7，推荐）
-│   ├── logs-dev.ps1          # 开发环境日志查看（PowerShell 7）
-│   ├── logs-prod.ps1         # 生产环境日志查看（PowerShell 7）
-│   ├── stop-dev.ps1          # 开发环境停止脚本（PowerShell 7）
-│   ├── stop-prod.ps1         # 生产环境停止脚本（PowerShell 7）
-│   ├── start-dev.bat         # 开发环境启动脚本（Windows Batch，PowerShell 7 入口）
-│   ├── start-prod.bat        # 生产环境启动脚本（Windows Batch，PowerShell 7 入口）
-│   ├── logs-dev.bat          # 开发环境日志查看（Windows Batch，PowerShell 7 入口）
-│   ├── logs-prod.bat         # 生产环境日志查看（Windows Batch，PowerShell 7 入口）
-│   ├── stop-dev.bat          # 开发环境停止脚本（Windows Batch，PowerShell 7 入口）
-│   ├── stop-prod.bat         # 生产环境停止脚本（Windows Batch，PowerShell 7 入口）
-│   ├── start-dev.sh          # 开发环境启动脚本（Linux/Mac）
-│   ├── start-prod.sh         # 生产环境启动脚本（Linux/Mac）
-│   ├── logs-dev.sh           # 开发环境日志查看（Linux/Mac）
-│   ├── logs-prod.sh          # 生产环境日志查看（Linux/Mac）
-│   ├── stop-dev.sh           # 开发环境停止脚本（Linux/Mac）
-│   └── stop-prod.sh          # 生产环境停止脚本（Linux/Mac）
-├── README.md                 # 项目说明文档
-├── docs/                     # 文档目录（索引见 docs/README.md）
-│   ├── README.md             # 文档索引（命名/状态规范）
-│   ├── api.md                # API 接口参考
-│   ├── architecture.md       # 架构总览
-│   ├── guide/                # 操作指南（deployment / development / monitoring）
-│   ├── design/               # 设计文档（对标 RFC，一文一事）
-│   └── archive/              # 归档（一次性报告）
-├── backend/                  # 后端服务
-│   ├── Dockerfile.dev        # 后端开发 Dockerfile（热重载）
-│   ├── Dockerfile.prod       # 后端生产 Dockerfile
-│   ├── start.py              # 后端入口（环境检查 + FastAPI 启动）
-│   ├── pyproject.toml        # uv 依赖配置
-│   ├── uv.lock               # 锁定依赖版本（唯一依赖描述）
-│   ├── scripts/              # 数据库迁移脚本
-│   ├── tests/                # 测试用例
-│   └── src/                  # 源码目录（统一以 `from src.* import` 方式引用）
-│       ├── config.py         # 配置中心（pydantic-settings，按 APP_ENV 选 .env.{env}）
-│       ├── database.py       # 数据库连接
-│       ├── auth.py           # 认证与授权（API Key / JWT / owner 归属校验）
-│       ├── exceptions.py     # 异常定义
-│       ├── main.py           # FastAPI 入口
-│       ├── api/              # REST API 路由（17 个模块）
-│       │   ├── auth.py                 # 注册/登录/当前用户/用户级 API Key
-│       │   ├── chat.py                 # 聊天问答接口（含 SSE 流式）
-│       │   ├── document.py             # 文档管理接口
-│       │   ├── knowledge_base.py       # 知识库管理接口
-│       │   ├── wiki.py                 # Wiki 编译层接口
-│       │   ├── session.py              # 会话管理接口
-│       │   ├── trace.py                # 请求链路追踪
-│       │   ├── audit.py                # 审计日志查询接口
-│       │   ├── experiment.py           # A/B 测试实验接口
-│       │   ├── category.py             # 分类管理接口
-│       │   ├── tag.py                  # 标签管理接口
-│       │   ├── feedback.py             # 评价反馈接口
-│       │   ├── badcase.py              # 坏例管理接口
-│       │   ├── learning.py             # 学习引擎接口
-│       │   ├── evaluation.py           # RAG 评估接口
-│       │   ├── config.py               # 系统配置接口
-│       │   └── notification.py         # WebSocket 实时通知接口
-│       ├── services/         # 业务逻辑层
-│       │   ├── pipeline/                 # RAG 管线拆分（stages/retrieval/agent/generation/state/insights）
-│       │   ├── rag_chain.py              # RAG 问答链（编排门面：依赖装配 + run/arun_stream）
-│       │   ├── decision_pipeline.py      # 决策管道（是否检索 KB / 联网 / Agent）
-│       │   ├── strategy_manager.py       # 策略管理器（strategies/ 子包：semantic/keyword/llm_inference）
-│       │   ├── kb_retrieval_service.py   # 统一知识库检索服务（管线与 Agent 共用口径）
-│       │   ├── hybrid_search.py          # 混合检索（BM25 + 向量 + RRF）与 KBReranker
-│       │   ├── agent_orchestrator.py     # 有界 Agent 编排（DECIDE-ACT-OBSERVE）
-│       │   ├── intent_router/            # 意图路由（embedding 分类 + LLM 路由 + 置信度门控）
-│       │   ├── tools/                    # 工具平台（tool_manager + plugins/ 9 个工具）
-│       │   ├── wiki_*.py                 # LLM-Wiki 编译层（compiler/navigator/lint/synthesis/cascade 等）
-│       │   ├── evaluation/               # 检索评估器 + 生成评估器（faithfulness/relevance）
-│       │   ├── learning_engine.py        # 学习引擎（用户反馈驱动的策略权重）
-│       │   ├── web_search_service.py     # 联网搜索服务
-│       │   ├── search_agent.py           # 原生 Function Calling / ReAct（AgentOrchestrator 回退路径）
-│       │   ├── semantic_cache_service.py # 语义缓存（命中直接回放）
-│       │   ├── context_enhancer.py       # 上下文增强（指代消解、压缩、摘要）
-│       │   ├── context_builder.py        # 上下文预算与 Lost-in-the-Middle 重排
-│       │   ├── answer_generator.py       # 答案生成（流式）
-│       │   ├── citation_backfiller.py    # 引用补全（[n] 回填）
-│       │   ├── output_sanitizer.py       # 输出清洗（推理前缀/复述过滤、答案校验）
-│       │   ├── numerical_validator.py    # 数字幻觉校验
-│       │   ├── query_rewriter.py         # 多查询改写
-│       │   ├── question_processor.py     # 问题处理（改写、分类、建议）
-│       │   ├── document_loaders.py       # 本地直读加载器（txt/md/csv/json/pdf）
-│       │   ├── ocr_parser.py             # 扫描版 PDF 双后端 OCR
-│       │   ├── document_analyzer.py      # 文档分析（去重、质量、分类）
-│       │   ├── kb_comparator.py          # 知识库对比
-│       │   ├── kb_recommender.py         # 知识库推荐
-│       │   ├── knowledge_graph_generator.py # 知识图谱生成
-│       │   ├── trace_collector.py        # 请求链路追踪采集
-│       │   ├── audit_service.py          # 审计日志记录与查询
-│       │   ├── session_service.py        # 会话消息原子追加
-│       │   ├── title_generator.py        # 会话标题生成
-│       │   ├── runtime_config_service.py # 运行时配置落盘/加载
-│       │   ├── cache_service.py          # Redis 缓存服务
-│       │   ├── vector_store.py           # 向量存储管理
-│       │   ├── minio_service.py          # MinIO 对象存储服务
-│       │   ├── milvus_service.py         # Milvus 服务
-│       │   └── document_processor.py     # 文档解析与分块
-│       ├── models/           # 数据库模型（SQLAlchemy）
-│       ├── middleware/       # 中间件
-│       └── utils/            # 工具函数
-├── frontend/                 # 前端应用（Vue 3）
-│   ├── Dockerfile.dev        # 前端开发 Dockerfile（Vite 服务器）
-│   ├── Dockerfile.prod       # 前端生产 Dockerfile（Nginx）
-│   ├── src/                  # 源码目录
-│   │   ├── views/            # 页面视图
-│   │   │   ├── ChatView.vue           # 对话页面（支持网页来源展示）
-│   │   │   ├── KnowledgeBaseView.vue  # 知识库管理
-│   │   │   ├── HistoryView.vue        # 历史记录
-│   │   │   ├── TraceView.vue          # 请求链路追踪
-│   │   │   ├── LoginView.vue          # 登录
-│   │   │   ├── SettingsView.vue       # 设置中心
-│   │   │   └── Settings/              # 设置子页面
-│   │   │       ├── GeneralView.vue    # 通用设置
-│   │   │       ├── TagView.vue        # 标签管理
-│   │   │       ├── CategoryView.vue   # 分类管理
-│   │   │       ├── LearningView.vue   # 学习引擎设置
-│   │   │       ├── FeedbackView.vue   # 反馈统计
-│   │   │       ├── ExperimentView.vue # A/B 实验管理
-│   │   │       └── ApiKeysView.vue    # 用户级 API 密钥管理
-│   │   ├── components/       # 公共组件（含 chat/ 与 knowledge-base/ 子目录）
-│   │   ├── composables/      # 组合式函数（useChatStream / useNotifications 等）
-│   │   ├── stores/           # Pinia 状态管理
-│   │   ├── queries/          # Vue Query 数据获取
-│   │   ├── router/           # 路由配置（含陈旧分片自愈）
-│   │   └── utils/            # 工具函数
-│   └── nginx.conf            # Nginx 配置
-├── configs/                  # 配置目录
-│   ├── prometheus/           # Prometheus 配置
-│   │   ├── prometheus.yml    # 生产环境配置
-│   │   ├── prometheus.dev.yml # 开发环境配置
-│   │   └── alerts.yml        # 告警规则
-│   ├── grafana/              # Grafana 配置
-│   ├── alertmanager/         # Alertmanager 配置
-│   └── postgres/             # PostgreSQL 配置
+├── docker-compose.yml / .dev.yml   # 生产 / 开发编排
+├── .env.example                    # 全量配置模板（184 键，含中文注释）
+├── scripts/                        # 启停、备份恢复、演练、验收（见下表）
+├── backend/
+│   ├── start.py                    # 入口（环境检查 + FastAPI 启动）
+│   ├── pyproject.toml / uv.lock    # 依赖唯一事实来源
+│   ├── alembic/versions/           # 11 个迁移
+│   ├── scripts/                    # 评测、对账、探针、性能、迁移
+│   ├── tests/                      # 134 个测试文件
+│   └── src/
+│       ├── config.py               # 配置中心（pydantic-settings，按 APP_ENV 选 .env.{env}）
+│       ├── auth.py                 # API Key / JWT / owner 归属校验
+│       ├── main.py                 # 装配与 lifespan（巡检调度等）
+│       ├── api/                    # REST 路由（17 个模块）
+│       ├── services/               # 业务实现（检索、缓存、编译、评测、审计…）
+│       └── utils/                  # 异常分级、日志、限流等
+├── frontend/src/                   # Vue 3（47 个 .vue + 62 个 .ts）
+├── docs/                           # 见「文档地图」
+└── monitoring/                     # Prometheus / Grafana / Alertmanager 配置
 ```
 
-### 📜 配套脚本说明
+### 常用脚本
 
-| 类别 | 脚本名 | 说明 |
-|------|--------|------|
-| **启动** | `start-dev.ps1 / start-dev.bat / start-dev.sh` | 开发环境启动，含健康检查、状态汇总 |
-| **启动** | `start-prod.ps1 / start-prod.bat / start-prod.sh` | 生产环境启动，含安全检查、确认提示、数据库迁移（alembic） |
-| **日志** | `logs-dev.ps1 / logs-dev.bat / logs-dev.sh` | 查看开发环境实时日志，可指定服务 |
-| **日志** | `logs-prod.ps1 / logs-prod.bat / logs-prod.sh` | 查看生产环境实时日志，可指定服务 |
-| **停止** | `stop-dev.ps1 / stop-dev.bat / stop-dev.sh` | 停止开发环境，`-Clean`（PowerShell）或 `--clean`（Batch/Linux）同时清除数据 |
-| **停止** | `stop-prod.ps1 / stop-prod.bat / stop-prod.sh` | 停止生产环境，`-Clean`（PowerShell）或 `--clean`（Batch/Linux）同时清除数据（危险） |
+| 类别 | 脚本 | 说明 |
+|---|---|---|
+| 启停 | `start-dev.* / start-prod.* / stop-*.{ps1,bat,sh}` | 开发/生产启停；生产含安全检查与 alembic 迁移 |
+| 日志 | `logs-dev.* / logs-prod.*` | 实时日志，可指定服务 |
+| 备份恢复 | `backup.sh` / `restore.sh` | PG + MinIO；容器模式降级（宿主机无客户端时借容器） |
+| 演练 | `restore_drill*.sh` / `rollback_drill.sh` | 恢复（PG / MinIO / Milvus）与回滚，隔离实例、自动清理 |
+| 规模 | `scale_rto_drill.sh MODE=pg\|milvus\|minio\|all` | 万级数据量 RTO |
+| 评测 | `backend/scripts/run_eval.py`、`perf_suite.py`、`probe_retrieval_stages.py` | 检索质量、性能门禁、逐级探针 |
+| 对账 | `backend/scripts/consistency_audit.py` | 三方一致性，只读 |
+| 验收 | `check_env_consistency.py`（CI 跑）、`scripts/e2e_verify_chat.py`、`scripts/ask_once.py` | 配置键一致性、端到端问答验收、单次问答（报帧数与是否收到 `end`） |
 
-**Windows PowerShell 7 脚本参数：**
-- `-SkipWait`：跳过健康检查等待，适用于快速启动
-- `-Force`：跳过生产环境确认提示（谨慎使用）
-- `-Clean`：停止时同时删除数据卷（会清除所有数据）
-
-**Windows Batch / Linux/Mac 脚本参数：**
-- `SKIP_WAIT=1`：跳过健康检查等待，适用于快速启动
-- `FORCE_START=1`：跳过生产环境确认提示（谨慎使用）
-- `--clean`：停止时同时删除数据卷（会清除所有数据）
-
-**使用建议：**
-- ✅ **推荐 Windows 用户使用 PowerShell 7 脚本（.ps1）**：提供最佳彩色输出和用户体验
-- Batch 脚本（.bat）会自动检测 PowerShell 7 并调用相应的 .ps1 脚本
-- 如未安装 PowerShell 7，脚本会降级为 Batch 方式运行，并提示安装地址
+脚本参数（`-SkipWait` / `-Force` / `-Clean`、`SKIP_WAIT=1` / `FORCE_START=1`）见
+[归档 README §配套脚本](docs/archive/README-dev-2026-11-07.md)。
 
 ---
 
-## 🔧 配置说明
-
-### 环境变量配置
-
-项目包含多个环境变量配置文件，用于不同层次的配置管理：
-
-#### 配置文件说明
-
-| 文件 | 用途 | 使用场景 |
-|------|------|---------|
-| `.env.dev` | 开发环境全量业务配置 | 本地裸跑（默认）与 dev 容器（`env_file:` 注入）共用 |
-| `.env.prod` | 生产环境全量业务配置 | 生产栈经 `--env-file` + `env_file:` 注入容器 |
-| `.env.example` | 全量配置模板（含注释） | 创建 `.env.dev` / `.env.prod` 时对照；CI 校验其覆盖全部在用键 |
-
-#### 配置加载机制
-
-**后端配置加载逻辑**（`backend/src/config.py`）：
-
-- 由 `APP_ENV` 环境变量选择环境文件：`dev`（默认）→ `.env.dev`，`prod` → `.env.prod`
-- Docker 部署时，业务配置统一由 compose `env_file:` 注入为容器环境变量，优先级高于 env 文件；compose 文件仅保留 Docker 网络路由覆盖（如 `POSTGRES_HOST=postgres`），新增功能开关只改 env 文件，不再改 compose
-- `IS_PRODUCTION` 决定启动强校验（强密钥/凭据非空）：容器内由 `IN_DOCKER=true` 推断为生产；非 Docker 的生产部署（裸跑 uvicorn/systemd）必须显式设置 `APP_ENV=prod`（兼容旧值 `production`），否则不执行强校验
-
-#### 配置对比
-
-| 配置项 | 开发环境 (`.env.dev`) | 生产环境 (`.env.prod`) |
-|--------|---------------------|---------------------|
-| Compose Project | `rag-dev` | `rag-prod` |
-| 数据库名 | `app_dev` | `app_prod` |
-| 用户名 | `dev_user` | `prod_user` |
-| 密码 | 简单密码 | **必须手动设置强密码** |
-| 端口占用 | 常规端口（8000 / 5173 / 5433…） | 错开端口（80 / 8001 / 5434…，仅回环绑定） |
-| MinIO 安全 | `false` | `true` |
-| 重启策略 | `no` | `unless-stopped` |
-| 数据卷 | `*_dev` | `*_prod` |
-| 监控告警 | 不启用 Alertmanager | 启用 Alertmanager |
-| 后端运行方式 | 源码挂载 + 热重载 | 镜像构建 |
-| 前端运行方式 | Vite 开发服务器 | Nginx 静态服务 |
-
-### 配置示例
-
-```env
-# ===========================================
-# 开发环境配置 (.env.dev)
-# ===========================================
-POSTGRES_DB=app_dev
-POSTGRES_USER=dev_user
-POSTGRES_PASSWORD=dev_password
-MINIO_ROOT_USER=dev_minio
-MINIO_ROOT_PASSWORD=dev_minio_password
-MINIO_ACCESS_KEY=dev_access_key
-MINIO_SECRET_KEY=dev_secret_key
-MINIO_BUCKET_NAME=documents
-MINIO_SECURE=false
-
-# Redis
-REDIS_PASSWORD=dev_redis_password
-
-# 安全密钥：开发环境可不设置，后端启动时自动生成临时随机密钥
-#（重启后旧签名失效）；生产环境必须设置为强密钥
-SECRET_KEY=
-```
-
-```env
-# ===========================================
-# 生产环境配置 (.env.prod)
-# ===========================================
-POSTGRES_DB=app_prod
-POSTGRES_USER=prod_user
-POSTGRES_PASSWORD=  # 必须手动设置！
-MINIO_ROOT_USER=prod_minio
-MINIO_ROOT_PASSWORD=  # 必须手动设置！
-MINIO_ACCESS_KEY=  # 必须手动设置！
-MINIO_SECRET_KEY=  # 必须手动设置！
-MINIO_BUCKET_NAME=documents
-MINIO_SECURE=true
-
-# Redis
-REDIS_PASSWORD=  # 必须手动设置！
-
-# 安全密钥（必须设置为强密钥，否则后端启动失败）
-SECRET_KEY=  # 必须手动设置！
-
-# 环境标记：Docker 部署无需设置（由 IN_DOCKER 推断为生产）；
-# 非 Docker 的生产部署（直接 uvicorn/systemd 运行）必须设置 APP_ENV=prod，
-# 否则不执行强校验（兼容旧值 "production"）
-APP_ENV=prod
-
-# Milvus 集合 schema/维度不匹配时是否允许删除重建（破坏性！旧向量数据全部丢失）
-# 默认 false：不匹配时启动失败并提示；确认可接受数据丢失后才改为 true
-MILVUS_REBUILD_ON_MISMATCH=false
-```
-
-### 核心配置参数说明
-
-| 参数 | 说明 | 默认值 | 范围 |
-|------|------|--------|------|
-| `CHUNK_SIZE` | 文本分割大小（字符数） | 500 | 50-5000 |
-| `CHUNK_OVERLAP` | 分割重叠大小 | 50 | ≥0 且 < `CHUNK_SIZE` |
-| `TOP_K` | 检索文档数量 | 3 | 1-20 |
-| `POSTGRES_PORT` | 数据库端口 | 5433（本地）/ 5432（容器内） | - |
-| `MINIO_ROOT_USER` | MinIO 管理员账号 | - | - |
-| `MINIO_ROOT_PASSWORD` | MinIO 管理员密码 | - | - |
-| `MINIO_ACCESS_KEY` | 后端连接 MinIO 的 Access Key | - | - |
-| `MINIO_SECRET_KEY` | 后端连接 MinIO 的 Secret Key | - | - |
-| `MINIO_BUCKET_NAME` | MinIO 存储桶名称 | `documents` | - |
-| `MINIO_SECURE` | 是否启用 HTTPS | `false` | true/false |
-| `SECRET_KEY` | JWT/安全签名密钥 | 无（开发缺失时启动自动生成临时密钥） | 生产环境必须设置为强密钥，否则启动失败 |
-| `AUTH_ALLOW_REGISTRATION` | 是否开放注册 | `true`（开发） | 生产建议 `false`；生产为 true 且未显式确认时拒绝启动 |
-| `ALLOW_OPEN_REGISTRATION_IN_PROD` | 生产显式允许开放注册 | `false` | 仅确需开放注册时设 true |
-| `TRUSTED_PROXY_CIDRS` | 受信代理网段（逗号分隔 CIDR/IP） | `127.0.0.1/32,::1/128` | Docker 由 compose 注入内网网段；仅受信代理的 XFF/X-Real-IP 生效 |
-| `QUOTA_ENFORCEMENT_ENABLED` | 聊天/上传配额总开关 | `true` | true/false；0 配额表示不限 |
-| `CHAT_RATE_LIMIT_PER_MINUTE` | 聊天每分钟请求上限 | `10` | - |
-| `CHAT_MAX_CONCURRENT_STREAMS_PER_USER` | 每用户并发流上限 | `2` | - |
-| `CHAT_DAILY_MESSAGE_QUOTA` | 每用户每日消息上限 | `200` | - |
-| `UPLOAD_MAX_FILES_PER_BATCH` | 单次批量上传文件数上限 | `20` | - |
-| `UPLOAD_MAX_BATCH_MB` | 单批上传总大小上限（MB） | `200` | - |
-| `UPLOAD_DAILY_MB_PER_USER` | 每用户每日上传字节上限（MB） | `500` | - |
-| `USER_API_KEYS_ENABLED` | 用户级 API Key 开关（设置页自助签发/吊销） | `false` | true/false；开启后用户可签发 `rag_` 前缀 Key，以其本人 `user_id` 调 API（owner 隔离同 JWT），MCP/脚本/CI 集成用 |
-| `USER_API_KEYS_MAX_PER_USER` | 每用户 Key 数量上限 | `5` | - |
-| `AUTH_RATE_LIMIT_API_KEY_CREATE` | 签发端点限流（次/分/IP） | `5` | 0 = 不限流 |
-| `APP_ENV` | 显式环境标记 | 空（按 `IN_DOCKER` 推断） | `dev` / `prod`（兼容旧值 `production`）。非 Docker 的生产部署**必须显式设为 `prod`**，否则不执行启动强校验 |
-| `MILVUS_REBUILD_ON_MISMATCH` | 集合 schema/维度不匹配时是否删除重建 | `false` | 破坏性操作，开启前必须完成数据迁移/备份 |
-| `REDIS_HOST` | Redis 主机 | `localhost` | 容器内自动覆盖为 `redis` |
-| `REDIS_PORT` | Redis 端口 | `6379` | - |
-| `REDIS_DB` | Redis 数据库编号 | `0` | 0-15 |
-| `REDIS_PASSWORD` | Redis 密码 | `dev_redis_password` | 必填，生产环境必须设置为强密码 |
-| `SEARCH_PROVIDER` | 搜索引擎 | `tavily` | `duckduckgo` / `searxng` / `tavily` |
-| `SEARCH_API_KEY` | Tavily API Key（provider 为 tavily 时必填） | - | - |
-| `SEARCH_MAX_RESULTS` | 单次搜索返回结果数 | 10 | 1-20 |
-| `SEARCH_FETCH_TIMEOUT` | 网页抓取超时（秒） | 10 | - |
-| `SEARCH_MAX_FETCH` | 最大并发抓取网页数 | 5 | - |
-| `SEARCH_MIN_CONTENT_LENGTH` | 网页内容最小长度 | 100 | - |
-| `SEARCH_ENABLE_MULTI_QUERY` | 是否启用 LLM 多角度 Query 改写 | `true` | true/false |
-| `SEARCH_NUM_QUERIES` | Query 改写生成的查询数 | 3 | - |
-| `SEARCH_ENABLE_RERANK` | 是否启用 Cross-Encoder 语义重排 | `true` | true/false |
-| `EMBEDDING_DIMENSION` | Embedding 向量维度 | `1024` | 需与 `EMBEDDING_MODEL_NAME` 对应 |
-| `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:3b-instruct` | 意图路由/标题/Query 改写；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致 |
-| `KB_RERANK_MODEL` | 知识库重排模型 | `BAAI/bge-reranker-base` | sentence_transformers 从 HF_HOME 离线缓存加载 |
-| `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
-| `SEARCH_RERANK_MODEL` | 搜索重排模型 | `BAAI/bge-reranker-base` | 同上 |
-| `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
-| `SEARCH_RERANK_TOP_K` | 重排后返回 Top-K | 5 | - |
-| `SEARCH_CACHE_TTL` | 搜索结果缓存时间（秒） | 3600 | - |
-| `SEARCH_CONTENT_CACHE_TTL` | 网页内容缓存时间（秒） | 86400 | - |
-| `SEARCH_ENABLE_FUNCTION_CALLING` | 是否启用 Function Calling | `true` | true/false |
-| `AGENT_WEB_FETCH_ENABLED` | 是否向 Agent 暴露网页深度抓取（`fetch_webpage`） | `false` | SEC-5：默认关闭；开启后受审批/域名/DLP 策略约束 |
-| `GUARDRAIL_TOOL_DOMAIN_ALLOWLIST` / `GUARDRAIL_TOOL_DOMAIN_DENYLIST` | 工具出站域名白/黑名单（逗号分隔） | 空 | 空 allowlist = 允许任意公网域名；denylist 优先 |
-| `AGENT_APPROVAL_MODE` / `AGENT_APPROVAL_TOOLS` | HITL 审批模式 / 强制审批工具 | `off` / `fetch_webpage` | 审批模式 off 时名单不生效；开启 wait/reject 后生效 |
-| `SEARCH_ENABLE_REACT` | 是否启用 ReAct Agent | `false` | true/false |
-| `SEARCH_REACT_MAX_STEPS` | ReAct 最大推理步数 | 3 | - |
-| `SEARCH_AGENT_FALLBACK_TO_PHASE2` | Agent 失败是否回退到普通搜索 | `true` | true/false |
-| `TITLE_GENERATION_ENABLED` | 是否启用 LLM 自动生成会话标题 | `true` | true/false |
-| `TITLE_MAX_LENGTH` | 生成标题的最大长度 | `30` | - |
-| `TITLE_FALLBACK_LENGTH` | 生成失败时截取问题前 N 字 | `30` | - |
-| `TITLE_GENERATION_MODEL` | 指定标题生成模型 | - | 留空则使用 `FAST_LLM_MODEL_NAME` |
-| `MODEL_REGISTRY_FILE` | 可选：JSON registry 路径 | - | 相对路径以 `backend/` 为根；配置后优先于 legacy `OLLAMA_*`，见「模型自由切换」 |
-| `MODEL_USAGE_FLUSH_INTERVAL_S` | 可选：用量增量落库间隔（秒） | `60` | `0` 关闭周期落库，查询仍叠加进程内增量 |
-| `MODEL_SECRET_ENC_KEY` | Provider API Key 加密密钥 | - | 未设置时从 `SECRET_KEY` 派生；轮换后已存 Key 需重录 |
-
-> 模型相关 `OLLAMA_*` / `FAST_LLM_MODEL_NAME` / `TITLE_GENERATION_MODEL` 仅在 legacy 模式下生效；DB 或 `MODEL_REGISTRY_FILE` 存在时以 registry 的任务路由为准。
-
-### Docker 服务端口
-
-| 服务 | 开发环境 | 生产环境 | 说明 |
-|------|---------|---------|------|
-| 后端 API | 8000 | 127.0.0.1:8001 | FastAPI 服务 |
-| 前端 | 5173 | 80 | Vite（开发）/ Nginx（生产） |
-| PostgreSQL | 5433 | 127.0.0.1:5434 | 业务数据库 |
-| MinIO | 9000 | 127.0.0.1:9002 | 对象存储（S3 API） |
-| MinIO 控制台 | 9001 | 127.0.0.1:9003 | 管理界面 |
-| Milvus | 19530 | 127.0.0.1:19531 | 向量数据库 |
-| Milvus 健康检查 | 9091 | 127.0.0.1:9092 | 健康检查/指标端口 |
-| Redis | 6379 | 127.0.0.1:6380 | 缓存服务 |
-| Prometheus | 9090 | 127.0.0.1:9094 | 监控指标 |
-| Alertmanager | -（开发不部署） | 127.0.0.1:9095 | 告警管理 |
-| Grafana | 3000 | 127.0.0.1:3001 | 监控面板 |
-
-**注意：** 两套环境端口完全错开，可**同时运行**（双栈并存），数据完全隔离；生产栈基础设施端口仅绑定回环地址（127.0.0.1），不对局域网暴露。
-
----
-
-## 🎯 使用方式
-
-### 基本使用流程
-
-1. **创建知识库**
-   - 进入知识库管理页面
-   - 点击"新建知识库"
-   - 输入知识库名称和描述
-
-2. **上传文档**
-   - 选择目标知识库
-   - 上传支持格式的文档
-   - 等待文档处理完成
-
-3. **提问**
-   - 进入对话页面
-   - 输入问题
-   - 选择要查询的知识库（可选）
-   - 点击发送
-
-4. **查看答案**
-   - 系统显示回答内容
-   - 显示参考来源和相关文档片段
-   - 支持流式打字效果
-
-5. **评价反馈**
-   - 对回答进行有用/无用评价
-   - 可选填写评价原因
-   - 系统学习用户反馈
-
-### 高级功能
-
-- **会话管理**: 支持多会话切换和历史记录
-- **文档标签**: 为文档添加分类和标签
-- **A/B 测试**: 创建实验对比不同策略效果
-- **学习引擎**: 基于反馈自动优化检索策略
-
-### 联网搜索与 Agent
-
-系统支持三种搜索模式，通过 `use_web_search=true` 与 `search_mode` 控制：
-
-| 模式 | `search_mode` | 说明 |
-|------|---------------|------|
-| 简单联网搜索 | `simple` | 单次搜索，结果经 LLM 改写、Cross-Encoder 重排后进入上下文 |
-| Function Calling | `function_calling` | 本地模型优先走原生 FC（`bind_tools`），不支持时回退 prompt-based JSON 约定。该路径暴露 `web_search` / `fetch_webpage` / `get_current_time`（需开启 `SEARCH_ENABLE_FUNCTION_CALLING`，默认已开启）；**`fetch_webpage` 默认关闭**（`AGENT_WEB_FETCH_ENABLED=false`），需要时显式开启并受审批/域名/DLP 策略约束 |
-| ReAct Agent | `agent` | 多轮 Thought → Action → Observation 迭代搜索（需开启 `SEARCH_ENABLE_REACT=true`） |
-
-**前端使用示例**：
-
-在对话页面勾选联网搜索开关，系统会自动根据问题类型选择知识库、联网或混合模式。搜索结果会在答案下方显示为可点击的网页来源卡片，知识库来源仍可点击查看原始文档片段。
-
-**注意事项**：
-
-- Function Calling（`SEARCH_ENABLE_FUNCTION_CALLING`）默认**已开启**；ReAct（`SEARCH_ENABLE_REACT`）默认**关闭**——开启 ReAct 前请确保模型能遵循工具调用格式
-- 代码类查询（如 `langchain_ollama.ChatOllama`）会保留 `_`、`.`、`#` 等关键符号，避免搜索精度下降
-- 搜索失败时会抛出带搜索引擎名称的 `WebSearchError`，不再静默返回空结果
-
----
-
-## 📊 监控系统
-
-### 访问地址
-
-| 服务 | 开发环境 | 生产环境 | 用户名/密码 |
-|------|---------|---------|-------------|
-| Grafana | http://localhost:3000 | http://localhost:3001 | admin / 见 env 文件中 `GF_SECURITY_ADMIN_PASSWORD` |
-| Prometheus | http://localhost:9090 | http://localhost:9094 | - |
-| Alertmanager | -（开发不部署） | http://localhost:9095 | - |
-
-### 监控指标
-
-| 指标名称 | 类型 | 说明 |
-|----------|------|------|
-| `rag_request_total` | Counter | 请求总数 |
-| `rag_request_errors_total` | Counter | 请求错误总数 |
-| `rag_request_duration_seconds` | Histogram | 请求耗时分布 |
-| `rag_active_requests` | Gauge | 当前活跃请求数 |
-| `rag_llm_calls_total` | Counter | LLM 调用次数 |
-| `rag_llm_call_duration_seconds` | Histogram | LLM 调用耗时分布 |
-| `rag_vector_search_total` | Counter | 向量检索次数 |
-| `rag_vector_search_duration_seconds` | Histogram | 向量检索耗时分布 |
-| `rag_documents_processed_total` | Counter | 文档处理次数 |
-| `rag_document_process_duration_seconds` | Histogram | 文档处理耗时分布 |
-| `rag_kb_queries_total` | Counter | 知识库查询次数 |
-| `rag_strategy_decisions_total` | Counter | 策略决策次数 |
-
-### 告警规则
-
-系统预设以下告警规则（仅生产环境启用 Alertmanager）：
-
-- **请求延迟告警**: 请求耗时超过 5 秒
-- **错误率告警**: 错误率超过 5%
-- **服务不可用告警**: 服务健康检查失败
-- **文档处理失败告警**: 文档处理失败率超过 10%
-
----
-
-## 🧪 测试
-
-### 后端测试
-
-```bash
-cd backend
-uv run pytest -q
-```
-
-### 前端测试
-
-```bash
-cd frontend
-
-# 单元测试
-pnpm test:unit
-
-# E2E 测试（需要先构建）
-pnpm build
-pnpm test:e2e
-```
-
-### 健康检查
-
-```bash
-# 检查后端服务
-curl http://localhost:8000/health/ready   # 依赖就绪；/health/live 仅进程探活
-
-# 检查数据库连接（开发环境）
-docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
-```
-
----
-
-## 📖 文档
-
-文档索引见 [docs/README.md](docs/README.md)。结构：核心参考（architecture / api）置于顶层，操作指南归入 `guide/`，设计文档归入 `design/`，一次性报告归入 `archive/`。
-
-| 文档 | 说明 | 路径 |
-|------|------|------|
-| 架构总览 | 服务拓扑、RAG 决策管线、代码地图 | [docs/architecture.md](docs/architecture.md) |
-| API 文档 | 完整的 API 接口说明 | [docs/api.md](docs/api.md) |
-| 部署指南 | 开发/生产环境部署说明 | [docs/guide/deployment.md](docs/guide/deployment.md) |
-| 开发与测试指南 | 本地开发、测试执行、CI 说明、踩坑记录 | [docs/guide/development.md](docs/guide/development.md) |
-| 监控运维指南 | 监控栈使用、指标说明、告警规则与处置 | [docs/guide/monitoring.md](docs/guide/monitoring.md) |
-| 运维 Runbook | 备份/恢复/回滚矩阵、容量模型与扩容阈值、季度演练（OPS-1） | [docs/guide/backup-restore.md](docs/guide/backup-restore.md) |
-| 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](docs/project-status.md) |
-| 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
-| 全项目演进路线 | 2026-10 对标审计：标配/差异化/避免、UX/视觉/代码/运维差距与三批执行序 | [docs/design/evolution-roadmap-2026-10.md](docs/design/evolution-roadmap-2026-10.md) |
-| 安全与多租户加固 | SEC-1~21 加固方案、验收与实施记录（P1/P2/P3 全部完成） | [docs/design/security-multitenancy-hardening-2026-10.md](docs/design/security-multitenancy-hardening-2026-10.md) |
-| UI 视觉收口 | VIS-3 调研结论、设计方向与实施记录（8px 网格/聊天主列/弹窗下拉） | [docs/design/ui-visual-polish-2026-10.md](docs/design/ui-visual-polish-2026-10.md) |
-| 专项设计文档 | 检索增强/意图路由/搜索优化等设计 | `docs/design/` |
-| 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](docs/archive/code-review-2026-08.md) |
-| 快速开始 | 项目入门指南 | 本文件 |
+## 📖 文档地图
+
+| 想知道 | 读 |
+|---|---|
+| **结项结论**：做到了什么 / 没做什么 / 遗留风险 | [docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) |
+| 系统怎么组织的、代码在哪 | [docs/architecture.md](docs/architecture.md) |
+| 接口有哪些、参数是什么 | [docs/api.md](docs/api.md) |
+| 部署、环境分离、升级与关机语义、踩坑 | [docs/guide/deployment.md](docs/guide/deployment.md) |
+| 环境变量、端口、配置加载机制 | [docs/guide/configuration.md](docs/guide/configuration.md) |
+| 本地开发、测试、CI、已知踩坑 | [docs/guide/development.md](docs/guide/development.md) |
+| 备份 / 恢复 / 回滚 / 容量与扩容 | [docs/guide/backup-restore.md](docs/guide/backup-restore.md) |
+| 监控栈、指标、告警处置 | [docs/guide/monitoring.md](docs/guide/monitoring.md) |
+| 三个静默失败的完整叙事（长文） | [docs/articles/silent-failures.md](docs/articles/silent-failures.md) |
+| 所有量化结论 | [docs/benchmarks/](docs/benchmarks/) |
+| 设计文档（一文一事） | [docs/design/](docs/design/) |
+| 过程账本（417 行，已冻结） | [docs/archive/project-status-2026-11-07.md](docs/archive/project-status-2026-11-07.md) |
+
+文档索引与命名规范见 [docs/README.md](docs/README.md)。
 
 ---
 
@@ -1044,65 +277,9 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 
 MIT License
 
----
-
 ## 🤝 贡献
 
-欢迎提交 Issue 和 Pull Request！
-
-### 分支与合并流程
-
-```text
-feature/* → Pull Request → CI 全绿 → squash merge 到 main
-```
-
-- CI 必检项（7 个 job）：`env-consistency`（环境变量一致性）/ `lint`（ruff）/ `secrets-scan`（gitleaks）/ `backend-unit` / `backend-integration` / `rag-eval` / `frontend`
-- 建议为 main 分支开启保护（Settings → Branches → Add rule）：勾选 *Require a pull request before merging* 与 *Require status checks to pass*，选中上述 7 个 check
-- 提交信息使用中文或英文均可，一次 PR 聚焦一个主题
-
-### 开发规范
-
-请参考项目代码注释与现有测试用例了解开发规范。
-
----
-
-## ⚠️ 注意事项
-
-1. **环境隔离**: 开发环境和生产环境使用不同的数据卷，确保数据隔离
-2. **密码安全**: 生产环境部署前务必设置强密码，不要使用默认密码
-3. **SECRET_KEY**: 生产环境必须在 `.env.prod` 中设置强密钥，否则后端容器启动失败
-4. **数据卷管理**: 使用 `docker-compose down -v` 会删除数据卷，**谨慎操作**
-5. **模型下载**: 首次运行需要下载 Ollama 模型，可能需要较长时间
-6. **模型拉取**: 首次运行前请在宿主机执行 `ollama pull bge-m3:latest`、`ollama pull qwen3:4b` 与 `ollama pull qwen2.5:3b-instruct`，耗时较长；重排序模型 `BAAI/bge-reranker-base` 不走 Ollama——由 sentence_transformers 从 `HF_HOME`（容器内挂载卷）的离线缓存加载，离线部署请先用支持网络的环境预热该缓存
-7. **内存要求**: 建议至少 8GB 内存，模型越大需要内存越多
-8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8080, 9002, 9003, 19531, 9092, 3001, 9094, 9095；前端 8080 绑定 0.0.0.0，其余均仅绑定回环地址。前端容器内监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）
-9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
-10. **联网搜索稳定性**: 联网搜索默认走 Tavily 在线 API，需在 `SEARCH_API_KEY` 配置有效的 Key；如遇网络或配额限制可切换其它 provider
-11. **公网多租户边界**: SEC-1~5 已完成；SEC P2（实验/通知隔离、SSRF fail-closed、JWT 吊销、缓存索引、live/ready、账号导出/注销与日志脱敏、传输层 IP 固定、镜像 digest、日志保留期、覆盖率 65）与 SEC P3（CSP/HSTS、评估配额、分页/批量上限、ToolGuard DNS fail-closed）已完成；公网多租户仍请按受控网络 + 最小权限运营，详见 [安全与多租户加固](docs/design/security-multitenancy-hardening-2026-10.md)
-
-### 环境启停
-
-两套环境端口与数据卷完全隔离，**可同时运行**，无需切换；按需独立启停即可：
-
-```bash
-# 开发环境（compose project: rag-dev）
-# Windows PowerShell 7 (推荐):  .\scripts\start-dev.ps1 / .\scripts\stop-dev.ps1
-# Windows Batch:                .\scripts\start-dev.bat / .\scripts\stop-dev.bat
-# Linux/Mac:                    ./scripts/start-dev.sh / ./scripts/stop-dev.sh
-
-# 生产环境（compose project: rag-prod）
-# Windows PowerShell 7 (推荐):  .\scripts\start-prod.ps1 / .\scripts\stop-prod.ps1
-# Windows Batch:                .\scripts\start-prod.bat / .\scripts\stop-prod.bat
-# Linux/Mac:                    ./scripts/start-prod.sh / ./scripts/stop-prod.sh
-```
-
-> 💡 提示：
-> 1. 生产栈基础设施端口仅绑定 127.0.0.1 回环地址，与开发栈常规端口互不冲突
-> 2. 停止脚本（不带 `-Clean` / `--clean`）只停容器，数据卷保留
-> 3. 数据如有需要可提前备份
-
----
-
-## 📞 支持
-
-如有问题，请提交 Issue 或联系开发团队。
+这是个人实践项目，没有对外贡献流程。如果要用它：先读「边界」与结项说明 §4 的负面结论，
+别在已经被证否的方向上重做一遍。分支与合并、代码约定的历史记录见
+[docs/archive/README-dev-2026-11-07.md](docs/archive/README-dev-2026-11-07.md) 与
+[docs/guide/development.md](docs/guide/development.md)。
