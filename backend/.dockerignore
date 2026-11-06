@@ -40,6 +40,11 @@ service-account.json
 # =============== Data / Logs ===============
 data/**
 !data/.gitkeep
+# NLTK 语料必须进镜像（4.4MB）：nltk 3.9+ 的 pathsec.ENFORCE 拒绝读取「组/他人可写」
+# 的数据目录，而开发栈挂进来的 ./backend/data 在容器里是 777，导致 stopwords 加载失败
+# → BM25 稀疏向量缺失 → 上传文档直接 failed。镜像内副本权限可控。
+!data/nltk_data/
+!data/nltk_data/**
 logs/
 *.log
 *.log.*

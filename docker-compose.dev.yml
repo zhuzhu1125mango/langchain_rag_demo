@@ -148,6 +148,13 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       MINIO_ENDPOINT: minio:9000
+      # 凭据与 minio 服务同源（2026-11-07 修）：
+      # .env.dev 里给 minio 容器的是 MINIO_ROOT_USER/ROOT_PASSWORD，给后端的是
+      # MINIO_ACCESS_KEY/SECRET_KEY；两份历史上不一致时，后端能连上端口却拿到
+      # `InvalidAccessKeyId`，表现为 /health/ready 503、上传/删除全挂。
+      # 这里显式绑定到 minio 容器实际使用的那对变量，只留一个事实来源。
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       MILVUS_HOST: milvus-standalone
       MILVUS_PORT: "19530"
       REDIS_HOST: redis
@@ -156,7 +163,7 @@ services:
       TRUSTED_PROXY_CIDRS: "172.16.0.0/12,127.0.0.1/32,::1/128"
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问本地 Ollama
       SKIP_OLLAMA_CHECK: "true"
-      NLTK_DATA: /app/data/nltk_data                   # nltk 语料离线目录（BM25 中文分词依赖 stopwords）
+      NLTK_DATA: /opt/nltk_data                        # 镜像内副本（权限私有）；挂载目录在容器里是 777，NLTK 会拒绝读取
       HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
       HF_HUB_OFFLINE: "1"                              # 容器内强制离线用缓存
       TRANSFORMERS_OFFLINE: "1"

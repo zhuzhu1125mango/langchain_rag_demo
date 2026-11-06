@@ -29,7 +29,7 @@
 | 定型 | **工程化参考实现**，不是产品：无真实用户、无 SLA、无采购方 |
 | 测试 | 后端 **1691 passed / 117 skipped**；前端 154 passed；CI **7/7 绿** |
 | 生产 | 11 容器全 healthy、`/health/ready` 四项 ok、OpenAPI **117** 条路由 |
-| 运维链路 | 备份/恢复/回滚四类演练 + 规模 RTO + 夜间性能门禁，全部有脚本、有实测数字 |
+| 运维链路 | 备份/恢复/回滚/删除链五类演练 + 规模 RTO + 夜间性能门禁，全部有脚本、有实测数字 |
 | 未做 | 多租户/SSO、真 HA、桌面端、企业级压测（详见「边界」与结项说明 §3） |
 
 **「企业级」一词仍然冻结**：三条门槛只过了两条（恢复演练 ✅、≥50 题标注集 ✅ 90 题），
@@ -88,6 +88,9 @@ cd .. && ./scripts/restore_drill.sh          # PostgreSQL 恢复（29 表 / 6s�
 ./scripts/restore_drill_milvus.sh             # Milvus 恢复（dense+sparse 双索引）
 ./scripts/rollback_drill.sh                   # 回滚到上一版镜像（含前端与「生成中停机」）
 ./scripts/scale_rto_drill.sh MODE=pg          # 真实规模 RTO（默认 1 万文档 / 20 万 trace）
+# 删除链：自建自删一个知识库，断言 PG/Milvus/MinIO/Redis 四处零残留
+# 需要开发栈在跑（./scripts/start-dev.sh）+ 宿主 Ollama；环境不具备时退出码 3，不算通过
+./scripts/delete_drill.sh
 ```
 
 `consistency_audit.py` 的退出码是刻意的：**0=一致、1=有差异、2=巡检没跑成**。
@@ -242,6 +245,7 @@ langchain_rag_demo/
 | 日志 | `logs-dev.* / logs-prod.*` | 实时日志，可指定服务 |
 | 备份恢复 | `backup.sh` / `restore.sh` | PG + MinIO；容器模式降级（宿主机无客户端时借容器） |
 | 演练 | `restore_drill*.sh` / `rollback_drill.sh` | 恢复（PG / MinIO / Milvus）与回滚，隔离实例、自动清理 |
+| 删除链 | `delete_drill.sh` | 自建自删一个 KB，断言 PG/Milvus/MinIO/Redis 四处零残留；退出码 0/1/3 = 干净/残留/没跑 |
 | 规模 | `scale_rto_drill.sh MODE=pg\|milvus\|minio\|all` | 万级数据量 RTO |
 | 评测 | `backend/scripts/run_eval.py`、`perf_suite.py`、`probe_retrieval_stages.py` | 检索质量、性能门禁、逐级探针 |
 | 对账 | `backend/scripts/consistency_audit.py` | 三方一致性，只读 |

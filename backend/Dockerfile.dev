@@ -35,6 +35,16 @@ ENV PATH="/app/.venv/bin:$PATH"
 # 复制项目代码（开发环境主要靠卷挂载，此处复制保证镜像可独立运行）
 COPY . .
 
+# NLTK 语料另存一份到镜像内并收紧权限（2026-11-07 修）：
+# nltk 3.9+ 的 pathsec.ENFORCE 会拒绝读取「组可写/他人可写」的数据目录
+# （`NLTK will not read data from ...: make it private to its owner`）。
+# 开发栈把 ./backend/data 挂进容器，Windows 上映射出来的权限是 777，
+# 于是 corpora/stopwords 永远加载失败 → BM25 稀疏向量缺失 → 上传文档直接 failed。
+# 镜像内的副本权限可控，NLTK_DATA 由 compose 指到 /opt/nltk_data。
+RUN mkdir -p /opt/nltk_data \
+    && cp -r /app/data/nltk_data/. /opt/nltk_data/ \
+    && chmod -R go-w /opt/nltk_data
+
 ENV PYTHONPATH=/app
 
 EXPOSE 8000

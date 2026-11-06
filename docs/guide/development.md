@@ -142,6 +142,9 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 18. **新增外部 Provider 依赖**：P1 引入 `langchain-openai`（OpenAI-Compatible 适配），拉代码后必须 `uv sync --frozen`；registry 单测全部 mock，不联网。`agent_decision` 主模型未声明 `tools` 会 apply 校验 400；`route.reasoning=native` 而主模型未声明 `reasoning` 仅告警，不阻断应用
 19. **熔断/用量是进程内状态**：Provider 连续失败 3 次会熔断 60s，跳过后自动走 fallback；断言“模型不可用”类测试记得重置 `provider_health`（`tests/test_model_health.py` 已用 autouse fixture）。`GET /api/admin/models/usage` 的用量和熔断状态在应用 registry/重启后清零，不做持久化；调试时先看 `health` 再判断是否为网络问题
 20. **流式 Token 可能为 0**：非流式调用可从 `usage_metadata` / Ollama `prompt_eval_count` 取值；流式调用只有 Provider 在末尾分片返回用量时才有值，ChatOpenAI 未开启 `stream_usage` 时可能缺失，不应据此判断计费
+21. **dev 栈 NLTK 语料必须来自镜像内副本**：nltk 3.9+ 的 `pathsec.ENFORCE` 会拒绝读取「组/他人可写」的数据目录，而 Windows 上挂进容器的 `./backend/data` 权限是 777 → `stopwords` 加载失败 → BM25 稀疏向量缺失 → `DataNotMatchException: Insert missed an field sparse_embedding` → **上传文档直接 failed**。语料已固化到镜像内 `/opt/nltk_data`（`chmod -R go-w`），`NLTK_DATA` 指向那里；`.dockerignore` 里 `data/**` 必须放行 `data/nltk_data`，否则构建时那段 COPY/`cp` 会失败
+22. **dev 栈 MinIO 有两套凭据变量**：`.env.dev` 同时存在给 minio 容器的 `MINIO_ROOT_USER/PASSWORD` 和给后端的 `MINIO_ACCESS_KEY/SECRET_KEY`；两者不一致时后端能连上 9000 但返回 `InvalidAccessKeyId`，表现是 `/health/ready` 503、上传与删除全挂。compose 已把后端凭据显式绑定到 `${MINIO_ROOT_*}`；改凭据后 minio 与 backend 两个容器都要重建（旧容器不会因 env 变化自动更新）
+23. **`/health/ready` 从站点侧探是假绿**：nginx 只代理 `/api/`，`GET :8080/health/ready` 会落到 SPA 的 `try_files` 返回 `index.html`（HTTP 200），`/api/health/ready` 是 404。判断后端是否真健康只能看容器 healthcheck（容器内 `127.0.0.1:8000`）或直连后端端口
 
 ## 5. 代码约定
 
