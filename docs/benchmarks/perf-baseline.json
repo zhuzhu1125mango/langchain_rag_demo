@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "由 scripts/perf_suite.py --update-baseline 生成",
+  "note": "由 scripts/perf_suite.py --update-baseline 生成；ci 档来自 GitHub Actions run 42172489784（ubuntu-latest / 4 vCPU）",
   "counters": {
     "rrf_channel_items": 150,
     "rrf_fused_items": 60,
@@ -27,6 +27,26 @@
         "min_ms": 0.268,
         "median_ms": 0.327,
         "p95_ms": 0.344,
+        "samples": 5
+      }
+    },
+    "ci": {
+      "rrf_fusion": {
+        "min_ms": 0.077,
+        "median_ms": 0.079,
+        "p95_ms": 0.092,
+        "samples": 300
+      },
+      "markdown_chunking": {
+        "min_ms": 3.49,
+        "median_ms": 3.52,
+        "p95_ms": 4.17,
+        "samples": 20
+      },
+      "bm25_query": {
+        "min_ms": 0.212,
+        "median_ms": 0.214,
+        "p95_ms": 0.221,
         "samples": 5
       }
     }
