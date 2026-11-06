@@ -126,7 +126,7 @@ run_preflight_checks() {
         log_ok "配置文件 $ENV_FILE 存在"
     else
         # 首次运行自动生成：全新 clone 里没有 .env.dev（.gitignore 排除 .env*），
-        # 而 README 承诺「10 分钟上手」——让用户自己去凑 184 个键，这个承诺就不成立。
+        # 而 README 承诺「10 分钟上手」——让用户自己去凑 189 个键，这个承诺就不成立。
         # 只有 dev 这么干：生产必须由人显式配置强密码，脚本不替它猜。
         EXAMPLE_FILE="$SCRIPT_DIR/../.env.example"
         if [[ ! -f "$EXAMPLE_FILE" ]]; then

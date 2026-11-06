@@ -25,12 +25,17 @@
 - `IS_PRODUCTION` 决定启动强校验（强密钥/凭据非空）：容器内由 `IN_DOCKER=true` 推断为生产；
   非 Docker 的生产部署（裸跑 uvicorn/systemd）必须显式设置 `APP_ENV=prod`（兼容旧值 `production`），否则不执行强校验
 
-> ⚠️ 写 env 文件时注意两个坑（`scripts/check_env_consistency.py` 会校验，CI 里跑）：
+> ⚠️ 写 env 文件时注意两件事（`scripts/check_env_consistency.py` 的校验 D / E 会拦，CI 里跑）：
 >
-> 1. **`KEY=` 后面不能跟行内注释**。pydantic-settings 取值时先尝试 JSON 解码，
->    `MINIO_ACCESS_KEY=  # 必须手动设置！` 会被当成整段字符串（注释也进去了）。
->    注释要单独写一行，放在键上方。
-> 2. **含 `${VAR}` 插值的键不能带注释**，插值解析会被注释截断。
+> 1. **空值后面不能跟行内注释**（`KEY=    # 说明`）。compose 的 `env_file` 解析**不**剥行内注释，
+>    会把 `# 说明` 当值注入容器，pydantic 抛 `int_parsing`，后端启动即退出——
+>    这时候 config 默认值和 field_validator 都救不了，值压根到不了校验层。
+>    注释要挪到上一行，本行只留 `KEY=`。
+>    （**非空值**带行内注释是允许的：本模板里大量这么写，如 `CHUNK_SIZE=512  # 注释`。）
+> 2. **被 compose `${VAR}` 插值的键不能带行内注释**。两套解析器行为不同：
+>    compose `--env-file` 插值**不**剥注释、容器 `env_file:` 注入**会**剥，
+>    于是同一个变量两端取到不同的值（如 `dev_minio    # 管理员账号` vs `dev_minio`），
+>    表现为 MinIO 凭据不匹配、`/health/ready` 直接 503，而容器状态还是 healthy。
 
 ### 1.3 环境差异对照
 
@@ -107,10 +112,15 @@ MILVUS_REBUILD_ON_MISMATCH=false
 
 ## 3. 核心配置参数
 
+> **「默认值」一列的口径**：有代码默认值的项填 `backend/src/config.py` 里的默认值；
+> 必须由 env 提供、代码里为 `None`/不设默认的项（模型名、凭据、Provider 选择）
+> 填 `.env.example` 里的**开发栈取值**——这类项写代码默认值只会误导。
+> 两者不一致时在「说明」列注明。
+
 | 参数 | 说明 | 默认值 | 范围 |
 |------|------|--------|------|
-| `CHUNK_SIZE` | 文本分割大小（字符数） | 500 | 50-5000 |
-| `CHUNK_OVERLAP` | 分割重叠大小 | 50 | ≥0 且 < `CHUNK_SIZE` |
+| `CHUNK_SIZE` | 文本分割大小（字符数） | 512 | 50-5000 |
+| `CHUNK_OVERLAP` | 分割重叠大小 | 64 | ≥0 且 < `CHUNK_SIZE` |
 | `TOP_K` | 检索文档数量 | 3 | 1-20 |
 | `POSTGRES_PORT` | 数据库端口 | 5433（本地）/ 5432（容器内） | - |
 | `MINIO_ROOT_USER` | MinIO 管理员账号 | - | - |
@@ -118,7 +128,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `MINIO_ACCESS_KEY` | 后端连接 MinIO 的 Access Key | - | 须与 `MINIO_ROOT_USER` 一致 |
 | `MINIO_SECRET_KEY` | 后端连接 MinIO 的 Secret Key | - | 须与 `MINIO_ROOT_PASSWORD` 一致 |
 | `MINIO_BUCKET_NAME` | MinIO 存储桶名称 | `documents` | - |
-| `MINIO_SECURE` | 是否启用 HTTPS | `false` | true/false |
+| `MINIO_SECURE` | 是否启用 HTTPS | `false` | true/false；**代码默认 `true`**（生产模式），内网 compose 显式设 `false` |
 | `SECRET_KEY` | JWT/安全签名密钥 | 无（开发缺失时启动自动生成临时密钥） | 生产环境必须设置为强密钥，否则启动失败 |
 | `AUTH_ALLOW_REGISTRATION` | 是否开放注册 | `true`（开发） | 生产建议 `false`；生产为 true 且未显式确认时拒绝启动 |
 | `ALLOW_OPEN_REGISTRATION_IN_PROD` | 生产显式允许开放注册 | `false` | 仅确需开放注册时设 true |
@@ -151,9 +161,9 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `EMBEDDING_DIMENSION` | Embedding 向量维度 | `1024` | 需与 `EMBEDDING_MODEL_NAME` 对应 |
 | `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:3b-instruct` | 意图路由/标题/Query 改写；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致 |
 | `KB_RERANK_MODEL` | 知识库重排模型 | `BAAI/bge-reranker-base` | sentence_transformers 从 HF_HOME 离线缓存加载 |
-| `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
+| `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama`；**代码默认 `ollama`**，开发栈用前者（本地离线加载，免走 Ollama） |
 | `SEARCH_RERANK_MODEL` | 搜索重排模型 | `BAAI/bge-reranker-base` | 同上 |
-| `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama` |
+| `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama`；**代码默认 `ollama`**，开发栈用前者 |
 | `SEARCH_RERANK_TOP_K` | 重排后返回 Top-K | 5 | - |
 | `SEARCH_CACHE_TTL` | 搜索结果缓存时间（秒） | 3600 | - |
 | `SEARCH_CONTENT_CACHE_TTL` | 网页内容缓存时间（秒） | 86400 | - |

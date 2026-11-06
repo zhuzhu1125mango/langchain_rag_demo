@@ -1,6 +1,6 @@
 # 知澜 · 一个把「可验证」做进 RAG 的知识库（开发向 README，已归档）
 
-> **这是 2026-11-07 结项前的 README 全文（1108 行），只读封存。**
+> **这是 2026-11-07 结项前的 README 全文（正文 1108 行，本文件另加了 7 行归档抬头），只读封存。**
 >
 > 当前 README 已改为结项版（[../../README.md](../../README.md)，285 行）：只留定位、上手、验证、
 > 数字速览与边界。这里保留的是**开发向**的完整内容——三种启动方式的逐步说明、脚本参数、
@@ -71,7 +71,7 @@ uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出�
 `consistency_audit.py` 的退出码是刻意的：**0=一致、1=有差异、2=巡检没跑成**。
 某一侧采集失败时它不会打印「未发现差异」——假阴性比不巡检更危险。
 
-检索指标同样给数字而不是形容词，报告见 [docs/benchmarks/](docs/benchmarks/)：
+检索指标同样给数字而不是形容词，报告见 [docs/benchmarks/](../benchmarks/)：
 90 道题里 11 道没命中，**全部是口语化问法**（「出去玩几天」 vs 文档里的「请假」）；制度题与产品参数题 100% 命中；
 同数据集上稠密单通道 hit@5 = 0.953、RRF 混合 = 0.891、加 `bge-reranker-base` 重排 = 0.922 ——
 **生产默认的混合+重排，在这份语料上打不过不融合的稠密单通道**。这些都是量出来的，不是猜的。
@@ -222,7 +222,7 @@ SEARCH_RERANK_MODEL=BAAI/bge-reranker-base
 - **故障隔离与成本（P2.1）**：同一 Provider 连续失败 3 次自动熔断 60s，期间直接走 fallback，冷却后自动半开探测；模型可配置每 1K tokens 输入/输出单价与币种，设置页「模型服务」直接查看最近 7/30/90 天调用数、失败、Token、平均延迟、估算成本与未定价次数；用量按天落库到 `model_usage_daily`，重启不丢已落库数据。管理员也可调用 `GET /api/admin/models/usage?days=7`。
 - **Embedding 迁移（P3）**：Embedding 模型/维度以 registry 为权威；切换后在设置页「向量索引 / Embedding」重建，系统会用新模型重新向量化全部切片、原子切换并保留旧索引备份，失败自动保留线上索引，可一键回滚；重建完成自动应用新配置并失效语义缓存。可选 `rerank` 路由支持 Ollama 托管重排序模型热切换。
 - **Embedding 不能热切**：切换模型/维度必须重建 Milvus 索引（设置页已提供重建与回滚）；重建完成前历史向量与新查询不可比。
-- 完整配置格式、API 与回滚见 [design/model-provider-registry-2026-10.md](docs/design/model-provider-registry-2026-10.md) 与 [deployment.md §6.3.2](docs/guide/deployment.md)。
+- 完整配置格式、API 与回滚见 [design/model-provider-registry-2026-10.md](../design/model-provider-registry-2026-10.md) 与 [deployment.md §6.3.2](../guide/deployment.md)。
 
 ---
 
@@ -1026,23 +1026,23 @@ docker exec -it postgres-dev psql -U dev_user -d app_dev -c "SELECT 1"
 
 ## 📖 文档
 
-文档索引见 [docs/README.md](docs/README.md)。结构：核心参考（architecture / api）置于顶层，操作指南归入 `guide/`，设计文档归入 `design/`，一次性报告归入 `archive/`。
+文档索引见 [docs/README.md](../README.md)。结构：核心参考（architecture / api）置于顶层，操作指南归入 `guide/`，设计文档归入 `design/`，一次性报告归入 `archive/`。
 
 | 文档 | 说明 | 路径 |
 |------|------|------|
-| 架构总览 | 服务拓扑、RAG 决策管线、代码地图 | [docs/architecture.md](docs/architecture.md) |
-| API 文档 | 完整的 API 接口说明 | [docs/api.md](docs/api.md) |
-| 部署指南 | 开发/生产环境部署说明 | [docs/guide/deployment.md](docs/guide/deployment.md) |
-| 开发与测试指南 | 本地开发、测试执行、CI 说明、踩坑记录 | [docs/guide/development.md](docs/guide/development.md) |
-| 监控运维指南 | 监控栈使用、指标说明、告警规则与处置 | [docs/guide/monitoring.md](docs/guide/monitoring.md) |
-| 运维 Runbook | 备份/恢复/回滚矩阵、容量模型与扩容阈值、季度演练（OPS-1） | [docs/guide/backup-restore.md](docs/guide/backup-restore.md) |
-| 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](docs/project-status.md) |
-| 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](docs/design/improvement-roadmap.md) |
-| 全项目演进路线 | 2026-10 对标审计：标配/差异化/避免、UX/视觉/代码/运维差距与三批执行序 | [docs/design/evolution-roadmap-2026-10.md](docs/design/evolution-roadmap-2026-10.md) |
-| 安全与多租户加固 | SEC-1~21 加固方案、验收与实施记录（P1/P2/P3 全部完成） | [docs/design/security-multitenancy-hardening-2026-10.md](docs/design/security-multitenancy-hardening-2026-10.md) |
-| UI 视觉收口 | VIS-3 调研结论、设计方向与实施记录（8px 网格/聊天主列/弹窗下拉） | [docs/design/ui-visual-polish-2026-10.md](docs/design/ui-visual-polish-2026-10.md) |
+| 架构总览 | 服务拓扑、RAG 决策管线、代码地图 | [docs/architecture.md](../architecture.md) |
+| API 文档 | 完整的 API 接口说明 | [docs/api.md](../api.md) |
+| 部署指南 | 开发/生产环境部署说明 | [docs/guide/deployment.md](../guide/deployment.md) |
+| 开发与测试指南 | 本地开发、测试执行、CI 说明、踩坑记录 | [docs/guide/development.md](../guide/development.md) |
+| 监控运维指南 | 监控栈使用、指标说明、告警规则与处置 | [docs/guide/monitoring.md](../guide/monitoring.md) |
+| 运维 Runbook | 备份/恢复/回滚矩阵、容量模型与扩容阈值、季度演练（OPS-1） | [docs/guide/backup-restore.md](../guide/backup-restore.md) |
+| 项目状态台账 | 已完成 / 剩余待办 / 阻塞项 / 关键红线（跨专项唯一台账） | [docs/project-status.md](../project-status.md) |
+| 优化路线图 | 后续完善与优化执行计划 | [docs/design/improvement-roadmap.md](../design/improvement-roadmap.md) |
+| 全项目演进路线 | 2026-10 对标审计：标配/差异化/避免、UX/视觉/代码/运维差距与三批执行序 | [docs/design/evolution-roadmap-2026-10.md](../design/evolution-roadmap-2026-10.md) |
+| 安全与多租户加固 | SEC-1~21 加固方案、验收与实施记录（P1/P2/P3 全部完成） | [docs/design/security-multitenancy-hardening-2026-10.md](../design/security-multitenancy-hardening-2026-10.md) |
+| UI 视觉收口 | VIS-3 调研结论、设计方向与实施记录（8px 网格/聊天主列/弹窗下拉） | [docs/design/ui-visual-polish-2026-10.md](../design/ui-visual-polish-2026-10.md) |
 | 专项设计文档 | 检索增强/意图路由/搜索优化等设计 | `docs/design/` |
-| 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](docs/archive/code-review-2026-08.md) |
+| 代码审查报告（已归档） | 历史审查与修复记录 | [docs/archive/code-review-2026-08.md](../archive/code-review-2026-08.md) |
 | 快速开始 | 项目入门指南 | 本文件 |
 
 ---
@@ -1085,7 +1085,7 @@ feature/* → Pull Request → CI 全绿 → squash merge 到 main
 8. **端口冲突**: 确保端口未被占用 —— 开发栈（5433, 6379, 8000, 9000, 9001, 19530, 9091, 3000, 9090, 5173）与生产栈（5434, 6380, 8001, 8080, 9002, 9003, 19531, 9092, 3001, 9094, 9095；前端 8080 绑定 0.0.0.0，其余均仅绑定回环地址。前端容器内监听 8080，因宿主 80 被外部服务占用而改绑宿主 8080）
 9. **双栈并存**: 开发/生产环境端口与数据卷完全隔离，可同时运行，无需切换
 10. **联网搜索稳定性**: 联网搜索默认走 Tavily 在线 API，需在 `SEARCH_API_KEY` 配置有效的 Key；如遇网络或配额限制可切换其它 provider
-11. **公网多租户边界**: SEC-1~5 已完成；SEC P2（实验/通知隔离、SSRF fail-closed、JWT 吊销、缓存索引、live/ready、账号导出/注销与日志脱敏、传输层 IP 固定、镜像 digest、日志保留期、覆盖率 65）与 SEC P3（CSP/HSTS、评估配额、分页/批量上限、ToolGuard DNS fail-closed）已完成；公网多租户仍请按受控网络 + 最小权限运营，详见 [安全与多租户加固](docs/design/security-multitenancy-hardening-2026-10.md)
+11. **公网多租户边界**: SEC-1~5 已完成；SEC P2（实验/通知隔离、SSRF fail-closed、JWT 吊销、缓存索引、live/ready、账号导出/注销与日志脱敏、传输层 IP 固定、镜像 digest、日志保留期、覆盖率 65）与 SEC P3（CSP/HSTS、评估配额、分页/批量上限、ToolGuard DNS fail-closed）已完成；公网多租户仍请按受控网络 + 最小权限运营，详见 [安全与多租户加固](../design/security-multitenancy-hardening-2026-10.md)
 
 ### 环境启停
 
