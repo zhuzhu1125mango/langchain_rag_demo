@@ -4,7 +4,7 @@
 定义聊天会话数据模型，用于存储会话历史和上下文信息
 """
 
-from sqlalchemy import Column, String, DateTime, JSON, UUID
+from sqlalchemy import Column, String, DateTime, Index, JSON, UUID, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 import uuid
@@ -20,7 +20,13 @@ class Session(Base):
     """
     
     __tablename__ = "sessions"
-    
+
+    # 会话列表热路径：WHERE user_id = ? ORDER BY updated_at DESC。
+    # 必须与 alembic 迁移 e6f7a8b9c0d1 保持一致，否则 autogenerate 会一直报漂移。
+    __table_args__ = (
+        Index("ix_sessions_user_id_updated_at", "user_id", text("updated_at DESC")),
+    )
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)  # 会话唯一标识
     user_id = Column(String, nullable=False)                               # 用户标识
     title = Column(String)                                                # 会话标题

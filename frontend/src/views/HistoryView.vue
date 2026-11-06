@@ -8,7 +8,8 @@
         </div>
         <AppButton
           :variant="sessionsData?.length ? 'danger-ghost' : 'secondary'"
-          :disabled="!sessionsData?.length"
+          :disabled="!sessionsData?.length || deleting"
+          :loading="deleting"
           class="flex-shrink-0"
           @click="clearAllHistory"
         >
@@ -64,7 +65,7 @@
         </AppButton>
       </div>
       <p v-if="hasActiveFilters" class="mt-2 text-xs text-content-muted">
-        筛选出 {{ sessionsData?.length ?? 0 }} 条会话
+        已加载 {{ sessionsData?.length ?? 0 }} 条<template v-if="hasNextPage">（还有更多，可继续加载）</template>
         <span v-if="isFetching" class="ml-1">· 搜索中…</span>
       </p>
     </div>
@@ -103,6 +104,19 @@
             {{ session.last_message || '暂无消息' }}
           </div>
         </AppCard>
+      </div>
+
+      <!-- 分页：历史页只加载第一页，翻到最后一页的入口必须显式存在，
+           否则「超过 50 条的会话」又会变成隐形丢失（原来是被 100 条截断）。 -->
+      <div v-if="hasNextPage && sessionsData?.length" class="mt-4 flex justify-center">
+        <AppButton
+          variant="secondary"
+          :loading="isFetchingNextPage"
+          data-testid="history-load-more"
+          @click="loadMore"
+        >
+          加载更多
+        </AppButton>
       </div>
 
       <AppStateView
@@ -183,11 +197,12 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 import {
-  useSessions,
+  useInfiniteSessions,
   useDeleteSession,
   useBatchDeleteSessions,
   useUpdateSession,
-  exportSessionMarkdown
+  exportSessionMarkdown,
+  fetchAllSessionIds
 } from '@/queries/chat'
 import type { Session, SessionFilters } from '@/queries/chat'
 import { useKnowledgeBases } from '@/queries/kb'
@@ -229,7 +244,25 @@ const hasActiveFilters = computed(
   () => !!(debouncedKeyword.value.trim() || kbFilter.value || dateRange.value?.length)
 )
 
-const { data: sessionsData, isFetching } = useSessions(filters)
+const {
+  data: sessionsPages,
+  isFetching,
+  hasNextPage,
+  fetchNextPage,
+  isFetchingNextPage
+} = useInfiniteSessions(filters)
+
+/** 已加载的会话（把翻过的页摊平）：模板只关心「现在有哪些」。 */
+const sessionsData = computed<Session[]>(() =>
+  (sessionsPages.value?.pages ?? []).flatMap(page => page.items)
+)
+
+/** 加载下一页。失败由 vue-query 记录在查询状态里，这里只负责触发。 */
+function loadMore(): void {
+  if (isFetchingNextPage.value) return
+  fetchNextPage()
+}
+
 const { data: kbsData } = useKnowledgeBases()
 const kbOptions = computed(() => kbsData.value ?? [])
 
@@ -317,12 +350,39 @@ async function deleteSession(session: Session): Promise<void> {
   }
 }
 
-/** 二次确认后批量删除全部会话并清空选中状态，操作不可恢复。 */
+/** 批量删除单次上限，与后端 `BATCH_DELETE_MAX_IDS` 默认值一致。 */
+const BATCH_DELETE_CHUNK = 200
+
+/** 「读取全量 id → 确认 → 分批删除」期间的按钮 loading。 */
+const deleting = ref(false)
+
+/**
+ * 二次确认后删除「当前筛选条件下的全部会话」，而不只是已加载的那一页。
+ *
+ * 早期版本直接拿页面上已渲染的 id 去删：用户看到 50 条、点「删除筛选结果」，
+ * 未加载的部分还在库里——提示说删了、界面也空了，刷新后又冒出来。
+ * 现在先按同一套筛选条件取回全量 id，再分批提交（后端单次最多 200 个）。
+ */
 async function clearAllHistory(): Promise<void> {
-  // 筛选状态下删除的是「筛出来的那些」，提示必须如实说清范围，
+  if (deleting.value) return
+  deleting.value = true
+  let ids: string[] = []
+  try {
+    ids = await fetchAllSessionIds(filters.value)
+  } catch {
+    toast.error('读取待删除的会话失败，请重试')
+    return
+  } finally {
+    deleting.value = false
+  }
+  if (ids.length === 0) {
+    toast.info('没有可删除的会话')
+    return
+  }
+
+  // 筛选状态下删除的是「筛出来的那些」，提示必须如实说清范围与**真实条数**，
   // 否则用户以为只删一屏，实际删掉了全部历史。
-  const count = sessionsData.value?.length ?? 0
-  const scope = hasActiveFilters.value ? `筛选出的 ${count} 条` : `全部 ${count} 条`
+  const scope = hasActiveFilters.value ? `筛选出的 ${ids.length} 条` : `全部 ${ids.length} 条`
   try {
     await ElMessageBox.confirm(
       `确定要删除${scope}历史对话吗？此操作不可恢复。`,
@@ -332,10 +392,20 @@ async function clearAllHistory(): Promise<void> {
   } catch {
     return
   }
-  const ids = sessionsData.value?.map(s => s.id) || []
-  if (ids.length === 0) return
-  batchDeleteMutation.mutate(ids)
+
+  let deletedCount = 0
+  try {
+    for (let i = 0; i < ids.length; i += BATCH_DELETE_CHUNK) {
+      const res = await batchDeleteMutation.mutateAsync(ids.slice(i, i + BATCH_DELETE_CHUNK))
+      deletedCount += res.deleted_count
+    }
+  } catch {
+    // 中途失败要如实报「已删多少」，否则用户以为一条没删而重复点。
+    toast.error(`已删除 ${deletedCount} 条，其余失败，请重试`)
+    return
+  }
   selectedSession.value = null
+  toast.success(`已删除 ${deletedCount} 条对话`)
 }
 
 </script>

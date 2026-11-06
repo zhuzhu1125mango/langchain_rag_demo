@@ -1,6 +1,6 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import type { AxiosResponse } from 'axios'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/vue-query'
 import { api } from '@/utils/axios'
 import { useAppStore } from '@/stores/app'
 
@@ -158,6 +158,9 @@ function compactFilters(filters?: SessionFilters): Record<string, string> {
  *
  * `filters` 传响应式值时，筛选条件会进 queryKey——否则改了筛选命中缓存，
  * 界面会一直显示上一次的结果。
+ *
+ * 注意：这里固定返回「最近一页」，供侧边栏这类只关心最近几条的场景使用；
+ * 需要翻完整个历史请用 `useInfiniteSessions`（历史页）。
  */
 export function useSessions(filters?: MaybeRefOrGetter<SessionFilters | undefined>) {
   const appStore = useAppStore()
@@ -171,6 +174,82 @@ export function useSessions(filters?: MaybeRefOrGetter<SessionFilters | undefine
     staleTime: 5 * 60 * 1000,
     enabled: computed(() => !!appStore.currentUser)
   })
+}
+
+/** 历史页每页条数：首屏等待与翻页次数的折中（后端默认 100，前端主动收窄）。 */
+export const SESSIONS_PAGE_SIZE = 50
+
+/** 列表接口单页上限，与后端 `SESSION_LIST_MAX_LIMIT` 保持一致。 */
+export const SESSIONS_MAX_LIMIT = 500
+
+/** 一页会话；`hasMore` 只按「本页是否装满」推断，避免额外一次 COUNT 查询。 */
+export interface SessionsPage {
+  items: Session[]
+  hasMore: boolean
+  nextOffset: number
+}
+
+/**
+ * 由一页数据算出「是否还有下一页」与下一页偏移。
+ *
+ * 抽成纯函数是为了能直接测：这里的判定错了不会报错，只会表现为
+ * 「加载更多按钮消失」或「一直请求同一页」，都是最难从界面上看出来的故障。
+ */
+export function buildSessionsPage(
+  items: Session[],
+  offset: number,
+  pageSize = SESSIONS_PAGE_SIZE
+): SessionsPage {
+  return { items, hasMore: items.length === pageSize, nextOffset: offset + items.length }
+}
+
+/**
+ * 分页获取会话列表（历史页用）。
+ *
+ * queryKey 里带的是**筛选条件**而不是页码：页码由 vue-query 的 pageParam 管理。
+ * 这样切换筛选就自然得到一条全新的无限查询（从第一页开始），
+ * 不会出现「筛选变了但仍停留在第 3 页、显示空列表」。
+ */
+export function useInfiniteSessions(filters?: MaybeRefOrGetter<SessionFilters | undefined>) {
+  const appStore = useAppStore()
+  const params = computed(() => compactFilters(toValue(filters)))
+  return useInfiniteQuery({
+    queryKey: computed(() => ['sessions', 'infinite', params.value]),
+    queryFn: async ({ pageParam }): Promise<SessionsPage> => {
+      const items = await api.get<Session[]>('/sessions/', {
+        params: { ...params.value, skip: pageParam, limit: SESSIONS_PAGE_SIZE }
+      })
+      return buildSessionsPage(items, pageParam)
+    },
+    initialPageParam: 0,
+    getNextPageParam: (last) => (last.hasMore ? last.nextOffset : undefined),
+    staleTime: 5 * 60 * 1000,
+    enabled: computed(() => !!appStore.currentUser)
+  })
+}
+
+/**
+ * 取回「当前筛选条件下的全部会话 id」。
+ *
+ * 批量删除不能只作用于已加载的那一页——否则用户点「删除筛选结果」，
+ * 界面清空了，下次刷新又冒出来一半。这里按接口上限翻页，直到取完。
+ *
+ * `maxPages` 是防呆上限（40 × 500 = 2 万条），避免后端 hasMore 判定异常时死循环。
+ */
+export async function fetchAllSessionIds(
+  filters?: SessionFilters,
+  maxPages = 40
+): Promise<string[]> {
+  const params = compactFilters(filters)
+  const ids: string[] = []
+  for (let page = 0; page < maxPages; page += 1) {
+    const items = await api.get<Session[]>('/sessions/', {
+      params: { ...params, skip: page * SESSIONS_MAX_LIMIT, limit: SESSIONS_MAX_LIMIT }
+    })
+    ids.push(...items.map(item => item.id))
+    if (items.length < SESSIONS_MAX_LIMIT) break
+  }
+  return ids
 }
 
 /**
