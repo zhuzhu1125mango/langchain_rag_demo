@@ -107,6 +107,29 @@
 > 生产脚本**始终**带监控：告警链路是值班依赖，不能因为「默认精简」而静默消失。
 > 手工在生产执行 `docker compose up -d` 会得到 7 个服务 —— 已在运行中的监控容器不会被动停止，> 但重建栈时（如换机器）需显式加 `--profile monitoring`。
 
+### 2.2.1a 只换一个服务时的坑：前端可能停在 `Created`
+
+`docker compose up -d backend frontend` 会在重建后**按 `depends_on` 顺序**启动：
+frontend 依赖 `backend: condition: service_healthy`。后端冷启动要加载 embedding 模型
+（27~48s），一旦超出 compose 的等待窗口，命令会以
+`dependency failed to start: container backend-prod is unhealthy` 退出，
+**frontend 此时状态是 `Created`（等于没起来）**——站点直接 404，但后端是好的，
+`/health/ready` 也正常，很容易被误判成「部署成功」。
+
+2026-11-07 部署 UX-5 时就这样踩了一次：后端 healthy、站点空了一分钟。
+
+所以换前端/后端后，**必须显式确认两个容器都是 Up**，别只看 compose 的退出信息：
+
+```bash
+docker ps --format '{{.Names}}\t{{.Status}}' | grep -E 'backend-prod|frontend-prod'
+# frontend 若显示 Created，补一条（后端此时已 healthy，不会再等）：
+docker compose -f docker-compose.yml --env-file .env.prod up -d frontend
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/
+```
+
+只改后端时可以只重建 backend；**前端也必须验一次** `GET /` 200 + 静态资源 200，
+因为「后端健康」不等于「用户能打开页面」。
+
 ### 2.2.2 关机与升级语义（P0-4）
 
 `docker stop` / `compose up -d`（换镜像）/ 重启主机都会给后端发 SIGTERM。此前的行为是
