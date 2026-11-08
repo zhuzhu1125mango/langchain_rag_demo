@@ -41,7 +41,12 @@ def main(argv: list[str]) -> int:
     raw_path = _opt(argv, "--raw")
     read_delay = float(_opt(argv, "--read-delay") or 0)
 
-    body = json.dumps({"question": question, "kb_ids": [kb_id]}).encode()
+    payload = {"question": question}
+    # kb_id 留空表示「不限定知识库」——后端会走全库检索/直答。
+    # 早先无条件拼 ["",] 会被 UUID 校验直接拒掉，演练里只能硬编一个真实 kb。
+    if kb_id:
+        payload["kb_ids"] = [kb_id]
+    body = json.dumps(payload).encode()
     req = urllib.request.Request(
         base.rstrip("/") + "/api/chat/stream",
         data=body,

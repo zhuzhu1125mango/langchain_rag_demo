@@ -127,10 +127,16 @@ class KBRetrievalService:
                     try:
                         docs = await vector_store.search_dense(question, **search_kwargs)
                     except Exception as e2:
-                        # 两级检索都失败：本次问答必然无命中，必须留痕后上抛
+                        # 两级检索都失败：本次问答必然无命中，必须留痕后上抛。
+                        # severity 显式写 REPORTABLE，不能交给 classify_exception 按异常类型判：
+                        # pymilvus 的异常在分类器里属于「可恢复」（本意是单次抖动可重试），
+                        # 但这里两级都挂了、本次问答直接不可用，与异常类型无关。
+                        # 2026-11-07 故障演练（pause Milvus）实测：不显式指定时这条只打
+                        # WARNING + severity=recoverable 且不带堆栈，与单测结论相反。
                         log_exception(
                             logger, e2,
                             action="kb.retrieval.dense_fallback",
+                            severity=ErrorSeverity.REPORTABLE,
                             message="dense 兜底检索同样失败，本次检索无结果",
                         )
                         # P2-5：检索失败埋点（best-effort，埋点自身失败不阻断上抛）

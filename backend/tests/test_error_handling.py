@@ -332,6 +332,38 @@ class TestObservedDegradation:
         assert fatal and fatal[0].levelno == logging.ERROR
         assert "severity=reportable" in fatal[0].getMessage()
 
+    def test_dense_fallback_failure_is_reportable_even_for_pymilvus_exceptions(self, caplog):
+        """两级检索都失败时的分级不能取决于异常类型。
+
+        真实 Milvus 停机抛的是 pymilvus 的异常，而 pymilvus 在分类器里被归为
+        「可恢复」（本意是单次抖动可重试）。上一例用 RuntimeError 恰好判成
+        reportable，于是单测绿着、真实事故只打 warning 且不带堆栈——
+        2026-11-07 故障演练在真实 pause 场景下抓到的就是这个差异。
+        """
+        from src.services.kb_retrieval_service import KBRetrievalService
+
+        class _PymilvusDown(Exception):
+            """模拟 pymilvus 的连接类异常（按模块前缀会被判 recoverable）。"""
+
+        _PymilvusDown.__module__ = "pymilvus.exceptions"
+
+        class _Store:
+            async def search_hybrid(self, *args, **kwargs):
+                raise _PymilvusDown("fail to connect milvus")
+
+            async def search_dense(self, *args, **kwargs):
+                raise _PymilvusDown("fail to connect milvus")
+
+        service = KBRetrievalService(vector_store=_Store())
+        with caplog.at_level(logging.WARNING, logger="rag_system"):
+            with pytest.raises(_PymilvusDown):
+                asyncio.run(service.retrieve("q", kb_ids=["kb-1"]))
+
+        fatal = [r for r in caplog.records if "action=kb.retrieval.dense_fallback" in r.getMessage()]
+        assert fatal, "两级检索全挂必须留痕"
+        assert fatal[0].levelno == logging.ERROR
+        assert "severity=reportable" in fatal[0].getMessage()
+
 
 class TestNotificationAndWikiGrading:
     """第八批：WS 推送失败与 Wiki 空白基线降级的回归。"""

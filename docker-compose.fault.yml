@@ -1,0 +1,64 @@
+# 故障演练专用后端（`scripts/fault_drill.sh` 用）。
+#
+# 为什么不直接复用 backend-dev：
+#   1. 演练会反复重启它、改环境变量（坏 reranker）、临时注入代码 bug（--reload 触发），
+#      混在开发栈里会把「刚才那个 500 是我自己弄的」变成常态；
+#   2. 演练还会 `docker pause` Milvus，需要一个能确定自己观察到的后端实例；
+#   3. 用独立 project（-p drill）避免与 dev 栈的 service 记录冲突，
+#      容器不因 `compose -f docker-compose.dev.yml up` 被顺手重建。
+#
+# 依赖全部指向开发栈（同一 external 网络），所以不会另起 PG/Milvus/MinIO/Redis。
+#
+# 用法：
+#   docker compose -f docker-compose.fault.yml -p drill --env-file .env.dev up -d
+#   docker compose -f docker-compose.fault.yml -p drill down
+services:
+  backend:
+    # 与开发栈同一个镜像；缺失时按 Dockerfile.dev 构建（镜像被清掉也能自己起来）
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    image: rag-dev-backend:latest
+    container_name: fault-backend
+    env_file:
+      - .env.dev
+    environment:
+      APP_ENV: "dev"
+      IN_DOCKER: "true"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      MINIO_ENDPOINT: minio:9000
+      # 与 minio 容器同一份凭据：.env.dev 里 MINIO_ACCESS_KEY 与 MINIO_ROOT_USER
+      # 是两套值，直接用后者的插值，避免 InvalidAccessKeyId。
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MILVUS_HOST: milvus-standalone
+      MILVUS_PORT: "19530"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      OLLAMA_HOST: host.docker.internal
+      SKIP_OLLAMA_CHECK: "true"
+      NLTK_DATA: /opt/nltk_data
+      HF_HOME: /app/data/model_cache/huggingface
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TRUSTED_PROXY_CIDRS: "172.16.0.0/12,127.0.0.1/32,::1/128"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+      - /app/.venv
+      - ./backend/data:/app/data
+      - ./backend/logs:/app/logs
+    networks:
+      - monitoring
+    restart: "no"
+    ports:
+      # 8001 会被某些残留端口映射占住（Windows 上 netstat 还看不到占用者），
+      # 用 18001 这种不常见端口，省得每次排查。
+      - "127.0.0.1:18001:8000"
+
+networks:
+  monitoring:
+    external: true
+    name: rag-dev_monitoring

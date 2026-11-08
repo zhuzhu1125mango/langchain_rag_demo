@@ -31,7 +31,7 @@ from src.database import async_engine, Base, init_db
 from src.config import settings, LOG_DIR
 from src.exceptions import AppException
 from src.utils.security import validate_secret_key, SecretKeyValidationError
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import log_exception, ErrorSeverity
 from src.auth import get_current_user, require_admin, CurrentUser
 from src.api import (
     document_router,
@@ -650,11 +650,19 @@ async def app_exception_handler(request: Request, exc: AppException):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     request_id = getattr(request.state, "request_id", str(uuid4()))
+    # 走到这里说明没有任何一层兜住——按 programming 记，而不是让分类器按异常类型猜：
+    # 未捕获异常意味着「代码里少了一个 except」，这是需要人改代码的信号，
+    # 混进 recoverable 会和「外部服务抖了一下」一样沉在 warning 里。
     # W6 #15：消息体只记异常类型——str(exc) 可能携带 SQL 片段、文件路径、
     # 内部拓扑等敏感信息；完整堆栈经 exc_info 落服务端日志供排障
-    logger.error(
-        f"Request {request_id} failed with {type(exc).__name__}",
-        exc_info=True
+    log_exception(
+        logger, exc,
+        action="request.unhandled",
+        severity=ErrorSeverity.PROGRAMMING,
+        message="未捕获异常（请求失败）",
+        path=request.url.path,
+        method=request.method,
+        request_id=request_id,
     )
     return JSONResponse(
         status_code=500,
@@ -675,7 +683,10 @@ async def http_exception_handler(request: Request, exc: HTTPException):
             "error_code": "HTTP_ERROR",
             "detail": exc.detail,
             "request_id": request_id
-        }
+        },
+        # 保留端点显式设置的响应头：Retry-After（限流后该等多久）与
+        # WWW-Authenticate（401 的鉴权方式）原先被这里吃掉，客户端只能瞎猜。
+        headers=getattr(exc, "headers", None),
     )
 
 
@@ -781,9 +792,12 @@ async def _collect_health_checks(*, include_ollama: bool, detailed: bool) -> dic
     async def _probe_ollama():
         import httpx
 
-        host = (settings.model.OLLAMA_HOST or "http://localhost:11434").rstrip("/")
+        from src.services.model_registry import _normalize_ollama_base_url
+
+        # 同 _probe_ollama_reachable：OLLAMA_HOST 可能是不带 scheme 的 host
+        host = _normalize_ollama_base_url(settings.model.OLLAMA_HOST) or "http://localhost:11434"
         async with httpx.AsyncClient(timeout=2.5) as client:
-            resp = await client.get(f"{host}/api/version")
+            resp = await client.get(f"{host.rstrip('/')}/api/version")
             resp.raise_for_status()
 
     await _record("database", _probe_db)
@@ -812,6 +826,137 @@ async def health_check_detail(current_user: CurrentUser = Depends(require_admin)
     checks = await _collect_health_checks(include_ollama=True, detailed=True)
     overall_status = "healthy" if all(c["status"] == "healthy" for c in checks.values()) else "unhealthy"
     return {"status": overall_status, "checks": checks}
+
+
+# P1-4 端到端探针：ready 刻意不含 Ollama（外部服务，挂了就重启容器会引发风暴），
+# 于是「11/11 全绿但问答全废」成了一个看不见的盲区。这里补的就是它。
+# 代价是一次真实 LLM 调用，所以要限流 + 只给管理员/定时任务调。
+_e2e_probe_lock = asyncio.Lock()
+_e2e_last_run_at: float = 0.0
+
+
+async def _probe_ollama_reachable(timeout: float = 3.0) -> bool:
+    """模型服务是否可达。单独探一次是为了把「模型没了」和「代码坏了」分开。
+
+    OLLAMA_HOST 允许三种写法（`host` / `host:port` / 完整 URL），这里必须走
+    `_normalize_ollama_base_url`：直接拼 `f"{host}/api/version"` 时，值为
+    `host.docker.internal` 会得到没有 scheme 的地址，httpx 直接抛错 → 探针
+    永远报「Ollama 不可达」。2026-11-08 实测：模型明明在跑，探针 100% 假红。
+    """
+    import httpx
+
+    from src.services.model_registry import _normalize_ollama_base_url
+
+    host = _normalize_ollama_base_url(settings.model.OLLAMA_HOST) or "http://localhost:11434"
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.get(f"{host.rstrip('/')}/api/version")
+            resp.raise_for_status()
+        return True
+    except Exception:
+        return False
+
+
+@app.get("/health/e2e")
+async def health_e2e(request: Request, current_user: CurrentUser = Depends(require_admin)):
+    """端到端探针：真的问一句（意图路由 + 生成）。
+
+    与 `/health/ready` 的分工：ready 回答「依赖连得上吗」，本端点回答「业务答得出吗」。
+    与 `/health/detail` 的分工：detail 只探连接，本端点会产生一次真实 LLM 调用。
+
+    **覆盖边界（别读成「全链路」）**：探针不指定知识库，所以不触达 Milvus——
+    健康检查不该依赖某个用户的数据，库被删了不该让探针变红。向量检索那一段由
+    `scripts/fault_drill.sh`（停 Milvus 看检索是否明确失败）和
+    `scripts/delete_drill.sh`（删除后四处零残留）覆盖。
+
+    返回：
+    - 200 `{ok, latency_ms, answer_type, rid}`
+    - 503 `{ok: false, stage, latency_ms, rid}`，stage ∈
+      `ollama_unreachable` / `generation` / `timeout`；
+      `retrieval` 仅在链路内部真的发生检索异常时出现（当前探针路径不会走到）
+
+    为什么要分 stage：三种失败的处置完全不同——模型没了要去起 Ollama，
+    检索异常要查 Milvus，生成异常要查提示词/模型/代码。只回一个 error 等于没回。
+    """
+    if not settings.health_probe.HEALTH_E2E_ENABLED:
+        raise HTTPException(status_code=404, detail="端到端探针已禁用（HEALTH_E2E_ENABLED=false）")
+
+    rid = str(getattr(request.state, "request_id", "") or uuid4())
+    min_interval = max(0, int(settings.health_probe.HEALTH_E2E_MIN_INTERVAL_SECONDS))
+
+    global _e2e_last_run_at
+    async with _e2e_probe_lock:
+        now = time.monotonic()
+        wait = min_interval - (now - _e2e_last_run_at)
+        if wait > 0:
+            raise HTTPException(
+                status_code=429,
+                detail=f"端到端探针每 {min_interval}s 只能调一次，请 {int(wait) + 1}s 后再试",
+                headers={"Retry-After": str(int(wait) + 1)},
+            )
+        _e2e_last_run_at = now
+
+        started = time.perf_counter()
+
+        def _fail(stage: str, error: str) -> JSONResponse:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            logger.error(
+                "端到端探针失败 stage=%s rid=%s latency_ms=%s error=%s",
+                stage, rid, latency_ms, error,
+            )
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "ok": False,
+                    "stage": stage,
+                    "error": error,
+                    "latency_ms": latency_ms,
+                    "rid": rid,
+                },
+            )
+
+        if not await _probe_ollama_reachable():
+            return _fail("ollama_unreachable", "Ollama 不可达")
+
+        try:
+            from src.services.rag_chain import RAGChain
+
+            chain = await RAGChain.get_instance()
+            answer, _sources, _meta, answer_type = await asyncio.wait_for(
+                chain.run(
+                    settings.health_probe.HEALTH_E2E_QUESTION,
+                    user_id=current_user.user_id,
+                ),
+                timeout=float(settings.health_probe.HEALTH_E2E_TIMEOUT_SECONDS),
+            )
+        except asyncio.TimeoutError:
+            return _fail(
+                "timeout",
+                f"超过 {settings.health_probe.HEALTH_E2E_TIMEOUT_SECONDS}s 未完成",
+            )
+        except Exception as exc:
+            # 阶段判定是启发式的：RAGChain 把检索与生成的异常都原样上抛，
+            # 没有专门的阶段字段。按异常来源模块区分 Milvus（检索）与其他（生成），
+            # 比统一报「内部错误」更有用；判错时的代价只是定位慢一点。
+            module = type(exc).__module__ or ""
+            stage = "retrieval" if "milvus" in module.lower() else "generation"
+            return _fail(stage, f"{type(exc).__name__}: {str(exc)[:200]}")
+
+        if not (answer or "").strip():
+            # 空回答比异常更隐蔽：链路都通了，但用户拿到的是空白。
+            return _fail("generation", "模型返回空答案")
+
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        logger.info(
+            "端到端探针通过 rid=%s latency_ms=%s answer_type=%s",
+            rid, latency_ms, answer_type,
+        )
+        return {
+            "ok": True,
+            "latency_ms": latency_ms,
+            "answer_type": answer_type,
+            "rid": rid,
+        }
 
 
 @app.get("/metrics")

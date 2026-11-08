@@ -78,6 +78,9 @@ class KBReranker:
     _model_loaded = False
     _model_failed = False
     _resolved_generation: Optional[str] = None
+    # 连续打分失败次数：单次抖动与「模型/配置坏了」要分开对待。
+    # 只记 warning 的话，后者会长期沉底，用户只感觉到「结果排序变差了」。
+    _consecutive_failures = 0
 
     def __init__(self, model_name: Optional[str] = None, provider: Optional[str] = None):
         self.model_name = model_name or settings.processing.KB_RERANK_MODEL
@@ -230,6 +233,7 @@ class KBReranker:
 
             for result, score in zip(results, scores):
                 result["rerank_score"] = float(score)
+            KBReranker._consecutive_failures = 0
 
             min_score = settings.processing.KB_RERANK_MIN_SCORE
             ranked = sorted(
@@ -239,15 +243,33 @@ class KBReranker:
             )
             return ranked[:top_k]
         except Exception as e:
+            # 分级刻意分两档：
+            # - 单次失败 → recoverable：降级到 RRF 仍在工作，一次抖动不值得报警；
+            # - 连续 ≥3 次 → reportable：这不是抖动，是模型名错/服务没起，
+            #   再往上涨是「排序悄悄变差」——用户看不到错误，只能靠日志报出来。
+            KBReranker._consecutive_failures += 1
+            severity = (
+                ErrorSeverity.REPORTABLE
+                if KBReranker._consecutive_failures >= 3
+                else ErrorSeverity.RECOVERABLE
+            )
             log_exception(
                 logger, e,
                 action="hybrid_search.rerank",
-                severity=ErrorSeverity.RECOVERABLE,
+                severity=severity,
                 message="知识库重排序失败，降级为 RRF 截断",
                 candidates=len(results),
+                consecutive_failures=KBReranker._consecutive_failures,
             )
             sorted_results = sorted(results, key=lambda x: x.get("rrf_score", 0.0), reverse=True)
-            return [dict(r, rerank_score=r.get("rrf_score", 0.0)) for r in sorted_results[:top_k]]
+            # 必须打标：这批结果的 rerank_score 其实是 RRF 分（数量级 1/61≈0.016），
+            # 不是 0~1 的相关性分。下游的相关性门禁只看 rerank_score，会把它们
+            # 全部判成不相关并清空上下文 —— 用户看到的正是「知识库里没有相关内容」。
+            # 2026-11-08 故障演练（reranker 指向不存在的模型）实测到这条链路。
+            return [
+                dict(r, rerank_score=r.get("rrf_score", 0.0), rerank_fallback=True)
+                for r in sorted_results[:top_k]
+            ]
 
 
 async def rerank_results(query: str, results: List[Dict], top_k: int = 5) -> List[Dict]:

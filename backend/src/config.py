@@ -677,6 +677,22 @@ class LoggingSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
 
 
+class HealthProbeSettings(BaseSettings):
+    """端到端健康探针（P1-4：补「容器全绿但问答全废」的盲区）。"""
+
+    # 是否启用 /health/e2e。默认启用：它只有被调用时才产生真实 LLM 调用，
+    # 关掉反而把这个盲区重新盖回去。
+    HEALTH_E2E_ENABLED: bool = True
+    # 固定问题：不绑定具体知识库——有库走检索、没库走直答，两条链路都会被覆盖
+    HEALTH_E2E_QUESTION: str = "请用一句话说明你能做什么。"
+    # 单次超时（秒）：模型首次加载可能要 20s+，别把它当性能指标
+    HEALTH_E2E_TIMEOUT_SECONDS: int = 90
+    # 最短调用间隔（秒）：每分钟最多一次，避免被误当压测接口
+    HEALTH_E2E_MIN_INTERVAL_SECONDS: int = 60
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, extra="ignore", secrets_dir=SECRETS_DIR)
+
+
 class Settings(BaseSettings):
     """聚合所有子配置的根配置类。"""
 
@@ -701,6 +717,7 @@ class Settings(BaseSettings):
     ocr: OcrSettings = OcrSettings()
     experiment: ExperimentSettings = ExperimentSettings()
     consistency_audit: ConsistencyAuditSettings = ConsistencyAuditSettings()
+    health_probe: HealthProbeSettings = HealthProbeSettings()
 
     IN_DOCKER: bool = False
     # 显式环境标记：dev | prod（与上方模块级 APP_ENV 同源）。未设置时按 IN_DOCKER 推断。

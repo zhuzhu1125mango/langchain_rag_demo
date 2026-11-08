@@ -98,3 +98,24 @@ jobs:
             backend/perf_report.json
             backend/eval_report.json
           retention-days: 90
+
+      # 端到端探针（/health/e2e）刻意**不**在这里跑，也不要加成 `if: false` 的占位 step：
+      # 托管 runner 起不了 11 个容器 + 5.6GB 模型，硬塞进去只会得到一个「永远跳过」的绿灯，
+      # 而看板上它和「真的验过」长得一模一样。宁可显式写明「这里没测」。
+      - name: Note about e2e probe (NOT run in CI)
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "### 端到端探针：本次未执行"
+            echo ""
+            echo "本工作流只覆盖**离线**基准（性能计数器 + 检索质量），没有验证「业务真的答得出」。"
+            echo "托管 runner 撑不起完整栈（11 容器 + 5.6GB 模型），所以这一项由服务器/本机定时任务执行："
+            echo ""
+            echo '```'
+            echo "E2E_TOKEN=<管理员 JWT> ./scripts/nightly_e2e.sh"
+            echo '```'
+            echo ""
+            echo "跑不起来时退出码为 2/3（配置缺失/服务不可达），不会被记成通过。"
+            echo "说明见 docs/guide/fault-injection.md。"
+          } >> "$GITHUB_STEP_SUMMARY"

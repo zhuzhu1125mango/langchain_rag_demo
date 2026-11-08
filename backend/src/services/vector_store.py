@@ -112,6 +112,9 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
                     "sparse_score": result.get("sparse_score", 0.0),
                     "rrf_score": result.get("rrf_score", 0.0),
                     "rerank_score": result.get("rerank_score", 0.0),
+                    # 重排整批失败时 hybrid_search 回退 RRF，并把 flag 透传到这里：
+                    # 下游据此知道「rerank_score 不是相关性分」，不能拿它做相关性门禁
+                    "rerank_fallback": bool(result.get("rerank_fallback", False)),
                 }
             )
             docs.append(doc)

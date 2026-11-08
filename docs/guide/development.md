@@ -120,6 +120,16 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 
 全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限；backend 各 job 另设 `UV_HTTP_TIMEOUT=120`——清华 PyPI 镜像在托管 runner 上偶发解析/下载超时（2026-10-27 复盘，曾致 Dependabot PR 假红）。
 
+**CI 不跑什么**（这一条比上面那张表更容易被误解）：
+
+- `scripts/*_drill.sh`（恢复 / 回滚 / 删除链 / 故障注入）与 `/health/e2e` 都**不在 CI 里**：
+  它们需要完整栈（11 容器 + 5.6GB 模型），托管 runner 起不来。
+  **CI 绿只代表单测 / 集成 / 构建过了，不代表演练过。**
+- 端到端探针的定时入口是 `scripts/nightly_e2e.sh`（退出码 0/1/2/3，其中 2 与 3 都不是通过）；
+  挂 cron 或 Windows 计划任务，见 `docs/guide/fault-injection.md`。
+- `nightly.yml` 里有一行显式声明「本次未执行 e2e」，没有留 `if: false` 的占位 step——
+  那种 step 在状态页上和「真跑过」长得一模一样，属于假绿。
+
 ## 4. 已知踩坑记录（改代码前先看）
 
 1. **隐性依赖**：pymilvus-model 的 BM25 tokenizers 模块级依赖 nltk 但未声明，必须显式保留 `nltk==3.10.4`（3.10.4 修复 GHSA-j456-xh4h-cpf2）；本地残留环境会掩盖缺失，验证依赖以 `uv sync --frozen` 干净安装为准

@@ -1063,6 +1063,45 @@ inhibit_rules:
 > - `inhibit_rules.equal` 包含 `dev` 标签，用于按环境隔离抑制告警。
 > - 启用 webhook 时建议设置 `send_resolved: true`，以便告警恢复时通知接收端。
 
+### 7.6 夜间端到端探针（不在 CI 里，必须自己挂定时任务）
+
+`/health/ready` 只能证明「依赖连得上」。**容器全绿、但模型加载不出来或检索链路坏了**这种情况，
+只有真的问一句才能发现，这就是 `/health/e2e` + `scripts/nightly_e2e.sh` 的用途。
+
+它**刻意不接 GitHub Actions**：托管 runner 起不了 11 个容器 + 5.6GB 模型，硬塞进去只会得到
+一个永远 skip 的绿灯。`nightly.yml` 里那一步只写一句「本次未执行」，不假装跑过。
+
+前置：生产栈在跑，且有一个管理员身份的 JWT（或 `X-Admin-Key`）。探针每分钟最多 1 次，
+默认只问一句，约 3~10s。
+
+```bash
+# 直连后端端口（8001），不要经 nginx：nginx 只代理 /api/，/health/* 会落到 SPA 的
+# try_files 返回 index.html —— HTTP 200 + text/html，看起来成功，其实什么都没测。
+E2E_TOKEN=<管理员 JWT> ./scripts/nightly_e2e.sh
+```
+
+退出码：`0` 通过 · `1` 探针失败（503 / 业务不通）· `2` 缺凭据（没跑）· `3` 服务不可达或请求被
+SPA 接走。`2` 和 `3` 都不是通过——把跳过当绿灯，比没有这条检查更糟。
+
+挂定时任务（二选一）：
+
+```bash
+# Linux / macOS
+crontab -e
+40 2 * * * cd /path/to/repo && E2E_TOKEN=... ./scripts/nightly_e2e.sh >> logs/cron.log 2>&1
+```
+
+```powershell
+# Windows：每天 02:40 跑一次（管理员 PowerShell）
+$action  = New-ScheduledTaskAction -Execute "C:\Program Files\Git\bin\bash.exe" `
+           -Argument "-lc 'cd /c/path/to/repo && E2E_TOKEN=... ./scripts/nightly_e2e.sh'"
+$trigger = New-ScheduledTaskTrigger -Daily -At 2:40am
+Register-ScheduledTask -TaskName "rag-nightly-e2e" -Action $action -Trigger $trigger
+```
+
+日志写在 `logs/nightly-e2e.log`，自动保留最近 500 行。失败时先看这一行：
+`FAIL 503 {"stage":"ollama_unreachable"}` 表示模型服务没起，不是代码问题。
+
 ---
 
 ## 8. 常见问题
