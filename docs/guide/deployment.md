@@ -1074,6 +1074,17 @@ inhibit_rules:
 前置：生产栈在跑，且有一个管理员身份的 JWT（或 `X-Admin-Key`）。探针每分钟最多 1 次，
 默认只问一句，约 3~10s。
 
+> **凭据在哪**：本项目生产凭据走 Docker secrets 文件（`/run/secrets/ADMIN_KEY`），
+> **不在环境变量里**。所以 `docker exec backend-prod printenv ADMIN_KEY` 是空的，
+> 这不代表没配——先 `ls /run/secrets`。直接用 secrets 里的值跑一次：
+>
+> ```bash
+> docker exec backend-prod sh -c \
+>   'curl -s -H "X-Admin-Key: $(cat /run/secrets/ADMIN_KEY)" http://127.0.0.1:8000/health/e2e'
+> ```
+>
+> 返回 200 且 `{"ok":true,...}`；无凭据时应为 403（鉴权生效）。
+
 ```bash
 # 直连后端端口（8001），不要经 nginx：nginx 只代理 /api/，/health/* 会落到 SPA 的
 # try_files 返回 index.html —— HTTP 200 + text/html，看起来成功，其实什么都没测。
