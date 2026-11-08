@@ -276,6 +276,56 @@ def _validate_registration_policy() -> None:
     )
 
 
+def _runtime_env_summary() -> str:
+    """一行写清「判据是什么、结论是什么」。
+
+    为什么需要：`IS_PRODUCTION` 是**推导出来**的（APP_ENV 优先，否则看 IN_DOCKER），
+    同一份 .env 在不同机器上可能得出不同结论。出问题时最容易问错的一句话就是
+    「它到底以为自己在什么环境里？」——日志里应该直接有答案，而不是让人去读代码。
+    「是否设置」只打 set/unset，不打印任何凭据内容。
+    """
+    sec = settings.security
+    return (
+        f"APP_ENV={settings.APP_ENV or '-'} IN_DOCKER={settings.IN_DOCKER} "
+        f"IS_PRODUCTION={settings.IS_PRODUCTION}"
+        f" | AUTH_ALLOW_REGISTRATION={sec.AUTH_ALLOW_REGISTRATION}"
+        f" MINIO_SECURE={settings.minio.MINIO_SECURE}"
+        f" ADMIN_KEY={'set' if sec.ADMIN_KEY else 'unset'}"
+        f" API_KEY={'set' if sec.API_KEY else 'unset'}"
+        f" METRICS_TOKEN={'set' if sec.METRICS_TOKEN else 'unset'}"
+    )
+
+
+def _dangerous_env_warnings() -> list[str]:
+    """列出「能启动、但已知危险」的组合。纯函数，便于单测。
+
+    刻意只告警不阻断：这些都可能是刻意的取舍（例如内网单机不配 METRICS_TOKEN）。
+    真正必须拦的组合在 lifespan 里直接 raise，这里不重复。
+    """
+    sec = settings.security
+    out: list[str] = []
+    if not settings.IS_PRODUCTION:
+        return out
+
+    if not sec.ADMIN_KEY:
+        out.append(
+            "生产模式未配置 ADMIN_KEY：管理员账号被锁死时没有应急通道，"
+            "/health/e2e 也无法用密钥调用（只能靠管理员登录态）"
+        )
+    if not sec.METRICS_TOKEN:
+        out.append(
+            "生产模式未配置 METRICS_TOKEN：/metrics 无鉴权，任何能连到后端端口的人都能读到"
+            "知识库/会话计数与延迟分布（仅在内网且端口不外露时勉强可接受）"
+        )
+    return out
+
+
+def _log_runtime_environment() -> None:
+    logger.info("运行环境: %s", _runtime_env_summary())
+    for warning in _dangerous_env_warnings():
+        logger.warning("[env-check] %s", warning)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -284,6 +334,10 @@ async def lifespan(app: FastAPI):
     在应用启动时自动创建所有数据库表
     在应用关闭时无需特殊清理操作
     """
+    # 先把「它以为自己在什么环境」写进日志，再做校验：
+    # 校验失败直接退出时，这行是唯一能解释「为什么退出」的东西。
+    _log_runtime_environment()
+
     # 生产级安全检查：无论是否 Docker，凡生产模式一律强制
     if settings.IS_PRODUCTION:
         try:

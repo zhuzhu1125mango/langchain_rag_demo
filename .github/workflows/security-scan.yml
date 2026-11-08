@@ -15,6 +15,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # #32：豁免是临时的。到期之后必须有人重新评估，否则 .trivyignore 会变成
+      # 永久白名单——而它看起来一直「有人管」。这一步不依赖第三方 action，
+      # 放在扫描之前：先判断豁免还有效，再看扫描结果。
+      - name: 豁免到期检查（.trivyignore）
+        run: python3 scripts/check_trivyignore.py
       # OPS-6：依赖已升级到修复版本；仅 .trivyignore 中登记的 4 条（filelock/transformers
       # 上游约束）豁免，其余 HIGH/CRITICAL 阻断。
       - name: Trivy filesystem scan (high/critical)

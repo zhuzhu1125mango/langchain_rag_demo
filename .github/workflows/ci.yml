@@ -59,6 +59,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # #34：文档里的判断句要么给口径，要么标（未测）。否则「万级可接受」这种
+      # 没量过的判断会和「hit@5 = 0.869」并排出现，读者分不出哪句是量的。
+      # 规则很窄（只抓几个规模/性能词），零依赖、几百毫秒，放在装依赖之前先跑。
+      - name: Docs claims（无口径判断）
+        run: python3 scripts/check_docs_claims.py
+
       - name: Install uv
         # uvx 依赖 uv（W6 #64 首轮 CI 复盘：runner 无预装，exit 127）
         uses: astral-sh/setup-uv@v10.3.2
