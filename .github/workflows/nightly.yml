@@ -63,7 +63,12 @@ jobs:
       # 计数器不符（切分块数 / 融合条数 / 打分文档数）或耗时超阈（默认 1.6×）时非零退出。
       # profile=ci 的基线单独存档：同一段代码在 2 核 runner 上比 16 核本机慢好几倍，
       # 跨机器比绝对值没有意义。
-      - name: Perf suite (counters hard-gate, timings soft-gate)
+      # 两把尺子，故意不同：
+      # - 计数器是确定性不变量（融合后 60 条、90 题、78 篇文档），改了算法就必须红；
+      # - 耗时是带噪声的观测，必须「比例超 1.6× 且绝对增量 ≥ 5ms」才红，
+      #   否则 0.2ms 的微基准每晚都可能因 0.16ms 抖动变红（2026-11-08 真发生过）。
+      # 只报警不阻断的耗时差异会打成 ::warning，出现在 annotations 里而不是埋进 summary。
+      - name: Perf suite (counters hard-gate, timings ratio+absolute dual gate)
         run: uv run python scripts/perf_suite.py --profile ci --report perf_report.json --summary "$GITHUB_STEP_SUMMARY"
 
       # 质量侧已有阈值卡点，这里顺带把 latency_p50/p95 落到同一个 artifact 里，

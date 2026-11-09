@@ -129,6 +129,10 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
   挂 cron 或 Windows 计划任务，见 `docs/guide/fault-injection.md`。
 - `nightly.yml` 里有一行显式声明「本次未执行 e2e」，没有留 `if: false` 的占位 step——
   那种 step 在状态页上和「真跑过」长得一模一样，属于假绿。
+- `nightly.yml` 里的**性能门禁有两把尺子**：计数器必须逐位相等（确定性）；
+  耗时必须「比例超 1.6× **且** 绝对增量 ≥ 5ms」才判红，否则只打 `::warning`。
+  别把耗时的比例阈值当成唯一判据——0.2ms 的微基准靠 runner 噪声就能凑出 1.76×，
+  2026-11-08 因此假红过一次（详见 `docs/benchmarks/perf-baseline.md` §3）。
 
 ## 4. 已知踩坑记录（改代码前先看）
 
