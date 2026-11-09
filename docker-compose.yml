@@ -110,6 +110,10 @@ services:
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问 Ollama
       SKIP_OLLAMA_CHECK: "true"
       NLTK_DATA: /app/nltk_data                        # nltk 语料随镜像发布（BM25 中文分词依赖 stopwords）；不放 /app/data 是因为 bind mount 在 Windows 下为 0777，NLTK 会拒绝读取
+      # BM25 词表必须落持久卷：默认目录 /app/src/data/bm25 属于镜像层，
+      # 重建镜像会把构建机上那份词表一起带回来（2026-11-09：59 词的演练词表覆盖了 532 条真实切片，
+      # 稀疏通道整条失效）。分 prod/dev 子目录是因为两者共用 ./backend/data 这个 bind mount。
+      MILVUS_BM25_VOCAB_DIR: /app/data/bm25/prod
       HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
       HF_HUB_OFFLINE: "1"                              # 容器内强制离线用缓存
       TRANSFORMERS_OFFLINE: "1"

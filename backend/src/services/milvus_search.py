@@ -34,15 +34,31 @@ def _log_sparse_empty(bm25_ef) -> None:
     if _sparse_empty_logged:
         return
     _sparse_empty_logged = True
-    vocab_size = len(getattr(bm25_ef, "idf_word", None) or [])
     log_exception(
         logger,
         RuntimeError("BM25 query vector is empty"),
         action="milvus.search.sparse_empty",
         severity=ErrorSeverity.REPORTABLE,
         message="查询词全部不在 BM25 词表内，稀疏通道被跳过（混合检索退化为 dense 单通道）",
-        vocab_size=vocab_size,
+        vocab_size=_vocab_size(bm25_ef),
+        # corpus_size 是判断「词表是不是在小语料上拟合的」的关键证据：
+        # 5 条演练文本 vs 532 条真实切片，光看 vocab_size 看不出来。
+        corpus_size=getattr(bm25_ef, "corpus_size", 0),
     )
+
+
+def _vocab_size(bm25_ef) -> int:
+    """词表规模（去重词数）。
+
+    pymilvus 的 BM25EmbeddingFunction 把词表存成 `idf` 字典，**没有** `idf_word`
+    属性；照 `idf_word` 取会永远得到 0，日志里的 vocab_size 就是假的
+    （2026-11-09 实测确认）。`idf_word` 仅作为历史/替身对象的兜底。
+    """
+    idf = getattr(bm25_ef, "idf", None)
+    if isinstance(idf, dict):
+        return len(idf)
+    idf_word = getattr(bm25_ef, "idf_word", None)
+    return len(idf_word) if idf_word else 0
 
 
 class SearchMixin:

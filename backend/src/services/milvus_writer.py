@@ -5,7 +5,7 @@ import logging
 import os
 import re
 import uuid
-from typing import List
+from typing import Dict, List
 
 from pymilvus.exceptions import MilvusException
 
@@ -18,6 +18,60 @@ from src.services.milvus_common import (
 )
 
 logger = logging.getLogger("milvus_service")
+
+
+def bm25_vocab_path() -> str:
+    """BM25 词表持久化文件路径（与 collection 名绑定）。
+
+    提为模块级函数是为了让运维脚本（scripts/rebuild_sparse_index.py）与应用
+    用**同一份**路径推导规则：脚本写到的文件必须是服务启动时读的那个文件，
+    一旦两边算法漂移，重建出来的索引就会被下一次重启作废。
+
+    目录取 MILVUS_BM25_VOCAB_DIR；生产必须指向持久卷。默认值
+    `backend/src/data/bm25` 在容器里属于镜像层，重建镜像会把旧词表一起带回来
+    （2026-11-09：镜像里带了 5 条演练文本拟合的 59 词词表，覆盖了 532 条真实切片）。
+    """
+    vocab_dir = settings.milvus.MILVUS_BM25_VOCAB_DIR or os.path.join(DATA_DIR, "bm25")
+    safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", settings.milvus.MILVUS_COLLECTION_NAME)
+    return os.path.join(vocab_dir, f"bm25_{safe_name}.json")
+
+
+def convert_sparse_embeddings(sparse_matrix) -> List[Dict[int, float]]:
+    """将 scipy csr_array 转换为 Milvus 接受的 sparse vector 字典列表。
+
+    **负权重必须截断为 0。** Milvus 的稀疏向量在 IP 度量下要求每个分量 ≥ 0，
+    否则整条请求被拒：
+
+        Invalid sparse row: negative value at .../Utils.h:287
+
+    而 BM25 的 IDF 天然会出负数——词出现在超过一半文档里时，
+    `log((N-n+0.5)/(n+0.5))` 就是负的。小语料（本项目 532 片）里这很常见。
+    原实现原样透传，结果是「命中一个高频词 → 整条稀疏查询失败 → 混合检索静默降级为
+    dense 单通道」（2026-11-09 实测，见 docs/audit/plan-2026-11-07.md）。
+
+    截断的语义是「该词不参与打分」，与「词不在词表里」一致，不会引入错误信号；
+    比整条查询失败温和得多。
+
+    索引重建脚本必须走同一个函数：写入端与查询端的截断规则一旦不同，
+    同一份文本在两端会得到不同的非零维度。
+
+    Returns:
+        list[dict]: 每个元素形如 {index: value, ...}，值为正
+    """
+    result = []
+    for row in sparse_matrix:
+        # 兼容 csr_array 和不同维度的输入
+        if hasattr(row, "toarray"):
+            arr = row.toarray().flatten()
+        else:
+            arr = row.flatten() if hasattr(row, "flatten") else row
+        vec = {}
+        for idx, val in enumerate(arr):
+            score = float(val)
+            if score > 0:  # 负数与 0 都不写入：负值会让 Milvus 拒绝整条请求
+                vec[int(idx)] = score
+        result.append(vec)
+    return result
 
 
 class WriteMixin:
@@ -123,9 +177,7 @@ class WriteMixin:
 
     def _bm25_vocab_path(self) -> str:
         """BM25 词表持久化文件路径（与 collection 名绑定）。"""
-        vocab_dir = settings.milvus.MILVUS_BM25_VOCAB_DIR or os.path.join(DATA_DIR, "bm25")
-        safe_name = re.sub(r"[^A-Za-z0-9_-]", "_", settings.milvus.MILVUS_COLLECTION_NAME)
-        return os.path.join(vocab_dir, f"bm25_{safe_name}.json")
+        return bm25_vocab_path()
 
     def _load_bm25_vocabulary(self) -> bool:
         """尝试从磁盘加载与 collection 绑定的 BM25 词表。
@@ -191,38 +243,8 @@ class WriteMixin:
 
     @staticmethod
     def _convert_sparse_embeddings(sparse_matrix):
-        """将 scipy csr_array 转换为 Milvus 接受的 sparse vector 字典列表。
-
-        **负权重必须截断为 0。** Milvus 的稀疏向量在 IP 度量下要求每个分量 ≥ 0，
-        否则整条请求被拒：
-
-            Invalid sparse row: negative value at .../Utils.h:287
-
-        而 BM25 的 IDF 天然会出负数——词出现在超过一半文档里时，
-        `log((N-n+0.5)/(n+0.5))` 就是负的。小语料（本项目 532 片）里这很常见。
-        原实现原样透传，结果是「命中一个高频词 → 整条稀疏查询失败 → 混合检索静默降级为
-        dense 单通道」（2026-11-09 实测，见 docs/audit/plan-2026-11-07.md）。
-
-        截断的语义是「该词不参与打分」，与「词不在词表里」一致，不会引入错误信号；
-        比整条查询失败温和得多。
-
-        Returns:
-            list[dict]: 每个元素形如 {index: value, ...}，值为正
-        """
-        result = []
-        for row in sparse_matrix:
-            # 兼容 csr_array 和不同维度的输入
-            if hasattr(row, "toarray"):
-                arr = row.toarray().flatten()
-            else:
-                arr = row.flatten() if hasattr(row, "flatten") else row
-            vec = {}
-            for idx, val in enumerate(arr):
-                score = float(val)
-                if score > 0:  # 负数与 0 都不写入：负值会让 Milvus 拒绝整条请求
-                    vec[int(idx)] = score
-            result.append(vec)
-        return result
+        """见模块级 `convert_sparse_embeddings`（保持方法名以兼容既有调用与测试）。"""
+        return convert_sparse_embeddings(sparse_matrix)
 
     async def flush(self):
         """显式触发 Milvus flush，受客户端限速保护。"""

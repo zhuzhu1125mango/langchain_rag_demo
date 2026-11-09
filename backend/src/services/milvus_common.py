@@ -6,6 +6,13 @@ from src.config import settings
 
 logger = logging.getLogger("milvus_service")
 
+# 词表「欠拟合」判据：corpus_size * N < 集合行数。
+# 2026-11-09 事故：镜像里带着 5 条演练文本拟合出的 59 词词表，覆盖了 532 条真实切片，
+# 结果稀疏通道整体失效却没有任何报错。5 * 10 << 532，这条判据能抓住它。
+# 阈值放在这里是为了让启动告警与重建脚本（scripts/rebuild_sparse_index.py）用同一个数，
+# 避免「脚本说健康、服务说病」的分歧。
+BM25_VOCAB_SUSPECT_RATIO = 10
+
 # 可选的 BM25 稀疏嵌入模型，失败时优雅降级为纯向量检索
 try:
     from pymilvus.model.sparse import BM25EmbeddingFunction

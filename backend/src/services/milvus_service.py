@@ -105,6 +105,9 @@ class MilvusService(
         # 启动时加载与 collection 绑定的持久化 BM25 词表，
         # 保证查询编码空间与历史 sparse 向量一致（不依赖"先插入过文档"）
         await asyncio.to_thread(self._load_bm25_vocabulary)
+        # 词表「太小」不会让任何请求失败，只会让稀疏召回静默失效；
+        # 启动时对一次行数，把部署期事故变成一条可检索的告警
+        await self._warn_if_vocab_underfitted()
 
     async def _async_cleanup(self):
         """关闭 Milvus 客户端连接。"""

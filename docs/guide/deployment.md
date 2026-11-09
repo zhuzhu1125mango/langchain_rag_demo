@@ -1195,7 +1195,87 @@ grep -rlF "$(cat secrets/search_api_key)" backups/ docs/ 2>/dev/null
 
 有输出就说明旧 Key 还躺在文件里：删掉对应备份，或把备份移出这台机器（密码管理器 / 加密卷）。
 
+### 7.8 BM25 词表与稀疏索引（重建、迁移与回滚）
 
+#### 为什么单独成节
+
+2026-11-09 发现生产稀疏通道**长期空转**：`documents` 集合 532 条切片，词表却是在
+5 条删除演练文本上拟合的（59 个词）。查询「混合检索」「重排序」时查询向量全零，
+`search_sparse` 直接跳过 → 混合检索退化 dense 单通道，**整个过程没有任何报错**。
+
+根因是两条，缺一不可：
+
+1. 词表落在 `/app/src/data/bm25`，属于**镜像层**：构建机上的小语料词表被一起打进镜像，
+   每次重建容器都会把线上词表覆盖回去；
+2. 服务把「词表文件存在」当成「词表可用」，从不校验它和语料规模是否匹配。
+
+#### 现状（已修）
+
+- 词表目录：`MILVUS_BM25_VOCAB_DIR=/app/data/bm25/prod`（dev 为 `/app/data/bm25/dev`），
+  落挂载卷，重建镜像不再带走；`backend/.dockerignore` 同时排除 `src/data/bm25/`。
+  分 prod/dev 子目录是因为两套 compose 共用 `./backend/data` 这一个 bind mount。
+- 启动告警：`corpus_size * 10 < 集合行数` 时记一条 `milvus.bm25_vocab.underfitted`
+  （reportable），日志里带 `corpus_size` 与 `collection_rows`，并直接给出重建命令。
+- 重建工具：`backend/scripts/rebuild_sparse_index.py`（默认预演，`--commit` 才写）。
+
+#### 重建流程
+
+```bash
+# 1. 预演：只读，报告新旧词表的存量覆盖率与查询词覆盖率
+docker exec backend-prod python scripts/rebuild_sparse_index.py \
+  --probe "混合检索" --probe "备份恢复"
+
+# 2. 执行：备份旧词表 → 落盘新词表 → 全部切片按原 id upsert（携带原 dense 向量）
+docker exec backend-prod python scripts/rebuild_sparse_index.py --commit \
+  --probe "混合检索" --probe "备份恢复"
+
+# 3. 重启：运行中的进程仍持有旧词表，不重启不会生效
+docker restart backend-prod
+```
+
+脚本的自保护（任一不满足即 exit 2，拒绝写入）：集合为空或少于 20 行、没有
+`sparse_embedding` 字段、主键重复、dense 维度不一致、重拟合词表少于 50 词、
+新词表算出的非空向量反而更少。写入后校验行数不变（upsert 不能变成 insert），
+并用切片自身内容做稀疏自检索，3 条里至少 2 条要命中自己。
+
+**为什么必须重算 sparse**：词表换了，词到维度的映射全变，只改词表文件会让存量向量
+落在错误维度上——比不修更糟。**为什么必须带原 dense 向量**：Milvus 没有局部更新，
+upsert 要提供全部字段；重算 dense 既慢，又会把「向量漂移」混进这次只该改稀疏通道的变更里。
+
+#### 回滚
+
+旧词表在同一目录留了备份（`bm25_documents.json.bak.<时间戳>`）：
+
+```bash
+docker exec backend-prod sh -c 'ls -l /app/data/bm25/prod/'
+```
+
+回滚必须**同时**恢复词表与重算向量：把备份词表当作当前词表、再跑一次 `--commit`
+（脚本会以它为「旧词表」并重算出配套向量）。只换文件不重算，等于把维度映射错位。
+
+#### 实测（2026-11-09）
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| 词表 `corpus_size` / 词数 | 5 / 59 | 532 / 3106 |
+| `avgdl` | 138.8 | 49.64 |
+| 存量向量平均非零维 | 3.9 | 38.1 |
+| 「混合检索」查询向量非零维 | **0** | 2 |
+| 「重排序」 | **0** | 2 |
+| 「备份恢复」 | **0** | 2 |
+| 稀疏检索 top1 分（混合检索） | 无结果 | 8.53 |
+
+532 条 upsert 后行数 532→532，自检索 3/3 首位命中。
+
+**「非空率」是骗人的**：旧词表下 532 条存量向量也是 100% 非空——它们命中的是
+「文档/内容」这类高频词，没有区分度。判断稀疏通道是否工作要看**查询向量的非零维**，
+不要看存量向量的非空比例。
+
+#### 仍未做
+
+迁到 Milvus **原生 BM25**（服务端 `Function`，2.6.17 已支持）：没有客户端词表，
+IDF 由服务端按全量语料计算，天然不会出现「词表冻结」。代价是 schema 变更 + 全量重建，
+属于一次独立迁移，不是本次的补救措施。
 
 ### 8.1 Ollama 服务未启动
 

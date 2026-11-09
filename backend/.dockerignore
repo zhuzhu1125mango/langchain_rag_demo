@@ -40,6 +40,10 @@ service-account.json
 # =============== Data / Logs ===============
 data/**
 !data/.gitkeep
+# BM25 词表是**运行时状态**，不是源码：构建机上的词表可能是在几条演练文本上拟合的，
+# 一旦进镜像就会覆盖线上的真实词表（2026-11-09 事故）。持久化目录由 compose 的
+# MILVUS_BM25_VOCAB_DIR 指向挂载卷。
+src/data/bm25/
 # NLTK 语料必须进镜像（4.4MB）：nltk 3.9+ 的 pathsec.ENFORCE 拒绝读取「组/他人可写」
 # 的数据目录，而开发栈挂进来的 ./backend/data 在容器里是 777，导致 stopwords 加载失败
 # → BM25 稀疏向量缺失 → 上传文档直接 failed。镜像内副本权限可控。

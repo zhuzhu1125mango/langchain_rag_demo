@@ -164,6 +164,9 @@ services:
       OLLAMA_HOST: host.docker.internal                # 通过宿主机访问本地 Ollama
       SKIP_OLLAMA_CHECK: "true"
       NLTK_DATA: /opt/nltk_data                        # 镜像内副本（权限私有）；挂载目录在容器里是 777，NLTK 会拒绝读取
+      # 词表落挂载卷，且与生产分目录：dev 与 prod 共用 ./backend/data，
+      # 同名 bm25_documents.json 会让两套语料互相污染（dev 的小语料词表正是 11-09 事故源头）
+      MILVUS_BM25_VOCAB_DIR: /app/data/bm25/dev
       HF_HOME: /app/data/model_cache/huggingface       # HF 模型缓存（挂载卷，离线可用）
       HF_HUB_OFFLINE: "1"                              # 容器内强制离线用缓存
       TRANSFORMERS_OFFLINE: "1"

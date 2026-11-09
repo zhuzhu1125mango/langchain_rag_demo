@@ -86,3 +86,19 @@ class TestEmptyQueryVectorIsNotSent:
         assert len(logs) == 1
         assert logs[0]["action"] == "milvus.search.sparse_empty"
         assert logs[0]["vocab_size"] == 2
+
+
+class TestVocabSizeEvidence:
+    """告警里的词表规模必须是真实的：它决定「要不要重建索引」这个判断。"""
+
+    def test_reads_idf_dict(self):
+        """真实 BM25EmbeddingFunction 把词表存成 idf 字典，没有 idf_word 属性。"""
+        ef = type("EF", (), {"idf": {"备份": 1.0, "恢复": 2.0, "演练": 3.0}})()
+        assert search_module._vocab_size(ef) == 3
+
+    def test_falls_back_to_idf_word_for_stubs(self):
+        ef = type("EF", (), {"idf_word": ["a", "b"]})()
+        assert search_module._vocab_size(ef) == 2
+
+    def test_zero_when_unknown(self):
+        assert search_module._vocab_size(object()) == 0

@@ -7,6 +7,7 @@ from typing import Optional
 from pymilvus import AsyncMilvusClient, DataType
 
 from src.config import settings
+from src.services.milvus_common import BM25_VOCAB_SUSPECT_RATIO
 
 logger = logging.getLogger("milvus_service")
 
@@ -243,6 +244,47 @@ class SchemaMixin:
             output_fields=["count(*)"],
         )
         return int(rows[0]["count(*)"] if rows else 0)
+
+    async def _warn_if_vocab_underfitted(self) -> None:
+        """词表规模与集合行数严重不匹配时告警（不阻断启动）。
+
+        这是 2026-11-09 事故的「下次能自己喊」版本：词表在 5 条演练文本上拟合、
+        却服役于 532 条真实切片，稀疏通道整条失效而**没有任何报错**，
+        现象只是「有些该命中的问题不命中」。
+
+        只告警不拒绝启动：词表欠拟合时 dense 通道仍然可用，把服务拦在门外
+        比降级更糟；但必须留下可检索的证据（corpus_size 与行数的比值）。
+        """
+        if not self._sparse_enabled or self.bm25_ef is None:
+            return
+        corpus_size = int(getattr(self.bm25_ef, "corpus_size", 0) or 0)
+        if not corpus_size:
+            return
+        try:
+            total = await self._collection_count(settings.milvus.MILVUS_COLLECTION_NAME)
+        except Exception as exc:
+            # 启动期的一次附加检查，失败不影响主流程；记 recoverable 便于发现连接问题
+            log_exception(
+                logger, exc, action="milvus.bm25_vocab.check",
+                message="检查 BM25 词表覆盖度失败（不影响启动）",
+                severity=ErrorSeverity.RECOVERABLE,
+            )
+            return
+        if total <= 0 or corpus_size * BM25_VOCAB_SUSPECT_RATIO >= total:
+            return
+        log_exception(
+            logger,
+            RuntimeError("BM25 vocabulary is under-fitted"),
+            action="milvus.bm25_vocab.underfitted",
+            severity=ErrorSeverity.REPORTABLE,
+            message=(
+                "BM25 词表疑似在小语料上拟合，稀疏通道基本失效（混合检索退化为 dense 单通道）；"
+                "执行 scripts/rebuild_sparse_index.py --commit 重建，再重启服务"
+            ),
+            corpus_size=corpus_size,
+            collection_rows=total,
+            vocab_path=self._bm25_vocab_path(),
+        )
 
     async def _add_sparse_field_if_missing(self):
         """兼容旧集合：缺少 sparse_embedding 字段时不删除数据，仅记录日志。
