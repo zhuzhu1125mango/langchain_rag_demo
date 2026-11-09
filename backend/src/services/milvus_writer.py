@@ -193,8 +193,21 @@ class WriteMixin:
     def _convert_sparse_embeddings(sparse_matrix):
         """将 scipy csr_array 转换为 Milvus 接受的 sparse vector 字典列表。
 
+        **负权重必须截断为 0。** Milvus 的稀疏向量在 IP 度量下要求每个分量 ≥ 0，
+        否则整条请求被拒：
+
+            Invalid sparse row: negative value at .../Utils.h:287
+
+        而 BM25 的 IDF 天然会出负数——词出现在超过一半文档里时，
+        `log((N-n+0.5)/(n+0.5))` 就是负的。小语料（本项目 532 片）里这很常见。
+        原实现原样透传，结果是「命中一个高频词 → 整条稀疏查询失败 → 混合检索静默降级为
+        dense 单通道」（2026-11-09 实测，见 docs/audit/plan-2026-11-07.md）。
+
+        截断的语义是「该词不参与打分」，与「词不在词表里」一致，不会引入错误信号；
+        比整条查询失败温和得多。
+
         Returns:
-            list[dict]: 每个元素形如 {index: value, ...}
+            list[dict]: 每个元素形如 {index: value, ...}，值为正
         """
         result = []
         for row in sparse_matrix:
@@ -203,7 +216,11 @@ class WriteMixin:
                 arr = row.toarray().flatten()
             else:
                 arr = row.flatten() if hasattr(row, "flatten") else row
-            vec = {int(idx): float(val) for idx, val in enumerate(arr) if val != 0}
+            vec = {}
+            for idx, val in enumerate(arr):
+                score = float(val)
+                if score > 0:  # 负数与 0 都不写入：负值会让 Milvus 拒绝整条请求
+                    vec[int(idx)] = score
             result.append(vec)
         return result
 

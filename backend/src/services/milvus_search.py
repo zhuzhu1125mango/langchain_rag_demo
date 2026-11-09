@@ -14,7 +14,36 @@ from src.services.milvus_common import (
 
 logger = logging.getLogger("milvus_service")
 
-from src.utils.error_handling import log_exception
+from src.utils.error_handling import ErrorSeverity, log_exception
+
+# 「查询词全部不在词表内」只报一次：它是部署期状态（词表是在什么语料上拟合的），
+# 不是请求级故障；每条请求刷一遍只会把日志冲掉。
+_sparse_empty_logged = False
+
+
+def _log_sparse_empty(bm25_ef) -> None:
+    """查询编码结果为空：稀疏通道对本条查询无效。
+
+    这曾经是**完全静默**的：全零向量转换后是 `[{}]`，而 `[{}]` 在 Python 里是 truthy，
+    能通过 `if not query_sparse` 的检查，于是空行被发给 Milvus（或拿到空结果），
+    混合检索悄悄退化为 dense 单通道——没有任何日志说明「sparse 这一路没参与」。
+    2026-11-09 实测：持久化词表是在 5 条演练文本上拟合的（59 词），
+    真实语料里的词对它全部不可见，稀疏索引里存的向量也几乎是空的。
+    """
+    global _sparse_empty_logged
+    if _sparse_empty_logged:
+        return
+    _sparse_empty_logged = True
+    vocab_size = len(getattr(bm25_ef, "idf_word", None) or [])
+    log_exception(
+        logger,
+        RuntimeError("BM25 query vector is empty"),
+        action="milvus.search.sparse_empty",
+        severity=ErrorSeverity.REPORTABLE,
+        message="查询词全部不在 BM25 词表内，稀疏通道被跳过（混合检索退化为 dense 单通道）",
+        vocab_size=vocab_size,
+    )
+
 
 class SearchMixin:
     """向量检索与过滤表达式构造，由 MilvusService 组合。"""
@@ -71,7 +100,10 @@ class SearchMixin:
         try:
             query_sparse = await asyncio.to_thread(self.bm25_ef.encode_queries, [query])
             query_sparse = self._convert_sparse_embeddings(query_sparse)
-            if not query_sparse:
+            # 空字典 = 这篇查询一个词都不在词表里。必须显式判空：
+            # `[{}]` 是 truthy，光靠 `if not query_sparse` 拦不住。
+            if not query_sparse or not query_sparse[0]:
+                _log_sparse_empty(self.bm25_ef)
                 return []
         except Exception as e:
             log_exception(
