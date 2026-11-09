@@ -1115,7 +1115,87 @@ Register-ScheduledTask -TaskName "rag-nightly-e2e" -Action $action -Trigger $tri
 
 ---
 
-## 8. 常见问题
+### 7.7 账号与密钥轮换（结项遗留三项的做法）
+
+这一节存在的原因很具体：结项报告里挂了三条 owner 项（管理员密码、两个测试账号、Tavily Key），
+挂了很久没做。复查发现**不是没人想做，是做不到**——全仓没有 `/change-password` 接口，
+`create_admin.py` 也只能建号/提权，改密码得手写 SQL 并自己算 bcrypt。
+2026-11-09 补了 `--set-password`，这三件事才变成可执行动作。
+
+#### 1. 轮换管理员密码
+
+```bash
+# 容器内执行；密码用环境变量传，不进 shell 历史、不回显
+docker exec -e CREATE_ADMIN_PASSWORD='<新密码>' backend-prod \
+  python scripts/create_admin.py --username ops-admin --set-password
+```
+
+三重防呆：账号不存在报错、**新密码与当前相同则拒绝**（防止「以为轮换了其实没变」）、
+强度不足拒绝。输出里永远不含密码。
+
+**已知边界**：已签发的 JWT 不会被吊销，最迟 `ACCESS_TOKEN_EXPIRE_MINUTES`（默认 60）后自然失效。
+要立刻踢掉在线会话只能重启后端——单管理员场景下可以接受，但不是零窗口。
+
+#### 2. 停用验证账号
+
+本项目**没有 `is_active` 列**，所以「停用」= 把 `password_hash` 换成一个随机值并丢弃它：
+账号还在（审计、历史数据不受影响），但任何人都无法再登录。恢复用第 1 步的 `--set-password`。
+
+```bash
+docker exec -i backend-prod python -W ignore - <<'PY'
+import asyncio, secrets
+from sqlalchemy import select
+from src.database import async_session_maker
+from src.models import User
+from src.auth import hash_password
+
+TARGETS = ["test2", "smoke_deploy"]   # 按需改
+
+async def main():
+    async with async_session_maker() as db:
+        rows = (await db.execute(select(User).where(User.username.in_(TARGETS)))).scalars().all()
+        for u in rows:
+            u.password_hash = hash_password(secrets.token_urlsafe(48))  # 口令未存，即不可恢复
+            print(f"{u.username}: 已锁定")
+        await db.commit()
+
+asyncio.run(main())
+PY
+```
+
+验证（必须两个都是 401）：
+
+```bash
+docker exec backend-prod sh -c 'curl -s -o /dev/null -w "%{http_code}\n" -X POST \
+  http://127.0.0.1:8000/api/auth/login -H "Content-Type: application/json" \
+  -d "{\"username\":\"test2\",\"password\":\"随便填\"}"'
+```
+
+#### 3. 轮换 Tavily Key
+
+密钥在 `secrets/search_api_key`（Docker secrets 注入，不是环境变量；`printenv` 查不到，
+别据此判断「没配」——见 §6.9）。
+
+1. 在 Tavily 控制台吊销旧 Key、建新 Key；
+2. 覆盖 `secrets/search_api_key`（只写新值，无引号无换行）；
+3. `docker compose -f docker-compose.yml --env-file .env.prod up -d backend`（secrets 在启动时读取，改文件不生效）。
+
+**轮换后必须清理旧副本**，否则等于没轮换。已知的旧副本位置：
+
+| 位置 | 说明 |
+|---|---|
+| `backups/.env.prod-*` | 早期整份环境变量备份（已被 `.gitignore` 忽略，未进仓库） |
+| 知识库文档 | `backups/minio_*/documents/*/source.md` 里出现过 `SEARCH_API_KEY` 字样，**是否含真实值未确认** |
+
+自查（只输出文件名，不打印密钥）：
+
+```bash
+grep -rlF "$(cat secrets/search_api_key)" backups/ docs/ 2>/dev/null
+```
+
+有输出就说明旧 Key 还躺在文件里：删掉对应备份，或把备份移出这台机器（密码管理器 / 加密卷）。
+
+
 
 ### 8.1 Ollama 服务未启动
 

@@ -410,3 +410,68 @@ class TestCreateAdminCli:
         assert await cli._revoke("only") == 0
         assert existing.is_admin is False
         assert "最后一个管理员" in capsys.readouterr().err
+
+    # -- --set-password --------------------------------------------------
+    #
+    # 这组用例的背景：此前全仓没有任何改密通道，导致「把初始密码换掉」这件事
+    # 只能靠手写 SQL + 自己算 bcrypt，最后就是在结项报告里挂了很久没人做。
+    # 所以除了「能改」，更要钉住三种「以为改了其实没改」的情形。
+
+    async def test_set_password_changes_hash(self, monkeypatch):
+        from src.auth import hash_password, verify_password
+
+        cli = _load_cli()
+        existing = _user(name="test2")
+        existing.password_hash = hash_password("Old-Passw0rd!2026")
+        session = _FakeSession(scalar_value=existing)
+        monkeypatch.setattr(cli, "async_session_maker", lambda: _SessionCM(session))
+
+        assert await cli._set_password("test2", "New-Passw0rd!2026") == 0
+        assert session.commits == 1
+        assert verify_password("New-Passw0rd!2026", existing.password_hash)
+        assert not verify_password("Old-Passw0rd!2026", existing.password_hash)
+
+    async def test_set_password_missing_user_fails(self, monkeypatch):
+        """不存在就报错——绝不能顺手建一个，否则打错用户名会得到意料之外的账号。"""
+        cli = _load_cli()
+        session = _FakeSession(scalar_value=None)
+        monkeypatch.setattr(cli, "async_session_maker", lambda: _SessionCM(session))
+
+        assert await cli._set_password("nobody", "New-Passw0rd!2026") == 2
+        assert not session.added
+        assert session.commits == 0
+
+    async def test_set_password_rejects_weak(self, monkeypatch):
+        cli = _load_cli()
+        session = _FakeSession(scalar_value=_user(name="test2"))
+        monkeypatch.setattr(cli, "async_session_maker", lambda: _SessionCM(session))
+
+        assert await cli._set_password("test2", "123456") == 2
+        assert session.commits == 0
+
+    async def test_set_password_rejects_same_password(self, monkeypatch, capsys):
+        """密码没变却报「已重置」，是这类操作最坏的失败方式：人会以为已经轮换过了。"""
+        from src.auth import hash_password, verify_password
+
+        cli = _load_cli()
+        existing = _user(name="ops-admin")
+        existing.password_hash = hash_password("Same-Passw0rd!2026")
+        session = _FakeSession(scalar_value=existing)
+        monkeypatch.setattr(cli, "async_session_maker", lambda: _SessionCM(session))
+
+        assert await cli._set_password("ops-admin", "Same-Passw0rd!2026") == 2
+        assert session.commits == 0
+        assert verify_password("Same-Passw0rd!2026", existing.password_hash)
+        assert "相同" in capsys.readouterr().err
+
+    async def test_set_password_never_prints_password(self, monkeypatch, capsys):
+        """CLI 输出会进日志/录屏；密码绝不能出现在 stdout 或 stderr。"""
+        cli = _load_cli()
+        session = _FakeSession(scalar_value=_user(name="test2"))
+        monkeypatch.setattr(cli, "async_session_maker", lambda: _SessionCM(session))
+
+        secret = "Very-Secret-Passw0rd!2026"
+        assert await cli._set_password("test2", secret) == 0
+        captured = capsys.readouterr()
+        assert secret not in captured.out
+        assert secret not in captured.err
