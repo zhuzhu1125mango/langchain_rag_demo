@@ -30,6 +30,6 @@
 | 测试 | 后端 1691 passed / 117 skipped；前端 154 passed |
 | CI | 7/7 绿 |
 | 生产 | 11 容器全 healthy、`/health/ready` 四项 ok、117 路由 |
-| 数据 | 4 篇文档 / 532 chunk；三方一致性巡检 `issues 0` |
+| 数据 | 4 篇文档 / **606 chunk**（11-10 重灌，原 532）；三方一致性巡检 `issues 0` |
 | 上线版本 | DEPLOY-5（UX-5 搜索/筛选/导出） |
 | 回滚源 | `rag-backend:rollback-20261107` / `rag-frontend:rollback-20261107` |

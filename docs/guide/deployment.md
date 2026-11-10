@@ -1271,6 +1271,56 @@ docker exec backend-prod sh -c 'ls -l /app/data/bm25/prod/'
 「文档/内容」这类高频词，没有区分度。判断稀疏通道是否工作要看**查询向量的非零维**，
 不要看存量向量的非空比例。
 
+#### 文档更新后重灌（2026-11-10）
+
+知识库不会自己跟着仓库文档走。2026-11-10 盘点发现生产仍是 **11-04 入库的 532 块**，
+而同样 4 篇文档在仓库里已经切出 **606 块**：
+
+| 文档 | 生产(11-04) | 仓库现在 | 块数 |
+|---|---|---|---|
+| architecture.md | 19903 B | 19903 B | 71 → 71（未变） |
+| monitoring.md | 18036 B | 18036 B | 67 → 67（未变） |
+| deployment.md | 57681 B | 70654 B | 296 → 332 |
+| backup-restore.md | 28275 B | 44635 B | 98 → 136 |
+
+两篇未变文档在**同一镜像、同一参数**下块数逐一对上，说明切分器没漂移，
+差异全部来自内容更新。回答基于旧版文档是**正确性**问题，必须重灌。
+
+```bash
+# 1. 预演：解析新源文件、报块数对比，不写任何数据
+docker cp docs/guide/deployment.md backend-prod:/tmp/deployment.md
+docker exec backend-prod python scripts/reingest_documents.py \
+  --doc deployment.md=/tmp/deployment.md
+
+# 2. 执行：备份旧正文 → 覆写对象存储 → 删旧向量并校验归零 → 重新解析写入
+docker exec backend-prod python scripts/reingest_documents.py \
+  --doc deployment.md=/tmp/deployment.md --commit
+
+# 3. 词表重拟合 + 重启（新块里的新词不在旧词表内）
+docker exec backend-prod python scripts/rebuild_sparse_index.py --commit
+docker restart backend-prod
+```
+
+**两个必须知道的实现事实**（脚本已按此实现，手工作业时同样成立）：
+
+1. 切片 id 是 `uuid.uuid4()`，不是内容哈希，`add_documents` 只追加不覆盖 ——
+   **不先删旧向量就会叠加一整份重复块**，检索命中后再去重也补不回来。
+2. `process_document` 读的是 `doc.file_path`（`minio://...`），**不是仓库磁盘**。
+   只改仓库文件再触发索引，读到的还是旧正文；必须先覆写同一个对象键。
+
+脚本的自保护（任一不满足即 exit 2）：文档不存在或同名多篇、新块数为 0、
+新块数不到现状一半（疑似拿错文件，确属删减用 `--allow-shrink`）、备份失败、
+删除后仍有残留向量。写入后校验「集合内该文档行数 == 新块数 == `documents.chunks_count`」。
+
+**实测（2026-11-10）**：332 / 136 块，总行数 532 → 606，逐篇行数与记录一致；
+词表 `corpus_size` 532 → 606、词数 3106 → 3633（+531 个新词，多为新章节里的
+数字与命令片段），606 条 upsert 后行数不变、自检索 3/3 首位命中。
+`heading_path` 里出现 `7.8 BM25 词表与稀疏索引`——这一节在旧索引里根本不存在，
+是「重灌真的生效」最直接的证据。
+
+**注意**：重灌的收益是**正文正确**，不是检索指标变好。选三个只存在于 §7.8 的事实去问，
+答案都在新块里；但真正的泛问失败（术语缺口、表格挤占）与本次无关，别把两笔账混起来。
+
 #### 仍未做
 
 迁到 Milvus **原生 BM25**（服务端 `Function`，2.6.17 已支持）：没有客户端词表，
