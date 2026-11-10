@@ -13,6 +13,12 @@
 指标：hit@K / MRR@K / recall@K（文档级，只统计有答案题）；另报无答案题的 top1 分数，
 看各通道「能不能区分没有答案」。
 
+口径注意（2026-11-10 补）：BM25 是**在评测语料本体上 fit** 的（`build_index`），
+不读生产 Milvus 的稀疏索引。所以本脚本测的是「通道的算法差异」，**测不到**
+「生产词表冻结」这类部署故障。要复现后者，用 `--sparse-vocab <旧词表文件>`：
+脚本会按生产语义「查询向量为空 → 整条稀疏通道跳过」计算，不会用全零向量排出
+一堆并列 0 分的无关文档。
+
 用法（本机需先 `ollama serve` 且已 pull bge-m3）：
     cd backend && uv run python scripts/run_channel_ab.py --report ../docs/benchmarks/channel-ab.json
     uv run python scripts/run_channel_ab.py --skip-rerank          # 只比 A/B/C
@@ -32,7 +38,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Callable, Dict, List, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -217,8 +223,40 @@ def _ids_only(ranked: Dict[str, List[Tuple[str, float]]]) -> Dict[str, List[str]
 
 
 def arm_sparse_scored(
-    corpus: List[Dict], dataset: List[Dict], channel_top_k: int
+    corpus: List[Dict],
+    dataset: List[Dict],
+    channel_top_k: int,
+    vocab_path: Optional[Path] = None,
 ) -> Dict[str, List[Tuple[str, float]]]:
+    """BM25 通道。
+
+    ``vocab_path`` 用于**复现「冻结词表」事故**：2026-11-09 生产词表是在 5 条演练文本上
+    fit 的，真实提问的词全部落在表外。此时生产 `search_sparse` 会直接跳过整条通道，
+    而这里若照常排序，全零查询向量会让所有文档并列 0 分、按数组下标返回一堆无关文档，
+    反而比生产更糟。所以空查询向量必须显式返回 []——**模拟要模拟得像**，
+    否则算出来的不是事故损失，是另一种故障。
+    """
+    if vocab_path is not None:
+        from pymilvus.model.sparse import BM25EmbeddingFunction
+        from pymilvus.model.sparse.bm25.tokenizers import build_default_analyzer
+
+        bm25_ef = BM25EmbeddingFunction(build_default_analyzer(language="zh"))
+        bm25_ef.load(str(vocab_path))
+        doc_texts = [f"{doc['title']} {doc['text']}" for doc in corpus]
+        doc_matrix = bm25_ef.encode_documents(doc_texts)
+        rankings: Dict[str, List[Tuple[str, float]]] = {}
+        for sample in dataset:
+            query_vec = bm25_ef.encode_queries([sample["question"]])
+            flat_query = query_vec.toarray().ravel() if hasattr(query_vec, "toarray") else query_vec.ravel()
+            if not (flat_query > 0).any():
+                rankings[sample["question"]] = []
+                continue
+            scores = doc_matrix @ query_vec.T
+            flat = scores.toarray().ravel() if hasattr(scores, "toarray") else scores.ravel()
+            order = flat.argsort()[::-1][:channel_top_k]
+            rankings[sample["question"]] = [(corpus[int(i)]["id"], float(flat[int(i)])) for i in order]
+        return rankings
+
     bm25_ef, doc_matrix = build_index(corpus)
     return {
         s["question"]: rank_with_index(bm25_ef, doc_matrix, corpus, s["question"], channel_top_k)
@@ -226,8 +264,13 @@ def arm_sparse_scored(
     }
 
 
-def arm_sparse(corpus: List[Dict], dataset: List[Dict], channel_top_k: int) -> Dict[str, List[str]]:
-    return _ids_only(arm_sparse_scored(corpus, dataset, channel_top_k))
+def arm_sparse(
+    corpus: List[Dict],
+    dataset: List[Dict],
+    channel_top_k: int,
+    vocab_path: Optional[Path] = None,
+) -> Dict[str, List[str]]:
+    return _ids_only(arm_sparse_scored(corpus, dataset, channel_top_k, vocab_path))
 
 
 def arm_dense_scored(
@@ -384,6 +427,12 @@ def main() -> int:
     parser.add_argument("--top-k", type=int, default=5, help="最终截断的 K（与 CI 口径一致）")
     parser.add_argument("--channel-top-k", type=int, default=20, help="融合前各通道保留的候选数")
     parser.add_argument(
+        "--sparse-vocab",
+        type=Path,
+        default=None,
+        help="用指定 BM25 词表文件编码（复现「冻结词表」事故）；默认在评测语料上 fit",
+    )
+    parser.add_argument(
         "--arms",
         default="sparse,dense,hybrid,rerank",
         help="要跑的臂：sparse,dense,hybrid,rerank,union,dense_rerank,weighted,scorefuse",
@@ -421,8 +470,11 @@ def main() -> int:
         results[name] = score_arm(rankings[name], dataset, args.top_k)
         print(f"[ab] {name:<7} done {timings[name]:>6.2f}s")
 
+    if args.sparse_vocab is not None:
+        print(f"[ab] BM25 使用外部词表（复现冻结事故）: {args.sparse_vocab}")
+
     if "sparse" in arms:
-        _run("sparse", lambda: arm_sparse(corpus, dataset, args.channel_top_k))
+        _run("sparse", lambda: arm_sparse(corpus, dataset, args.channel_top_k, args.sparse_vocab))
 
     need_dense = arms & {"dense", "hybrid", "rerank", "union", "dense_rerank", "weighted", "scorefuse"}
     if need_dense:
@@ -440,7 +492,7 @@ def main() -> int:
             _run("dense", lambda: arm_dense(corpus, dataset, args.channel_top_k, _embed))
         if arms & {"hybrid", "rerank", "union", "dense_rerank", "weighted", "scorefuse"}:
             if "sparse" not in rankings:
-                _run("sparse", lambda: arm_sparse(corpus, dataset, args.channel_top_k))
+                _run("sparse", lambda: arm_sparse(corpus, dataset, args.channel_top_k, args.sparse_vocab))
             if "dense" not in rankings:
                 _run("dense", lambda: arm_dense(corpus, dataset, args.channel_top_k, _embed))
         if arms & {"hybrid", "rerank"}:
@@ -450,7 +502,11 @@ def main() -> int:
             # 融合臂只做纯计算，嵌入/BM25 已算过（dense 二次调用走磁盘缓存），
             # 因此一次跑多个权重几乎不增加耗时——扫描比反复跑脚本划算。
             weights = [float(w) for w in args.dense_weights.split(",") if w.strip()]
-            sparse_scored = arm_sparse_scored(corpus, dataset, args.channel_top_k) if "scorefuse" in arms else {}
+            sparse_scored = (
+                arm_sparse_scored(corpus, dataset, args.channel_top_k, args.sparse_vocab)
+                if "scorefuse" in arms
+                else {}
+            )
             dense_scored = (
                 arm_dense_scored(corpus, dataset, args.channel_top_k, _embed) if "scorefuse" in arms else {}
             )
