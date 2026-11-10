@@ -176,6 +176,7 @@ def log_exception(
     action: str,
     severity: Optional[ErrorSeverity] = None,
     message: Optional[str] = None,
+    include_traceback: bool = True,
     **context: Any,
 ) -> ErrorSeverity:
     """按分级记录异常并返回该分级（方便调用方继续分支）。
@@ -186,6 +187,10 @@ def log_exception(
         action: 稳定动作标识（如 ``document.classify``），用于检索聚合。
         severity: 显式指定分级；缺省按 :func:`classify_exception` 判定。
         message: 人类可读前缀；缺省为「操作失败」。
+        include_traceback: 是否输出堆栈。默认 True；**合成的信号**（不是真的在
+            ``except`` 里捕获的，例如「门禁把候选全判成不相关」）应显式关掉——
+            否则 `exc_info=True` 会打出一行 ``NoneType: None``，
+            看起来像程序出错，实际是设计内的业务事件。
         **context: 附加业务键值（doc_id / kb_id / stage 等），None 自动跳过。
 
     Returns:
@@ -196,6 +201,9 @@ def log_exception(
     if resolved is ErrorSeverity.RECOVERABLE:
         # 可恢复：保留错误文本但不输出堆栈，避免网络抖动刷满日志
         logger.warning("%s: %s", text, exc)
-    else:
+    elif include_traceback:
         logger.error("%s: %s", text, exc, exc_info=True)
+    else:
+        # 合成信号：连 exc_info=False 都不传，让记录与 warning 路径一致（exc_info 为 None）
+        logger.error("%s: %s", text, exc)
     return resolved

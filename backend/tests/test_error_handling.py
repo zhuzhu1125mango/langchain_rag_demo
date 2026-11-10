@@ -119,6 +119,26 @@ class TestLogException:
         assert record.levelno == logging.ERROR
         assert record.exc_info is not None
 
+    def test_reportable_can_skip_traceback_for_synthetic_signals(self, caplog):
+        """合成的信号（不是 except 里捕获的）不该打堆栈。
+
+        否则 `exc_info=True` 会输出一行 `NoneType: None` —— 看起来像程序出错，
+        实际是设计内的业务事件（如「相关性门禁把候选全判成不相关」）。
+        """
+        logger = logging.getLogger("test.error_handling.synthetic")
+        with caplog.at_level(logging.DEBUG, logger=logger.name):
+            severity = log_exception(
+                logger,
+                RuntimeError("gate suppressed"),
+                action="pipeline.kb.relevance_gate_suppressed",
+                include_traceback=False,
+            )
+        assert severity is ErrorSeverity.REPORTABLE
+        record = caplog.records[-1]
+        assert record.levelno == logging.ERROR
+        assert record.exc_info is None
+        assert "action=pipeline.kb.relevance_gate_suppressed" in record.getMessage()
+
     def test_programming_logs_error_with_stack(self, caplog):
         logger = logging.getLogger("test.error_handling.programming")
         with caplog.at_level(logging.DEBUG, logger=logger.name):

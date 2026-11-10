@@ -1,0 +1,160 @@
+{
+  "samples": 24,
+  "stage": "rerank_n3",
+  "results": [
+    {
+      "threshold": 0.0,
+      "n": 24,
+      "refused": 0,
+      "false_refuse": 0,
+      "missed": 4,
+      "answered": 24,
+      "false_refuse_questions": [],
+      "min_answered_score": 0.0189
+    },
+    {
+      "threshold": 0.01,
+      "n": 24,
+      "refused": 0,
+      "false_refuse": 0,
+      "missed": 4,
+      "answered": 24,
+      "false_refuse_questions": [],
+      "min_answered_score": 0.0189
+    },
+    {
+      "threshold": 0.02,
+      "n": 24,
+      "refused": 1,
+      "false_refuse": 1,
+      "missed": 4,
+      "answered": 23,
+      "false_refuse_questions": [
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.12
+    },
+    {
+      "threshold": 0.05,
+      "n": 24,
+      "refused": 1,
+      "false_refuse": 1,
+      "missed": 4,
+      "answered": 23,
+      "false_refuse_questions": [
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.12
+    },
+    {
+      "threshold": 0.1,
+      "n": 24,
+      "refused": 1,
+      "false_refuse": 1,
+      "missed": 4,
+      "answered": 23,
+      "false_refuse_questions": [
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.12
+    },
+    {
+      "threshold": 0.15,
+      "n": 24,
+      "refused": 2,
+      "false_refuse": 1,
+      "missed": 3,
+      "answered": 22,
+      "false_refuse_questions": [
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.2594
+    },
+    {
+      "threshold": 0.2,
+      "n": 24,
+      "refused": 2,
+      "false_refuse": 1,
+      "missed": 3,
+      "answered": 22,
+      "false_refuse_questions": [
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.2594
+    },
+    {
+      "threshold": 0.3,
+      "n": 24,
+      "refused": 3,
+      "false_refuse": 2,
+      "missed": 3,
+      "answered": 21,
+      "false_refuse_questions": [
+        "从零部署一套生产环境要做哪些事？",
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.3356
+    },
+    {
+      "threshold": 0.5,
+      "n": 24,
+      "refused": 7,
+      "false_refuse": 6,
+      "missed": 3,
+      "answered": 17,
+      "false_refuse_questions": [
+        "优雅停机怎么做？为什么需要？",
+        "从零部署一套生产环境要做哪些事？",
+        "容量怎么规划，什么时候该扩容？",
+        "数据库迁移怎么执行？",
+        "恢复的顺序为什么不能打乱？",
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.513
+    },
+    {
+      "threshold": 0.7,
+      "n": 24,
+      "refused": 9,
+      "false_refuse": 8,
+      "missed": 3,
+      "answered": 15,
+      "false_refuse_questions": [
+        "优雅停机怎么做？为什么需要？",
+        "从零部署一套生产环境要做哪些事？",
+        "容量怎么规划，什么时候该扩容？",
+        "告警怎么通知出去，怎么配接收人？",
+        "生产环境升级换版本要注意什么？",
+        "数据库迁移怎么执行？",
+        "恢复的顺序为什么不能打乱？",
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.7051
+    },
+    {
+      "threshold": 0.9,
+      "n": 24,
+      "refused": 13,
+      "false_refuse": 10,
+      "missed": 1,
+      "answered": 11,
+      "false_refuse_questions": [
+        "优雅停机怎么做？为什么需要？",
+        "从零部署一套生产环境要做哪些事？",
+        "出问题要回滚，怎么决策、怎么执行？",
+        "容量怎么规划，什么时候该扩容？",
+        "告警怎么通知出去，怎么配接收人？",
+        "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+        "生产环境升级换版本要注意什么？",
+        "数据库迁移怎么执行？",
+        "恢复的顺序为什么不能打乱？",
+        "熔断触发的时间和条件是什么？"
+      ],
+      "min_answered_score": 0.9062
+    }
+  ],
+  "safe_thresholds": [
+    0.0,
+    0.01
+  ]
+}
