@@ -275,6 +275,13 @@ class ProcessingSettings(BaseSettings):
     KB_HYBRID_SEARCH_TOP_K: int = 20
     KB_HYBRID_RERANK_TOP_K: int = 5
     KB_RRF_K: int = 60
+    # 融合后折叠同表行级块（2026-11-11）：同一 (文档, 表头) 只占 1 个重排名额。
+    # 背景：生产 rerank_n = max(k, KB_HYBRID_RERANK_TOP_K) = 3 = 最终块数，重排只能排序
+    # 不能换人，所以「谁进 3 个名额」由 RRF 顺序决定。不折叠时，「监控哪些指标、有哪些告警」
+    # 的 3 个名额被同一张指标表的三行（0.970/0.969/0.968）占满，答案在另一张表里。
+    # 默认关闭：离线 24 题上概览 0.556→0.598、细节持平、其余题目不变，收益约半道题，
+    # 证据不足以直接改线上默认行为；用 KB_TABLE_FOLD_ENABLED=true 可开启验证。
+    KB_TABLE_FOLD_ENABLED: bool = False
     KB_RERANK_MIN_SCORE: float = 0.0  # 重排序最低置信度，低于此值的结果将被过滤
     # 是否启用知识库重排序（C1）：关闭或未配置模型时按 RRF 分数直接截断，不加载 reranker
     KB_RERANK_ENABLED: bool = True

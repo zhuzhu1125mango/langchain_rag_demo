@@ -49,6 +49,7 @@ from src.services.hybrid_search import (  # noqa: E402
 )
 from src.services.milvus_common import _ab_rerank_top_k  # noqa: E402
 from src.services.milvus_service import MilvusService  # noqa: E402
+from src.services.table_chunks import fold_same_table_rows  # noqa: E402
 
 # 复用同一批题与同一个覆盖率定义——两套口径算出来的数不可比，那就白测了
 from probe_retrieval_stages import QUESTIONS, coverage  # noqa: E402
@@ -113,6 +114,14 @@ async def probe_one(svc, item: Dict, corpus_by_id: Dict[str, Dict], args) -> Dic
     sparse = await svc.search_sparse(q, k=pool)
     fused = reciprocal_rank_fusion({"dense": dense, "sparse": sparse}, k=settings.processing.KB_RRF_K)
 
+    # 可选：在生产候选上折叠同表行级块（与 search_hybrid 里 KB_TABLE_FOLD_ENABLED 同一函数），
+    # 用于在不改线上配置的前提下验证这条改动在真实索引上的效果。
+    fused_before_fold = len(fused)
+    fold_removed = 0
+    if getattr(args, "fold_table", False):
+        fused = fold_same_table_rows(fused)
+        fold_removed = fused_before_fold - len(fused)
+
     fused_ids = [r["id"] for r in fused]
     fused_rank, fused_hits = best_fact_rank(fused_ids, corpus_by_id, facts)
 
@@ -126,6 +135,8 @@ async def probe_one(svc, item: Dict, corpus_by_id: Dict[str, Dict], args) -> Dic
         "dense_returned": len(dense),
         "sparse_returned": len(sparse),
         "fused_returned": len(fused),
+        "fused_before_fold": fused_before_fold,
+        "fold_removed": fold_removed,
         "fused_rank": fused_rank,
         "fused_hits_at_rank": fused_hits,
         "channel_top_k": {
@@ -252,6 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pool", type=int, default=20, help="每路召回数（生产 KB_HYBRID_SEARCH_TOP_K）")
     parser.add_argument("--rerank-n", default="3,5,10,20", help="重排窗口扫描，逗号分隔")
     parser.add_argument("--final-k", type=int, default=3, help="最终进上下文的块数（生产 top_k）")
+    parser.add_argument(
+        "--fold-table",
+        action="store_true",
+        help="融合后折叠同表行级块（与 KB_TABLE_FOLD_ENABLED 同一函数），用于验证改动效果",
+    )
     parser.add_argument("--report", default="", help="把完整结果写成 JSON")
     return parser
 

@@ -11,6 +11,7 @@ from src.config import settings
 from src.services.milvus_common import (
     _ab_rerank_top_k,
 )
+from src.services.table_chunks import fold_same_table_rows
 
 logger = logging.getLogger("milvus_service")
 
@@ -211,6 +212,15 @@ class SearchMixin:
                 k=settings.processing.KB_RRF_K,
             )
             timings["rrf_ms"] = int((time.perf_counter() - t0) * 1000)
+
+            # 融合后折叠同表行级块：同一 (文档, 表头) 只留第一个候选。
+            # 必须在这里做（RRF 之后、截断之前）——线上 rerank_n = max(k, 3) 等于最终块数，
+            # 重排只能排序不能换人，所以「谁进这 3 个名额」由 RRF 顺序决定。
+            # 详见 src/services/table_chunks.py 的实测数据与边界说明。
+            if settings.processing.KB_TABLE_FOLD_ENABLED:
+                before = len(fused)
+                fused = fold_same_table_rows(fused)
+                timings["table_fold_removed"] = before - len(fused)
 
             # C1：rerank 关闭或未配置模型时，直接按 RRF 分数截断，不加载/调用 reranker
             if (

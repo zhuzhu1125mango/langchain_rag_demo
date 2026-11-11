@@ -1,0 +1,2447 @@
+{
+  "configs": [
+    {
+      "label": "pool20/原样/含元信息块/win3",
+      "pool": 20,
+      "fold": false,
+      "window": 3,
+      "by_kind": {
+        "overview": 0.556,
+        "detail": 0.792
+      },
+      "rows": [
+        {
+          "question": "系统由哪些部分组成，请求怎么流转？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#26",
+            "deployment.md#227",
+            "deployment.md#230"
+          ],
+          "n_fused_after_fold": 40
+        },
+        {
+          "question": "优雅停机怎么做？为什么需要？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM",
+            "SIGKILL"
+          ],
+          "picked": [
+            "backup-restore.md#118",
+            "deployment.md#45",
+            "backup-restore.md#72"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "监控哪些指标、有哪些告警？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "deployment.md#227",
+            "deployment.md#231",
+            "deployment.md#230"
+          ],
+          "n_fused_after_fold": 26
+        },
+        {
+          "question": "备份怎么恢复？恢复后确认什么？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "pg_dump",
+            "恢复顺序"
+          ],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 33
+        },
+        {
+          "question": "从零部署一套生产环境要做哪些事？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "首次部署准备",
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#0",
+            "deployment.md#176"
+          ],
+          "n_fused_after_fold": 28
+        },
+        {
+          "question": "出问题要回滚，怎么决策、怎么执行？",
+          "kind": "overview",
+          "coverage": 0.33,
+          "hits": [
+            "决策矩阵"
+          ],
+          "picked": [
+            "backup-restore.md#35",
+            "deployment.md#268",
+            "architecture.md#19"
+          ],
+          "n_fused_after_fold": 39
+        },
+        {
+          "question": "容量怎么规划，什么时候该扩容？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "扩容触发阈值"
+          ],
+          "picked": [
+            "backup-restore.md#65",
+            "backup-restore.md#66",
+            "backup-restore.md#49"
+          ],
+          "n_fused_after_fold": 26
+        },
+        {
+          "question": "告警怎么通知出去，怎么配接收人？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "alertmanager.yml",
+            "webhook"
+          ],
+          "picked": [
+            "deployment.md#243",
+            "monitoring.md#48",
+            "deployment.md#242"
+          ],
+          "n_fused_after_fold": 23
+        },
+        {
+          "question": "备份和恢复的 RPO / RTO 目标是多少？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "RPO",
+            "RTO"
+          ],
+          "picked": [
+            "backup-restore.md#4",
+            "backup-restore.md#1",
+            "backup-restore.md#6"
+          ],
+          "n_fused_after_fold": 31
+        },
+        {
+          "question": "一致性巡检怎么跑，结果怎么判读？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "退出码"
+          ],
+          "picked": [
+            "monitoring.md#51",
+            "monitoring.md#59",
+            "monitoring.md#65"
+          ],
+          "n_fused_after_fold": 25
+        },
+        {
+          "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#38",
+            "backup-restore.md#37",
+            "backup-restore.md#39"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "生产环境升级换版本要注意什么？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#52",
+            "deployment.md#45"
+          ],
+          "n_fused_after_fold": 40
+        },
+        {
+          "question": "为什么要给 NLTK 语料单独放进镜像？",
+          "kind": "detail",
+          "coverage": 0.5,
+          "hits": [
+            "NLTK_DATA"
+          ],
+          "picked": [
+            "deployment.md#53",
+            "deployment.md#54",
+            "deployment.md#56"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "ScrapeTargetDown 是什么意思？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "backup-restore.md#108",
+            "monitoring.md#32",
+            "monitoring.md#45"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "改完告警规则怎么生效？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "promtool",
+            "reload"
+          ],
+          "picked": [
+            "monitoring.md#47",
+            "monitoring.md#43",
+            "deployment.md#239"
+          ],
+          "n_fused_after_fold": 24
+        },
+        {
+          "question": "数据库迁移怎么执行？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic upgrade head",
+            "alembic check"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "deployment.md#192",
+            "deployment.md#7"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "恢复的顺序为什么不能打乱？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "恢复顺序",
+            "不可打乱"
+          ],
+          "picked": [
+            "backup-restore.md#24",
+            "backup-restore.md#26",
+            "backup-restore.md#25"
+          ],
+          "n_fused_after_fold": 37
+        },
+        {
+          "question": "只想恢复某一个知识库，怎么部分恢复？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "部分恢复",
+            "单知识库"
+          ],
+          "picked": [
+            "backup-restore.md#29",
+            "backup-restore.md#132",
+            "backup-restore.md#99"
+          ],
+          "n_fused_after_fold": 35
+        },
+        {
+          "question": "数据库迁移怎么回滚？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#37",
+            "backup-restore.md#31"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "熔断触发的时间和条件是什么？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "60s"
+          ],
+          "picked": [
+            "architecture.md#23",
+            "architecture.md#24",
+            "architecture.md#37"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "流式响应的事件是怎么发给前端的？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "data:",
+            "event:"
+          ],
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#50",
+            "monitoring.md#37"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "换 Embedding 模型需要做什么？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#25",
+            "deployment.md#159",
+            "deployment.md#158"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "部署生产环境前必须配哪些密码？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#205",
+            "deployment.md#88"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "备份恢复后要确认哪些事？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 34
+        }
+      ]
+    },
+    {
+      "label": "pool20/原样/去元信息块/win3",
+      "pool": 20,
+      "fold": false,
+      "window": 3,
+      "by_kind": {
+        "overview": 0.556,
+        "detail": 0.792
+      },
+      "rows": [
+        {
+          "question": "系统由哪些部分组成，请求怎么流转？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#26",
+            "deployment.md#227",
+            "deployment.md#230"
+          ],
+          "n_fused_after_fold": 40
+        },
+        {
+          "question": "优雅停机怎么做？为什么需要？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM",
+            "SIGKILL"
+          ],
+          "picked": [
+            "backup-restore.md#118",
+            "deployment.md#45",
+            "backup-restore.md#72"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "监控哪些指标、有哪些告警？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "deployment.md#227",
+            "deployment.md#231",
+            "deployment.md#230"
+          ],
+          "n_fused_after_fold": 25
+        },
+        {
+          "question": "备份怎么恢复？恢复后确认什么？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "pg_dump",
+            "恢复顺序"
+          ],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 33
+        },
+        {
+          "question": "从零部署一套生产环境要做哪些事？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "首次部署准备",
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#0",
+            "deployment.md#176"
+          ],
+          "n_fused_after_fold": 28
+        },
+        {
+          "question": "出问题要回滚，怎么决策、怎么执行？",
+          "kind": "overview",
+          "coverage": 0.33,
+          "hits": [
+            "决策矩阵"
+          ],
+          "picked": [
+            "backup-restore.md#35",
+            "deployment.md#268",
+            "architecture.md#19"
+          ],
+          "n_fused_after_fold": 38
+        },
+        {
+          "question": "容量怎么规划，什么时候该扩容？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "扩容触发阈值"
+          ],
+          "picked": [
+            "backup-restore.md#65",
+            "backup-restore.md#66",
+            "backup-restore.md#49"
+          ],
+          "n_fused_after_fold": 25
+        },
+        {
+          "question": "告警怎么通知出去，怎么配接收人？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "alertmanager.yml",
+            "webhook"
+          ],
+          "picked": [
+            "deployment.md#243",
+            "monitoring.md#48",
+            "deployment.md#242"
+          ],
+          "n_fused_after_fold": 23
+        },
+        {
+          "question": "备份和恢复的 RPO / RTO 目标是多少？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "RPO",
+            "RTO"
+          ],
+          "picked": [
+            "backup-restore.md#4",
+            "backup-restore.md#1",
+            "backup-restore.md#6"
+          ],
+          "n_fused_after_fold": 31
+        },
+        {
+          "question": "一致性巡检怎么跑，结果怎么判读？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "退出码"
+          ],
+          "picked": [
+            "monitoring.md#51",
+            "monitoring.md#59",
+            "monitoring.md#65"
+          ],
+          "n_fused_after_fold": 25
+        },
+        {
+          "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#38",
+            "backup-restore.md#37",
+            "backup-restore.md#39"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "生产环境升级换版本要注意什么？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#52",
+            "deployment.md#45"
+          ],
+          "n_fused_after_fold": 40
+        },
+        {
+          "question": "为什么要给 NLTK 语料单独放进镜像？",
+          "kind": "detail",
+          "coverage": 0.5,
+          "hits": [
+            "NLTK_DATA"
+          ],
+          "picked": [
+            "deployment.md#53",
+            "deployment.md#54",
+            "deployment.md#56"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "ScrapeTargetDown 是什么意思？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "backup-restore.md#108",
+            "monitoring.md#32",
+            "monitoring.md#45"
+          ],
+          "n_fused_after_fold": 35
+        },
+        {
+          "question": "改完告警规则怎么生效？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "promtool",
+            "reload"
+          ],
+          "picked": [
+            "monitoring.md#47",
+            "monitoring.md#43",
+            "deployment.md#239"
+          ],
+          "n_fused_after_fold": 23
+        },
+        {
+          "question": "数据库迁移怎么执行？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic upgrade head",
+            "alembic check"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "deployment.md#192",
+            "deployment.md#7"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "恢复的顺序为什么不能打乱？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "恢复顺序",
+            "不可打乱"
+          ],
+          "picked": [
+            "backup-restore.md#24",
+            "backup-restore.md#26",
+            "backup-restore.md#25"
+          ],
+          "n_fused_after_fold": 37
+        },
+        {
+          "question": "只想恢复某一个知识库，怎么部分恢复？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "部分恢复",
+            "单知识库"
+          ],
+          "picked": [
+            "backup-restore.md#29",
+            "backup-restore.md#132",
+            "backup-restore.md#99"
+          ],
+          "n_fused_after_fold": 35
+        },
+        {
+          "question": "数据库迁移怎么回滚？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#37",
+            "backup-restore.md#31"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "熔断触发的时间和条件是什么？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "60s"
+          ],
+          "picked": [
+            "architecture.md#23",
+            "architecture.md#24",
+            "architecture.md#37"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "流式响应的事件是怎么发给前端的？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "data:",
+            "event:"
+          ],
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#50",
+            "monitoring.md#37"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "换 Embedding 模型需要做什么？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#25",
+            "deployment.md#159",
+            "deployment.md#158"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "部署生产环境前必须配哪些密码？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#205",
+            "deployment.md#88"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "备份恢复后要确认哪些事？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 34
+        }
+      ]
+    },
+    {
+      "label": "pool20/折叠/含元信息块/win3",
+      "pool": 20,
+      "fold": true,
+      "window": 3,
+      "by_kind": {
+        "overview": 0.598,
+        "detail": 0.792
+      },
+      "rows": [
+        {
+          "question": "系统由哪些部分组成，请求怎么流转？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#17",
+            "deployment.md#227"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "优雅停机怎么做？为什么需要？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM",
+            "SIGKILL"
+          ],
+          "picked": [
+            "backup-restore.md#118",
+            "deployment.md#45",
+            "backup-restore.md#72"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "监控哪些指标、有哪些告警？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "deployment.md#227",
+            "monitoring.md#0",
+            "monitoring.md#32"
+          ],
+          "n_fused_after_fold": 7
+        },
+        {
+          "question": "备份怎么恢复？恢复后确认什么？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "pg_dump",
+            "恢复顺序"
+          ],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "从零部署一套生产环境要做哪些事？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "首次部署准备",
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#0",
+            "deployment.md#176"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "出问题要回滚，怎么决策、怎么执行？",
+          "kind": "overview",
+          "coverage": 0.33,
+          "hits": [
+            "决策矩阵"
+          ],
+          "picked": [
+            "backup-restore.md#35",
+            "deployment.md#268",
+            "architecture.md#19"
+          ],
+          "n_fused_after_fold": 28
+        },
+        {
+          "question": "容量怎么规划，什么时候该扩容？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "扩容触发阈值"
+          ],
+          "picked": [
+            "backup-restore.md#65",
+            "backup-restore.md#66",
+            "backup-restore.md#49"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "告警怎么通知出去，怎么配接收人？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "alertmanager.yml",
+            "webhook"
+          ],
+          "picked": [
+            "deployment.md#243",
+            "monitoring.md#48",
+            "deployment.md#242"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "备份和恢复的 RPO / RTO 目标是多少？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "RPO",
+            "RTO"
+          ],
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#4",
+            "backup-restore.md#94"
+          ],
+          "n_fused_after_fold": 18
+        },
+        {
+          "question": "一致性巡检怎么跑，结果怎么判读？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "退出码"
+          ],
+          "picked": [
+            "monitoring.md#51",
+            "monitoring.md#59",
+            "monitoring.md#65"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#38",
+            "backup-restore.md#37",
+            "backup-restore.md#39"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "生产环境升级换版本要注意什么？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#52",
+            "deployment.md#45"
+          ],
+          "n_fused_after_fold": 16
+        },
+        {
+          "question": "为什么要给 NLTK 语料单独放进镜像？",
+          "kind": "detail",
+          "coverage": 0.5,
+          "hits": [
+            "NLTK_DATA"
+          ],
+          "picked": [
+            "deployment.md#53",
+            "deployment.md#54",
+            "deployment.md#56"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "ScrapeTargetDown 是什么意思？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "backup-restore.md#108",
+            "monitoring.md#32",
+            "monitoring.md#45"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "改完告警规则怎么生效？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "promtool",
+            "reload"
+          ],
+          "picked": [
+            "monitoring.md#47",
+            "monitoring.md#43",
+            "deployment.md#239"
+          ],
+          "n_fused_after_fold": 13
+        },
+        {
+          "question": "数据库迁移怎么执行？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic upgrade head",
+            "alembic check"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "deployment.md#192",
+            "deployment.md#7"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "恢复的顺序为什么不能打乱？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "恢复顺序",
+            "不可打乱"
+          ],
+          "picked": [
+            "backup-restore.md#24",
+            "backup-restore.md#26",
+            "backup-restore.md#25"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "只想恢复某一个知识库，怎么部分恢复？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "部分恢复",
+            "单知识库"
+          ],
+          "picked": [
+            "backup-restore.md#29",
+            "backup-restore.md#132",
+            "backup-restore.md#99"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "数据库迁移怎么回滚？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#37",
+            "backup-restore.md#31"
+          ],
+          "n_fused_after_fold": 24
+        },
+        {
+          "question": "熔断触发的时间和条件是什么？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "60s"
+          ],
+          "picked": [
+            "architecture.md#23",
+            "architecture.md#24",
+            "architecture.md#37"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "流式响应的事件是怎么发给前端的？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "data:",
+            "event:"
+          ],
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#50",
+            "monitoring.md#37"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "换 Embedding 模型需要做什么？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#25",
+            "deployment.md#159",
+            "deployment.md#158"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "部署生产环境前必须配哪些密码？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#205",
+            "deployment.md#88"
+          ],
+          "n_fused_after_fold": 15
+        },
+        {
+          "question": "备份恢复后要确认哪些事？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 33
+        }
+      ]
+    },
+    {
+      "label": "pool20/折叠/去元信息块/win3",
+      "pool": 20,
+      "fold": true,
+      "window": 3,
+      "by_kind": {
+        "overview": 0.598,
+        "detail": 0.792
+      },
+      "rows": [
+        {
+          "question": "系统由哪些部分组成，请求怎么流转？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#17",
+            "deployment.md#227"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "优雅停机怎么做？为什么需要？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM",
+            "SIGKILL"
+          ],
+          "picked": [
+            "backup-restore.md#118",
+            "deployment.md#45",
+            "backup-restore.md#72"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "监控哪些指标、有哪些告警？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "deployment.md#227",
+            "monitoring.md#32",
+            "monitoring.md#31"
+          ],
+          "n_fused_after_fold": 6
+        },
+        {
+          "question": "备份怎么恢复？恢复后确认什么？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "pg_dump",
+            "恢复顺序"
+          ],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "从零部署一套生产环境要做哪些事？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "首次部署准备",
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#0",
+            "deployment.md#176"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "出问题要回滚，怎么决策、怎么执行？",
+          "kind": "overview",
+          "coverage": 0.33,
+          "hits": [
+            "决策矩阵"
+          ],
+          "picked": [
+            "backup-restore.md#35",
+            "deployment.md#268",
+            "architecture.md#19"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "容量怎么规划，什么时候该扩容？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "扩容触发阈值"
+          ],
+          "picked": [
+            "backup-restore.md#65",
+            "backup-restore.md#66",
+            "backup-restore.md#49"
+          ],
+          "n_fused_after_fold": 11
+        },
+        {
+          "question": "告警怎么通知出去，怎么配接收人？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "alertmanager.yml",
+            "webhook"
+          ],
+          "picked": [
+            "deployment.md#243",
+            "monitoring.md#48",
+            "deployment.md#242"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "备份和恢复的 RPO / RTO 目标是多少？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "RPO",
+            "RTO"
+          ],
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#4",
+            "backup-restore.md#94"
+          ],
+          "n_fused_after_fold": 18
+        },
+        {
+          "question": "一致性巡检怎么跑，结果怎么判读？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "退出码"
+          ],
+          "picked": [
+            "monitoring.md#51",
+            "monitoring.md#59",
+            "monitoring.md#65"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#38",
+            "backup-restore.md#37",
+            "backup-restore.md#39"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "生产环境升级换版本要注意什么？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "SIGTERM"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#52",
+            "deployment.md#45"
+          ],
+          "n_fused_after_fold": 16
+        },
+        {
+          "question": "为什么要给 NLTK 语料单独放进镜像？",
+          "kind": "detail",
+          "coverage": 0.5,
+          "hits": [
+            "NLTK_DATA"
+          ],
+          "picked": [
+            "deployment.md#53",
+            "deployment.md#54",
+            "deployment.md#56"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "ScrapeTargetDown 是什么意思？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "backup-restore.md#108",
+            "monitoring.md#32",
+            "monitoring.md#45"
+          ],
+          "n_fused_after_fold": 26
+        },
+        {
+          "question": "改完告警规则怎么生效？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "promtool",
+            "reload"
+          ],
+          "picked": [
+            "monitoring.md#47",
+            "monitoring.md#43",
+            "deployment.md#239"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "数据库迁移怎么执行？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic upgrade head",
+            "alembic check"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "deployment.md#192",
+            "deployment.md#7"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "恢复的顺序为什么不能打乱？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "恢复顺序",
+            "不可打乱"
+          ],
+          "picked": [
+            "backup-restore.md#24",
+            "backup-restore.md#26",
+            "backup-restore.md#25"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "只想恢复某一个知识库，怎么部分恢复？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "部分恢复",
+            "单知识库"
+          ],
+          "picked": [
+            "backup-restore.md#29",
+            "backup-restore.md#132",
+            "backup-restore.md#99"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "数据库迁移怎么回滚？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#37",
+            "backup-restore.md#31"
+          ],
+          "n_fused_after_fold": 24
+        },
+        {
+          "question": "熔断触发的时间和条件是什么？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "60s"
+          ],
+          "picked": [
+            "architecture.md#23",
+            "architecture.md#24",
+            "architecture.md#37"
+          ],
+          "n_fused_after_fold": 20
+        },
+        {
+          "question": "流式响应的事件是怎么发给前端的？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "data:",
+            "event:"
+          ],
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#50",
+            "monitoring.md#37"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "换 Embedding 模型需要做什么？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#25",
+            "deployment.md#159",
+            "deployment.md#158"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "部署生产环境前必须配哪些密码？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#205",
+            "deployment.md#88"
+          ],
+          "n_fused_after_fold": 15
+        },
+        {
+          "question": "备份恢复后要确认哪些事？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 33
+        }
+      ]
+    },
+    {
+      "label": "pool20/原样/去元信息块/win20",
+      "pool": 20,
+      "fold": false,
+      "window": 20,
+      "by_kind": {
+        "overview": 0.452,
+        "detail": 0.792
+      },
+      "rows": [
+        {
+          "question": "系统由哪些部分组成，请求怎么流转？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#26",
+            "architecture.md#15",
+            "architecture.md#60"
+          ],
+          "n_fused_after_fold": 40
+        },
+        {
+          "question": "优雅停机怎么做？为什么需要？",
+          "kind": "overview",
+          "coverage": 0.25,
+          "hits": [
+            "timeout-graceful-shutdown"
+          ],
+          "picked": [
+            "backup-restore.md#115",
+            "backup-restore.md#38",
+            "backup-restore.md#118"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "监控哪些指标、有哪些告警？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "deployment.md#227",
+            "deployment.md#238",
+            "deployment.md#231"
+          ],
+          "n_fused_after_fold": 25
+        },
+        {
+          "question": "备份怎么恢复？恢复后确认什么？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "pg_dump",
+            "恢复顺序"
+          ],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 33
+        },
+        {
+          "question": "从零部署一套生产环境要做哪些事？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "首次部署准备",
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#80",
+            "deployment.md#76"
+          ],
+          "n_fused_after_fold": 28
+        },
+        {
+          "question": "出问题要回滚，怎么决策、怎么执行？",
+          "kind": "overview",
+          "coverage": 0.33,
+          "hits": [
+            "决策矩阵"
+          ],
+          "picked": [
+            "backup-restore.md#35",
+            "backup-restore.md#33",
+            "backup-restore.md#109"
+          ],
+          "n_fused_after_fold": 38
+        },
+        {
+          "question": "容量怎么规划，什么时候该扩容？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "扩容触发阈值"
+          ],
+          "picked": [
+            "backup-restore.md#65",
+            "backup-restore.md#66",
+            "backup-restore.md#53"
+          ],
+          "n_fused_after_fold": 25
+        },
+        {
+          "question": "告警怎么通知出去，怎么配接收人？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "alertmanager.yml",
+            "webhook"
+          ],
+          "picked": [
+            "deployment.md#243",
+            "monitoring.md#48",
+            "deployment.md#242"
+          ],
+          "n_fused_after_fold": 23
+        },
+        {
+          "question": "备份和恢复的 RPO / RTO 目标是多少？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "RPO",
+            "RTO"
+          ],
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#4",
+            "backup-restore.md#2"
+          ],
+          "n_fused_after_fold": 31
+        },
+        {
+          "question": "一致性巡检怎么跑，结果怎么判读？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "退出码"
+          ],
+          "picked": [
+            "monitoring.md#63",
+            "monitoring.md#51",
+            "monitoring.md#58"
+          ],
+          "n_fused_after_fold": 25
+        },
+        {
+          "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#38",
+            "backup-restore.md#37",
+            "backup-restore.md#35"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "生产环境升级换版本要注意什么？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#205",
+            "deployment.md#52"
+          ],
+          "n_fused_after_fold": 40
+        },
+        {
+          "question": "为什么要给 NLTK 语料单独放进镜像？",
+          "kind": "detail",
+          "coverage": 0.5,
+          "hits": [
+            "NLTK_DATA"
+          ],
+          "picked": [
+            "deployment.md#53",
+            "deployment.md#263",
+            "deployment.md#54"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "ScrapeTargetDown 是什么意思？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "backup-restore.md#108",
+            "monitoring.md#46",
+            "monitoring.md#32"
+          ],
+          "n_fused_after_fold": 35
+        },
+        {
+          "question": "改完告警规则怎么生效？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "promtool",
+            "reload"
+          ],
+          "picked": [
+            "monitoring.md#47",
+            "monitoring.md#50",
+            "monitoring.md#32"
+          ],
+          "n_fused_after_fold": 23
+        },
+        {
+          "question": "数据库迁移怎么执行？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic upgrade head",
+            "alembic check"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#37",
+            "backup-restore.md#13"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "恢复的顺序为什么不能打乱？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "恢复顺序",
+            "不可打乱"
+          ],
+          "picked": [
+            "backup-restore.md#24",
+            "backup-restore.md#26",
+            "backup-restore.md#27"
+          ],
+          "n_fused_after_fold": 37
+        },
+        {
+          "question": "只想恢复某一个知识库，怎么部分恢复？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "部分恢复",
+            "单知识库"
+          ],
+          "picked": [
+            "backup-restore.md#29",
+            "backup-restore.md#25",
+            "deployment.md#253"
+          ],
+          "n_fused_after_fold": 35
+        },
+        {
+          "question": "数据库迁移怎么回滚？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#38",
+            "backup-restore.md#37"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "熔断触发的时间和条件是什么？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "60s"
+          ],
+          "picked": [
+            "architecture.md#23",
+            "monitoring.md#27",
+            "architecture.md#49"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "流式响应的事件是怎么发给前端的？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "data:",
+            "event:"
+          ],
+          "picked": [
+            "architecture.md#26",
+            "backup-restore.md#66",
+            "architecture.md#50"
+          ],
+          "n_fused_after_fold": 36
+        },
+        {
+          "question": "换 Embedding 模型需要做什么？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#8",
+            "monitoring.md#30",
+            "architecture.md#25"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "部署生产环境前必须配哪些密码？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#78",
+            "deployment.md#24"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "备份恢复后要确认哪些事？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#40",
+            "backup-restore.md#25"
+          ],
+          "n_fused_after_fold": 34
+        }
+      ]
+    },
+    {
+      "label": "pool20/折叠/含元信息块/win20",
+      "pool": 20,
+      "fold": true,
+      "window": 20,
+      "by_kind": {
+        "overview": 0.452,
+        "detail": 0.792
+      },
+      "rows": [
+        {
+          "question": "系统由哪些部分组成，请求怎么流转？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#26",
+            "monitoring.md#51",
+            "architecture.md#27"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "优雅停机怎么做？为什么需要？",
+          "kind": "overview",
+          "coverage": 0.25,
+          "hits": [
+            "timeout-graceful-shutdown"
+          ],
+          "picked": [
+            "backup-restore.md#115",
+            "backup-restore.md#38",
+            "backup-restore.md#118"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "监控哪些指标、有哪些告警？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "deployment.md#227",
+            "monitoring.md#11",
+            "monitoring.md#0"
+          ],
+          "n_fused_after_fold": 7
+        },
+        {
+          "question": "备份怎么恢复？恢复后确认什么？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "pg_dump",
+            "恢复顺序"
+          ],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "从零部署一套生产环境要做哪些事？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "首次部署准备",
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#78",
+            "deployment.md#77",
+            "deployment.md#80"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "出问题要回滚，怎么决策、怎么执行？",
+          "kind": "overview",
+          "coverage": 0.33,
+          "hits": [
+            "决策矩阵"
+          ],
+          "picked": [
+            "backup-restore.md#35",
+            "backup-restore.md#38",
+            "backup-restore.md#68"
+          ],
+          "n_fused_after_fold": 28
+        },
+        {
+          "question": "容量怎么规划，什么时候该扩容？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "扩容触发阈值"
+          ],
+          "picked": [
+            "backup-restore.md#65",
+            "backup-restore.md#66",
+            "backup-restore.md#53"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "告警怎么通知出去，怎么配接收人？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "alertmanager.yml",
+            "webhook"
+          ],
+          "picked": [
+            "deployment.md#243",
+            "monitoring.md#48",
+            "deployment.md#242"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "备份和恢复的 RPO / RTO 目标是多少？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "RPO",
+            "RTO"
+          ],
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#4",
+            "backup-restore.md#69"
+          ],
+          "n_fused_after_fold": 18
+        },
+        {
+          "question": "一致性巡检怎么跑，结果怎么判读？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "退出码"
+          ],
+          "picked": [
+            "monitoring.md#63",
+            "monitoring.md#51",
+            "monitoring.md#58"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#38",
+            "backup-restore.md#37",
+            "backup-restore.md#35"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "生产环境升级换版本要注意什么？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#205",
+            "deployment.md#52"
+          ],
+          "n_fused_after_fold": 16
+        },
+        {
+          "question": "为什么要给 NLTK 语料单独放进镜像？",
+          "kind": "detail",
+          "coverage": 0.5,
+          "hits": [
+            "NLTK_DATA"
+          ],
+          "picked": [
+            "deployment.md#53",
+            "deployment.md#263",
+            "deployment.md#54"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "ScrapeTargetDown 是什么意思？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "backup-restore.md#108",
+            "monitoring.md#46",
+            "monitoring.md#32"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "改完告警规则怎么生效？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "promtool",
+            "reload"
+          ],
+          "picked": [
+            "monitoring.md#47",
+            "monitoring.md#50",
+            "monitoring.md#44"
+          ],
+          "n_fused_after_fold": 13
+        },
+        {
+          "question": "数据库迁移怎么执行？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic upgrade head",
+            "alembic check"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#37",
+            "backup-restore.md#13"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "恢复的顺序为什么不能打乱？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "恢复顺序",
+            "不可打乱"
+          ],
+          "picked": [
+            "backup-restore.md#24",
+            "backup-restore.md#26",
+            "backup-restore.md#27"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "只想恢复某一个知识库，怎么部分恢复？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "部分恢复",
+            "单知识库"
+          ],
+          "picked": [
+            "backup-restore.md#29",
+            "backup-restore.md#25",
+            "deployment.md#253"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "数据库迁移怎么回滚？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#38",
+            "backup-restore.md#35"
+          ],
+          "n_fused_after_fold": 24
+        },
+        {
+          "question": "熔断触发的时间和条件是什么？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "60s"
+          ],
+          "picked": [
+            "architecture.md#23",
+            "monitoring.md#51",
+            "monitoring.md#27"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "流式响应的事件是怎么发给前端的？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "data:",
+            "event:"
+          ],
+          "picked": [
+            "architecture.md#26",
+            "backup-restore.md#66",
+            "architecture.md#50"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "换 Embedding 模型需要做什么？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#8",
+            "monitoring.md#30",
+            "architecture.md#25"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "部署生产环境前必须配哪些密码？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#78",
+            "deployment.md#24"
+          ],
+          "n_fused_after_fold": 15
+        },
+        {
+          "question": "备份恢复后要确认哪些事？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#40",
+            "backup-restore.md#25"
+          ],
+          "n_fused_after_fold": 33
+        }
+      ]
+    },
+    {
+      "label": "pool20/折叠/去元信息块/win20",
+      "pool": 20,
+      "fold": true,
+      "window": 20,
+      "by_kind": {
+        "overview": 0.493,
+        "detail": 0.792
+      },
+      "rows": [
+        {
+          "question": "系统由哪些部分组成，请求怎么流转？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#26",
+            "monitoring.md#51",
+            "architecture.md#27"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "优雅停机怎么做？为什么需要？",
+          "kind": "overview",
+          "coverage": 0.25,
+          "hits": [
+            "timeout-graceful-shutdown"
+          ],
+          "picked": [
+            "backup-restore.md#115",
+            "backup-restore.md#38",
+            "backup-restore.md#118"
+          ],
+          "n_fused_after_fold": 32
+        },
+        {
+          "question": "监控哪些指标、有哪些告警？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "deployment.md#227",
+            "monitoring.md#11",
+            "monitoring.md#32"
+          ],
+          "n_fused_after_fold": 6
+        },
+        {
+          "question": "备份怎么恢复？恢复后确认什么？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "pg_dump",
+            "恢复顺序"
+          ],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#25",
+            "backup-restore.md#134"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "从零部署一套生产环境要做哪些事？",
+          "kind": "overview",
+          "coverage": 0.67,
+          "hits": [
+            "首次部署准备",
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#78",
+            "deployment.md#77",
+            "deployment.md#80"
+          ],
+          "n_fused_after_fold": 21
+        },
+        {
+          "question": "出问题要回滚，怎么决策、怎么执行？",
+          "kind": "overview",
+          "coverage": 0.33,
+          "hits": [
+            "决策矩阵"
+          ],
+          "picked": [
+            "backup-restore.md#35",
+            "backup-restore.md#38",
+            "backup-restore.md#68"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "容量怎么规划，什么时候该扩容？",
+          "kind": "overview",
+          "coverage": 0.5,
+          "hits": [
+            "扩容触发阈值"
+          ],
+          "picked": [
+            "backup-restore.md#65",
+            "backup-restore.md#66",
+            "backup-restore.md#53"
+          ],
+          "n_fused_after_fold": 11
+        },
+        {
+          "question": "告警怎么通知出去，怎么配接收人？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "alertmanager.yml",
+            "webhook"
+          ],
+          "picked": [
+            "deployment.md#243",
+            "monitoring.md#48",
+            "deployment.md#242"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "备份和恢复的 RPO / RTO 目标是多少？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "RPO",
+            "RTO"
+          ],
+          "picked": [
+            "backup-restore.md#7",
+            "backup-restore.md#4",
+            "backup-restore.md#69"
+          ],
+          "n_fused_after_fold": 18
+        },
+        {
+          "question": "一致性巡检怎么跑，结果怎么判读？",
+          "kind": "overview",
+          "coverage": 1.0,
+          "hits": [
+            "退出码"
+          ],
+          "picked": [
+            "monitoring.md#63",
+            "monitoring.md#51",
+            "monitoring.md#58"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "数据库迁移出错和应用版本出错，回滚方式有什么不同？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#38",
+            "backup-restore.md#37",
+            "backup-restore.md#35"
+          ],
+          "n_fused_after_fold": 22
+        },
+        {
+          "question": "生产环境升级换版本要注意什么？",
+          "kind": "overview",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#205",
+            "deployment.md#52"
+          ],
+          "n_fused_after_fold": 16
+        },
+        {
+          "question": "为什么要给 NLTK 语料单独放进镜像？",
+          "kind": "detail",
+          "coverage": 0.5,
+          "hits": [
+            "NLTK_DATA"
+          ],
+          "picked": [
+            "deployment.md#53",
+            "deployment.md#263",
+            "deployment.md#54"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "ScrapeTargetDown 是什么意思？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "ScrapeTargetDown"
+          ],
+          "picked": [
+            "backup-restore.md#108",
+            "monitoring.md#46",
+            "monitoring.md#32"
+          ],
+          "n_fused_after_fold": 26
+        },
+        {
+          "question": "改完告警规则怎么生效？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "promtool",
+            "reload"
+          ],
+          "picked": [
+            "monitoring.md#47",
+            "monitoring.md#50",
+            "monitoring.md#44"
+          ],
+          "n_fused_after_fold": 12
+        },
+        {
+          "question": "数据库迁移怎么执行？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic upgrade head",
+            "alembic check"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#37",
+            "backup-restore.md#13"
+          ],
+          "n_fused_after_fold": 27
+        },
+        {
+          "question": "恢复的顺序为什么不能打乱？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "恢复顺序",
+            "不可打乱"
+          ],
+          "picked": [
+            "backup-restore.md#24",
+            "backup-restore.md#26",
+            "backup-restore.md#27"
+          ],
+          "n_fused_after_fold": 29
+        },
+        {
+          "question": "只想恢复某一个知识库，怎么部分恢复？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "部分恢复",
+            "单知识库"
+          ],
+          "picked": [
+            "backup-restore.md#29",
+            "backup-restore.md#25",
+            "deployment.md#253"
+          ],
+          "n_fused_after_fold": 34
+        },
+        {
+          "question": "数据库迁移怎么回滚？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "alembic downgrade"
+          ],
+          "picked": [
+            "backup-restore.md#39",
+            "backup-restore.md#38",
+            "backup-restore.md#35"
+          ],
+          "n_fused_after_fold": 24
+        },
+        {
+          "question": "熔断触发的时间和条件是什么？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "60s"
+          ],
+          "picked": [
+            "architecture.md#23",
+            "monitoring.md#51",
+            "monitoring.md#27"
+          ],
+          "n_fused_after_fold": 20
+        },
+        {
+          "question": "流式响应的事件是怎么发给前端的？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "data:",
+            "event:"
+          ],
+          "picked": [
+            "architecture.md#26",
+            "backup-restore.md#66",
+            "architecture.md#50"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "换 Embedding 模型需要做什么？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "architecture.md#8",
+            "monitoring.md#30",
+            "architecture.md#25"
+          ],
+          "n_fused_after_fold": 30
+        },
+        {
+          "question": "部署生产环境前必须配哪些密码？",
+          "kind": "detail",
+          "coverage": 1.0,
+          "hits": [
+            "强密码"
+          ],
+          "picked": [
+            "deployment.md#77",
+            "deployment.md#78",
+            "deployment.md#24"
+          ],
+          "n_fused_after_fold": 15
+        },
+        {
+          "question": "备份恢复后要确认哪些事？",
+          "kind": "detail",
+          "coverage": 0.0,
+          "hits": [],
+          "picked": [
+            "backup-restore.md#113",
+            "backup-restore.md#40",
+            "backup-restore.md#25"
+          ],
+          "n_fused_after_fold": 33
+        }
+      ]
+    }
+  ],
+  "n_chunks": 614,
+  "rrf_k": 60
+}
