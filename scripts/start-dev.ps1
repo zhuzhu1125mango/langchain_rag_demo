@@ -42,7 +42,7 @@ $script:WaitInterval = $env:WAIT_INTERVAL ? [int]$env:WAIT_INTERVAL : 5
 # Color Definitions & Logging Functions
 # ==============================================================================
 
-function Get-ANSI { param([string]$Code) { "`e[$Code" } }
+function Get-ANSI { param([string]$Code) "$([char]27)[$Code" }
 
 $Reset = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "0m" } else { "" }
 $Red = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "31m" } else { "" }

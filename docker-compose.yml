@@ -149,7 +149,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      # 2026-11-11 实测：backend 启动要预热 reranker(CrossEncoder)、BM25 词表、意图路由，
+      # 耗时 60s+。原来 30s 会让 compose 提前判 unhealthy（报 dependency failed to start），
+      # start-prod.ps1 随即 exit 1 跳过 alembic 迁移。给足 120s。
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy

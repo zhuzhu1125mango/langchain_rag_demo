@@ -29,7 +29,7 @@ $script:Services = @("backend", "frontend", "postgres", "minio", "milvus-standal
 # Color Definitions
 # ==============================================================================
 
-function Get-ANSI { param([string]$Code) { "`e[$Code" } }
+function Get-ANSI { param([string]$Code) "$([char]27)[$Code" }
 
 $Reset = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "0m" } else { "" }
 $Cyan = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "36m" } else { "" }

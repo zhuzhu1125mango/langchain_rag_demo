@@ -27,12 +27,13 @@ $script:ComposeFile = Join-Path $script:ScriptDir "../docker-compose.yml"
 # Color Definitions
 # ==============================================================================
 
-function Get-ANSI { param([string]$Code) { "`e[$Code" } }
+function Get-ANSI { param([string]$Code) "$([char]27)[$Code" }
 
 $Reset = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "0m" } else { "" }
 $Red = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "31m" } else { "" }
 $Green = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "32m" } else { "" }
 $Yellow = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "33m" } else { "" }
+$Blue = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "34m" } else { "" }
 $Cyan = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "36m" } else { "" }
 $Bold = if ($host.UI.SupportsVirtualTerminal) { Get-ANSI "1m" } else { "" }
 
