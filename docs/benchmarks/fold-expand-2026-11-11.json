@@ -1,0 +1,597 @@
+{
+  "grid": {
+    "不折叠/不回填": {
+      "overview": {
+        "n": 12,
+        "coverage": 0.556,
+        "chars": 732,
+        "chunks": 3
+      },
+      "detail": {
+        "n": 12,
+        "coverage": 0.792,
+        "chars": 923,
+        "chunks": 3
+      }
+    },
+    "不折叠/回填(无预算)": {
+      "overview": {
+        "n": 12,
+        "coverage": 0.597,
+        "chars": 1942,
+        "chunks": 7.9
+      },
+      "detail": {
+        "n": 12,
+        "coverage": 0.833,
+        "chars": 2460,
+        "chunks": 7.8
+      }
+    },
+    "折叠/不回填": {
+      "overview": {
+        "n": 12,
+        "coverage": 0.597,
+        "chars": 793,
+        "chunks": 3
+      },
+      "detail": {
+        "n": 12,
+        "coverage": 0.792,
+        "chars": 969,
+        "chunks": 3
+      }
+    },
+    "折叠/回填(无预算)": {
+      "overview": {
+        "n": 12,
+        "coverage": 0.681,
+        "chars": 2028,
+        "chunks": 8
+      },
+      "detail": {
+        "n": 12,
+        "coverage": 0.833,
+        "chars": 2498,
+        "chunks": 7.8
+      }
+    }
+  },
+  "sweep": {
+    "900": {
+      "off": {
+        "n": 12,
+        "coverage": 0.556,
+        "chars": 939,
+        "chunks": 4.2
+      },
+      "on": {
+        "n": 12,
+        "coverage": 0.597,
+        "chars": 940,
+        "chunks": 3.8
+      }
+    },
+    "1200": {
+      "off": {
+        "n": 12,
+        "coverage": 0.556,
+        "chars": 1123,
+        "chunks": 5.1
+      },
+      "on": {
+        "n": 12,
+        "coverage": 0.639,
+        "chars": 1143,
+        "chunks": 5
+      }
+    },
+    "1600": {
+      "off": {
+        "n": 12,
+        "coverage": 0.556,
+        "chars": 1451,
+        "chunks": 5.9
+      },
+      "on": {
+        "n": 12,
+        "coverage": 0.639,
+        "chars": 1512,
+        "chunks": 6
+      }
+    },
+    "2000": {
+      "off": {
+        "n": 12,
+        "coverage": 0.597,
+        "chars": 1688,
+        "chunks": 7.2
+      },
+      "on": {
+        "n": 12,
+        "coverage": 0.681,
+        "chars": 1761,
+        "chunks": 7.3
+      }
+    },
+    "2600": {
+      "off": {
+        "n": 12,
+        "coverage": 0.597,
+        "chars": 1888,
+        "chunks": 7.8
+      },
+      "on": {
+        "n": 12,
+        "coverage": 0.681,
+        "chars": 1974,
+        "chunks": 7.8
+      }
+    },
+    "1000000000": {
+      "off": {
+        "n": 12,
+        "coverage": 0.597,
+        "chars": 1942,
+        "chunks": 7.9
+      },
+      "on": {
+        "n": 12,
+        "coverage": 0.681,
+        "chars": 2028,
+        "chunks": 8
+      }
+    }
+  },
+  "off": {
+    "系统由哪些部分组成，请求怎么流转？": {
+      "kind": "overview",
+      "coverage": 0.25,
+      "hits": [
+        "intent_router"
+      ],
+      "chars": 2198,
+      "chunks": 9
+    },
+    "优雅停机怎么做？为什么需要？": {
+      "kind": "overview",
+      "coverage": 0.75,
+      "hits": [
+        "SIGTERM",
+        "timeout-graceful-shutdown",
+        "SIGKILL"
+      ],
+      "chars": 2677,
+      "chunks": 9
+    },
+    "监控哪些指标、有哪些告警？": {
+      "kind": "overview",
+      "coverage": 0.0,
+      "hits": [],
+      "chars": 932,
+      "chunks": 7
+    },
+    "备份怎么恢复？恢复后确认什么？": {
+      "kind": "overview",
+      "coverage": 0.667,
+      "hits": [
+        "pg_dump",
+        "恢复顺序"
+      ],
+      "chars": 2602,
+      "chunks": 9
+    },
+    "从零部署一套生产环境要做哪些事？": {
+      "kind": "overview",
+      "coverage": 0.667,
+      "hits": [
+        "首次部署准备",
+        "强密码"
+      ],
+      "chars": 1923,
+      "chunks": 8
+    },
+    "出问题要回滚，怎么决策、怎么执行？": {
+      "kind": "overview",
+      "coverage": 0.333,
+      "hits": [
+        "决策矩阵"
+      ],
+      "chars": 1472,
+      "chunks": 9
+    },
+    "容量怎么规划，什么时候该扩容？": {
+      "kind": "overview",
+      "coverage": 0.5,
+      "hits": [
+        "扩容触发阈值"
+      ],
+      "chars": 2206,
+      "chunks": 9
+    },
+    "告警怎么通知出去，怎么配接收人？": {
+      "kind": "overview",
+      "coverage": 1.0,
+      "hits": [
+        "alertmanager.yml",
+        "webhook"
+      ],
+      "chars": 2210,
+      "chunks": 7
+    },
+    "备份和恢复的 RPO / RTO 目标是多少？": {
+      "kind": "overview",
+      "coverage": 1.0,
+      "hits": [
+        "RPO",
+        "RTO"
+      ],
+      "chars": 1071,
+      "chunks": 7
+    },
+    "一致性巡检怎么跑，结果怎么判读？": {
+      "kind": "overview",
+      "coverage": 1.0,
+      "hits": [
+        "退出码"
+      ],
+      "chars": 2277,
+      "chunks": 9
+    },
+    "数据库迁移出错和应用版本出错，回滚方式有什么不同？": {
+      "kind": "overview",
+      "coverage": 0.5,
+      "hits": [
+        "alembic downgrade"
+      ],
+      "chars": 1880,
+      "chunks": 5
+    },
+    "生产环境升级换版本要注意什么？": {
+      "kind": "overview",
+      "coverage": 0.5,
+      "hits": [
+        "SIGTERM"
+      ],
+      "chars": 1863,
+      "chunks": 7
+    },
+    "为什么要给 NLTK 语料单独放进镜像？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "RuntimeWarning",
+        "NLTK_DATA"
+      ],
+      "chars": 2212,
+      "chunks": 6
+    },
+    "ScrapeTargetDown 是什么意思？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "ScrapeTargetDown"
+      ],
+      "chars": 2946,
+      "chunks": 9
+    },
+    "改完告警规则怎么生效？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "promtool",
+        "reload"
+      ],
+      "chars": 2694,
+      "chunks": 9
+    },
+    "数据库迁移怎么执行？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "alembic upgrade head",
+        "alembic check"
+      ],
+      "chars": 2481,
+      "chunks": 8
+    },
+    "恢复的顺序为什么不能打乱？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "恢复顺序",
+        "不可打乱"
+      ],
+      "chars": 1916,
+      "chunks": 5
+    },
+    "只想恢复某一个知识库，怎么部分恢复？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "部分恢复",
+        "单知识库"
+      ],
+      "chars": 3036,
+      "chunks": 9
+    },
+    "数据库迁移怎么回滚？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "alembic downgrade"
+      ],
+      "chars": 1880,
+      "chunks": 5
+    },
+    "熔断触发的时间和条件是什么？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "60s"
+      ],
+      "chars": 2098,
+      "chunks": 7
+    },
+    "流式响应的事件是怎么发给前端的？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "data:",
+        "event:"
+      ],
+      "chars": 2404,
+      "chunks": 9
+    },
+    "换 Embedding 模型需要做什么？": {
+      "kind": "detail",
+      "coverage": 0.0,
+      "hits": [],
+      "chars": 3430,
+      "chunks": 9
+    },
+    "部署生产环境前必须配哪些密码？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "强密码"
+      ],
+      "chars": 1825,
+      "chunks": 9
+    },
+    "备份恢复后要确认哪些事？": {
+      "kind": "detail",
+      "coverage": 0.0,
+      "hits": [],
+      "chars": 2602,
+      "chunks": 9
+    }
+  },
+  "on": {
+    "系统由哪些部分组成，请求怎么流转？": {
+      "kind": "overview",
+      "coverage": 0.25,
+      "hits": [
+        "intent_router"
+      ],
+      "chars": 2198,
+      "chunks": 9
+    },
+    "优雅停机怎么做？为什么需要？": {
+      "kind": "overview",
+      "coverage": 0.75,
+      "hits": [
+        "SIGTERM",
+        "timeout-graceful-shutdown",
+        "SIGKILL"
+      ],
+      "chars": 2677,
+      "chunks": 9
+    },
+    "监控哪些指标、有哪些告警？": {
+      "kind": "overview",
+      "coverage": 1.0,
+      "hits": [
+        "ScrapeTargetDown",
+        "PostgresDatabaseDown"
+      ],
+      "chars": 1177,
+      "chunks": 8
+    },
+    "备份怎么恢复？恢复后确认什么？": {
+      "kind": "overview",
+      "coverage": 0.667,
+      "hits": [
+        "pg_dump",
+        "恢复顺序"
+      ],
+      "chars": 2602,
+      "chunks": 9
+    },
+    "从零部署一套生产环境要做哪些事？": {
+      "kind": "overview",
+      "coverage": 0.667,
+      "hits": [
+        "首次部署准备",
+        "强密码"
+      ],
+      "chars": 1923,
+      "chunks": 8
+    },
+    "出问题要回滚，怎么决策、怎么执行？": {
+      "kind": "overview",
+      "coverage": 0.333,
+      "hits": [
+        "决策矩阵"
+      ],
+      "chars": 1472,
+      "chunks": 9
+    },
+    "容量怎么规划，什么时候该扩容？": {
+      "kind": "overview",
+      "coverage": 0.5,
+      "hits": [
+        "扩容触发阈值"
+      ],
+      "chars": 1861,
+      "chunks": 7
+    },
+    "告警怎么通知出去，怎么配接收人？": {
+      "kind": "overview",
+      "coverage": 1.0,
+      "hits": [
+        "alertmanager.yml",
+        "webhook"
+      ],
+      "chars": 2210,
+      "chunks": 7
+    },
+    "备份和恢复的 RPO / RTO 目标是多少？": {
+      "kind": "overview",
+      "coverage": 1.0,
+      "hits": [
+        "RPO",
+        "RTO"
+      ],
+      "chars": 2200,
+      "chunks": 9
+    },
+    "一致性巡检怎么跑，结果怎么判读？": {
+      "kind": "overview",
+      "coverage": 1.0,
+      "hits": [
+        "退出码"
+      ],
+      "chars": 2277,
+      "chunks": 9
+    },
+    "数据库迁移出错和应用版本出错，回滚方式有什么不同？": {
+      "kind": "overview",
+      "coverage": 0.5,
+      "hits": [
+        "alembic downgrade"
+      ],
+      "chars": 1880,
+      "chunks": 5
+    },
+    "生产环境升级换版本要注意什么？": {
+      "kind": "overview",
+      "coverage": 0.5,
+      "hits": [
+        "SIGTERM"
+      ],
+      "chars": 1863,
+      "chunks": 7
+    },
+    "为什么要给 NLTK 语料单独放进镜像？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "RuntimeWarning",
+        "NLTK_DATA"
+      ],
+      "chars": 2212,
+      "chunks": 6
+    },
+    "ScrapeTargetDown 是什么意思？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "ScrapeTargetDown"
+      ],
+      "chars": 2946,
+      "chunks": 9
+    },
+    "改完告警规则怎么生效？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "promtool",
+        "reload"
+      ],
+      "chars": 2694,
+      "chunks": 9
+    },
+    "数据库迁移怎么执行？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "alembic upgrade head",
+        "alembic check"
+      ],
+      "chars": 2481,
+      "chunks": 8
+    },
+    "恢复的顺序为什么不能打乱？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "恢复顺序",
+        "不可打乱"
+      ],
+      "chars": 1916,
+      "chunks": 5
+    },
+    "只想恢复某一个知识库，怎么部分恢复？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "部分恢复",
+        "单知识库"
+      ],
+      "chars": 3036,
+      "chunks": 9
+    },
+    "数据库迁移怎么回滚？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "alembic downgrade"
+      ],
+      "chars": 1880,
+      "chunks": 5
+    },
+    "熔断触发的时间和条件是什么？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "60s"
+      ],
+      "chars": 2098,
+      "chunks": 7
+    },
+    "流式响应的事件是怎么发给前端的？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "data:",
+        "event:"
+      ],
+      "chars": 2404,
+      "chunks": 9
+    },
+    "换 Embedding 模型需要做什么？": {
+      "kind": "detail",
+      "coverage": 0.0,
+      "hits": [],
+      "chars": 3430,
+      "chunks": 9
+    },
+    "部署生产环境前必须配哪些密码？": {
+      "kind": "detail",
+      "coverage": 1.0,
+      "hits": [
+        "强密码"
+      ],
+      "chars": 2278,
+      "chunks": 9
+    },
+    "备份恢复后要确认哪些事？": {
+      "kind": "detail",
+      "coverage": 0.0,
+      "hits": [],
+      "chars": 2602,
+      "chunks": 9
+    }
+  }
+}
