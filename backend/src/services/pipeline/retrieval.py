@@ -75,18 +75,25 @@ class RetrievalMixin:
         if not docs or len(docs) == 0:
             return 0.0, False
 
+        # 邻块回填进来的块不参与门禁：它们的分数是**沿用父块的**，不是自己被打出来的。
+        # 让它们参与平均分等于用「复制过的分数」重新投票——回填越多，平均分越向父块靠，
+        # 阈值判定会被这次改动悄悄改掉。门禁只看原始入选的块，与回填前逐位一致。
+        gate_docs = [
+            d for d in docs if not getattr(d, "metadata", {}).get("neighbor_expand")
+        ] or docs
+
         # 优先复用 reranker 真实相关性分数（接上 KB_RELEVANCE_SCORE_THRESHOLD）。
         # 但「模型已加载」不等于「这批分数是真的」：整批打分失败时 hybrid_search 会
         # 回退 RRF 并把 rerank_fallback 标在 metadata 上，此时 rerank_score≈0.016，
         # 拿它跟阈值比会把所有候选判成不相关、清空上下文——用户看到「知识库里
         # 没有相关内容」，而库里明明有。（2026-11-08 故障演练实测）
         if self._rerank_score_available() and not any(
-            getattr(doc, "metadata", {}).get("rerank_fallback") for doc in docs
+            getattr(doc, "metadata", {}).get("rerank_fallback") for doc in gate_docs
         ):
             threshold = settings.processing.KB_RELEVANCE_SCORE_THRESHOLD
             scores = [
                 float(getattr(doc, "metadata", {}).get("rerank_score", 0.0) or 0.0)
-                for doc in docs
+                for doc in gate_docs
             ]
             if scores:
                 avg_score = sum(scores) / len(scores)
@@ -107,7 +114,7 @@ class RetrievalMixin:
             question,
             *[
                 doc.page_content if hasattr(doc, "page_content") else str(doc)
-                for doc in docs
+                for doc in gate_docs
             ],
         ]
         embeddings = await asyncio.to_thread(self.sentence_transformer.encode, texts)

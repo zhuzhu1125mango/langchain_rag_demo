@@ -139,9 +139,16 @@ class RAGChain(
         # P1：回答/直答模型由 Provider/Model/Route registry 决定，业务层不再
         # 直接构造 ChatOllama。think=None 表示不强制绑定 reasoning，由模型默认行为；
         # 直答 route 使用独立模型，避免关闭深度思考时仍落到思考模型。
-        self.llm = await model_manager.get_chat_llm("answer", streaming=True, think=None)
+        # 采样温度：None 时沿用模型默认（langchain_ollama 为 0.8）。事实型问答
+        # 不需要这种多样性，且它会让答案侧的 A/B 抖动 ±15pp（实测两次同上下文
+        # 0.340 / 0.493）。是否改默认值见 KB_ANSWER_TEMPERATURE 的说明。
+        self.llm = await model_manager.get_chat_llm(
+            "answer", streaming=True, think=None,
+            temperature=settings.processing.KB_ANSWER_TEMPERATURE,
+        )
         self.llm_direct = await model_manager.get_chat_llm(
-            "answer_direct", streaming=True, think=False
+            "answer_direct", streaming=True, think=False,
+            temperature=settings.processing.KB_ANSWER_TEMPERATURE,
         )
 
         # 辅助任务统一走 fast 模型并关闭思考（B3/C2），避免占用主模型与空烧思考链
@@ -259,8 +266,14 @@ class RAGChain(
         if generation == self._model_generation:
             return
         logger.info("检测到模型注册表变化，刷新 RAGChain 模型引用: %s -> %s", self._model_generation, generation)
-        self.llm = await model_manager.get_chat_llm("answer", streaming=True, think=None)
-        self.llm_direct = await model_manager.get_chat_llm("answer_direct", streaming=True, think=False)
+        self.llm = await model_manager.get_chat_llm(
+            "answer", streaming=True, think=None,
+            temperature=settings.processing.KB_ANSWER_TEMPERATURE,
+        )
+        self.llm_direct = await model_manager.get_chat_llm(
+            "answer_direct", streaming=True, think=False,
+            temperature=settings.processing.KB_ANSWER_TEMPERATURE,
+        )
         if self.answer_generator is not None:
             self.answer_generator.llm = self.llm
             self.answer_generator.llm_direct = self.llm_direct

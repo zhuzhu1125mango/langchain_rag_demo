@@ -282,6 +282,22 @@ class ProcessingSettings(BaseSettings):
     # 默认关闭：离线 24 题上概览 0.556→0.598、细节持平、其余题目不变，收益约半道题，
     # 证据不足以直接改线上默认行为；用 KB_TABLE_FOLD_ENABLED=true 可开启验证。
     KB_TABLE_FOLD_ENABLED: bool = False
+    # 邻块回填（2026-11-12）：给入选的块补上同文档 chunk_index ± 1。
+    # 离线 24 题（606 块、窗口 3）：单独用概览 0.556→0.597 / 细节 0.792→0.833；
+    # 与折叠同开 0.681（+12.5pp）。对「同表占满窗口」那类题单独用完全无效
+    # （邻块还是同一张表的行），必须配合折叠。
+    # 默认关闭：噪声代价没有被验证过——覆盖率只回答「该有的有没有」，
+    # 不回答「多塞进来的有没有害」。用 KB_NEIGHBOR_EXPAND_ENABLED=true 开启。
+    KB_NEIGHBOR_EXPAND_ENABLED: bool = False
+    # 回填的总字符预算（含原地块）。1200 = 性价比拐点（0.639，多 350 字符），
+    # 2000 = 收益拐点（0.681，多 968 字符）；无预算会到 2028 字符且收益不再涨。
+    KB_NEIGHBOR_EXPAND_BUDGET_CHARS: int = 2000
+    # 知识库答案的采样温度。None = 不传给模型、用它自己的默认值
+    # （langchain_ollama 默认 0.8）。2026-11-12 实测：同一份上下文两次运行，
+    # 答案事实覆盖率 0.340 / 0.493——24 题规模下 ±15pp 的抖动全部来自采样。
+    # 事实型问答不需要这种多样性；但它同时影响「多列举几条」的倾向，
+    # 所以先做成开关，用同一套指标验证后再决定是否改默认值。
+    KB_ANSWER_TEMPERATURE: Optional[float] = None
     KB_RERANK_MIN_SCORE: float = 0.0  # 重排序最低置信度，低于此值的结果将被过滤
     # 是否启用知识库重排序（C1）：关闭或未配置模型时按 RRF 分数直接截断，不加载 reranker
     KB_RERANK_ENABLED: bool = True

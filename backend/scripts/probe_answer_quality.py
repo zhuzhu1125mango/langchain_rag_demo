@@ -92,7 +92,7 @@ def extract_context(state: Any) -> List[str]:
     return []
 
 
-async def run_one(chain, item: Dict, kb_id: str, session: str) -> Dict:
+async def run_one(chain, item: Dict, kb_id: str, session: str, save_answer: bool = False) -> Dict:
     q, facts = item["q"], item["facts"]
     parts: List[str] = []
     answer_type = None
@@ -142,15 +142,26 @@ async def run_one(chain, item: Dict, kb_id: str, session: str) -> Dict:
         # 「自信地漏答」：有足够上下文、答案却明显更少、而且没有一句「资料里没写」
         "confident_miss": bool(ctx_cov >= 0.5 and (ctx_cov - ans_cov) >= GAP_WARN and not refused),
         "ctx_chars": sum(len(t) for t in ctx_texts),
+        "ctx_chunks": len(ctx_texts),
         "answer_chars": len(answer),
         "sources": len(sources) if sources else 0,
         "elapsed_s": round(elapsed, 1),
         "answer_preview": answer[:200].replace("\n", " "),
+        # 全文只在显式要求时落盘：它是判断「真漏写」还是「换个说法」的唯一依据，
+        # 但 24 题全文有几十 KB，默认塞进报告会让 diff 不可读。
+        **({"answer": answer} if save_answer else {}),
     }
 
 
 async def main_async(args) -> int:
     items = json.load(open(args.questions, encoding="utf-8"))
+    if args.only:
+        # 单题复跑：诊断「为什么这题没写进答案」时要反复看同一批题，
+        # 全量 24 题一次 10 分钟，调不动。
+        items = [it for it in items if args.only in it["q"]]
+        if not items:
+            print(f"[answer-probe] --only 没有匹配到任何题：{args.only}")
+            return 1
     if args.limit:
         items = items[: args.limit]
     print(f"[answer-probe] {len(items)} 题 / kb={args.kb}")
@@ -170,7 +181,7 @@ async def main_async(args) -> int:
     rows: List[Dict] = []
     t0 = time.perf_counter()
     for i, item in enumerate(items, 1):
-        row = await run_one(chain, item, args.kb, args.session)
+        row = await run_one(chain, item, args.kb, args.session, save_answer=bool(args.save_answers))
         rows.append(row)
         if "error" in row:
             print(f"  [{i:>2}/{len(items)}] ERROR {row['error'][:70]}")
@@ -213,6 +224,8 @@ def main() -> int:
     parser.add_argument("--kb", required=True, help="知识库 ID（项目文档库）")
     parser.add_argument("--session", default="eval-answer-20261112", help="trace 归属标记，便于区分评测流量")
     parser.add_argument("--limit", type=int, default=0, help="只跑前 N 题（冒烟用）")
+    parser.add_argument("--only", default="", help="只跑问题包含该子串的题（诊断单题用）")
+    parser.add_argument("--save-answers", action="store_true", help="报告里存答案全文（判断措辞 vs 真漏写）")
     parser.add_argument("--flush-cache", action="store_true", help="跑前清除该 KB 的语义缓存（重跑必须加）")
     parser.add_argument("--report", default="")
     args = parser.parse_args()

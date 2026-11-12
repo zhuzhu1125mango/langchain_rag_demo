@@ -1577,6 +1577,33 @@ cat backend/src/config.py | findstr MAX_FILE_SIZE
 
 ---
 
+### 7.9 检索增强开关（折叠 / 邻块回填 / 答案采样温度）
+
+三个开关都**默认关闭**，验证数据见 `docs/benchmarks/neighbor-expand-2026-11-12.md`。
+
+| 配置 | 默认 | 作用 | 实测 |
+|---|---|---|---|
+| `KB_TABLE_FOLD_ENABLED` | false | RRF 之后把同表行级块折叠成 1 席（重排只能排序不能换人，必须在这里换人） | 离线 24 题概览 0.556→0.597 |
+| `KB_NEIGHBOR_EXPAND_ENABLED` | false | 给入选块补同文档 `chunk_index ± 1`（**只补同章节**） | 线上上下文 0.500→0.604 |
+| `KB_NEIGHBOR_EXPAND_BUDGET_CHARS` | 2000 | 回填总字符预算（含原地块）；1200 性价比拐点 / 2000 收益拐点 | 见上 |
+| `KB_ANSWER_TEMPERATURE` | 空（模型默认 0.8） | 知识库答案采样温度 | 0.1 时同配置两跑逐位一致；默认温度差 15.3pp |
+
+**为什么默认关闭**：折叠+回填把上下文覆盖率抬了 10.4pp，但答案侧「概览 +2 点 / 细节 −2 点、
+总量持平」。多塞 3~5 块要付噪声与 prefill，换 0 个事实点不划算。要打开，先解决
+「上下文进得去、答案写不出」的转化率问题。
+
+**评测时必须固定温度**：
+
+```bash
+docker exec -e KB_ANSWER_TEMPERATURE=0.1 backend-prod \
+  python scripts/probe_answer_quality.py --kb <kb_id> --flush-cache --save-answers \
+  --report /app/data/answer-quality.json
+```
+
+不固定温度的话，同一配置重跑的答案覆盖率会差 15pp —— 任何生成侧的 A/B 都会被噪声淹没。
+两份报告对比用 `scripts/analyze_answer_gap.py --arms 名=路径 ...`（池化 + 宽松口径，
+能把「措辞不同」和「真没写」分开）。
+
 ## 9. 故障排查
 
 ### 9.1 日志排查

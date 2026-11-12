@@ -9,6 +9,11 @@ import logging
 from langchain_core.documents import Document
 from pymilvus.exceptions import MilvusException
 
+from src.services.chunk_expand import (
+    merge_with_neighbors,
+    neighbor_positions,
+    same_heading_as_parent,
+)
 from src.services.milvus_service import MilvusService
 from src.utils.async_singleton import AsyncSingleton
 from src.utils.error_handling import ErrorSeverity, log_exception
@@ -93,6 +98,93 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
             queries, k=k, document_ids=document_ids, kb_ids=kb_ids, query_embedding=query_embedding, source_kind=source_kind, exclude_source_kinds=exclude_source_kinds
         )
         return self._results_to_documents(results)
+
+    async def expand_neighbors(self, docs, budget_chars=None):
+        """给选中的块补上同文档的 `chunk_index ± 1`（邻块回填）。
+
+        调用点必须在**截断到 TOP_K 之后**：补进来的邻块排在原地块后面，
+        先补后截断等于把它们全部截掉（离线脚本是在探针结果上直接算的，
+        接进生产时这是最容易出错的一处）。
+
+        Args:
+            docs: 已按相关性排序、已截断的 Document 列表。
+            budget_chars: 总字符上限（含原地块），None 表示不限。见 chunk_expand 的实测数据。
+
+        Returns:
+            原地块 + 邻块。补查失败时原样返回原地块（回填是增益，不是依赖）。
+        """
+        if not docs or budget_chars == 0:
+            return docs
+        # 用 (document_id, chunk_index) 当 id：切片主键是 uuid、每次重灌都会变，
+        # 位置才是稳定身份；而且相邻的两个原地块互为邻块时，靠它去重才不会补出重复块。
+        base = []
+        for d in docs:
+            doc_id = str(d.metadata.get("document_id", ""))
+            idx = d.metadata.get("chunk_index")
+            if not doc_id or idx is None:
+                continue
+            base.append({
+                "id": f"{doc_id}#{int(idx)}",
+                "document_id": doc_id,
+                "chunk_index": int(idx),
+                "content": d.page_content,
+                "heading_path": str(d.metadata.get("heading_path") or ""),
+                "_doc": d,
+            })
+        if not base:
+            return docs
+        positions = neighbor_positions(base)
+        if not positions:
+            return docs
+        try:
+            rows = await self.milvus_service.fetch_chunks_by_positions(positions)
+        except Exception as e:  # noqa: BLE001 —— 回填失败不能影响检索主链路
+            log_exception(
+                logger, e, action="vector_store.expand_neighbors",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="邻块回填失败，返回原检索结果",
+                positions=len(positions),
+            )
+            return docs
+        if not rows:
+            return docs
+
+        for row in rows:
+            row["id"] = f'{row.get("document_id")}#{int(row.get("chunk_index", -1))}'
+        # 物理相邻 ≠ 语义连续：只补同章节的邻块，跨章节的相邻块会把注意力带偏
+        # （实测代价见 chunk_expand.same_heading_as_parent 的说明）
+        rows = same_heading_as_parent(rows, base)
+        if not rows:
+            return docs
+        merged = merge_with_neighbors(base, rows, budget_chars=budget_chars)
+
+        # 邻块没有自己的重排分：沿用「带它进来的那个原地块」的分数。
+        # 不编一个 0 分，否则下游按分数排序或做相关性门禁时，邻块会莫名其妙沉底/被清掉。
+        parent_score = {
+            (str(d.metadata.get("document_id", "")), int(d.metadata.get("chunk_index") or -1)): float(
+                d.metadata.get("rerank_score") or 0.0
+            )
+            for d in docs
+        }
+        out = []
+        n_added = 0
+        for item in merged:
+            if item.get("_doc") is not None:
+                out.append(item["_doc"])
+                continue
+            doc = self._results_to_documents([item])[0]
+            key = (item.get("document_id", ""), int(item.get("chunk_index") or -1))
+            score = parent_score.get((key[0], key[1] - 1), parent_score.get((key[0], key[1] + 1), 0.0))
+            doc.metadata["rerank_score"] = score
+            doc.metadata["score"] = score
+            doc.metadata["neighbor_expand"] = True
+            out.append(doc)
+            n_added += 1
+        logger.debug(
+            "邻块回填：%d 块 → %d 块（+%d，预算 %s 字符）",
+            len(docs), len(out), n_added, budget_chars,
+        )
+        return out
 
     def _results_to_documents(self, results):
         """将 Milvus 检索结果统一转换为 LangChain Document。"""

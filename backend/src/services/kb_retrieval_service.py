@@ -149,7 +149,28 @@ class KBRetrievalService:
             else:
                 docs = await vector_store.search_dense(question, **search_kwargs)
 
-            return docs[: settings.processing.TOP_K]
+            docs = docs[: settings.processing.TOP_K]
+            # 邻块回填必须在截断之后：补进来的块排在原地块后面，先补后截断等于白补。
+            # 开关关闭时是完全无副作用的旁路（不查库、不改顺序）。
+            if settings.processing.KB_NEIGHBOR_EXPAND_ENABLED and docs:
+                t_expand = time.time()
+                before = len(docs)
+                docs = await vector_store.expand_neighbors(
+                    docs,
+                    budget_chars=settings.processing.KB_NEIGHBOR_EXPAND_BUDGET_CHARS,
+                )
+                # 回填的耗时与增量要能看见：否则「检索变慢」或「上下文变长」都会
+                # 被归因到别的地方（历史上 rerank/embed 的锅都是这么背上的）。
+                try:
+                    from src.services.pipeline.state import _request_retrieval_timings
+
+                    timings = dict(_request_retrieval_timings.get() or {})
+                    timings["neighbor_expand_ms"] = int((time.time() - t_expand) * 1000)
+                    timings["neighbor_expand_added"] = len(docs) - before
+                    _request_retrieval_timings.set(timings)
+                except Exception:  # noqa: BLE001 —— 埋点失败不影响检索
+                    pass
+            return docs
         finally:
             if PROMETHEUS_AVAILABLE:
                 record_vector_search(time.time() - search_start)

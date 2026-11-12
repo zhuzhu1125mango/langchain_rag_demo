@@ -4,7 +4,7 @@ import asyncio
 import logging
 import re
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List, Sequence
 
 
 from src.config import settings
@@ -153,6 +153,49 @@ class SearchMixin:
             )
             return []
 
+    async def fetch_chunks_by_positions(self, positions: Sequence[tuple]) -> List[Dict[str, Any]]:
+        """按 `(document_id, chunk_index)` 精确补查切片（邻块回填专用）。
+
+        为什么不走检索：邻块要的是**位置**，不是相似度。用向量或 BM25 去召回「同一个
+        文档的上一块」，命中率取决于措辞是否相似，而邻块很可能在讲别的事
+        （章节过渡句、相邻主题的表格行）——那正好是召回不回来的那类。
+
+        Args:
+            positions: `(document_id, chunk_index)` 列表，调用方已去重。
+
+        Returns:
+            命中的切片列表（字段同检索结果，另含 `id`）；任一位置不存在则跳过。
+        """
+        if not positions:
+            return []
+        docs = sorted({str(doc) for doc, _ in positions})
+        indexes = sorted({int(idx) for _, idx in positions})
+        # UUID 白名单校验后再拼表达式（Milvus filter 无参数化，同 _build_filter_expr 的理由）
+        doc_expr = ",".join(f'"{self._safe_id(d)}"' for d in docs)
+        idx_expr = ",".join(str(i) for i in indexes)
+        # 两个 in 是笛卡尔积，可能多取到「同文档的其它块」，Python 侧再按位置过滤
+        expr = f"document_id in [{doc_expr}] && chunk_index in [{idx_expr}]"
+        try:
+            rows = await self.client.query(
+                collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+                filter=expr,
+                output_fields=["id", *self._base_output_fields()],
+            )
+        except Exception as e:  # noqa: BLE001 —— 回填失败只降级为「不补」，不能拖垮检索
+            log_exception(
+                logger, e, action="milvus.search.fetch_neighbors",
+                message="邻块补查失败，本次不回填（检索结果仍可用）",
+                positions=len(positions),
+            )
+            return []
+        wanted = {(str(doc), int(idx)) for doc, idx in positions}
+        out = []
+        for row in rows or []:
+            key = (str(row.get("document_id")), int(row.get("chunk_index", -1)))
+            if key in wanted:
+                out.append({**row, "score": 0.0})
+        return out
+
     async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
         """混合检索入口：dense + sparse，返回经 RRF 融合与 Cross-Encoder 重排序后的结果。
 
@@ -284,6 +327,11 @@ class SearchMixin:
             channel_results[f"q{i}_sparse"] = sparse_res
 
         fused = reciprocal_rank_fusion(channel_results, k=settings.processing.KB_RRF_K)
+
+        # 折叠同样插在截断之前（理由见 search_hybrid）：多查询路径若只截断不折叠，
+        # 同一张表的多行照样占满窗口，两条路径的行为会不一致。
+        if settings.processing.KB_TABLE_FOLD_ENABLED:
+            fused = fold_same_table_rows(fused)
 
         # rerank 关闭或未配置模型时，直接按 RRF 分数截断（与单查询路径行为一致）
         if (
