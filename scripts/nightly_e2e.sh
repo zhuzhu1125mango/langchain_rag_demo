@@ -50,11 +50,26 @@ fi
 # 不用临时文件接响应体。Git Bash 的 mktemp 返回带盘符的路径，而部分环境里
 # `rm -f` 会被安全钩子拒绝（返回 1），配上 set -e 就直接把脚本带走 ——
 # 实测（2026-11-08）：退出码 1、日志一个字都没写，看起来像「探针失败」。
-resp="$(curl -s -m 120 -w $'\n%{http_code} %{content_type}' "${auth[@]}" "$E2E_BASE/health/e2e" || true)"
-code="$(printf '%s' "$resp" | tail -n 1 | awk '{print $1}')"
-ctype="$(printf '%s' "$resp" | tail -n 1 | awk '{print $2}')"
-body="$(printf '%s' "$resp" | sed '$d')"
-: "${code:=000}"
+probe_once() {
+  resp="$(curl -s -m 120 -w $'\n%{http_code} %{content_type}' "${auth[@]}" "$E2E_BASE/health/e2e" || true)"
+  code="$(printf '%s' "$resp" | tail -n 1 | awk '{print $1}')"
+  ctype="$(printf '%s' "$resp" | tail -n 1 | awk '{print $2}')"
+  body="$(printf '%s' "$resp" | sed '$d')"
+  : "${code:=000}"
+}
+
+probe_once
+
+# 429 是**探针自己的限流**（`/health/e2e` 每 60s 只允许一次），不是业务故障。
+# 夜间任务不该因为「有人刚手动跑过」变红——但也绝不能记成通过。
+# 处置：等一个窗口重试一次；仍被限流则按「跳过」记日志，退出码 2（环境因素，非通过非失败）。
+if [[ "$code" == "429" ]]; then
+  wait_s="${E2E_RETRY_WAIT:-65}"
+  echo "[$stamp] THROTTLED 429 探针限流（60s 一次），${wait_s}s 后重试一次" | tee -a "$E2E_LOG" >&2
+  sleep "$wait_s"
+  stamp="$(date '+%Y-%m-%d %H:%M:%S')"
+  probe_once
+fi
 
 # 只保留最近 500 行，避免日志无限长（无人看的日志等于没有）
 trim_log() {
@@ -88,6 +103,12 @@ case "$code" in
     echo "[$stamp] DISABLED_OR_MISSING $code $body" | tee -a "$E2E_LOG" >&2
     trim_log
     exit 1
+    ;;
+  429)
+    # 重试过、仍被限流：这是环境因素（有人刚好也在调），既不是通过也不是故障。
+    echo "[$stamp] THROTTLED_SKIP 重试后仍被限流，本次未取得探针结果" | tee -a "$E2E_LOG" >&2
+    trim_log
+    exit 2
     ;;
   *)
     echo "[$stamp] FAIL $code $body" | tee -a "$E2E_LOG" >&2

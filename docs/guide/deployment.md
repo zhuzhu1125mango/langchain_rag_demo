@@ -1089,26 +1089,49 @@ inhibit_rules:
 # 直连后端端口（8001），不要经 nginx：nginx 只代理 /api/，/health/* 会落到 SPA 的
 # try_files 返回 index.html —— HTTP 200 + text/html，看起来成功，其实什么都没测。
 E2E_TOKEN=<管理员 JWT> ./scripts/nightly_e2e.sh
+# 应急通道（require_admin 的第二条路，不需要登录）：
+E2E_ADMIN_KEY=<X-Admin-Key> ./scripts/nightly_e2e.sh
 ```
 
-退出码：`0` 通过 · `1` 探针失败（503 / 业务不通）· `2` 缺凭据（没跑）· `3` 服务不可达或请求被
-SPA 接走。`2` 和 `3` 都不是通过——把跳过当绿灯，比没有这条检查更糟。
+退出码：`0` 通过 · `1` 探针失败（503 / 业务不通）· `2` 缺凭据或被限流（没跑）· `3` 服务不可达或
+请求被 SPA 接走。`2` 和 `3` 都不是通过——把跳过当绿灯，比没有这条检查更糟。
 
-挂定时任务（二选一）：
+挂定时任务：用 `scripts/nightly_e2e_prod.sh`，**不要**把密钥写进 crontab。
 
 ```bash
 # Linux / macOS
 crontab -e
-40 2 * * * cd /path/to/repo && E2E_TOKEN=... ./scripts/nightly_e2e.sh >> logs/cron.log 2>&1
+30 2 * * * /path/to/repo/scripts/nightly_e2e_prod.sh >> /path/to/repo/logs/cron.log 2>&1
 ```
 
 ```powershell
-# Windows：每天 02:40 跑一次（管理员 PowerShell）
+# Windows：每天 02:30（普通用户 PowerShell 即可）
 $action  = New-ScheduledTaskAction -Execute "C:\Program Files\Git\bin\bash.exe" `
-           -Argument "-lc 'cd /c/path/to/repo && E2E_TOKEN=... ./scripts/nightly_e2e.sh'"
-$trigger = New-ScheduledTaskTrigger -Daily -At 2:40am
-Register-ScheduledTask -TaskName "rag-nightly-e2e" -Action $action -Trigger $trigger
+           -Argument '-lc "/c/path/to/repo/scripts/nightly_e2e_prod.sh"' `
+           -WorkingDirectory "C:\path\to\repo"
+$trigger = New-ScheduledTaskTrigger -Daily -At 2:30am
+$set     = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries
+Register-ScheduledTask -TaskName "RAG-Nightly-E2E" -Action $action -Trigger $trigger -Settings $set
 ```
+
+包装脚本做三件事，都是踩过才写的：
+
+| 行为 | 为什么 |
+|---|---|
+| 每次运行从 backend 容器现取 `ADMIN_KEY`，只在内存/环境变量里存在 | 把 Key 复制进 crontab 或第二份 `.env`，就是「旧 Key 躺在备份里」那类问题的来源 |
+| 容器不健康直接 `exit 3` | 否则「Docker 没开」会被记成「业务不通」，几天后没人再信这个告警 |
+| 容器内没配 `ADMIN_KEY` → `exit 2` | 配置问题不该伪装成探针失败 |
+
+**429 不是故障。** `/health/e2e` 每 60s 只允许一次；撞上时脚本等 65s 重试一次，仍被限流则记
+`THROTTLED_SKIP` 并 `exit 2`。2026-11-12 实测：手动跑一次后立刻再跑，走的正是这条路径
+（`THROTTLED 429` → 65s → `OK latency_ms=859`）。
+
+> **2026-11-12 首次挂上并实测**：计划任务 `RAG-Nightly-E2E`，手动触发 `LastTaskResult=0`，
+> 日志 `OK {"ok":true,"latency_ms":859,...}`。此前 `logs/nightly-e2e.log` 不存在——
+> 脚本写了半个月，一次都没跑过。
+>
+> 注意 latency 差异：**冷启动 8.2s，热态 0.86~0.91s**。第一次 8.1s 是模型首次加载，
+> 不是故障；判断探针是否变慢要用热态基线。
 
 日志写在 `logs/nightly-e2e.log`，自动保留最近 500 行。失败时先看这一行：
 `FAIL 503 {"stage":"ollama_unreachable"}` 表示模型服务没起，不是代码问题。
