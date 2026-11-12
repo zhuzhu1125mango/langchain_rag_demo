@@ -140,7 +140,7 @@
 
 ### 2.8 生产现场
 
-11 个容器全 healthy、`/health/ready` 四项 ok、OpenAPI **117** 条路由、4 篇文档 / 532 chunk、
+11 个容器全 healthy、`/health/ready` 四项 ok、OpenAPI **117** 条路由、4 篇文档 / **606** chunk、
 三方一致性巡检 `issues 0`（进程内调度，每日自动跑）。
 
 > 2026-11-10 已重灌：知识库当时停留在 11-04 的旧版正文，而其中两篇
@@ -256,4 +256,4 @@ uv run python scripts/consistency_audit.py --sample 5  # 三方对账，只出�
 
 ---
 
-**结项日期**：2026-11-07 · 最终提交见 `git log` · 生产快照：11 容器 healthy / 117 路由 / 4 文档 532 chunk
+**结项日期**：2026-11-07 · 最终提交见 `git log` · 生产快照：11 容器 healthy / 117 路由 / 4 文档 606 chunk
