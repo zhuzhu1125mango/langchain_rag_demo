@@ -219,7 +219,7 @@ class AgentStreamMixin:
                     continue
                 from .output_sanitizer import OutputSanitizer
 
-                cleaned, pol = OutputSanitizer.sanitize(chunk)
+                cleaned, pol = OutputSanitizer.sanitize(chunk, strip_edges=False)
                 polluted = polluted or pol
                 if cleaned:
                     answer_acc += cleaned

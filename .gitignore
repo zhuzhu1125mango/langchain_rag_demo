@@ -121,6 +121,10 @@ build/
 
 # =============== Testing ===============
 .pytest_cache/
+# 跑全量测试时用 --basetemp=.pytest_tmp 把临时目录留在项目内：
+# 系统临时目录里残留文件一多，pytest 的批量清理会触发 safe-delete 拦截，
+# 拿不到 "N passed" 摘要（2026-11-12 实测）。
+.pytest_tmp/
 .tox/
 .coverage
 .coverage.*

@@ -95,15 +95,19 @@ class OutputSanitizer:
         return None
 
     @staticmethod
-    def remove_thinking_tags(text: str) -> str:
-        """移除 <think> / <thinking> 等思考标签。"""
+    def remove_thinking_tags(text: str, strip_edges: bool = True) -> str:
+        """移除 <think> / <thinking> 等思考标签。
+
+        `strip_edges=False` 用于**流式片段**：片段之间靠空格连接，逐片 strip 会把
+        边界上的空格吃掉（见 `sanitize` 的说明）。
+        """
         cleaned = text
         for pattern in _THINKING_TAG_PATTERNS:
             cleaned = pattern.sub("", cleaned)
-        return cleaned.strip()
+        return cleaned.strip() if strip_edges else cleaned
 
     @staticmethod
-    def remove_answer_prefix(text: str) -> str:
+    def remove_answer_prefix(text: str, strip_edges: bool = True) -> str:
         """移除答案开头常见的搜索过程前缀（兜底过滤）。
 
         仅处理文本开头处的前缀，不修改正文内容。
@@ -113,7 +117,7 @@ class OutputSanitizer:
         cleaned = text
         for pattern in _ANSWER_PREFIX_PATTERNS:
             cleaned = pattern.sub("", cleaned)
-        return cleaned.strip()
+        return cleaned.strip() if strip_edges else cleaned
 
     @classmethod
     def sanitize(
@@ -121,6 +125,7 @@ class OutputSanitizer:
         text: str,
         reference_numbers: Optional[List[Decimal]] = None,
         low_confidence_threshold: float = 0.6,
+        strip_edges: bool = True,
     ) -> Tuple[str, bool]:
         """清洗 LLM 输出。
 
@@ -128,9 +133,20 @@ class OutputSanitizer:
             text: 原始 LLM 输出。
             reference_numbers: 可选的参考数值列表，用于数字幻觉检测。
             low_confidence_threshold: 低置信度阈值，低于此值时对具体数字更严格。
+            strip_edges: 是否剥掉首尾空白。**流式调用必须传 False。**
 
         Returns:
             (cleaned_text, was_polluted): 清洗后的文本，以及是否检测到污染。
+
+        Note:
+            `strip_edges` 存在的原因是一个真实的生产缺陷（2026-11-12）：本方法被
+            **逐 chunk** 调用时，每个片段两端的空格都被剥掉，而流式 chunk 的边界
+            经常正好落在空格上 —— 于是「docker logs backend-prod 2>&1 | grep -E」
+            落库后变成「dockerlogsbackend-prod2>&1|grep-E」。中文看不出问题，
+            代码块和英文则完全粘连、无法复制。
+
+            清洗规则里只有「剥首尾空白」和「移除开头前缀」依赖整段语义，
+            其余（思考标签、工具调用过滤）对片段是安全的。流式路径传 False 即可。
         """
         if not text:
             return text, False
@@ -138,7 +154,7 @@ class OutputSanitizer:
         was_polluted = cls.looks_like_tool_call(text) or cls.looks_like_tool_narration(text)
 
         # 移除思考标签
-        cleaned = cls.remove_thinking_tags(text)
+        cleaned = cls.remove_thinking_tags(text, strip_edges=strip_edges)
 
         # 如果整段是 JSON 工具调用，直接清空
         stripped = cleaned.strip()
@@ -167,15 +183,25 @@ class OutputSanitizer:
         cleaned = re.sub(r'<tool_call>\s*[\s\S]*?\s*</tool_call>', '', cleaned, flags=re.IGNORECASE)
 
         # 移除独立的工具 JSON 行 / 工具调用叙述行
-        lines = []
-        for line in cleaned.splitlines():
-            if cls.looks_like_tool_call(line):
+        #
+        # 只在确实删掉行时才重建文本：`splitlines()` + `"\n".join()` 会顺手吃掉
+        # 结尾的换行符，而流式片段经常正好以换行结尾——重建一次就丢一个换行，
+        # 用户看到的是整段黏在一起。没有命中删除时保持原文不动。
+        raw_lines = cleaned.splitlines(keepends=True)
+        kept: List[str] = []
+        dropped = False
+        for line in raw_lines:
+            probe = line.rstrip("\r\n")
+            if cls.looks_like_tool_call(probe):
+                dropped = True
                 continue
-            if cls.looks_like_tool_narration(line):
+            if cls.looks_like_tool_narration(probe):
                 was_polluted = True
+                dropped = True
                 continue
-            lines.append(line)
-        cleaned = "\n".join(lines)
+            kept.append(line)
+        if dropped:
+            cleaned = "".join(kept)
 
         # 数字幻觉检测
         if reference_numbers:
@@ -187,10 +213,10 @@ class OutputSanitizer:
                 cleaned += "\n\n[系统提示：以上回答中的部分数值与权威数据源存在偏差，建议您通过官方渠道核实。]"
                 was_polluted = True
 
-        # 兜底移除答案开头常见搜索过程前缀
-        cleaned = cls.remove_answer_prefix(cleaned)
+        # 兜底移除答案开头常见搜索过程前缀（整段语义：逐片调用只对首片有意义）
+        cleaned = cls.remove_answer_prefix(cleaned, strip_edges=strip_edges)
 
-        return cleaned.strip(), was_polluted
+        return (cleaned.strip() if strip_edges else cleaned), was_polluted
 
 # 兼容历史导入（rag_chain 与评估脚本直接引用）
 from src.services.answer_verification_types import VerificationResult  # noqa: F401

@@ -139,7 +139,7 @@ class PreStagesMixin:
                 if thinking:
                     yield ("thinking", thinking)
                     continue
-                cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk)
+                cleaned_chunk, polluted = OutputSanitizer.sanitize(chunk, strip_edges=False)
                 if polluted:
                     state.trace.set_pollution_detected(True)
                 if cleaned_chunk:
