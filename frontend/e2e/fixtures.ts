@@ -134,8 +134,8 @@ export async function installMocks(page: Page, state: MockState = createMockStat
     route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ user_id: 'user-1', username: 'tester' }) })
   )
 
-  // 会话列表：GET 返回数组；POST（新建会话）返回单会话
-  page.route(/\/api\/sessions\/$/, route => {
+  // 会话列表：GET 返回数组（带 skip/limit 查询参数）；POST（新建会话）返回单会话
+  page.route(/\/api\/sessions\/(\?.*)?$/, route => {
     if (route.request().method() === 'POST') {
       route.fulfill({
         status: 200,
