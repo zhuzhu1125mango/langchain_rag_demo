@@ -72,8 +72,9 @@ dependencies = [
     "pytz==2026.5",
     "certifi==2026.10.23",
     "charset-normalizer==3.5.2",
-    # OPS-6：filelock 4.x 修复 CVE-2026-112940，但 unstructured（含最新 0.27.x）
-    # 强制 filelock<4.0.0，故维持在 3.x 并在 .trivyignore 登记该条，待上游放宽后升级
+    # OPS-6：filelock 4.x 修复 CVE-2026-112940。上游已放宽：unstructured 0.27.37 起
+    # 允许 filelock<5.0.0,>=4.2.1（2026-11-13 核对），但当前 pin 的 0.27.34 仍锁 <4.0.0。
+    # 升级要同时抬 unstructured 与 filelock 两处 pin 并重灌校验，排在下一批依赖升级。
     "filelock==3.32.7",
     "fsspec==2026.9.0",
     "huggingface_hub>=0.34.0,<3.0",
@@ -83,8 +84,9 @@ dependencies = [
     "nltk==3.10.4",
     "cryptography==50.0.2",
     # OPS-6：以下两项为传递依赖，提升为直接依赖以固定修复版本（Trivy HIGH/CRITICAL）。
-    # transformers 无法固定到 5.x：可选 ocr-mineru 组的 mineru（含 4.x）强制 <5 且依赖
-    # gradio>=6.8 与主依赖冲突，故 4.x 的 3 条 CVE 在 .trivyignore 登记并限制加载来源。
+    # transformers 无法固定到 5.x：4.57.6 是最后一个 4.x（2026-11-13 复核，无 4.57.7），
+    # 升 5.x 需 mineru 4.x，而它要求 gradio>=6.21 → gradio 要求 aiofiles<25，
+    # 与主依赖 aiofiles==25.1.0 硬冲突。故 4.x 的 3 条 CVE 在 .trivyignore 登记并限制加载来源。
     "pillow>=13.0.0",
     "urllib3>=2.8.0",
     "grpcio==1.84.1",
@@ -132,8 +134,8 @@ demo = [
 ocr-mineru = [
     # 用 [pipeline] 而非 [core]：[core] 附带 gradio（要求 aiofiles<25），与主依赖冲突
     # >=3.2.0：3.1.x 及更早要求 pandas<3，与主依赖 pandas==3.1.0 冲突
-    # OPS-6：4.x 要求 gradio>=6.8（与主依赖冲突），且仅支持 transformers 5.x；
-    # 保持 3.x。transformers 4.x 的 3 条 CVE 在 .trivyignore 登记（详见该文件注释）
+    # OPS-6：4.x 要求 gradio>=6.21（与主依赖 aiofiles==25.1.0 冲突，见上），
+    # 且只支持 transformers 5.x；保持 3.x。transformers 4.x 的 3 条 CVE 在 .trivyignore 登记。
     "mineru[pipeline]>=3.2.0,<4",
 ]
 ocr-paddle = [
