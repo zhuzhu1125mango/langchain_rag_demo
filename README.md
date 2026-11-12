@@ -27,7 +27,7 @@
 | 维度 | 状态 |
 |---|---|
 | 定型 | **工程化参考实现**，不是产品：无真实用户、无 SLA、无采购方 |
-| 测试 | 后端单测 **1898 passed / 117 skipped**、集成 **1991 passed / 24 skipped**（各 1 例失败）；前端 154 passed；CI **非全绿**（2026-11-12） |
+| 测试 | 后端单测 **1900 passed / 117 skipped**、集成 **1993 passed / 24 skipped**；前端 154 passed；CI **7/7 全绿**（`5a475b7`，2026-11-13） |
 | 生产 | 11 容器全 healthy、`/health/ready` 四项 ok、OpenAPI **117** 条路由 |
 | 运维链路 | 备份/恢复/回滚/删除链/故障注入六类演练 + 规模 RTO + 夜间性能门禁，全部有脚本、有实测数字 |
 | 未做 | 多租户/SSO、真 HA、桌面端、企业级压测（详见「边界」与结项说明 §3） |
@@ -77,7 +77,7 @@ CHECK_ONLY=1 ./scripts/start-dev.sh        # Windows: $env:CHECK_ONLY="1"; .\scr
 
 ```bash
 cd backend
-IN_DOCKER=false uv run pytest -q                       # 后端全量：2016 例（CI 单测 1898 passed / 117 skipped，2026-11-12）
+IN_DOCKER=false uv run pytest -q                       # 后端全量：2016 例（CI 单测 1900 passed / 117 skipped，2026-11-13）
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
 uv run pytest tests/test_chat_run.py -q                # 续传/停止：35 例
 uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.869 / MRR 0.739（90 题 / 78 篇）

@@ -41,7 +41,7 @@ uv run pytest tests/test_security_p2.py tests/test_jwt_auth.py \
   tests/test_security_utils.py tests/test_experiment.py -q
 ```
 
-基线（2026-11-13 复核）：`uv run pytest -q` 共收集 **2016** 例。CI 最近一次（`359d9ca`）backend-unit **1898 passed / 117 skipped / 1 failed**、backend-integration **1991 passed / 24 skipped / 1 failed**，覆盖率 **71%**（阈值 65%，2026-11-12 run `43203258210`）。Linux CI 跑全量。
+基线（2026-11-13 复核）：`uv run pytest -q` 共收集 **2016** 例。CI 最近一次（`5a475b7`）backend-unit **1900 passed / 117 skipped**、backend-integration **1993 passed / 24 skipped**，覆盖率 **70.81%**（阈值 65%，2026-11-13 run `43271138407`）。Linux CI 跑全量。
 单测默认在 `tests/conftest.py` 设置 `QUOTA_ENFORCEMENT_ENABLED=false`，避免跨用例累计触发 429；配额逻辑由 `test_quota.py` 直接覆盖。
 
 ### 2.2 集成测试（需容器）
@@ -118,18 +118,22 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 | rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json；另有信息性多查询 A/B 步骤（continue-on-error，非卡点） |
 | frontend | `vitest run --coverage`（阈值 35/40/25/34 卡点）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
 
-> **当前 CI 非全绿（2026-11-13 复核）**：`359d9ca` 上 3 个 job 失败——
-> backend-unit 与 backend-integration 同因 `tests/test_health_e2e.py::TestHealthE2E::test_rate_limited_to_one_per_interval`
-> （断言第二次请求 200，实得 429；根因待查）；
-> frontend 是 Playwright「sessions 历史对话页展示全部会话」找不到元素。
-> 在修好之前，本仓库的现状是「CI 红」，不要把「7/7 绿」当默认前提。
+> **CI 状态（2026-11-13 复核）：7/7 全绿**（`5a475b7`，unit 1900 / integration 1993 / 覆盖率 70.81%）。
+> 上一轮（`38d3f7d`）红过 3 个 job，根因两条，都已修并留了回归：
+> backend-unit 与 backend-integration 同因「进程启动 60s 内的首次 `/health/e2e` 探针被判成限流」——
+> `_e2e_last_run_at` 初值 `0.0` 与 `time.monotonic()`（起点是开机时间）相减，
+> 容器刚起来时 `wait` 为正数；这是真实缺陷（重启后一分钟内探针静默失效，nightly 把 429 当限流跳过）；
+> frontend 是 Playwright 的会话列表 mock 用精确匹配 `/api/sessions/$`，漏了分页参数 `?skip=0&limit=50`。
+> 下次看到红，先分清「产品缺陷」还是「测试桩没跟上契约」——两者这次的修法就完全不同。
 
 全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限；backend 各 job 另设 `UV_HTTP_TIMEOUT=120`——清华 PyPI 镜像在托管 runner 上偶发解析/下载超时（2026-10-27 复盘，曾致 Dependabot PR 假红）。
 
 **CI 不跑什么**（这一条比上面那张表更容易被误解）：
 
-- `scripts/*_drill.sh`（恢复 / 回滚 / 删除链 / 故障注入）与 `/health/e2e` 都**不在 CI 里**：
-  它们需要完整栈（11 容器 + 5.6GB 模型），托管 runner 起不来。
+- `scripts/*_drill.sh`（恢复 / 回滚 / 删除链 / 故障注入）与**真实链路版**的 `/health/e2e`
+  都不在 CI 里：它们需要完整栈（11 容器 + 5.6GB 模型），托管 runner 起不来。
+  注意 `/health/e2e` 有一个**打桩版**在 CI 里跑（`tests/test_health_e2e.py`，monkeypatch 掉
+  Ollama 与 RAGChain），它验的是限流/降级分支，不验模型是否真活着——别把它当成端到端。
   **CI 绿只代表单测 / 集成 / 构建过了，不代表演练过。**
 - 端到端探针的定时入口是 `scripts/nightly_e2e.sh`（退出码 0/1/2/3，其中 2 与 3 都不是通过）；
   挂 cron 或 Windows 计划任务，见 `docs/guide/fault-injection.md`。
