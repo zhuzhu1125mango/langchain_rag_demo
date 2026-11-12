@@ -27,7 +27,7 @@
 | 维度 | 状态 |
 |---|---|
 | 定型 | **工程化参考实现**，不是产品：无真实用户、无 SLA、无采购方 |
-| 测试 | 后端 **1691 passed / 117 skipped**；前端 154 passed；CI **7/7 绿** |
+| 测试 | 后端单测 **1898 passed / 117 skipped**、集成 **1991 passed / 24 skipped**（各 1 例失败）；前端 154 passed；CI **非全绿**（2026-11-12） |
 | 生产 | 11 容器全 healthy、`/health/ready` 四项 ok、OpenAPI **117** 条路由 |
 | 运维链路 | 备份/恢复/回滚/删除链/故障注入六类演练 + 规模 RTO + 夜间性能门禁，全部有脚本、有实测数字 |
 | 未做 | 多租户/SSO、真 HA、桌面端、企业级压测（详见「边界」与结项说明 §3） |
@@ -77,7 +77,7 @@ CHECK_ONLY=1 ./scripts/start-dev.sh        # Windows: $env:CHECK_ONLY="1"; .\scr
 
 ```bash
 cd backend
-IN_DOCKER=false uv run pytest -q                       # 后端全量：1691 passed / 117 skipped（2026-11-06）
+IN_DOCKER=false uv run pytest -q                       # 后端全量：2016 例（CI 单测 1898 passed / 117 skipped，2026-11-12）
 uv run pytest tests/test_error_handling.py -q          # 异常分级：93 例
 uv run pytest tests/test_chat_run.py -q                # 续传/停止：35 例
 uv run python scripts/run_eval.py --show-misses         # 检索基线：hit@5 0.869 / MRR 0.739（90 题 / 78 篇）
@@ -116,7 +116,8 @@ E2E_TOKEN=<管理员 JWT> ./scripts/nightly_e2e.sh     # 退出码 0/1/2/3，2 �
 | 真实文档探针 | 24 题：概览题 0.598 / 细节题 0.792；加宽重排窗口**反而更低**（0.598→0.501） | [benchmarks/stage-probe](docs/benchmarks/stage-probe-2026-11-03.md) |
 | 延迟 | 知识库问答整链 wall **0.9~1.5s**（全本地，零 API 费） | trace stage detail |
 | 恢复 RTO | PG 915MB **22s** / Milvus 2 万向量 **29~33s** / MinIO 195MB **18s** | [benchmarks/rto-scale](docs/benchmarks/rto-scale-2026-11-05.md) |
-| 性能门禁 | 计数器硬卡点（切分块数 792、融合条数 60）+ 耗时按 profile 卡 1.6× | [benchmarks/perf-baseline](docs/benchmarks/perf-baseline.md) |
+| 检索增强实验 | 表格行折叠、邻块回填各自约 +4pp，同开 0.681（+12.5pp）；噪声代价未验证，**均默认关闭** | [benchmarks/neighbor-expand](docs/benchmarks/neighbor-expand-2026-11-12.md) |
+| 性能门禁 | 计数器硬卡点（切分块数 792、融合条数 60）+ 耗时「比例 1.6× **且** 绝对增量 ≥5ms」双条件 | [benchmarks/perf-baseline](docs/benchmarks/perf-baseline.md) |
 | 回滚 | 上一版镜像可在当前 schema 上跑通（ready 27~48s）；代价是**跑不了 alembic** 且**丢掉优雅停机** | [guide/backup-restore §7](docs/guide/backup-restore.md) |
 
 **一个诚实的负面结论**：在同一份语料上，稠密单通道 hit@5 = 0.953、RRF 混合 = 0.891、

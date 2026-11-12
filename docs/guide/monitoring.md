@@ -65,7 +65,7 @@
 - 外部 Provider 的失败与超时同样计入 `rag_llm_call_errors_total` 与熔断计数；排查时结合 `/api/config` 的 `registry_source` 与 `route_models` 确认真实路由。
 - **当前仍未实现**：按租户维度的配额/成本上限与 429 告警（属于 MODEL-P4）；设置页已提供用量/成本展示与模型单价配置。
 - **索引迁移（P3）**：`GET /api/admin/models/index/status` 查看当前索引画像与目标 Embedding 配置；重建期间 `status=rebuilding`，失败会记录 `last_error` 并保留线上索引。重建/回滚会全量失效语义缓存（`rag:semcache:*`），命中率短时下降属预期。
-- **健康探针（SEC-12）**：`/health/live` 仅判断进程存活；`/health/ready` 深探 DB/Redis/Milvus/MinIO，任一失败返回 503；`/health/detail`（管理员）含依赖错误与 Ollama。
+- **健康探针（SEC-12）**：`/health/live` 仅判断进程存活；`/health/ready` 深探 DB/Redis/Milvus/MinIO，任一失败返回 503；`/health/detail`（管理员）含依赖错误与 Ollama；`/health/e2e`（管理员）真实提问一次，回答「业务答得出吗」，默认 60s 一次，由 `scripts/nightly_e2e.sh` 定时调用（脚本退出码 2/3 都不算通过）。
 - **认证与隐私（SEC-10/14）**：登出/refresh 轮换通过 `rag:jwt:revoked:*` 吊销 jti；日志中用户问题已替换为 `<redacted:hash:len>`，排查时用 trace 表而非日志还原原文。
 - **结构化日志（OPS-3）**：每条日志自动携带 `request_id` / `user_id` / `stage` 三个上下文维度。
   - `LOG_LEVEL`（默认 `INFO`）、`LOG_FORMAT`（`text` 默认 / `json`）；

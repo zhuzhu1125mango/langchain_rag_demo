@@ -145,6 +145,7 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `AUTH_RATE_LIMIT_API_KEY_CREATE` | 签发端点限流（次/分/IP） | `5` | 0 = 不限流 |
 | `APP_ENV` | 显式环境标记 | 空（按 `IN_DOCKER` 推断） | `dev` / `prod`（兼容旧值 `production`）。非 Docker 的生产部署**必须显式设为 `prod`**，否则不执行启动强校验 |
 | `MILVUS_REBUILD_ON_MISMATCH` | 集合 schema/维度不匹配时是否删除重建 | `false` | 破坏性操作，开启前必须完成数据迁移/备份 |
+| `MILVUS_BM25_VOCAB_DIR` | BM25 稀疏词表持久化目录（与 collection 绑定，重启自动加载） | 空 → `backend/src/data/bm25` | 词表在镜像层之外，重建容器不会丢；改目录等于换一份词表 |
 | `REDIS_HOST` | Redis 主机 | `localhost` | 容器内自动覆盖为 `redis` |
 | `REDIS_PORT` | Redis 端口 | `6379` | - |
 | `REDIS_DB` | Redis 数据库编号 | `0` | 0-15 |
@@ -162,6 +163,14 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `FAST_LLM_MODEL_NAME` | 轻量任务模型 | `qwen2.5:3b-instruct` | 意图路由/标题/Query 改写；须与 `OLLAMA_DIRECT_MODEL_NAME` 一致 |
 | `KB_RERANK_MODEL` | 知识库重排模型 | `BAAI/bge-reranker-base` | sentence_transformers 从 HF_HOME 离线缓存加载 |
 | `KB_RERANK_PROVIDER` | 知识库重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama`；**代码默认 `ollama`**，开发栈用前者（本地离线加载，免走 Ollama） |
+| `KB_ENABLE_HYBRID_SEARCH` | 是否启用 BM25 + 向量混合检索 | `true` | 关闭则退回纯 dense；BM25 失败时链路本身也会回退 dense |
+| `KB_HYBRID_SEARCH_TOP_K` | 混合检索候选池大小 | `20` | 融合前的召回数量 |
+| `KB_HYBRID_RERANK_TOP_K` | 重排后进入上下文的块数 | `5` | 实际重排名额还会被 `TOP_K` 与折叠逻辑约束 |
+| `KB_RRF_K` | RRF 融合常数 | `60` | 越小越偏向单通道头部 |
+| `KB_TABLE_FOLD_ENABLED` | 融合后折叠同表行级块（同一文档 + 表头只占 1 个重排名额） | `false` | 2026-11-11 实测概览题约 +4pp、细节持平；证据不足以改线上默认行为，默认关闭 |
+| `KB_NEIGHBOR_EXPAND_ENABLED` | 入选块回填同文档相邻块（`chunk_index ± 1`） | `false` | 2026-11-12 实测单独用概览题约 +4pp，与折叠同开 0.681；噪声代价未验证，默认关闭 |
+| `KB_NEIGHBOR_EXPAND_BUDGET_CHARS` | 邻块回填的总字符预算（含原地块） | `2000` | 1200 是性价比拐点，2000 是收益拐点；无预算只增长成本、收益不再涨 |
+| `KB_ANSWER_TEMPERATURE` | 知识库答案采样温度 | 空（不传给模型，沿用其默认值，通常 0.8） | 2026-11-12 实测同上下文两次运行事实覆盖率 0.340 / 0.493，抖动主要来自采样；先留开关，未改默认值 |
 | `SEARCH_RERANK_MODEL` | 搜索重排模型 | `BAAI/bge-reranker-base` | 同上 |
 | `SEARCH_RERANK_PROVIDER` | 搜索重排加载方式 | `sentence_transformers` | `sentence_transformers` / `ollama`；**代码默认 `ollama`**，开发栈用前者 |
 | `SEARCH_RERANK_TOP_K` | 重排后返回 Top-K | 5 | - |
@@ -181,6 +190,12 @@ MILVUS_REBUILD_ON_MISMATCH=false
 | `MODEL_REGISTRY_FILE` | 可选：JSON registry 路径 | - | 相对路径以 `backend/` 为根；配置后优先于 legacy `OLLAMA_*` |
 | `MODEL_USAGE_FLUSH_INTERVAL_S` | 可选：用量增量落库间隔（秒） | `60` | `0` 关闭周期落库，查询仍叠加进程内增量 |
 | `MODEL_SECRET_ENC_KEY` | Provider API Key 加密密钥 | - | 未设置时从 `SECRET_KEY` 派生；轮换后已存 Key 需重录 |
+| `LOG_LEVEL` | 日志级别 | `INFO` | DEBUG / INFO / WARNING / ERROR |
+| `LOG_FORMAT` | 日志格式 | `text` | `text` / `json`；容器环境建议 `json`，字段含 request_id / user_id / stage |
+| `HEALTH_E2E_ENABLED` | 端到端探针 `/health/e2e` 开关 | `true` | 关闭后该端点返回 404；探针会产生一次真实 LLM 调用 |
+| `HEALTH_E2E_QUESTION` | 探针使用的固定问题 | `请用一句话说明你能做什么。` | 只走意图路由 + 生成，不触达 Milvus |
+| `HEALTH_E2E_TIMEOUT_SECONDS` | 探针整体超时（秒） | `90` | 超时返回 503 且 `stage=timeout` |
+| `HEALTH_E2E_MIN_INTERVAL_SECONDS` | 两次探针的最小间隔（秒） | `60` | 间隔内重复调用返回 429 + `Retry-After`；周期任务 `scripts/nightly_e2e.sh` 据此取值 |
 
 > 模型相关 `OLLAMA_*` / `FAST_LLM_MODEL_NAME` / `TITLE_GENERATION_MODEL` 仅在 legacy 模式下生效；
 > DB 或 `MODEL_REGISTRY_FILE` 存在时以 registry 的任务路由为准。

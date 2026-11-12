@@ -72,20 +72,31 @@ docs/
 │   └── silent-failures.md   #   删除可对账 / 失败可判定 / 断连可续（参考实现的技术叙事）
 ├── audit/               # 对抗性检查与审计报告（假设声称是假的，去证伪）
 │   ├── adversarial-2026-11-07.md  # 结项后对抗检查：6 项不成立 + 8 项不足与方案（含 sessions 索引缺失）
-│   └── plan-2026-11-07.md         # 8 项不足的整改排期（A/B/C 三批 + 可穿插的工程债）
+│   ├── plan-2026-11-07.md         # 8 项不足的整改排期（A/B/C 三批 + 可穿插的工程债）
+│   └── answer-side-2026-11-12.md  # 答案侧核查：抖动来源与三条被数据否掉的修法
 ├── benchmarks/          # 评测与实测数据（结论 + 可复现的 JSON）
 │   ├── quality-and-cost-2026-11-04.md  # 汇总页：四份评测收成一页，含「不显著不写成结论」的口径
 │   ├── retrieval-baseline-2026-11-02.md    # 90 题合成集基线（hit@5 0.869 / MRR@5 0.739）
 │   ├── channel-ab-2026-11-02.md            # 通道 A/B（10 个臂）
+│   ├── channel-ab-2026-11-10.md            # 生产索引上复跑通道 A/B
 │   ├── channel-fusion-2026-11-02.md        # 融合策略 + McNemar 显著性
 │   ├── stage-probe-2026-11-03.md           # 真实文档逐级探针：概览题丢在哪一级（24 题 / 6 个修法）
+│   ├── stage-probe-2026-11-10.md           # 泛问逐级探针：加宽重排窗口反而更差
+│   ├── trace-inventory-2026-11-10.md       # 生产轨迹盘点：73 条撑不起 100 题评测集
+│   ├── prod-probe-2026-11-10.md            # 生产索引 24 题探针：与本地夹具逐位一致
+│   ├── relevance-gate-2026-11-10.md        # 低置信兜底被数据否掉，改为给拒答加留痕
+│   ├── fold-expand-2026-11-11.md           # 表格行级折叠：收益约半道题，默认关闭
+│   ├── table-selection-2026-11-11.md       # 表格感知选择的两个动作都被证伪
+│   ├── table-combo-2026-11-11.md           # 折叠与邻块回填互补，含上下文成本实测
+│   ├── neighbor-expand-2026-11-12.md       # 邻块回填：与折叠同开 0.681，接进生产但默认关
 │   ├── rto-scale-2026-11-05.md             # 真实规模 RTO：PG 915MB/22s、Milvus 2 万向量/29~33s、MinIO 195MB/18s
 │   └── perf-baseline.md                    # 性能基线与夜间回归：量什么、怎么判、红了怎么查（附 perf-baseline.json）
 ├── guide/               # 操作指南
 │   ├── deployment.md    #   部署（开发/生产环境）
-│   ├── configuration.md #   配置（env 文件加载机制、全量参数、端口）
+│   ├── configuration.md #   配置（env 文件加载机制、核心参数、端口）
 │   ├── development.md   #   开发与测试（含踩坑记录）
 │   ├── fault-injection.md #  故障注入演练：三类注入、判据、六次假通过的复盘
+│   ├── docker-disk-reclaim.md # Docker 磁盘回收（构建缓存 / 悬空镜像 / 卷）
 │   ├── monitoring.md    #   监控运维（指标、告警、处置）
 │   ├── quickstart-verification-2026-11-04.md # 干净目录复现验证记录（7 轮，找出 7 处问题）
 │   └── backup-restore.md #  备份 / 恢复 / 回滚 / 容量与演练（运维 Runbook）

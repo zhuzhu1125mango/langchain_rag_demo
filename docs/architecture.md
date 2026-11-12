@@ -60,13 +60,25 @@
   │    └─ 闲聊/纯 LLM ──► 直接生成（answer_generator_no_context）
   │
   ├─ 查询改写（query_rewriter.py）
-  ├─ 检索（hybrid_search.py：BM25 + 向量，失败回退 dense）
+  ├─ 检索（hybrid_search.py：BM25 稀疏 + 向量；BM25 失败回退 dense）
+  │    ├─ 融合后折叠同表行级块（KB_TABLE_FOLD_ENABLED，默认关；同一文档 + 表头只占 1 个重排名额）
+  │    └─ 邻块回填 chunk_index ± 1（KB_NEIGHBOR_EXPAND_ENABLED，默认关；受字符预算约束，回填块不参与相关性门禁）
   ├─ 重排序（ollama_reranker.py）
+  ├─ 相关性门控（pipeline/retrieval.py：优先复用 rerank_score；整批打分失败时 fail-open 并标 rerank_fallback，不再返回假分数）
   ├─ 上下文构建（context_builder.py / context_enhancer.py）
-  ├─ 答案生成（answer_generator.py，ainvoke）
+  ├─ 答案生成（answer_generator.py，ainvoke；KB_ANSWER_TEMPERATURE 为空时不传，沿用模型默认）
   └─ 后处理：引用补全（citation_backfiller）→ 数字幻觉校验（numerical_validator）
-            → 输出清洗（output_sanitizer：过滤推理前缀/复述）
+            → 输出清洗（output_sanitizer：过滤推理前缀/复述；流式跨片段的空格与换行已修）
 ```
+
+### 健康探针分工
+
+| 端点 | 回答的问题 | 代价 / 鉴权 |
+|---|---|---|
+| `/health/live` | 进程还活着吗 | 无依赖检查、无鉴权 |
+| `/health/ready` | DB/Redis/Milvus/MinIO 连得上吗 | 四项依赖探测、无鉴权，失败 503 |
+| `/health/detail` | 依赖拓扑与错误是什么 | 管理员；含 Ollama 探测 |
+| `/health/e2e` | 业务真的答得出吗 | 管理员；真实 LLM 调用，默认 60s 一次，不触达 Milvus |
 
 ### 模型路由层（Provider / Model / Route）
 
@@ -115,7 +127,7 @@
 | 存储 | 内容 |
 |---|---|
 | PostgreSQL | 用户（`users`）、知识库/文档元数据、会话与消息（JSONB）、反馈/坏例、实验（A/B）、标签/分类、请求 trace、Wiki 编译页（`wiki_pages`）、审计日志（`audit_logs`）、学习引擎配置、模型注册（`model_providers` / `model_deployments` / `model_routes`）、模型用量日聚合（`model_usage_daily`）、索引 Embedding 画像（`model_index_profile`） |
-| Milvus | 文档向量 + BM25 稀疏向量（含词表持久化）；Wiki 编译页切片以 `source_kind="wiki"` 同集合区分；Agent 记忆以 `source_kind="memory"` 复用同集合 |
+| Milvus | 文档向量 + BM25 稀疏向量（词表落盘到 `MILVUS_BM25_VOCAB_DIR`，默认 `backend/src/data/bm25`，位于镜像层之外）；Wiki 编译页切片以 `source_kind="wiki"` 同集合区分；Agent 记忆以 `source_kind="memory"` 复用同集合 |
 | MinIO | 文档原文件、Milvus 底层存储 |
 | Redis | 缓存（知识库列表、快捷问题等）；语义缓存条目；Wiki 分布式锁（`WIKI_DISTRIBUTED_LOCK`，Redis 不可用时降级为进程内锁）。注：Wiki 编译**去抖队列是进程内实现**（`wiki_compile_scheduler.py` 用 per-KB 集合 + asyncio 计时器，多副本部署时各 worker 独立去抖） |
 

@@ -41,7 +41,7 @@ uv run pytest tests/test_security_p2.py tests/test_jwt_auth.py \
   tests/test_security_utils.py tests/test_experiment.py -q
 ```
 
-基线：本机（Windows）`uv run pytest -q` **1326 passed / 105 skipped、覆盖率 67.37%**（2026-10-28，含模型 registry P1/P2/P2.1/P3、SEC P1~P3、OPS-1/2/3 与 Dependabot 依赖收口）；Linux CI 跑全量。
+基线（2026-11-13 复核）：`uv run pytest -q` 共收集 **2016** 例。CI 最近一次（`359d9ca`）backend-unit **1898 passed / 117 skipped / 1 failed**、backend-integration **1991 passed / 24 skipped / 1 failed**，覆盖率 **71%**（阈值 65%，2026-11-12 run `43203258210`）。Linux CI 跑全量。
 单测默认在 `tests/conftest.py` 设置 `QUOTA_ENFORCEMENT_ENABLED=false`，避免跨用例累计触发 429；配额逻辑由 `test_quota.py` 直接覆盖。
 
 ### 2.2 集成测试（需容器）
@@ -113,10 +113,16 @@ uv run python scripts/download_ocr_models.py --backend all   # 模型预热 + �
 | env-consistency | 用 `.env.example` 生成占位 env 校验键集合一致 | `.env.dev/.env.prod` 被 gitignore 不入库；脚本对缺失文件容错跳过 |
 | lint | backend ruff（`uvx ruff --select E9,F63,F7,F82`）+ 前端 eslint / typecheck | 真错误级规则集，零风格噪音；runner 无预装 uvx，须先 setup-uv |
 | secrets-scan | gitleaks `detect --no-git --redact` | 只扫工作树不扫历史；误报按 fingerprint 登记到 `.gitleaksignore` 并注明原因 |
-| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | 阈值已收敛至 `backend/pyproject.toml` `[tool.coverage.report]` `fail_under=65`（实测 67.37%），CI 命令仅 `--cov=src`；干净安装暴露隐性依赖缺失 |
+| backend-unit | `uv sync --frozen` + pytest 单测 + 覆盖率卡点 | 阈值已收敛至 `backend/pyproject.toml` `[tool.coverage.report]` `fail_under=65`（实测 71%），CI 命令仅 `--cov=src`；干净安装暴露隐性依赖缺失 |
 | backend-integration | docker run 启动 MinIO(pgsty fork)/etcd/Milvus/Redis + pytest 集成测试 | 不用 GHA services（镜像无默认 CMD）；Redis 必须带密码；pytest-timeout 120s 防挂死 + step timeout-minutes 40 |
 | rag-eval | 离线检索质量评估（依赖 backend-unit） | `scripts/run_eval.py` 阈值卡点 + 上传 eval_report.json；另有信息性多查询 A/B 步骤（continue-on-error，非卡点） |
 | frontend | `vitest run --coverage`（阈值 35/40/25/34 卡点）+ build（含 vue-tsc -b）+ Playwright E2E | 依赖变更时需 `--build` 重建镜像 |
+
+> **当前 CI 非全绿（2026-11-13 复核）**：`359d9ca` 上 3 个 job 失败——
+> backend-unit 与 backend-integration 同因 `tests/test_health_e2e.py::TestHealthE2E::test_rate_limited_to_one_per_interval`
+> （断言第二次请求 200，实得 429；根因待查）；
+> frontend 是 Playwright「sessions 历史对话页展示全部会话」找不到元素。
+> 在修好之前，本仓库的现状是「CI 红」，不要把「7/7 绿」当默认前提。
 
 全部 job 均设 `timeout-minutes`（5~45），防挂死耗尽上限；backend 各 job 另设 `UV_HTTP_TIMEOUT=120`——清华 PyPI 镜像在托管 runner 上偶发解析/下载超时（2026-10-27 复盘，曾致 Dependabot PR 假红）。
 
