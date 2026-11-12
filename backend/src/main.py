@@ -942,7 +942,9 @@ async def health_e2e(request: Request, current_user: CurrentUser = Depends(requi
     async with _e2e_probe_lock:
         now = time.monotonic()
         wait = min_interval - (now - _e2e_last_run_at)
-        if wait > 0:
+        # `_e2e_last_run_at == 0` 表示「本次进程还没跑过」：monotonic 的起点是开机时间，
+        # 容器刚起来时它可能小于 min_interval，直接相减会把首次探针误判成 429。
+        if _e2e_last_run_at > 0 and wait > 0:
             raise HTTPException(
                 status_code=429,
                 detail=f"端到端探针每 {min_interval}s 只能调一次，请 {int(wait) + 1}s 后再试",
