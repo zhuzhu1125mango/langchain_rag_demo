@@ -72,19 +72,38 @@ class TestCheckTrivyignore:
 
 
 class TestCliExitCode:
-    def test_warn_exits_zero(self, capsys):
+    """CLI 层用**合成文件**，不读仓库里那份。
+
+    2026-11-13 踩到：这里原先直接对 `.trivyignore` 传死日期（`--today 2026-11-20` /
+    `2026-12-01`），于是**续期本身会让测试变红**——而这个检查的全部意义就是逼人
+    在到期前处理它。测试反过来惩罚维护动作，最后的结果只会是「改日期时顺手改测试」，
+    检查就变成了形式。真实文件的约束只剩一条：当下有效（见上一个测试类）。
+    """
+
+    def _file(self, tmp_path, review_by: str = "2026-11-30"):
+        path = tmp_path / ".trivyignore"
+        path.write_text(_text(review_by), encoding="utf-8")
+        return path
+
+    def test_warn_exits_zero(self, tmp_path, capsys):
         """告警不能挡合入，否则会被习惯性绕过。"""
-        code = mod.main(["--file", str(_REPO_ROOT / ".trivyignore"), "--today", "2026-11-20"])
+        code = mod.main(["--file", str(self._file(tmp_path)), "--today", "2026-11-20"])
         assert code == 0
         assert "WARN" in capsys.readouterr().out
 
-    def test_expired_exits_one(self):
-        assert mod.main(["--file", str(_REPO_ROOT / ".trivyignore"), "--today", "2026-12-01"]) == 1
+    def test_expired_exits_one(self, tmp_path):
+        assert mod.main(["--file", str(self._file(tmp_path)), "--today", "2026-12-01"]) == 1
+
+    def test_renewal_does_not_break_cli(self, tmp_path, capsys):
+        """续期后（换一个新的 review-by）CLI 行为不变：这是本轮修复的直接回归。"""
+        code = mod.main(["--file", str(self._file(tmp_path, "2026-12-15")), "--today", "2026-11-13"])
+        assert code == 0
+        assert "OK" in capsys.readouterr().out
 
     def test_missing_file_is_not_an_error(self, tmp_path):
         """豁免文件删掉说明不再需要豁免，不该拦。"""
         assert mod.main(["--file", str(tmp_path / "nope")]) == 0
 
-    def test_bad_today_arg_raises(self):
+    def test_bad_today_arg_raises(self, tmp_path):
         with pytest.raises(ValueError):
-            mod.main(["--file", str(_REPO_ROOT / ".trivyignore"), "--today", "2026-13-01"])
+            mod.main(["--file", str(self._file(tmp_path)), "--today", "2026-13-01"])
