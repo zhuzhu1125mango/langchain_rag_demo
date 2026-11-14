@@ -74,6 +74,20 @@ jobs:
       - name: Backend ruff (syntax & pyflakes core)
         run: uvx ruff@0.9.3 check --select E9,F63,F7,F82 backend
 
+      # 锁与 manifest 的一致性：只读、秒级、不需要装依赖。
+      #
+      # 不加这一步的话，唯一能发现「pyproject 改了但 uv.lock 没跟着改」的地方是各 job 的
+      # `uv sync --frozen`，而它的报错长这样：
+      #   error: No solution found when resolving dependencies for split
+      #          (markers: python_full_version == '3.13.*' and platform_machine == 'aarch64'
+      #           and sys_platform == 'linux')
+      # 这句话里没有一个字提到「锁过期」，读起来像平台问题或包不兼容。
+      # 2026-11-14 复盘：5 个 dependabot PR（#34 #35 #38 #36 #31）全部卡在这句话上，
+      # 被误判了两周。根因是 dependabot 当时配的 pip 生态不改 uv.lock。
+      - name: Lock consistency (uv lock --check)
+        working-directory: backend
+        run: uv lock --check
+
       - uses: pnpm/action-setup@v6
         with:
           version: 10
