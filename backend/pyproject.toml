@@ -82,6 +82,10 @@ dependencies = [
     "tokenizers==0.22.2",
     "jieba==0.42.1",
     "nltk==3.10.4",
+    # OPS-6：soupsieve 2.9.2 有 CVE-2026-126190（多项式时间 DoS）与
+    # CVE-2026-126191（选择器编译指数级 ReDoS），修复版 4.0.0 / 3.0.2。
+    # 传递自 beautifulsoup4（只要求 soupsieve>=1.6.1），提升为直接依赖固定 4.1。
+    "soupsieve==4.1",
     "cryptography==50.0.2",
     # OPS-6：以下两项为传递依赖，提升为直接依赖以固定修复版本（Trivy HIGH/CRITICAL）。
     # transformers 无法固定到 5.x：4.57.6 是最后一个 4.x（2026-11-13 复核，无 4.57.7），
