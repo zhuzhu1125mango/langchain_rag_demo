@@ -139,9 +139,9 @@ class RAGChain(
         # P1：回答/直答模型由 Provider/Model/Route registry 决定，业务层不再
         # 直接构造 ChatOllama。think=None 表示不强制绑定 reasoning，由模型默认行为；
         # 直答 route 使用独立模型，避免关闭深度思考时仍落到思考模型。
-        # 采样温度：None 时沿用模型默认（langchain_ollama 为 0.8）。事实型问答
-        # 不需要这种多样性，且它会让答案侧的 A/B 抖动 ±15pp（实测两次同上下文
-        # 0.340 / 0.493）。是否改默认值见 KB_ANSWER_TEMPERATURE 的说明。
+        # 采样温度：默认 0.1（见 KB_ANSWER_TEMPERATURE 的说明与实测数据）。
+        # 置 None 才跟随模型默认（langchain_ollama 为 0.8），那会让同一问题的
+        # 答案条目数每次不同，生成侧改动也无法判定。
         self.llm = await model_manager.get_chat_llm(
             "answer", streaming=True, think=None,
             temperature=settings.processing.KB_ANSWER_TEMPERATURE,
