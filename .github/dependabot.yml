@@ -1,6 +1,13 @@
 version: 2
 updates:
-  - package-ecosystem: pip
+  # 用 uv 而不是 pip：项目由 uv 管理（backend/uv.lock，version 1 revision 3，
+  # 本地 uv 0.11.26）。pip 生态**不认识 uv.lock**，只会改 pyproject.toml，
+  # 于是每个 PR 到 CI 都变成「锁过期 → 重新解析 → 失败」。
+  # 2026-11-14 复盘：7 个存量 PR 里 5 个因此全红（#34 #35 #38 #36 #31），
+  # 其中 #34 的报错 `langchain-text-splitters==1.1.3 depends on langchain-core>=1.4.7
+  # and your project depends on langchain-core==1.4.1` 已本地复现，与平台无关。
+  # 改用 uv 生态后由 dependabot 自己重算通用锁（uv 生态自 v0.11 起支持）。
+  - package-ecosystem: uv
     directory: /backend
     schedule:
       interval: weekly
