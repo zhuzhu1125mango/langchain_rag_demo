@@ -54,7 +54,12 @@ dependencies = [
     # uv 对「按平台切换 index」(tool.uv.sources + marker) 仅对直接依赖生效：
     # 声明后 Linux 容器走 pytorch-cpu 源（避免拉取 ~2.5GB CUDA 依赖），
     # Windows/macOS 仍走默认镜像源（其 wheel 本身不含 CUDA）
-    "torch>=2.13",
+    # 上界卡在 2.15 之前：2.15.0 的 CPU wheel 是 199.8MB，本地镜像构建时
+    # `uv sync` 两次都在传 199.8MiB 处中断（`error reading a body from connection`），
+    # 生产镜像建不出来。上界压到 2.14.1 之前是为了复用已缓存的 2.14.0 wheel
+    # （2.14.1 也是另一份 199MB）。torch 只是 sentence-transformers 的传递依赖，
+    # 待网络窗口恢复后解除上界。
+    "torch>=2.13,<2.14.1",
     "httpx==0.28.1",
     "httpx-sse==0.4.3",
     "aiohttp==3.14.5",
