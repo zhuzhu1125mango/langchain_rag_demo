@@ -68,7 +68,7 @@ dependencies = [
     "backoff==2.2.1",
     "aiofiles==25.1.0",
     "cachetools==7.2.4",
-    "python-dateutil==2.9.0.post0",
+    "python-dateutil==4.0.0",
     "pytz==2026.6",
     "certifi==2026.10.23",
     "charset-normalizer==3.5.2",
