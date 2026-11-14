@@ -1586,16 +1586,26 @@ cat backend/src/config.py | findstr MAX_FILE_SIZE
 | `KB_TABLE_FOLD_ENABLED` | false | RRF 之后把同表行级块折叠成 1 席（重排只能排序不能换人，必须在这里换人） | 离线 24 题概览 0.556→0.597 |
 | `KB_NEIGHBOR_EXPAND_ENABLED` | false | 给入选块补同文档 `chunk_index ± 1`（**只补同章节**） | 线上上下文 0.500→0.604 |
 | `KB_NEIGHBOR_EXPAND_BUDGET_CHARS` | 2000 | 回填总字符预算（含原地块）；1200 性价比拐点 / 2000 收益拐点 | 见上 |
-| `KB_ANSWER_TEMPERATURE` | 空（模型默认 0.8） | 知识库答案采样温度 | 0.1 时同配置两跑逐位一致；默认温度差 15.3pp |
+| `KB_ANSWER_TEMPERATURE` | **0.1**（设 `None`/留空 = 跟随模型 0.8） | 知识库答案采样温度 | 0.1 四轮概览 9~11 点；0.8 四轮 8~13 点 |
 
 **为什么默认关闭**：折叠+回填把上下文覆盖率抬了 10.4pp，但答案侧「概览 +2 点 / 细节 −2 点、
 总量持平」。多塞 3~5 块要付噪声与 prefill，换 0 个事实点不划算。要打开，先解决
 「上下文进得去、答案写不出」的转化率问题。
 
-**评测时必须固定温度**：
+**为什么温度默认 0.1**：0.8 的问题在方差不在均值。生产设置下（折叠/回填均关）同口径对照：
+默认温度 8.33/30、9.67/18、答案均值 364 字符；T=0.1 是 9/30、11/18、答案均值 308 字符——
+低温答案更短、覆盖率反而更高。而 0.8 连跑四轮，概览在 8~13 点之间跳（1 点 = 3.3pp），
+用户侧表现就是「同一个问题问两次，条目数不一样」。
+
+**0.1 不是完全可复现**：四轮 T=0.1 的概览落在 9~11 点，同配置两轮仍可能差 1 点（3.3pp）。
+要逐位复现还得同时固定 seed（`ChatOllama` 支持，本项目未做）。所以**判定生成侧改动时，
+差异小于 2 点（约 7pp）不能当结论**——这条是从「以为 0.1 就一劳永逸」的误判里纠正来的。
+
+**评测时的温度**：新部署已默认 0.1，无需再显式传参；要复现历史报告（那些是 0.8 跑的）
+才需要 `-e KB_ANSWER_TEMPERATURE=` 留空。
 
 ```bash
-docker exec -e KB_ANSWER_TEMPERATURE=0.1 backend-prod \
+docker exec backend-prod \
   python scripts/probe_answer_quality.py --kb <kb_id> --flush-cache --save-answers \
   --report /app/data/answer-quality.json
 ```
