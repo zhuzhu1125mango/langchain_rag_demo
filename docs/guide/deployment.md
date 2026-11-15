@@ -1614,6 +1614,57 @@ docker exec backend-prod \
 两份报告对比用 `scripts/analyze_answer_gap.py --arms 名=路径 ...`（池化 + 宽松口径，
 能把「措辞不同」和「真没写」分开）。
 
+### 7.10 切换模型 provider（Ollama → LM Studio / 任意 OpenAI 兼容）
+
+**先说结论：不需要改代码，也不需要改 env。** Provider 抽象支持
+`ollama` 与 `openai_compatible`（LM Studio、vLLM、DeepSeek、OpenAI 都属后者），
+配置优先级是 **DB（管理页/管理 API）> `MODEL_REGISTRY_FILE` JSON > `OLLAMA_*` legacy**。
+详见 [model-provider-registry-2026-10.md](../design/model-provider-registry-2026-10.md)。
+
+**为什么“改不了模型”这个印象会存在**：一旦 DB 里没有 provider、也没配 registry 文件，
+运行时就走 legacy 路径——模型名写死在 `OLLAMA_MODEL_NAME` / `FAST_LLM_MODEL_NAME` /
+`EMBEDDING_MODEL_NAME` 三个 env 里，那时确实只能改 env。查当前走哪条路：
+
+```bash
+docker logs backend-prod 2>&1 | grep "模型注册表已加载"
+# source=legacy-env  → 走 env（下面第 3 步就是把它换成 DB）
+# source=database    → 已在用 DB 配置
+```
+
+**切换步骤**
+
+1. **LM Studio 侧**：加载一个 chat 模型 + 一个 embedding 模型；打开
+   Developer → Local Server（默认 `1234`）；**必须允许局域网访问**——
+   容器是经 `host.docker.internal` 连的，只绑 `127.0.0.1` 时容器连不上。
+
+2. **四项检查**（在容器里跑，才等价于后端看到的网络）：
+
+   ```bash
+   docker exec backend-prod python scripts/check_model_endpoint.py \
+     --base-url http://host.docker.internal:1234/v1 \
+     --chat-model <chat 模型 id> --embedding-model <embedding 模型 id>
+   ```
+
+   它把“能用”拆成连通性 / 模型列表 / 生成 / 向量维度四项，各自可单独失败。
+   **第 4 项是本项目特有的坑**：现有语料是 `bge-m3` 的 **1024 维**，换成 768 维的
+   embedding 不会报错，只会让检索静默返回空。
+
+3. **写入配置**：设置页「模型服务」，或管理 API
+   `POST /api/admin/models/providers` → `POST .../deployments` →
+   `PUT .../routes` → `POST .../apply`。`apply` 是**热更新**
+   （`model_manager.apply_registry_config`），不写文件、不重启。
+
+4. **验收**：`GET /health/detail` 的 `model` 项应为 `healthy`；
+   `GET /health/e2e` 应返回 200。若返回 503 且 `stage=model_unreachable`，
+   `error` 里带 `type@base_url`，能直接看出该去看哪个服务。
+
+**向量维度变了怎么办**：必须重灌语料（`scripts/reingest_documents.py`），
+并用 `POST /api/admin/models/index/rebuild` 重建索引；`apply` 前会先过
+`embedding_migration` 的一致性检查，不一致直接 409，不会让你半途切换。
+
+**回滚**：DB 配置是覆盖式的，`PUT /routes` 换回原路由再 `apply` 即可回到旧 provider；
+legacy 路径始终保留，删掉 registry 文件与 DB 配置就退回 env。
+
 ## 9. 故障排查
 
 ### 9.1 日志排查
