@@ -1134,7 +1134,7 @@ Register-ScheduledTask -TaskName "RAG-Nightly-E2E" -Action $action -Trigger $tri
 > 不是故障；判断探针是否变慢要用热态基线。
 
 日志写在 `logs/nightly-e2e.log`，自动保留最近 500 行。失败时先看这一行：
-`FAIL 503 {"stage":"ollama_unreachable"}` 表示模型服务没起，不是代码问题。
+`FAIL 503 {"stage":"model_unreachable"}` 表示当前路由指向的模型服务没起（`error` 里带 `type@base_url`，能看出该去看 Ollama 还是 LM Studio），不是代码问题。
 
 ---
 

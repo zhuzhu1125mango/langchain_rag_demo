@@ -398,10 +398,14 @@ def _validate_url(url: Optional[str]) -> str:
     return url.rstrip("/")
 
 
-async def test_provider(provider: ProviderConfig) -> Dict[str, Any]:
-    """管理员连接测试 / 模型发现；API Key 不进入返回值。"""
+async def test_provider(provider: ProviderConfig, timeout: float = 12.0) -> Dict[str, Any]:
+    """管理员连接测试 / 模型发现；API Key 不进入返回值。
+
+    ``timeout`` 默认 12s（管理页点「测试」时人愿意等），但健康探针传 2s：
+    探针要的是「现在通不通」，不是「网络慢的时候还能不能等到」。
+    """
     try:
-        async with httpx.AsyncClient(timeout=12.0, follow_redirects=False) as client:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
             if provider.type == "ollama":
                 base = _normalize_ollama_base_url(provider.base_url or None)
                 if not base:

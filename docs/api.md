@@ -1700,7 +1700,7 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | 健康检查 | GET | `/health/ready` | 就绪探针（DB/Redis/Milvus/MinIO，503 表示未就绪） |
 | 健康检查 | GET | `/health` | 兼容旧探针（等同 live） |
 | 健康检查 | GET | `/health/detail` | 详细健康检查（管理员，含 Ollama 与错误信息） |
-| 健康检查 | GET | `/health/e2e` | 端到端探针（管理员）：真实提问一次，200 `{ok, latency_ms, answer_type, rid}`；503 `{ok:false, stage, latency_ms, rid}`，`stage` ∈ `ollama_unreachable` / `generation` / `timeout`；间隔内重复调用 429 + `Retry-After`；`HEALTH_E2E_ENABLED=false` 时 404 |
+| 健康检查 | GET | `/health/e2e` | 端到端探针（管理员）：真实提问一次，200 `{ok, latency_ms, answer_type, rid}`；503 `{ok:false, stage, latency_ms, rid}`，`stage` ∈ `model_unreachable` / `generation` / `timeout`；间隔内重复调用 429 + `Retry-After`；`HEALTH_E2E_ENABLED=false` 时 404 |
 | 监控 | GET | `/metrics` | 获取 Prometheus 监控指标 |
 | 监控 | POST | `/metrics/reset` | 重置监控指标（需 `X-Admin-Key`） |
 | 追踪 | GET | `/api/traces` | 获取请求追踪列表 |

@@ -110,7 +110,7 @@ inotify 事件（实测改完文件请求照样 200，注入等于没做）。
 - **底层逐条日志可能被节流**：`ollama_reranker` 对单条打分失败只记前 3 次（之后每 50 次一条），
   而启动预热就会用掉这 3 次额度。所以断言看的是 batch 级结论（「整批 N/N 条打分失败」），
   不是逐条日志。
-- **`ollama_unreachable` 不在这里测**：它由 `/health/e2e` 覆盖（探针会先探 Ollama），
+- **`model_unreachable` 不在这里测**：它由 `/health/e2e` 覆盖（探针先按注册表路由探当前 provider），
   单独再注入一次属于重复。
 - **注入 B 只覆盖「打分失败」，不覆盖「模型加载失败」**：加载失败走
   `action=hybrid_search.load_cross_encoder`，且会把进程置为永久 RRF 截断，不再重试。

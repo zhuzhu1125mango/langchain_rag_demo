@@ -1,7 +1,7 @@
 """端到端健康探针（P1-4）：/health/e2e 的分级与限流。
 
 为什么单独一个文件：这个端点的价值不在「返回 200」，而在**失败时能说清卡在哪一段**。
-只断言状态码的测试等于没测——ollama_unreachable / retrieval / generation / timeout
+只断言状态码的测试等于没测——model_unreachable / retrieval / generation / timeout
 四种情况在运维上的处置完全不同。
 """
 
@@ -15,7 +15,7 @@ from src.main import app
 client = TestClient(app)
 
 # 自动 fixture 会把探针换成「永远可达」，测探针本身时必须拿原始函数
-_REAL_PROBE = main_module._probe_ollama_reachable
+_REAL_PROBE = main_module._probe_active_model_providers
 
 
 class _PymilvusError(Exception):
@@ -51,10 +51,10 @@ def _reset_probe_state(monkeypatch):
     monkeypatch.setattr(main_module, "_e2e_last_run_at", 0.0)
     monkeypatch.setattr(main_module, "settings", settings)
 
-    async def _ollama_ok(timeout: float = 3.0) -> bool:
-        return True
+    async def _model_ok(timeout: float = 2.0) -> tuple[bool, str]:
+        return True, ""
 
-    monkeypatch.setattr(main_module, "_probe_ollama_reachable", _ollama_ok)
+    monkeypatch.setattr(main_module, "_probe_active_model_providers", _model_ok)
     yield
 
 
@@ -71,18 +71,23 @@ class TestHealthE2E:
         assert isinstance(data["latency_ms"], int) and data["latency_ms"] >= 0
         assert data["rid"], "没有 rid 就关联不到日志"
 
-    def test_ollama_unreachable_is_its_own_stage(self, monkeypatch):
-        """模型没了和代码坏了必须分开：前者重启后端无用。"""
-        async def _ollama_down(timeout: float = 3.0) -> bool:
-            return False
+    def test_model_unreachable_is_its_own_stage(self, monkeypatch):
+        """模型没了和代码坏了必须分开：前者重启后端无用。
 
-        monkeypatch.setattr(main_module, "_probe_ollama_reachable", _ollama_down)
+        断言 stage 与 detail 都要有：detail 里带着 provider 的 type@base_url，
+        运维才能一眼看出该去看 Ollama 还是 LM Studio。
+        """
+        async def _model_down(timeout: float = 2.0) -> tuple[bool, str]:
+            return False, "openai_compatible@http://host.docker.internal:1234/v1: connect failed"
+
+        monkeypatch.setattr(main_module, "_probe_active_model_providers", _model_down)
         _patch_chain(monkeypatch, _FakeChain(("不该被调用", [], [], "llm_direct")))
 
         resp = client.get("/health/e2e")
 
         assert resp.status_code == 503
-        assert resp.json()["stage"] == "ollama_unreachable"
+        assert resp.json()["stage"] == "model_unreachable"
+        assert "1234" in resp.json()["error"], "失败信息要带上到底哪个 provider 连不上"
 
     def test_empty_answer_is_failure_not_success(self, monkeypatch):
         """链路都通但答案为空，比抛异常更隐蔽——用户拿到的是空白。"""
@@ -149,50 +154,80 @@ class TestHealthE2E:
         assert resp.status_code in (401, 403)
 
 
-class TestOllamaProbe:
-    """探针本身也会假红：OLLAMA_HOST 允许 host / host:port / URL 三种写法。"""
+class TestActiveProviderProbe:
+    """探针必须探「当前路由指向的 provider」，而不是写死 Ollama。
 
-    def _patch_http(self, monkeypatch, seen: dict):
-        import httpx
+    2026-11-15 的教训：宿主把 Ollama 换成 LM Studio 后，固定打 `/api/version`
+    的实现会永远报红——而模型服务明明好着。探针探错对象比不探更糟，
+    它会训练人忽略红灯。
+    """
 
-        class _Resp:
-            def raise_for_status(self):
-                return None
+    @staticmethod
+    def _registry(mapping: dict):
+        from types import SimpleNamespace
 
-        class _Client:
-            def __init__(self, **kwargs):
-                pass
+        class _Registry:
+            def resolve(self, task):
+                if task not in mapping:
+                    raise KeyError(task)
+                provider = SimpleNamespace(type=mapping[task][0], base_url=mapping[task][1])
+                return SimpleNamespace(primary=SimpleNamespace(provider=provider))
 
-            async def __aenter__(self):
-                return self
+        return _Registry()
 
-            async def __aexit__(self, *args):
-                return False
-
-            async def get(self, url):
-                seen["url"] = url
-                return _Resp()
-
-        monkeypatch.setattr(httpx, "AsyncClient", _Client)
-
-    def test_bare_host_gets_scheme_and_port(self, monkeypatch):
-        """`host.docker.internal` 直拼会得到没有 scheme 的地址 → httpx 抛错 →
-        探针 100% 报「Ollama 不可达」。2026-11-08 实测踩到，必须靠这里兜住。"""
+    def test_same_provider_probed_once(self, monkeypatch):
+        """answer / answer_direct / fast 常指向同一 provider，探三遍是浪费。"""
         import asyncio
 
-        seen: dict = {}
-        self._patch_http(monkeypatch, seen)
-        monkeypatch.setattr(settings.model, "OLLAMA_HOST", "host.docker.internal")
+        from src.services import model_config_service as mcs
+        from src.services.model_manager import model_manager
 
-        assert asyncio.run(_REAL_PROBE()) is True
-        assert seen["url"] == "http://host.docker.internal:11434/api/version"
+        calls: list = []
 
-    def test_full_url_kept_as_is(self, monkeypatch):
+        async def _fake_test(provider, timeout=12.0):
+            calls.append((provider.type, provider.base_url))
+            return {"ok": True, "models": []}
+
+        url = "http://host.docker.internal:1234/v1"
+        monkeypatch.setattr(model_manager, "_get_registry",
+                            lambda: self._registry({"answer": ("openai_compatible", url),
+                                                    "fast": ("openai_compatible", url)}))
+        monkeypatch.setattr(mcs, "test_provider", _fake_test)
+
+        ok, detail = asyncio.run(_REAL_PROBE())
+
+        assert ok is True and detail == ""
+        assert calls == [("openai_compatible", url)], "同一 provider 应该只探一次"
+
+    def test_failure_detail_names_the_provider(self, monkeypatch):
+        """只回「模型不可达」等于没回——要能看出该去看哪个进程。"""
         import asyncio
 
-        seen: dict = {}
-        self._patch_http(monkeypatch, seen)
-        monkeypatch.setattr(settings.model, "OLLAMA_HOST", "http://10.0.0.5:11435/")
+        from src.services import model_config_service as mcs
+        from src.services.model_manager import model_manager
 
-        assert asyncio.run(_REAL_PROBE()) is True
-        assert seen["url"] == "http://10.0.0.5:11435/api/version"
+        async def _fake_test(provider, timeout=12.0):
+            return {"ok": False, "error": "connect failed"}
+
+        monkeypatch.setattr(model_manager, "_get_registry",
+                            lambda: self._registry({"answer": ("openai_compatible",
+                                                               "http://host.docker.internal:1234/v1")}))
+        monkeypatch.setattr(mcs, "test_provider", _fake_test)
+
+        ok, detail = asyncio.run(_REAL_PROBE())
+
+        assert ok is False
+        assert "openai_compatible@" in detail and "1234" in detail
+
+    def test_no_route_is_not_healthy(self, monkeypatch):
+        """一条路由都没有时空注册表不能算「健康」——那是没配，不是没事。"""
+        import asyncio
+
+        from src.services.model_manager import model_manager
+
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: self._registry({}))
+
+        ok, detail = asyncio.run(_REAL_PROBE())
+
+        assert ok is False
+        assert "没有可用的模型路由" in detail

@@ -253,7 +253,7 @@ async def test_health_live_and_ready(monkeypatch):
     live = await main_module.health_live()
     assert live["status"] == "alive"
 
-    async def _checks(*, include_ollama, detailed):
+    async def _checks(*, include_model, detailed):
         return {"database": "ok", "redis": "fail"}
 
     monkeypatch.setattr(main_module, "_collect_health_checks", _checks)

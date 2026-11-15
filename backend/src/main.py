@@ -802,8 +802,44 @@ async def health_check():
     return {"status": "healthy"}
 
 
-async def _collect_health_checks(*, include_ollama: bool, detailed: bool) -> dict:
-    """探测 DB/Redis/Milvus/MinIO（可选 Ollama），供 ready 与 detail 共用。"""
+async def _probe_active_model_providers(timeout: float = 2.0) -> tuple[bool, str]:
+    """探「当前生效路由实际指向的 provider」是否可达，返回 (全通, 失败摘要)。
+
+    为什么不直接探 Ollama：2026-11-15 宿主把 Ollama 换成 LM Studio 后，
+    旧实现固定打 `/api/version`，于是**模型服务明明可用、探针也会永远报红**。
+    探针探错对象比不探更糟——它会训练人忽略红灯。
+
+    去重按 (type, base_url)：answer / answer_direct / fast 常常指向同一个 provider，
+    没必要探三遍。timeout 默认 2s：探针要的是「现在通不通」，不是「网络慢时能否等到」。
+    """
+    from src.services.model_config_service import test_provider
+    from src.services.model_manager import model_manager
+
+    registry = model_manager.registry
+    seen: set[tuple[str, str]] = set()
+    failures: list[str] = []
+    for task in ("answer", "answer_direct", "fast", "embedding"):
+        try:
+            provider = registry.resolve(task).primary.provider
+        except Exception:
+            continue  # 该 task 没配路由，不属于健康问题
+        key = (provider.type, provider.base_url or "")
+        if key in seen:
+            continue
+        seen.add(key)
+        result = await test_provider(provider, timeout=timeout)
+        if not result.get("ok"):
+            failures.append(
+                f"{provider.type}@{provider.base_url or '-'}: "
+                f"{str(result.get('error') or 'unreachable')[:80]}"
+            )
+    if not seen:
+        return False, "没有可用的模型路由"
+    return (not failures), "; ".join(failures)
+
+
+async def _collect_health_checks(*, include_model: bool, detailed: bool) -> dict:
+    """探测 DB/Redis/Milvus/MinIO（可选模型 provider），供 ready 与 detail 共用。"""
     checks: dict = {}
 
     async def _record(name: str, coro_factory) -> None:
@@ -843,30 +879,24 @@ async def _collect_health_checks(*, include_ollama: bool, detailed: bool) -> dic
             None, minio._client.bucket_exists, settings.minio.MINIO_BUCKET_NAME
         )
 
-    async def _probe_ollama():
-        import httpx
-
-        from src.services.model_registry import _normalize_ollama_base_url
-
-        # 同 _probe_ollama_reachable：OLLAMA_HOST 可能是不带 scheme 的 host
-        host = _normalize_ollama_base_url(settings.model.OLLAMA_HOST) or "http://localhost:11434"
-        async with httpx.AsyncClient(timeout=2.5) as client:
-            resp = await client.get(f"{host.rstrip('/')}/api/version")
-            resp.raise_for_status()
+    async def _probe_model():
+        ok, detail = await _probe_active_model_providers(timeout=2.0)
+        if not ok:
+            raise RuntimeError(detail)
 
     await _record("database", _probe_db)
     await _record("redis", _probe_redis)
     await _record("milvus", _probe_milvus)
     await _record("minio", _probe_minio)
-    if include_ollama:
-        await _record("ollama", _probe_ollama)
+    if include_model:
+        await _record("model", _probe_model)
     return checks
 
 
 @app.get("/health/ready")
 async def health_ready():
     """就绪探针（SEC-12）：任一关键依赖不可用返回 503，供容器编排使用。"""
-    checks = await _collect_health_checks(include_ollama=False, detailed=False)
+    checks = await _collect_health_checks(include_model=False, detailed=False)
     ready = all(value == "ok" for value in checks.values())
     return JSONResponse(
         status_code=200 if ready else 503,
@@ -877,38 +907,20 @@ async def health_ready():
 @app.get("/health/detail")
 async def health_check_detail(current_user: CurrentUser = Depends(require_admin)):
     """详细健康检查接口（管理接口：暴露依赖拓扑与错误，需管理员权限）。"""
-    checks = await _collect_health_checks(include_ollama=True, detailed=True)
+    checks = await _collect_health_checks(include_model=True, detailed=True)
     overall_status = "healthy" if all(c["status"] == "healthy" for c in checks.values()) else "unhealthy"
     return {"status": overall_status, "checks": checks}
 
 
-# P1-4 端到端探针：ready 刻意不含 Ollama（外部服务，挂了就重启容器会引发风暴），
+# P1-4 端到端探针：ready 刻意不含模型 provider（外部服务，挂了就重启容器会引发风暴），
 # 于是「11/11 全绿但问答全废」成了一个看不见的盲区。这里补的就是它。
 # 代价是一次真实 LLM 调用，所以要限流 + 只给管理员/定时任务调。
+#
+# 2026-11-15 修正：前置检查原先固定打 Ollama 的 `/api/version`，与「当前用哪个
+# provider」无关。宿主改用 LM Studio 后，这个检查会一直报 `ollama_unreachable`，
+# 哪怕模型服务完全正常。现在统一走 `_probe_active_model_providers`（按注册表路由）。
 _e2e_probe_lock = asyncio.Lock()
 _e2e_last_run_at: float = 0.0
-
-
-async def _probe_ollama_reachable(timeout: float = 3.0) -> bool:
-    """模型服务是否可达。单独探一次是为了把「模型没了」和「代码坏了」分开。
-
-    OLLAMA_HOST 允许三种写法（`host` / `host:port` / 完整 URL），这里必须走
-    `_normalize_ollama_base_url`：直接拼 `f"{host}/api/version"` 时，值为
-    `host.docker.internal` 会得到没有 scheme 的地址，httpx 直接抛错 → 探针
-    永远报「Ollama 不可达」。2026-11-08 实测：模型明明在跑，探针 100% 假红。
-    """
-    import httpx
-
-    from src.services.model_registry import _normalize_ollama_base_url
-
-    host = _normalize_ollama_base_url(settings.model.OLLAMA_HOST) or "http://localhost:11434"
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(f"{host.rstrip('/')}/api/version")
-            resp.raise_for_status()
-        return True
-    except Exception:
-        return False
 
 
 @app.get("/health/e2e")
@@ -926,10 +938,11 @@ async def health_e2e(request: Request, current_user: CurrentUser = Depends(requi
     返回：
     - 200 `{ok, latency_ms, answer_type, rid}`
     - 503 `{ok: false, stage, latency_ms, rid}`，stage ∈
-      `ollama_unreachable` / `generation` / `timeout`；
+      `model_unreachable` / `generation` / `timeout`；
       `retrieval` 仅在链路内部真的发生检索异常时出现（当前探针路径不会走到）
 
-    为什么要分 stage：三种失败的处置完全不同——模型没了要去起 Ollama，
+    为什么要分 stage：三种失败的处置完全不同——模型没了要去看 provider
+    （Ollama / LM Studio / 任何 OpenAI 兼容服务）的进程与端口，
     检索异常要查 Milvus，生成异常要查提示词/模型/代码。只回一个 error 等于没回。
     """
     if not settings.health_probe.HEALTH_E2E_ENABLED:
@@ -971,8 +984,9 @@ async def health_e2e(request: Request, current_user: CurrentUser = Depends(requi
                 },
             )
 
-        if not await _probe_ollama_reachable():
-            return _fail("ollama_unreachable", "Ollama 不可达")
+        model_ok, model_detail = await _probe_active_model_providers()
+        if not model_ok:
+            return _fail("model_unreachable", model_detail)
 
         try:
             from src.services.rag_chain import RAGChain
