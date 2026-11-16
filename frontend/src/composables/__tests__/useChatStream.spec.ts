@@ -75,6 +75,7 @@ interface Harness {
   selectedKBs: Ref<string[]>
   useWebSearch: Ref<boolean>
   deepThinking: Ref<boolean>
+  selectedModelId: Ref<string>
   searchStatus: Ref<'idle' | 'searching' | 'done' | 'failed'>
   suggestions: Ref<string[]>
   routerReplace: ReturnType<typeof vi.fn>
@@ -87,6 +88,7 @@ function mountStream(): Harness {
   const selectedKBs = ref<string[]>([])
   const useWebSearch = ref(false)
   const deepThinking = ref(false)
+  const selectedModelId = ref('')
   const searchStatus = ref<'idle' | 'searching' | 'done' | 'failed'>('idle')
   const suggestions = ref<string[]>(['q1'])
   const messageListRef = ref({ scrollToBottom: () => {} })
@@ -96,6 +98,7 @@ function mountStream(): Harness {
     selectedKBs,
     useWebSearch,
     deepThinking,
+    selectedModelId,
     searchStatus,
     suggestions,
     messageListRef: messageListRef as never
@@ -118,6 +121,7 @@ function mountStream(): Harness {
     selectedKBs,
     useWebSearch,
     deepThinking,
+    selectedModelId,
     searchStatus,
     suggestions,
     routerReplace,
@@ -216,9 +220,49 @@ describe('请求构造', () => {
     expect(body.search_mode).toBeUndefined()
     expect(body.deep_thinking).toBe('off')
   })
+
+  it('用户选了模型时携带 model_id', async () => {
+    stubSseFetch(['data: {"type":"end"}\n\n'])
+    const h = mountStream()
+    h.selectedModelId.value = 'qwen3-8b'
+
+    await h.api.sendMessage('用指定模型答')
+
+    expect(lastRequestBody().model_id).toBe('qwen3-8b')
+  })
+
+  it('未选模型时不携带 model_id（而不是传空串）', async () => {
+    // 区别在于语义：显式传 "" 在后端是「用户选了个叫空的模型」，不传才是「用默认」。
+    // 这条用例防的是「顺手写成 always 传」的改动。
+    stubSseFetch(['data: {"type":"end"}\n\n'])
+    const h = mountStream()
+
+    await h.api.sendMessage('用默认模型答')
+
+    expect('model_id' in lastRequestBody()).toBe(false)
+  })
 })
 
 describe('SSE 事件分发', () => {
+  it('end 带 model_fallback=true 时在消息上留痕（不能静默换模型）', async () => {
+    stubSseFetch(['data: {"type":"end","model_id":"default-model","model_fallback":true}\n\n'])
+    const h = mountStream()
+    h.selectedModelId.value = 'chosen-model'
+
+    await h.api.sendMessage('问')
+
+    expect(assistantOf(h.store).modelFallback).toBe(true)
+  })
+
+  it('end 未标记回落时不留痕（默认路径不该出现提示）', async () => {
+    stubSseFetch(['data: {"type":"end","model_id":"chosen-model"}\n\n'])
+    const h = mountStream()
+
+    await h.api.sendMessage('问')
+
+    expect(assistantOf(h.store).modelFallback).toBeUndefined()
+  })
+
   it('content 增量累加、thinking 追加、reasoning 合并，首片段后退出加载态', async () => {
     stubSseFetch([
       'data: {"type":"content","content":"你"}\n\n',

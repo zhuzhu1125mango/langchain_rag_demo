@@ -37,6 +37,8 @@ export interface UseChatStreamOptions {
   selectedKBs: Ref<string[]>
   useWebSearch: Ref<boolean>
   deepThinking: Ref<boolean>
+  /** 用户选择的模型 id（空串=用后端默认路由模型）；只在非空时进请求体 */
+  selectedModelId: Ref<string>
   searchStatus: Ref<'idle' | 'searching' | 'done' | 'failed'>
   /** 发送成功后需要清空的输入辅助状态（如推荐问题列表） */
   suggestions: Ref<string[]>
@@ -49,7 +51,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 export function useChatStream(options: UseChatStreamOptions) {
-  const { questionInput, selectedKBs, useWebSearch, deepThinking, searchStatus, suggestions, messageListRef } = options
+  const { questionInput, selectedKBs, useWebSearch, deepThinking, selectedModelId, searchStatus, suggestions, messageListRef } = options
   const chatStore = useChatStore()
   const queryClient = useQueryClient()
   const router = useRouter()
@@ -188,6 +190,13 @@ export function useChatStream(options: UseChatStreamOptions) {
         deep_thinking: deepThinking.value ? 'on' : 'off'
       }
 
+      // 只在用户明确选了模型时携带：空串交给后端走任务路由默认模型。
+      // 不要传 model_id: '' —— 后端虽有校验器兜住，但「显式传空」和「不传」在
+      // 请求日志里是两种语义，排查时会误导。
+      if (selectedModelId.value) {
+        requestBody.model_id = selectedModelId.value
+      }
+
       if (useWebSearch.value) {
         requestBody.search_mode = 'function_calling'
       }
@@ -324,6 +333,11 @@ export function useChatStream(options: UseChatStreamOptions) {
             }
             // 确保 isLoading 被设置为 false，避免消息一直处于加载状态
             chatStore.updateMessage(lastMsg.id, { isLoading: false })
+            // 用户选了模型、但该模型在生成时失败、由 fallback 接手：把这件事挂到
+            // 这条消息上。不提示的话，用户会以为自己在用 A，实际是 B 答的。
+            if (data.model_fallback === true) {
+              chatStore.updateMessage(lastMsg.id, { modelFallback: true })
+            }
             // 后端 message_id 同步替换前端临时 id：前端先用临时 id 占位渲染，
             // 流结束后用后端正式 ID 替换，确保后续反馈/关联操作能定位到真实消息。
             if (data.message_id && lastMsg.id !== data.message_id) {

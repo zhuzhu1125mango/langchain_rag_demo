@@ -313,7 +313,8 @@ data: {"type": "thinking", "content": "模型原始思考增量片段"}
 data: {"type": "content", "content": "回答片段"}
 
 data: {"type": "end", "message_id": "消息ID", "session_id": "会话ID", "sources": [...],
-       "answer_type": "llm_direct|function_calling|agent|...", "reasoning": [...]}
+       "answer_type": "llm_direct|function_calling|agent|...", "reasoning": [...],
+       "model_id": "实际产出本条回答的模型ID", "model_fallback": false}
 
 data: {"type": "title", "session_id": "会话ID", "title": "新生成的会话标题"}
 
@@ -328,6 +329,9 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 - `reasoning` 为分步过程事件，前端渲染为答案气泡上方的可折叠时间线；`thinking` 为模型原始思考增量，供折叠面板实时展示
 - `end` 事件**不含** `title`：标题生成已改为后台任务（避免推迟流完成信号），完成后**在 `end` 之后**补发独立的 `title` 事件。客户端断开时标签生成任务仍会落库，仅 `title` 事件丢失，刷新侧栏可见新标题
 - `end` 事件的来源字段名为 `sources`（非 `sources_metadata`），每项含 `source_type` 为 `kb` 或 `web`；网页来源额外含 `url` 字段供前端跳转
+- `end.model_id` 是**实际产出**本条回答的模型（请求里 `model_id` 只在选中的模型真的服务了本次生成时才等于它）；
+  `end.model_fallback=true` 表示请求指定的模型在生成时失败、由默认路由的模型接手。两者供客户端如实告知用户
+  「这句答案是谁说的」——静默换模型比报错更难排查
 - 会话不存在等错误在**流开始前**无法以 4xx 返回时，会以 `200 + error 事件` 形式下发；非流式接口同场景返回 404
 - 在途生成超过单用户上限（默认 5）时，`POST /api/chat/stream` 直接返回 **429**（在用户消息落库之前拒绝，不留「有问无答」）
 

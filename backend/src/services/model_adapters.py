@@ -48,6 +48,10 @@ class ChatModelGroup:
         self.labels = labels or [f"model-{i}" for i in range(len(models))]
         self.targets = targets or []
         self.task = task or "chat"
+        # 实际成功服务的 target 下标（None=还没成功过）。组内 fallback 是静默的：
+        # 主模型失败会自动试下一个，调用方看不到换了模型。有了这个下标，生成阶段
+        # 才能在结束后回答「这句答案到底是谁说的」。
+        self.last_served_index: Optional[int] = None
 
     def _meta(self, index: int) -> Optional[tuple[str, str, str]]:
         if index >= len(self.targets):
@@ -66,6 +70,7 @@ class ChatModelGroup:
         return False
 
     def _success(self, index: int, started: float, usage: tuple[int, int] = (0, 0)) -> None:
+        self.last_served_index = index
         meta = self._meta(index)
         if meta is None:
             return

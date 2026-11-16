@@ -204,3 +204,69 @@ class TestCatalogEndpoint:
         assert "provider" not in payload["models"][0]
         assert "localhost:11434" not in dumped
         assert "cost" not in dumped
+
+
+class TestServedModelReported:
+    """「谁答的」要能被看见。
+
+    ChatModelGroup 内部的 fallback 是静默的：主模型失败会自动试下一个，
+    调用方无从得知换了模型。不记录这件事，「用户选了 A、A 挂了、实际是 B 答完」
+    就永远不可见——而它正是最该告诉用户的那类事实。
+    """
+
+    @staticmethod
+    def _chain():
+        from src.services.pipeline.generation import GenerationMixin as Mixin
+
+        class _Chain(Mixin):
+            llm = "DEFAULT"
+            llm_direct = "DEFAULT"
+
+        return _Chain()
+
+    @staticmethod
+    def _fake_group(served_index, model_ids):
+        return SimpleNamespace(
+            last_served_index=served_index,
+            targets=[SimpleNamespace(model=SimpleNamespace(id=mid)) for mid in model_ids],
+        )
+
+    def test_user_model_served_is_not_flagged(self):
+        state = SimpleNamespace(
+            model_id="chosen", resolved_model_id=None, model_fallback=False, model_holder={}
+        )
+
+        self._chain()._record_model_outcome(state, self._fake_group(0, ["chosen", "default"]))
+
+        assert state.model_holder == {"requested": "chosen", "used": "chosen", "fallback": False}
+
+    def test_group_fallback_is_flagged_with_used_model(self):
+        state = SimpleNamespace(
+            model_id="chosen", resolved_model_id=None, model_fallback=False, model_holder={}
+        )
+
+        self._chain()._record_model_outcome(state, self._fake_group(1, ["chosen", "default"]))
+
+        assert state.model_holder["fallback"] is True
+        assert state.model_holder["used"] == "default"
+        assert state.model_fallback is True
+
+    def test_no_selection_never_flagged(self):
+        """没选模型时本来就用默认，不能报「回落」——那是误报。"""
+        state = SimpleNamespace(
+            model_id=None, resolved_model_id=None, model_fallback=False, model_holder={}
+        )
+
+        self._chain()._record_model_outcome(state, self._fake_group(0, ["default"]))
+
+        assert state.model_holder["fallback"] is False
+
+    def test_missing_holder_does_not_raise(self):
+        """非流式路径没有出口容器，记录逻辑必须容忍 None。"""
+        state = SimpleNamespace(
+            model_id="chosen", resolved_model_id=None, model_fallback=False, model_holder=None
+        )
+
+        self._chain()._record_model_outcome(state, self._fake_group(1, ["chosen", "default"]))
+
+        assert state.model_fallback is True

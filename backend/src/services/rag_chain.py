@@ -302,7 +302,7 @@ class RAGChain(
         """
         return await super().get_instance(vector_store, strategy_manager)
 
-    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None, model_id=None):
+    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None, model_id=None, model_holder=None):
         """
         流式运行RAG问答。
 
@@ -329,7 +329,7 @@ class RAGChain(
                 use_web_search=use_web_search, search_mode=search_mode,
                 user_id=user_id, session_id=session_id,
                 deep_thinking=deep_thinking, verify_holder=verify_holder,
-                model_id=model_id,
+                model_id=model_id, model_holder=model_holder,
             ):
                 kind = ev[0]
                 if kind == "chunk":

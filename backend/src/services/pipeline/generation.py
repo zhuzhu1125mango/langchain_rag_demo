@@ -136,6 +136,40 @@ class GenerationMixin:
             return self.llm_direct
         return self.llm
 
+    @staticmethod
+    def _record_model_outcome(state, llm) -> None:
+        """把「本次回答实际由哪个模型产出」写进 state 与出口容器。
+
+        为什么不能只靠 state.model_fallback：那个标记只覆盖「生成前就已经不可用」
+        （配置被关）。真正的常见故障是**生成时**主模型调用失败，ChatModelGroup
+        内部静默切到 fallback——它不会告诉调用方换了模型。不记录这件事，
+        「用户选了 A、A 挂了、实际是默认模型答完」就永远不可见，
+        而这恰恰是最该告诉用户的那类事实。
+        """
+        if state is None:
+            return
+        requested = getattr(state, "model_id", None)
+        served_index = getattr(llm, "last_served_index", None)
+        targets = getattr(llm, "targets", None) or []
+        used_id = None
+        if served_index is not None and served_index < len(targets):
+            used_id = getattr(getattr(targets[served_index], "model", None), "id", None)
+
+        # 下标 0 是用户自己选的那个；>0 说明是 fallback 接手的
+        fallback = bool(requested) and served_index not in (None, 0)
+        state.model_fallback = state.model_fallback or fallback
+        state.resolved_model_id = used_id or state.resolved_model_id
+
+        holder = getattr(state, "model_holder", None)
+        if holder is not None:
+            holder.update(
+                {
+                    "requested": requested,
+                    "used": state.resolved_model_id,
+                    "fallback": bool(state.model_fallback),
+                }
+            )
+
     async def _stream_with_retry(self, prompt, source_texts, source_metadata, answer_type, max_retries=2, state: Optional[_PipelineState] = None, think=None):
         """
         带重试机制的续传式流式生成
@@ -197,6 +231,8 @@ class GenerationMixin:
                     )
                     record_llm_call(metric_model, time.time() - llm_start)
 
+                # 生成成功后再记录「谁答的」：组内 fallback 只有在调用发生后才知道
+                self._record_model_outcome(state, llm)
                 return
             except Exception as e:
                 # 重试前把真实模型标识算出来，供指标与日志共用

@@ -191,6 +191,10 @@ class _PipelineState:
     # 管线内联阻塞执行，而是把 {answer, citation_sources, cross_source_data}
     # 写入此容器，交由 API 层在 end 事件后台校验并补发/落库。
     verify_holder: Optional[dict] = None
+    # 模型选择的出口容器（流式路径由 API 层传入）。用户选了模型而该模型调用失败时，
+    # 管线会回落默认路由——这件事必须让调用方知道，否则「以为在用 A、实际用 B」
+    # 就是静默替换。写入 {requested, used, fallback}，由 API 层放进 end 事件。
+    model_holder: Optional[dict] = None
 
     trace: Any = None
     resolved_question: str = ""

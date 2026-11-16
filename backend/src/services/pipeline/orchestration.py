@@ -32,12 +32,14 @@ logger = logging.getLogger("rag_system")
 class PipelineOrchestrationMixin:
     """流式/非流式共用的管线编排，由 PipelineStagesMixin 组合。"""
 
-    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None, model_id=None):
+    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None, model_id=None, model_holder=None):
         """执行完整问答流程，按事件协议产出 reasoning/chunk/final 事件。
 
         user_id / session_id 用于 Trace 归属（request_traces 表按用户隔离查询）。
         deep_thinking: 深度思考开关（on/off）。
         verify_holder: B2-3 事实校验输入容器（流式路径由 API 层传入，见 _stage_generate）。
+        model_holder: 模型选择出口容器（流式路径由 API 层传入），写入实际用了哪个模型、
+                      是否发生了回落。
         """
         state = _PipelineState(
             question=question,
@@ -50,6 +52,7 @@ class PipelineOrchestrationMixin:
             session_id=session_id,
             verify_holder=verify_holder,
             model_id=model_id,
+            model_holder=model_holder,
         )
         state.think = should_think(deep_thinking)
         state.trace = TraceCollector()

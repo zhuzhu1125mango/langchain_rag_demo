@@ -119,6 +119,12 @@ export interface Message {
   thinking?: string
   /** UX-1：用户主动停止生成（保留已输出内容，不显示错误）。 */
   stopped?: boolean
+  /**
+   * 用户选了模型，但该模型在生成时失败、由默认路由的模型接手作答。
+   * 只作用于本次会话的这条消息（未持久化）：刷新后自行消失，
+   * 因为「这条答案是谁答的」目前没有落到消息记录里。
+   */
+  modelFallback?: boolean
   /** AM-2：待人工审批的高危工具调用（approval_required 事件）。 */
   approval?: {
     /** 审批 ID（回执接口使用）。 */

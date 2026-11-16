@@ -90,10 +90,16 @@
               <MarkdownRenderer :content="message.content" :sources="message.sources" @cite-click="onCiteClick(message, $event)" />
             </div>
             <p v-if="message.stopped" class="mt-1.5 text-xs text-content-subtle">生成已中断</p>
+            <p v-if="message.modelFallback" class="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
+              所选模型暂时不可用，本条回答由默认模型生成
+            </p>
           </template>
           <template v-else>
             <MarkdownRenderer :content="message.content" :sources="message.sources" @cite-click="onCiteClick(message, $event)" />
             <p v-if="message.stopped" class="mt-1.5 text-xs text-content-subtle">已停止生成</p>
+            <p v-if="message.modelFallback" class="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
+              所选模型暂时不可用，本条回答由默认模型生成
+            </p>
           </template>
         </div>
 

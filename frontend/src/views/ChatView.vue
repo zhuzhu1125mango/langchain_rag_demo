@@ -78,6 +78,9 @@
         :deep-thinking="deepThinking"
         :deep-thinking-label="deepThinkingLabel"
         :deep-thinking-title="deepThinkingTitle"
+        :available-models="availableModels"
+        :selected-model-id="selectedModelId"
+        :default-model-id="defaultModelId"
         @send="sendMessage()"
         @stop="stopGeneration"
         @send-quick-question="sendQuickQuestion"
@@ -88,6 +91,7 @@
         @toggle-kb-id="toggleKBById"
         @toggle-web-search="useWebSearch = !useWebSearch"
         @toggle-deep-thinking="toggleDeepThinking"
+        @update:selected-model-id="selectedModelId = $event"
       />
     </div>
 
@@ -113,6 +117,7 @@ import KnowledgeBaseSelector from '@/components/chat/KnowledgeBaseSelector.vue'
 import ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import { useChatStream } from '@/composables/useChatStream'
+import { useModelSelection } from '@/composables/useModelSelection'
 import { useChatAssist } from '@/composables/useChatAssist'
 import { useSessionLoader } from '@/composables/useSessionLoader'
 import { useMessageInteractions } from '@/composables/useMessageInteractions'
@@ -146,6 +151,10 @@ function toggleDeepThinking(): void {
   deepThinking.value = !deepThinking.value
 }
 
+// 用户可选模型：列表来自 /api/models/available，选择按用户存在 localStorage。
+// 管理员的开放范围决定列表内容，前端只决定「界面上能不能点」——真校验在后端。
+const { models: availableModels, defaultModelId, selectedModelId } = useModelSelection()
+
 // 子组件实例引用：用于调用子组件暴露的方法
 const messageListRef = ref<InstanceType<typeof ChatMessageList> | null>(null)
 
@@ -174,6 +183,7 @@ const { sendMessage, sendQuickQuestion, regenerateLast, resolveApproval, stopGen
   selectedKBs,
   useWebSearch,
   deepThinking,
+  selectedModelId,
   searchStatus,
   suggestions,
   messageListRef

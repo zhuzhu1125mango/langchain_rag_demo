@@ -108,8 +108,14 @@
         ></textarea>
 
         <div class="flex flex-wrap items-center justify-between gap-2 px-3.5 pb-3 pt-1.5">
-          <!-- 左侧：功能开关 pills（深度思考在前，联网搜索在后） -->
+          <!-- 左侧：功能开关 pills（模型 → 深度思考 → 联网搜索） -->
           <div class="flex items-center gap-1.5">
+            <ModelSelector
+              :models="availableModels"
+              :model-value="selectedModelId"
+              :default-model-id="defaultModelId"
+              @update:model-value="emit('update:selectedModelId', $event)"
+            />
             <button
               @click="emit('toggle-deep-thinking')"
               :title="deepThinkingTitle"
@@ -215,6 +221,9 @@
  * @props deepThinking - 深度思考开关（开=模型先推理再回答，关=直接生成）
  * @props deepThinkingLabel - 深度思考按钮文案
  * @props deepThinkingTitle - 深度思考按钮悬停提示
+ * @props availableModels - 用户可选的模型列表（后端已按 user_selectable + chat 过滤）
+ * @props selectedModelId - 当前选中的模型 id（空串=默认模型）
+ * @props defaultModelId - 默认模型 id，用于在「默认」项上标出具体是哪个
  *
  * @emits update:modelValue - 输入文本变化
  * @emits send - 发送当前问题
@@ -227,11 +236,14 @@
  * @emits toggle-kb-id - 切换知识库选中态
  * @emits toggle-web-search - 切换联网搜索开关
  * @emits toggle-deep-thinking - 切换深度思考开关
+ * @emits update:selectedModelId - 用户切换了模型（空串=回到默认模型）
  */
 import { computed, ref } from 'vue'
 import { Sparkles, MessageCircleQuestion, X, Lightbulb, Database, Loader2, ArrowUp, Globe2, BrainCircuit, Square } from '@lucide/vue'
 import type { RewriteResponse } from '@/queries/chat'
 import type { KBRecommendation } from '@/queries/kb'
+import type { AvailableModel } from '@/queries/models'
+import ModelSelector from './ModelSelector.vue'
 
 const props = defineProps<{
   modelValue: string
@@ -249,6 +261,9 @@ const props = defineProps<{
   deepThinking: boolean
   deepThinkingLabel: string
   deepThinkingTitle: string
+  availableModels: AvailableModel[]
+  selectedModelId: string
+  defaultModelId: string
 }>()
 
 const emit = defineEmits<{
@@ -263,6 +278,7 @@ const emit = defineEmits<{
   (e: 'toggle-kb-id', kbId: string): void
   (e: 'toggle-web-search'): void
   (e: 'toggle-deep-thinking'): void
+  (e: 'update:selectedModelId', modelId: string): void
 }>()
 
 const maxLength = 2000

@@ -343,6 +343,9 @@ async def stream_answer(
         thinking_text = ""
         # B2-3：管线把事实校验输入写入此容器（仅含 web 来源时），由本层在 end 后后台校验
         verify_holder: dict = {}
+        # 模型选择的出口容器：管线写入 {requested, used, fallback}。用户选的模型在
+        # 生成时失败、由 fallback 接手时，前端要能看出来——静默换模型比报错更糟。
+        model_holder: dict = {}
 
         # LEARN W-C：解析本请求 A/B 变体 → 白名单参数覆盖（含 search_mode）
         ab_config = await _resolve_ab_config(current_user.user_id, current_session_id)
@@ -360,6 +363,7 @@ async def stream_answer(
                 deep_thinking=deep_thinking,
                 verify_holder=verify_holder,
                 model_id=selected_model_id,
+                model_holder=model_holder,
             ):
                 chunk, source_texts, source_meta, at = result
 
@@ -583,6 +587,10 @@ async def stream_answer(
             'sources': source_info,
             'answer_type': answer_type,
             'reasoning': final_reasoning,
+            # 本条回答由哪个模型产出；用户选了模型却发生回落时 fallback=True，
+            # 前端据此在答案下方给出提示（不静默替换）
+            'model_id': model_holder.get('used') or selected_model_id or None,
+            'model_fallback': bool(model_holder.get('fallback')),
         }
         logger.info(f"SSE end payload: {end_payload}")
         yield f"data: {json.dumps(end_payload)}\n\n"
