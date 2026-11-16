@@ -32,7 +32,7 @@ logger = logging.getLogger("rag_system")
 class PipelineOrchestrationMixin:
     """流式/非流式共用的管线编排，由 PipelineStagesMixin 组合。"""
 
-    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None):
+    async def _pipeline(self, question, kb_ids=None, history=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None, model_id=None):
         """执行完整问答流程，按事件协议产出 reasoning/chunk/final 事件。
 
         user_id / session_id 用于 Trace 归属（request_traces 表按用户隔离查询）。
@@ -49,6 +49,7 @@ class PipelineOrchestrationMixin:
             user_id=user_id,
             session_id=session_id,
             verify_holder=verify_holder,
+            model_id=model_id,
         )
         state.think = should_think(deep_thinking)
         state.trace = TraceCollector()

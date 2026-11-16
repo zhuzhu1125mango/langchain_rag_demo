@@ -171,6 +171,13 @@ class _PipelineState:
     deep_thinking: str = "off"
     # 深度思考决策结果（True/False 强制，None 用模型默认）
     think: Optional[bool] = None
+    # 用户在本轮选择的模型 id（None = 用任务路由的默认模型）。
+    # 只允许 user_selectable 的模型，校验在 API 层做（见 model_catalog）。
+    model_id: Optional[str] = None
+    # 实际用于生成的模型 id（用户选择生效时等于 model_id）
+    resolved_model_id: Optional[str] = None
+    # 用户所选模型不可用、已回落默认路由（响应里要能告诉用户，不能静默替换）
+    model_fallback: bool = False
     # Trace 归属用户 ID（run()/arun_stream() 透传）
     user_id: Optional[str] = None
     # 会话 ID（arun_stream() 透传）：Agent L1-a 跨请求记忆按会话隔离注入/写入

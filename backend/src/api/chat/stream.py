@@ -37,6 +37,7 @@ from src.utils.error_handling import ErrorSeverity, log_exception
 from .common import (
     MessageRequest,
     chat_quota_dependency,
+    ensure_model_selectable,
     _parse_session_id,
     _record_ab_metric,
     _resolve_ab_config,
@@ -138,6 +139,8 @@ async def stream_answer(
     use_web_search = payload.use_web_search
     search_mode = payload.search_mode
     deep_thinking = payload.deep_thinking or "off"
+    # 用户选择的模型：不可选/不存在直接 400，避免「选了 A 却用 B 答」
+    selected_model_id = ensure_model_selectable(payload.model_id)
 
     # request_id 由中间件生成并挂载到 request.state，SSE 错误事件仅回传该 ID
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
@@ -356,6 +359,7 @@ async def stream_answer(
                 session_id=current_session_id,
                 deep_thinking=deep_thinking,
                 verify_holder=verify_holder,
+                model_id=selected_model_id,
             ):
                 chunk, source_texts, source_meta, at = result
 

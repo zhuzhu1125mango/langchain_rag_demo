@@ -50,6 +50,8 @@ class ModelDeployment(Base):
     output_cost_per_1k = Column(Float, nullable=True)
     price_currency = Column(String(8), nullable=False, default="USD", server_default="USD")
     enabled = Column(Boolean, nullable=False, default=True)
+    # 是否允许终端用户按会话选择该模型（默认否：新能力默认关闭，不因升级生效）
+    user_selectable = Column(Boolean, nullable=False, default=False, server_default="false")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

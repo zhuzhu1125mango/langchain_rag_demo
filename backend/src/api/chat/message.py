@@ -24,6 +24,7 @@ from .common import (
     FeedbackRequest,
     MessageRequest,
     chat_quota_dependency,
+    ensure_model_selectable,
     _parse_session_id,
     _record_ab_metric,
     _resolve_ab_config,
@@ -109,6 +110,9 @@ async def send_message(
     ab_config = await _resolve_ab_config(current_user.user_id, str(session_uuid))
     effective_search_mode = (ab_config or {}).get("search_mode") or (request.search_mode or "simple")
 
+    # 用户选择的模型：不可选/不存在直接 400（运行时故障的回落不在这里，见 _select_llm）
+    selected_model_id = ensure_model_selectable(request.model_id)
+
     # 生成回答（传递历史消息和搜索参数）——此处不持有任何 DB 会话
     ab_token = set_ab_config(ab_config)
     ab_t0 = time.perf_counter()
@@ -118,7 +122,8 @@ async def send_message(
             use_web_search=request.use_web_search,
             search_mode=effective_search_mode,
             user_id=current_user.user_id,
-            session_id=str(session_uuid)
+            session_id=str(session_uuid),
+            model_id=selected_model_id,
         )
     finally:
         reset_ab_config(ab_token)

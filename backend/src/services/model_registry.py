@@ -99,6 +99,8 @@ class ModelConfig(BaseModel):
     model: str
     display_name: str = ""
     capabilities: List[str] = Field(default_factory=lambda: ["chat", "stream"])
+    # 是否出现在「用户可选模型」目录里。False 的模型只能由路由间接使用。
+    user_selectable: bool = False
     context_window: int = 0
     max_output_tokens: int = 0
     embedding_dimension: int = 0

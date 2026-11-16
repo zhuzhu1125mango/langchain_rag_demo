@@ -99,6 +99,43 @@ class GenerationMixin:
         """构造搜索状态事件负载（向后兼容，已映射为 reasoning 事件）。"""
         return json.dumps({"status": status, "message": message, "sources": sources})
 
+    def _select_llm(self, *, state=None, think=None):
+        """按请求选模型：用户选了就用用户的，否则走 answer / answer_direct 路由。
+
+        为什么每次请求新建、不缓存到 `self` 上：RAGChain 是单例，把请求级模型
+        写回共享字段会让并发请求互相串模型（A 用户选了模型甲，B 用户的请求跟着变）。
+        构造 ChatModelGroup 只是建对象、不建连接，真正的连接与用量统计发生在调用时，
+        所以这点开销可忽略。
+
+        用户模型不可用时回落到默认路由，并把 `model_fallback` 记在 state 上：
+        「静默用别的模型答」是最不该有的行为——用户以为在用 A，实际是 B。
+        """
+        model_id = getattr(state, "model_id", None) if state is not None else None
+        if model_id:
+            from src.config import settings
+            from src.services.model_manager import model_manager
+
+            group = model_manager.build_user_model_group(
+                model_id,
+                task="answer",
+                streaming=True,
+                think=think,
+                temperature=settings.processing.KB_ANSWER_TEMPERATURE,
+            )
+            if group is not None:
+                if state is not None:
+                    state.resolved_model_id = model_id
+                return group
+            if state is not None:
+                state.model_fallback = True
+            logger.warning("用户选择的模型不可用，回落默认路由: model_id=%s", model_id)
+
+        # 深度思考关闭时使用 answer_direct 路由模型；是否思考由 registry/model
+        # 决定，业务层不再 bind(reasoning=...)，保持 Provider 无关。
+        if think is False and self.llm_direct is not None:
+            return self.llm_direct
+        return self.llm
+
     async def _stream_with_retry(self, prompt, source_texts, source_metadata, answer_type, max_retries=2, state: Optional[_PipelineState] = None, think=None):
         """
         带重试机制的续传式流式生成
@@ -120,12 +157,7 @@ class GenerationMixin:
         """
         llm_start = time.time()
         yielded_part = ""
-        # 深度思考关闭时使用 answer_direct 路由模型；是否思考由 registry/model
-        # 决定，业务层不再 bind(reasoning=...)，保持 Provider 无关。
-        if think is False and self.llm_direct is not None:
-            llm = self.llm_direct
-        else:
-            llm = self.llm
+        llm = self._select_llm(state=state, think=think)
 
         for attempt in range(max_retries):
             current_prompt = prompt

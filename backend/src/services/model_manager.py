@@ -24,6 +24,7 @@ from src.services.model_registry import (
     ModelRegistry,
     ResolvedModel,
     ResolvedRoute,
+    RouteConfig,
 )
 
 logger = logging.getLogger(__name__)
@@ -311,6 +312,74 @@ class ModelManager:
             num_ctx=num_ctx,
             max_output_tokens=max_output_tokens,
             timeout=timeout,
+        )
+
+    def resolve_user_model(self, model_id: str) -> Optional[ResolvedModel]:
+        """按 id 取「允许用户选择」的模型；不存在 / 不可选 / 非 chat → None。
+
+        三个条件缺一不可：
+        - 模型必须存在（前端传来的 id 不可信）
+        - `user_selectable`（默认 False，见迁移 a7b8c9d0e1f2）
+        - 具备 `chat` 能力——embedding 模型即便被误标可选也不该出现在对话选择里
+
+        校验放服务层而不是 API 层：非流式 `run()` 与流式 `arun_stream()` 两条路径
+        都要过这道门，放在接口层就会漏一条。
+        """
+        if not model_id:
+            return None
+        try:
+            resolved = self._get_registry().get_model(model_id)
+        except Exception:
+            return None
+        model = resolved.model
+        if not getattr(model, "user_selectable", False) or not model.has("chat"):
+            return None
+        return resolved
+
+    def build_user_model_group(
+        self,
+        model_id: str,
+        *,
+        task: str = "answer",
+        streaming: bool = True,
+        think: Optional[bool] = None,
+        temperature: Optional[float] = None,
+    ) -> Any:
+        """按用户选择的模型构造模型组；不可选时返回 None（调用方回落默认）。
+
+        为什么把默认路由的模型放进 fallbacks：用户选了 A、而 A 的服务挂了，
+        「什么都不答」比「用默认模型答出来并告知」更糟。ChatModelGroup 会按顺序
+        尝试，且每个 target 各自记用量与熔断，所以成本归因不会串到默认模型上。
+        """
+        selected = self.resolve_user_model(model_id)
+        if selected is None:
+            return None
+
+        fallbacks: List[ResolvedModel] = []
+        try:
+            route = self._get_registry().resolve(task)
+            for item in [route.primary, *route.fallbacks]:
+                if item.model.id != selected.model.id:
+                    fallbacks.append(item)
+        except Exception:
+            # 默认路由不可用不该让「用户选择」整体失效，只是没有兜底
+            pass
+
+        resolved_route = ResolvedRoute(
+            task=task,
+            primary=selected,
+            fallbacks=fallbacks,
+            config=RouteConfig(
+                primary=selected.model.id,
+                fallbacks=[item.model.id for item in fallbacks],
+            ),
+            source="user-selection",
+        )
+        return build_route_models(
+            resolved_route,
+            streaming=streaming,
+            think=think,
+            temperature=temperature,
         )
 
     @property

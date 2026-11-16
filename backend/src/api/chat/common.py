@@ -28,6 +28,19 @@ class MessageRequest(BaseModel):
     search_mode: Optional[str] = "simple"
     # 深度思考开关：on（开启思考）| off（关闭思考）
     deep_thinking: Optional[str] = "off"
+    # 用户选择的模型 id（可选）。仅 `/api/models/available` 列出的模型有效；
+    # 不可选/不存在时返回 400 而不是静默忽略——用户选了 A 却用 B 答是最糟的体验。
+    model_id: Optional[str] = None
+
+    @field_validator("model_id")
+    @classmethod
+    def _validate_model_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not str(v).strip():
+            return None
+        v = str(v).strip()
+        if len(v) > 64:
+            raise ValueError("model_id 过长")
+        return v
 
     @field_validator("deep_thinking")
     @classmethod
@@ -38,6 +51,23 @@ class MessageRequest(BaseModel):
         if v not in allowed:
             raise ValueError(f"deep_thinking 必须是 {sorted(allowed)} 之一")
         return v
+
+
+def ensure_model_selectable(model_id: Optional[str]) -> Optional[str]:
+    """校验用户选择的模型；不可选直接 400。
+
+    与「运行时回落」分工不同：
+    - 这里 400 = 你选的东西不存在/没开放，属于请求错误，应该让你改
+    - generation._select_llm 的回落 = 选的时候好用、跑的时候挂了，属于运行时故障，
+      回落默认并标记 model_fallback，让用户知道答案不是所选模型给的
+    """
+    if not model_id:
+        return None
+    from src.services.model_manager import model_manager
+
+    if model_manager.resolve_user_model(model_id) is None:
+        raise HTTPException(status_code=400, detail="该模型不可用或未开放选择")
+    return model_id
 
 
 def _parse_session_id(raw: Optional[str]) -> Optional[uuid.UUID]:

@@ -302,7 +302,7 @@ class RAGChain(
         """
         return await super().get_instance(vector_store, strategy_manager)
 
-    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None):
+    async def arun_stream(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", verify_holder=None, model_id=None):
         """
         流式运行RAG问答。
 
@@ -329,6 +329,7 @@ class RAGChain(
                 use_web_search=use_web_search, search_mode=search_mode,
                 user_id=user_id, session_id=session_id,
                 deep_thinking=deep_thinking, verify_holder=verify_holder,
+                model_id=model_id,
             ):
                 kind = ev[0]
                 if kind == "chunk":
@@ -351,7 +352,7 @@ class RAGChain(
                 pass
             raise
 
-    async def run(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None):
+    async def run(self, question, kb_ids=None, history=None, force_mode=None, use_web_search=False, search_mode="simple", user_id=None, session_id=None, deep_thinking="off", model_id=None):
         """
         非流式运行RAG问答。
 
@@ -388,6 +389,7 @@ class RAGChain(
             question, kb_ids=kb_ids, history=history,
             use_web_search=use_web_search, search_mode=search_mode,
             user_id=user_id, session_id=session_id,
+            deep_thinking=deep_thinking, model_id=model_id,
         ):
             kind = ev[0]
             if kind == "chunk":

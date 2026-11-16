@@ -415,6 +415,15 @@
             </label>
           </div>
         </div>
+        <div>
+          <label class="inline-flex items-center gap-2 text-sm text-content-secondary">
+            <input v-model="modelForm.user_selectable" type="checkbox" class="rounded border-line-strong text-primary-600" />
+            允许用户选择
+          </label>
+          <p class="mt-1 text-xs text-content-tertiary">
+            开启后该模型会出现在用户的模型选择器里（仅对具备 chat 能力的模型生效）
+          </p>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label class="block text-sm text-content-secondary mb-1">上下文</label>
@@ -705,6 +714,7 @@ const modelForm = reactive<ModelPayload>({
   model_name: '',
   display_name: '',
   capabilities: ['chat', 'stream'],
+  user_selectable: false,
   context_window: 0,
   max_output_tokens: 0,
   embedding_dimension: 0,
@@ -725,6 +735,7 @@ function openModel(model?: AdminModel): void {
     model_name: model?.model_name || '',
     display_name: model?.display_name || '',
     capabilities: model?.capabilities || ['chat', 'stream'],
+    user_selectable: model?.user_selectable ?? false,
     context_window: model?.context_window || 0,
     max_output_tokens: model?.max_output_tokens || 0,
     embedding_dimension: model?.embedding_dimension || 0,

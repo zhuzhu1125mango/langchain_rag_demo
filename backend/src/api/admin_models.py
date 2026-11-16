@@ -68,6 +68,7 @@ class ModelUpsert(BaseModel):
     model_name: Optional[str] = None
     display_name: Optional[str] = None
     capabilities: Optional[List[str]] = None
+    user_selectable: Optional[bool] = None
     context_window: Optional[int] = None
     max_output_tokens: Optional[int] = None
     embedding_dimension: Optional[int] = None

@@ -73,6 +73,7 @@ def _model_config(row: ModelDeployment) -> ModelConfig:
         model=row.model_name,
         display_name=row.display_name or row.model_name,
         capabilities=list(row.capabilities or []),
+        user_selectable=bool(getattr(row, "user_selectable", False)),
         context_window=int(row.context_window or 0),
         max_output_tokens=int(row.max_output_tokens or 0),
         embedding_dimension=int(row.embedding_dimension or 0),
@@ -167,6 +168,7 @@ def safe_model(row: ModelDeployment) -> Dict[str, Any]:
         "model_name": row.model_name,
         "display_name": row.display_name or row.model_name,
         "capabilities": list(row.capabilities or []),
+        "user_selectable": bool(getattr(row, "user_selectable", False)),
         "context_window": row.context_window,
         "max_output_tokens": row.max_output_tokens,
         "embedding_dimension": row.embedding_dimension,
@@ -311,6 +313,7 @@ async def create_model(db: AsyncSession, payload: Dict[str, Any]) -> ModelDeploy
         output_cost_per_1k=_price_value("output_cost_per_1k", payload.get("output_cost_per_1k")),
         price_currency=_currency_value(payload.get("price_currency")),
         enabled=bool(payload.get("enabled", True)),
+        user_selectable=bool(payload.get("user_selectable", False)),
     )
     if not model.model_name:
         raise ModelConfigError("模型名不能为空")
@@ -341,6 +344,8 @@ async def update_model(db: AsyncSession, model_id: str, payload: Dict[str, Any])
         model.price_currency = _currency_value(payload["price_currency"])
     if "enabled" in payload:
         model.enabled = bool(payload["enabled"])
+    if "user_selectable" in payload:
+        model.user_selectable = bool(payload["user_selectable"])
     await db.commit()
     await db.refresh(model)
     return model

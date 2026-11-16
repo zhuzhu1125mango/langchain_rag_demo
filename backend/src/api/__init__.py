@@ -17,6 +17,7 @@ from .auth import router as auth_router
 from .trace import router as trace_router
 from .audit import router as audit_router
 from .admin_models import router as admin_models_router
+from .model_catalog import router as model_catalog_router
 
 __all__ = [
     "document_router",
@@ -38,4 +39,5 @@ __all__ = [
     "trace_router",
     "audit_router",
     "admin_models_router",
+    "model_catalog_router",
 ]

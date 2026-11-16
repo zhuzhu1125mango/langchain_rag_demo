@@ -53,6 +53,7 @@ from src.api import (
     trace_router,
     audit_router,
     admin_models_router,
+    model_catalog_router,
 )
 from src.middleware.metrics import MetricsMiddleware, get_metrics, reset_metrics
 
@@ -764,6 +765,8 @@ app.include_router(trace_router, prefix="/api", dependencies=[Depends(get_curren
 app.include_router(audit_router, prefix="/api", dependencies=[Depends(get_current_user)])
 # 模型 Provider/Model/Route 管理：路由内已挂 require_admin，不叠加全局登录依赖
 app.include_router(admin_models_router, prefix="/api")
+# 用户面模型目录：只需要登录，不需要管理员
+app.include_router(model_catalog_router, prefix="/api", dependencies=[Depends(get_current_user)])
 # document_ws_router 仅包含 WebSocket 端点，认证在端点内通过 get_current_user_for_ws 处理，
 # 原因同 notification_router：router 级 HTTP 依赖在 WebSocket 上下文中缺少 request 对象会失败。
 app.include_router(document_ws_router, prefix="/api")

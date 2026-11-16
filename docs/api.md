@@ -204,7 +204,8 @@ curl -X POST http://localhost:8000/api/documents/upload \
   "kb_ids": ["可选，知识库ID列表"],
   "use_web_search": false,
   "search_mode": "simple",
-  "deep_thinking": "off"
+  "deep_thinking": "off",
+  "model_id": "可选，用户选择的模型ID"
 }
 ```
 
@@ -216,6 +217,7 @@ curl -X POST http://localhost:8000/api/documents/upload \
 | use_web_search | boolean | 否 | 是否启用联网搜索，默认false |
 | search_mode | string | 否 | 搜索模式：`simple` / `function_calling` / `agent`，默认 `simple` |
 | deep_thinking | string | 否 | 深度思考开关：`on` / `off`，默认 `off`（有校验器，其他取值返回 422） |
+| model_id | string | 否 | 本次回答使用的模型，取自 `GET /api/models/available`；不传则用任务路由默认模型。不可选/不存在返回 **400**（不静默忽略） |
 
 **成功响应** (200) —— 固定 7 个字段：
 
@@ -1472,6 +1474,7 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | POST | `/api/admin/models/index/rebuild?force=false` | 按 DB 待应用 Embedding 配置后台重建索引（P3；`force=true` 可强制重跑） |
 | POST | `/api/admin/models/index/rollback` | 把上一次重建前的备份集合与旧 Embedding 路由回滚（P3） |
 | POST | `/api/admin/models/apply` | 校验 DB 配置并热应用到在线 registry |
+| GET | `/api/models/available` | **用户面**（只需登录）：可选的对话模型列表 + 当前默认模型；只含 `user_selectable=true` 且有 `chat` 能力的模型，不返回 provider/单价 |
 
 保存 Provider/Model/Route 只写入 DB；点击“校验并应用”（或调用 `apply`）后才会替换在线模型，新请求立即使用新配置，在途请求继续使用旧实例。
 
