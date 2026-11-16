@@ -33,6 +33,8 @@ export interface AdminModel {
   output_cost_per_1k?: number | null
   price_currency?: string
   enabled: boolean
+  /** 是否允许终端用户在选择器里选它（管理员开启后才出现在 /api/models/available） */
+  user_selectable: boolean
 }
 
 export interface AdminRoute {
@@ -80,6 +82,7 @@ export interface ModelPayload {
   output_cost_per_1k?: number | null
   price_currency?: string
   enabled?: boolean
+  user_selectable?: boolean
 }
 
 export interface RoutePayload {
