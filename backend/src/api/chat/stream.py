@@ -53,6 +53,20 @@ router = APIRouter(tags=["chat"])
 _stream_finalize_tasks: set = set()
 
 
+def _model_attribution(holder: dict) -> dict:
+    """把模型选择结果转成消息里要存的字段（只保留有值的键）。
+
+    单独抽成纯函数是为了能被直接测：模型归因一旦丢了，「这条答案是谁答的」
+    就永久丢失，而它只能靠历史回看发现问题——在 DB 里翻 JSON 才知道漏了。
+    """
+    extra: dict = {}
+    if holder.get("used"):
+        extra["model_id"] = holder["used"]
+    if holder.get("fallback"):
+        extra["model_fallback"] = True
+    return extra
+
+
 def _reject_run_limit(exc: RunLimitExceeded, session_id) -> HTTPException:
     """在途生成超限的统一拒绝：一个人挂多条生成会把 LLM 配额打满。"""
     log_exception(
@@ -290,6 +304,11 @@ async def stream_answer(
                 message_payload["stopped"] = True
             if error:
                 message_payload["error"] = error
+            # 模型归因：按消息存，跟随答案一起持久化（主流做法是「每条消息带 metadata」，
+            # 而不是给会话只记一个模型——同一会话里用户随时可能换模型）。
+            # 读闭包里的 model_holder 而不是加三个参数：停止 / 失败 / 正常三条落库路径
+            # 都在同一请求作用域内，显式传参要改三处，漏一处就少一半历史。
+            message_payload.update(_model_attribution(model_holder))
             # 原子追加（服务端 jsonb 拼接）
             assistant_msg_count = await append_session_message(db, session.id, message_payload)
 

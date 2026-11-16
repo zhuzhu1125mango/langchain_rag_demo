@@ -270,3 +270,32 @@ class TestServedModelReported:
         self._chain()._record_model_outcome(state, self._fake_group(1, ["chosen", "default"]))
 
         assert state.model_fallback is True
+
+
+class TestModelAttributionPersisted:
+    """落库时写进消息的模型归因字段。
+
+    这类字段的丢失很隐蔽：答案本身照常显示，只有翻 JSON 或回看历史时才发现
+    「这条不知道是谁答的」。所以钉住键名与「无值不写键」的语义。
+    """
+
+    def test_both_written_when_fallback(self):
+        from src.api.chat.stream import _model_attribution
+
+        extra = _model_attribution({"requested": "a", "used": "b", "fallback": True})
+
+        assert extra == {"model_id": "b", "model_fallback": True}
+
+    def test_no_fallback_key_when_normal(self):
+        """正常路径不该出现 model_fallback=false——「存在即发生」比布尔值更好查。"""
+        from src.api.chat.stream import _model_attribution
+
+        extra = _model_attribution({"requested": "a", "used": "a", "fallback": False})
+
+        assert extra == {"model_id": "a"}
+
+    def test_empty_holder_writes_nothing(self):
+        """legacy 单模型 / 取消失败路径：holder 为空，不能写出空字段。"""
+        from src.api.chat.stream import _model_attribution
+
+        assert _model_attribution({}) == {}

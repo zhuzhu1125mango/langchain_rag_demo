@@ -399,13 +399,19 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
       "role": "assistant",
       "content": "助手回答",
       "sources": [...],
-      "timestamp": "2024-01-01T12:00:05"
+      "timestamp": "2024-01-01T12:00:05",
+      "model_id": "产出这条回答的模型ID（仅当注册表配置了多模型时存在）",
+      "model_fallback": true
     }
   ],
   "created_at": "2024-01-01T12:00:00",
   "updated_at": "2024-01-01T12:00:05"
 }
 ```
+
+> 助手消息里的 `model_id` / `model_fallback` 是**按消息**存的模型归因：同一会话里用户随时可能换模型，
+> 所以不能只在会话上记一个。`model_fallback=true` 表示这条回答本该由用户选的模型产出，
+> 但它在生成时失败、由默认路由的模型接手。只存不展示——主流产品不在每条消息上贴模型名。
 
 ### 1.4 搜索模式说明
 
