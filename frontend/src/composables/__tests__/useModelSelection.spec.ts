@@ -1,9 +1,13 @@
 /**
- * useModelSelection：`supportsReasoning` 的判定。
+ * useModelSelection：`thinkingControl` 的判定。
  *
- * 这一项决定深度思考开关能不能点，而它的输入有两个来源——选中的模型、
- * 以及「没选模型时用的默认模型」。后者的坑是：默认模型可以不对外开放，
- * 于是它不在 `models` 里，前端只能靠目录额外给的 `default_supports_reasoning`。
+ * 这一项决定深度思考开关能不能点，三个取值对应三种不同的界面表现：
+ * `off`（不会思考）/ `switchable`（能开关）/ `always_on`（会思考但关不掉）。
+ * 后两者都必须置灰，但提示语不同，所以这里是枚举而不是布尔。
+ *
+ * 输入有两个来源——选中的模型、以及「没选模型时用的默认模型」。后者的坑是：
+ * 默认模型可以不对外开放，于是它不在 `models` 里，前端只能靠目录额外给的
+ * `default_thinking_control`。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref, type Ref } from 'vue'
@@ -18,13 +22,14 @@ vi.mock('@/queries/models', () => ({
 
 import { useModelSelection } from '@/composables/useModelSelection'
 
-function model(id: string, caps: string[], isDefault = false) {
+function model(id: string, control: string, isDefault = false) {
   return {
     id,
     display_name: id,
-    capabilities: caps,
+    capabilities: control === 'off' ? ['chat'] : ['chat', 'reasoning'],
     context_window: 32768,
-    is_default: isDefault
+    is_default: isDefault,
+    thinking_control: control
   }
 }
 
@@ -33,7 +38,7 @@ function setCatalog(payload: unknown, success = true) {
   isSuccess.value = success
 }
 
-describe('useModelSelection.supportsReasoning', () => {
+describe('useModelSelection.thinkingControl', () => {
   beforeEach(() => {
     // app store 读主题偏好时会调 matchMedia，jsdom 没实现——补个最小桩，
     // 否则连 store 都建不起来，测的就不是这里要测的东西了。
@@ -53,65 +58,77 @@ describe('useModelSelection.supportsReasoning', () => {
     isSuccess.value = false
   })
 
-  it('目录还没回来时是 null（未知），不能当成「不支持」', () => {
-    const { supportsReasoning } = useModelSelection()
-    expect(supportsReasoning.value).toBeNull()
+  it('目录还没回来时是 null（未知），不能当成「不能点」', () => {
+    const { thinkingControl } = useModelSelection()
+    expect(thinkingControl.value).toBeNull()
   })
 
-  it('选中的模型带 reasoning 能力 → true', () => {
+  it('选中的模型可开关 → switchable', () => {
     setCatalog({
-      models: [model('a', ['chat', 'reasoning']), model('b', ['chat'], true)],
+      models: [model('a', 'switchable'), model('b', 'off', true)],
       default_model_id: 'b',
-      default_supports_reasoning: false
+      default_thinking_control: 'off'
     })
-    const { supportsReasoning, selectedModelId } = useModelSelection()
+    const { thinkingControl, selectedModelId } = useModelSelection()
     selectedModelId.value = 'a'
 
-    expect(supportsReasoning.value).toBe(true)
+    expect(thinkingControl.value).toBe('switchable')
   })
 
-  it('选中的模型没有 reasoning 能力 → false（开关要置灰）', () => {
+  it('选中的模型不会思考 → off', () => {
     setCatalog({
-      models: [model('a', ['chat', 'reasoning']), model('b', ['chat'], true)],
+      models: [model('a', 'switchable'), model('b', 'off', true)],
       default_model_id: 'b',
-      default_supports_reasoning: false
+      default_thinking_control: 'off'
     })
-    const { supportsReasoning, selectedModelId } = useModelSelection()
+    const { thinkingControl, selectedModelId } = useModelSelection()
     selectedModelId.value = 'b'
 
-    expect(supportsReasoning.value).toBe(false)
+    expect(thinkingControl.value).toBe('off')
+  })
+
+  it('选中会思考但关不掉的模型 → always_on（同样要置灰）', () => {
+    setCatalog({
+      models: [model('a', 'always_on', true)],
+      default_model_id: 'a',
+      default_thinking_control: 'always_on'
+    })
+    const { thinkingControl, selectedModelId } = useModelSelection()
+    selectedModelId.value = 'a'
+
+    expect(thinkingControl.value).toBe('always_on')
   })
 
   it('没选模型时按默认模型判断（默认在列表里）', () => {
     setCatalog({
-      models: [model('a', ['chat', 'reasoning']), model('b', ['chat'], true)],
+      models: [model('a', 'switchable'), model('b', 'off', true)],
       default_model_id: 'b',
-      default_supports_reasoning: false
+      default_thinking_control: 'off'
     })
-    const { supportsReasoning } = useModelSelection()
+    const { thinkingControl } = useModelSelection()
 
-    expect(supportsReasoning.value).toBe(false)
+    expect(thinkingControl.value).toBe('off')
   })
 
   it('默认模型没开放给用户（不在列表）时用目录字段，而不是猜', () => {
     setCatalog({
-      models: [model('a', ['chat'])],
+      models: [model('a', 'off')],
       default_model_id: 'hidden',
-      default_supports_reasoning: true
+      default_thinking_control: 'always_on'
     })
-    const { supportsReasoning } = useModelSelection()
+    const { thinkingControl } = useModelSelection()
 
-    expect(supportsReasoning.value).toBe(true)
+    expect(thinkingControl.value).toBe('always_on')
   })
 
-  it('没有默认路由时是 null：能力无从判断', () => {
+  it('没有默认路由时是 null：可控性无从判断', () => {
     setCatalog({
-      models: [model('a', ['chat'])],
+      models: [model('a', 'off')],
       default_model_id: '',
-      default_supports_reasoning: false
+      default_thinking_control: ''
     })
-    const { supportsReasoning } = useModelSelection()
+    const { thinkingControl } = useModelSelection()
 
-    expect(supportsReasoning.value).toBeNull()
+    expect(thinkingControl.value).toBeNull()
   })
 })

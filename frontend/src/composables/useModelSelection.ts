@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { useAvailableModels } from '@/queries/models'
+import type { ThinkingControl } from '@/queries/models'
 
 /**
  * 对话页的模型选择状态（列表 + 当前选择 + 跨会话记忆）。
@@ -87,19 +88,21 @@ export function useModelSelection() {
   )
 
   /**
-   * 能否开启深度思考：`true` 支持、`false` 不支持、`null` 未知。
+   * 本次请求的思考可控性：`off` / `switchable` / `always_on`，`null` 表示未知。
    *
-   * 三态而不是布尔：目录还没回来时把开关灰掉会闪一下，而「未知」和
-   * 「确定不支持」对用户是两件事。只在确知不支持时才禁用，后台也会再兜一层
-   * （`should_think` 对无思考能力的模型强制关闭），所以前端即使猜错也害不了人。
+   * 三态 + 未知，而不是布尔：目录还没回来就灰掉会闪一下，而「未知」和
+   * 「确定不能点」对用户是两件事。只有 `switchable` 才允许点开关——
+   * `always_on`（会思考但关不掉）同样要灰，否则点了也不生效。
+   * 后台还有一层兜底（`should_think` 对 off/always_on 都不发思考参数），
+   * 所以前端即使判断不出，也不会真的造成错误行为。
    */
-  const supportsReasoning = computed<boolean | null>(() => {
-    if (effectiveModel.value) return effectiveModel.value.capabilities.includes('reasoning')
+  const thinkingControl = computed<ThinkingControl | null>(() => {
+    if (effectiveModel.value) return effectiveModel.value.thinking_control
     if (!catalog.value) return null
-    // 没有默认路由就没有「不选模型时会用谁」这回事，能力无从判断
+    // 没有默认路由就没有「不选模型时会用谁」这回事，可控性无从判断
     if (!catalog.value.default_model_id) return null
-    return catalog.value.default_supports_reasoning
+    return catalog.value.default_thinking_control || null
   })
 
-  return { models, defaultModelId, selectedModelId, effectiveModel, supportsReasoning }
+  return { models, defaultModelId, selectedModelId, effectiveModel, thinkingControl }
 }

@@ -16,6 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.models.model_registry import ModelDeployment, ModelProvider, ModelRoute
 from src.utils.error_handling import log_exception
 from src.services.model_registry import (
+    THINKING_ALWAYS_ON,
+    THINKING_SWITCHABLE,
     ModelConfig,
     ModelRegistry,
     ModelRegistryConfig,
@@ -74,6 +76,7 @@ def _model_config(row: ModelDeployment) -> ModelConfig:
         display_name=row.display_name or row.model_name,
         capabilities=list(row.capabilities or []),
         user_selectable=bool(getattr(row, "user_selectable", False)),
+        reasoning_control=getattr(row, "reasoning_control", None) or "auto",
         context_window=int(row.context_window or 0),
         max_output_tokens=int(row.max_output_tokens or 0),
         embedding_dimension=int(row.embedding_dimension or 0),
@@ -169,6 +172,7 @@ def safe_model(row: ModelDeployment) -> Dict[str, Any]:
         "display_name": row.display_name or row.model_name,
         "capabilities": list(row.capabilities or []),
         "user_selectable": bool(getattr(row, "user_selectable", False)),
+        "reasoning_control": getattr(row, "reasoning_control", None) or "auto",
         "context_window": row.context_window,
         "max_output_tokens": row.max_output_tokens,
         "embedding_dimension": row.embedding_dimension,
@@ -296,6 +300,25 @@ def _currency_value(value: Any) -> str:
     return (str(value or "USD").strip().upper() or "USD")[:8]
 
 
+# `auto` 之外允许显式声明的两种（`off` 由 capabilities 决定，不是这里配的）
+_REASONING_CONTROL_VALUES = ("auto", THINKING_SWITCHABLE, THINKING_ALWAYS_ON)
+
+
+def _reasoning_control_value(value: Any) -> str:
+    """校验思考可控性声明。
+
+    写错必须报错而不是落库：这一列决定界面上「深度思考」能不能点，
+    拼成 `switchabel` 会让它静默退回 auto —— 表现是「配了没生效」，
+    而排查时看到的是一列看上去正常的值。
+    """
+    raw = str(value or "auto").strip().lower()
+    if raw not in _REASONING_CONTROL_VALUES:
+        raise ModelConfigError(
+            f"reasoning_control 只能是 {' / '.join(_REASONING_CONTROL_VALUES)}，收到: {value}"
+        )
+    return raw
+
+
 async def create_model(db: AsyncSession, payload: Dict[str, Any]) -> ModelDeployment:
     provider_id = payload.get("provider_id")
     if not provider_id or await db.get(ModelProvider, provider_id) is None:
@@ -314,6 +337,7 @@ async def create_model(db: AsyncSession, payload: Dict[str, Any]) -> ModelDeploy
         price_currency=_currency_value(payload.get("price_currency")),
         enabled=bool(payload.get("enabled", True)),
         user_selectable=bool(payload.get("user_selectable", False)),
+        reasoning_control=_reasoning_control_value(payload.get("reasoning_control")),
     )
     if not model.model_name:
         raise ModelConfigError("模型名不能为空")
@@ -346,6 +370,8 @@ async def update_model(db: AsyncSession, model_id: str, payload: Dict[str, Any])
         model.enabled = bool(payload["enabled"])
     if "user_selectable" in payload:
         model.user_selectable = bool(payload["user_selectable"])
+    if "reasoning_control" in payload:
+        model.reasoning_control = _reasoning_control_value(payload["reasoning_control"])
     await db.commit()
     await db.refresh(model)
     return model

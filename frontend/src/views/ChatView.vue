@@ -145,23 +145,32 @@ const deepThinking = ref(false)
 
 // 用户可选模型：列表来自 /api/models/available，选择按用户存在 localStorage。
 // 管理员的开放范围决定列表内容，前端只决定「界面上能不能点」——真校验在后端。
-const { models: availableModels, defaultModelId, selectedModelId, supportsReasoning } =
+const { models: availableModels, defaultModelId, selectedModelId, thinkingControl } =
   useModelSelection()
 
 /**
- * 只有具备思考能力的模型才允许开这个开关。
+ * 只有**思考可关**的模型才允许动这个开关。
  *
- * 三态（支持/不支持/未知）里只在**确知不支持**时禁用：目录还没回来就灰掉会闪一下，
- * 而「未知」本来就该沿用默认行为。后端 `should_think` 对无思考能力的模型强制关闭，
- * 所以这里即使判断不出，也不会真的把一个没有思考能力的模型推去「思考」。
+ * 三种情况都要灰，但说法不同：不会思考（off）、会思考但关不掉（always_on）。
+ * 后者是最容易被忽略的：LM Studio 上的 qwen3 实测发什么参数都照样思考，
+ * 开关亮着只会让用户以为「关掉了」，而实际一个字都没省。
+ * 未知（null）不禁用——目录还没回来就灰掉会闪一下，且后端 `should_think`
+ * 对 off / always_on 都不会发思考参数，判断不出时也不会造成错误行为。
  */
-const deepThinkingDisabled = computed(() => supportsReasoning.value === false)
+const deepThinkingDisabled = computed(() => {
+  const control = thinkingControl.value
+  return control !== null && control !== 'switchable'
+})
 
 const deepThinkingLabel = computed(() => {
+  if (thinkingControl.value === 'always_on') return '深度思考·不可关闭'
   if (deepThinkingDisabled.value) return '深度思考·不支持'
   return deepThinking.value ? '深度思考·开' : '深度思考·关'
 })
 const deepThinkingTitle = computed(() => {
+  if (thinkingControl.value === 'always_on') {
+    return '该模型总是先思考，且无法通过接口关闭，因此开关不可用'
+  }
   if (deepThinkingDisabled.value) {
     return '当前模型不具备思考能力，选一个支持思考的模型才能开启'
   }
@@ -170,8 +179,8 @@ const deepThinkingTitle = computed(() => {
     : '开启深度思考：模型先推理再回答，适合复杂问题'
 })
 
-// 切到不支持的模型时把开关复位：留着一个「开着但点不亮」的状态，
-// 换回支持思考的模型时会莫名其妙地又变成开启。
+// 切到不可控的模型时把开关复位：留着一个「开着但点不亮」的状态，
+// 换回可控模型时会莫名其妙地又变成开启。
 watch(deepThinkingDisabled, disabled => {
   if (disabled) deepThinking.value = false
 })

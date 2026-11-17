@@ -30,8 +30,8 @@ except ImportError:
 logger = logging.getLogger("rag_system")
 
 
-def _selected_supports_reasoning(model_id):
-    """本次请求要用的模型是否具备思考能力；查不到返回 None。
+def _selected_thinking_control(model_id):
+    """本次请求要用的模型的思考可控性（off / switchable / always_on）；未知返回 None。
 
     只影响「是否允许思考」，不影响模型能否使用——注册表里没有这个模型时
     `_select_llm` 会自己回落到默认路由，这里不该抢着下结论。
@@ -41,9 +41,9 @@ def _selected_supports_reasoning(model_id):
     try:
         from src.services.model_manager import model_manager
 
-        return model_manager.model_supports_reasoning(model_id)
+        return model_manager.model_thinking_control(model_id)
     except Exception:  # noqa: BLE001 —— 能力探测失败不能拖垮整条问答
-        logger.warning("思考能力探测失败，按未知处理: model_id=%s", model_id)
+        logger.warning("思考可控性探测失败，按未知处理: model_id=%s", model_id)
         return None
 
 
@@ -74,7 +74,7 @@ class PipelineOrchestrationMixin:
         )
         state.think = should_think(
             deep_thinking,
-            supports_reasoning=_selected_supports_reasoning(model_id),
+            thinking_control=_selected_thinking_control(model_id),
         )
         state.trace = TraceCollector()
         state.trace.set_basic(question=question, session_id=session_id, user_id=user_id)

@@ -15,10 +15,12 @@ from typing import Any, AsyncIterator, List, Optional
 from src.config import settings
 from src.services.model_health import ProviderCircuitError, provider_health
 from src.services.model_registry import (
+    THINKING_SWITCHABLE,
     ModelRegistryError,
     ResolvedModel,
     ResolvedRoute,
     _normalize_ollama_base_url,
+    resolve_thinking_control,
 )
 from src.services.model_usage import model_usage
 from src.utils.error_handling import ErrorSeverity, log_exception
@@ -354,10 +356,16 @@ def build_chat_model(
                 kwargs["max_completion_tokens"] = effective_max_tokens
             else:
                 kwargs["max_tokens"] = effective_max_tokens
-        # OpenAI o 系列等显式支持 reasoning_effort 的模型才传；普通兼容 API 不传，
-        # 避免 DeepSeek/Qwen/vLLM 因未知参数 400。
-        if think is not None and model.has("reasoning") and model.model.lower().startswith(("o1", "o3", "o4")):
-            kwargs["reasoning_effort"] = "medium" if think else "low"
+        # 思考参数的发送范围必须收得很窄：兼容端点对未知参数的反应从「静默忽略」
+        # 到「直接 400」都有，猜错的代价比不发更糟。
+        if think is not None and model.has("reasoning"):
+            if model.model.lower().startswith(("o1", "o3", "o4")):
+                # o 系列：reasoning_effort 是官方参数（low 不等于关闭，只是最小化）
+                kwargs["reasoning_effort"] = "medium" if think else "low"
+            elif think is False and resolve_thinking_control(model, provider) == THINKING_SWITCHABLE:
+                # vLLM / SGLang 的 Qwen3 用 chat template 开关控制思考；
+                # 只在模型被声明为「可关」时才发，默认（auto 且非 ollama）不发
+                kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
         return ChatOpenAI(**kwargs)
 
     raise ModelRegistryError(f"不支持的 provider.type: {provider.type}")

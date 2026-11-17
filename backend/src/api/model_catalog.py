@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends
 
 from src.auth import CurrentUser, get_current_user
 from src.services.model_manager import model_manager
+from src.services.model_registry import resolve_thinking_control
 
 logger = logging.getLogger(__name__)
 
@@ -37,15 +38,19 @@ async def list_available_models(current_user: CurrentUser = Depends(get_current_
     # 生成走 `answer_direct` 路由；只有它缺失时才回退到 `answer`（思考路径）。
     # 标错不会报错，只会让人以为默认在用的是思考模型——实测两者延迟差 3 倍以上。
     default_model_id = ""
-    default_supports_reasoning = False
+    default_thinking_control = ""
     for task in ("answer_direct", "answer"):
         try:
-            primary = registry.resolve(task).primary.model
-            default_model_id = primary.id
-            default_supports_reasoning = primary.has("reasoning")
+            primary = registry.resolve(task).primary
+            default_model_id = primary.model.id
+            default_thinking_control = resolve_thinking_control(primary.model, primary.provider)
             break
         except Exception:  # noqa: BLE001 —— 单条路由缺失不影响目录可用，继续试下一条
             logger.warning("模型目录：%s 路由解析失败", task)
+
+    def _thinking_control(model_id: str) -> str:
+        resolved = registry.get_model(model_id)
+        return resolve_thinking_control(resolved.model, resolved.provider)
 
     models = [
         {
@@ -54,6 +59,10 @@ async def list_available_models(current_user: CurrentUser = Depends(get_current_
             "capabilities": list(model.capabilities),
             "context_window": model.context_window,
             "is_default": model.id == default_model_id,
+            # off：不会思考；switchable：能开能关；always_on：会思考但关不掉。
+            # 客户端据此决定深度思考开关可不可点——「关不掉」和「不会思考」
+            # 都要置灰，但提示语不同，所以给枚举而不是布尔。
+            "thinking_control": _thinking_control(model.id),
         }
         for model in registry.config.models
         if model.user_selectable and model.has("chat")
@@ -61,8 +70,8 @@ async def list_available_models(current_user: CurrentUser = Depends(get_current_
     return {
         "models": models,
         "default_model_id": default_model_id,
-        # 默认模型可能没开放给用户（不在 models 里），前端就拿不到它的能力；
-        # 而「不选模型」时用的正是它。少了这个字段，深度思考开关的状态只能靠猜。
-        "default_supports_reasoning": default_supports_reasoning,
+        # 默认模型可能没开放给用户（不在 models 里），前端就拿不到它的可控性；
+        # 而「不选模型」时用的正是它。空串 = 没有默认路由，前端按未知处理。
+        "default_thinking_control": default_thinking_control,
         "source": registry.source,
     }

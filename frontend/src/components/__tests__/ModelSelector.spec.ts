@@ -9,7 +9,8 @@ function model(id: string, displayName: string, isDefault = false): AvailableMod
     display_name: displayName,
     capabilities: ['chat', 'stream'],
     context_window: 32768,
-    is_default: isDefault
+    is_default: isDefault,
+    thinking_control: 'off'
   }
 }
 

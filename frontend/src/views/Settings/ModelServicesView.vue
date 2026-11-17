@@ -424,6 +424,20 @@
             开启后该模型会出现在用户的模型选择器里（仅对具备 chat 能力的模型生效）
           </p>
         </div>
+        <!-- 只有会思考的模型才需要声明「关不关得掉」 -->
+        <div v-if="modelForm.capabilities?.includes('reasoning')">
+          <label class="block text-sm text-content-secondary mb-1">思考是否可关闭</label>
+          <AppSelect v-model="modelForm.reasoning_control" class="w-56">
+            <option value="auto">自动（按协议推断）</option>
+            <option value="switchable">可关闭</option>
+            <option value="always_on">无法关闭</option>
+          </AppSelect>
+          <p class="mt-1 text-xs text-content-tertiary">
+            自动：只有 Ollama 的 think 判为可关闭，兼容端点一律按「无法关闭」处理。
+            确认端点真的会停掉思考后再选「可关闭」——兼容端点常静默丢弃不认识的参数，
+            发了参数不等于生效。判为「无法关闭」时用户端的深度思考开关会置灰。
+          </p>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label class="block text-sm text-content-secondary mb-1">上下文</label>
@@ -715,6 +729,7 @@ const modelForm = reactive<ModelPayload>({
   display_name: '',
   capabilities: ['chat', 'stream'],
   user_selectable: false,
+  reasoning_control: 'auto',
   context_window: 0,
   max_output_tokens: 0,
   embedding_dimension: 0,
@@ -736,6 +751,7 @@ function openModel(model?: AdminModel): void {
     display_name: model?.display_name || '',
     capabilities: model?.capabilities || ['chat', 'stream'],
     user_selectable: model?.user_selectable ?? false,
+    reasoning_control: model?.reasoning_control || 'auto',
     context_window: model?.context_window || 0,
     max_output_tokens: model?.max_output_tokens || 0,
     embedding_dimension: model?.embedding_dimension || 0,

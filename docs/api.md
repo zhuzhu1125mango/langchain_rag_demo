@@ -216,7 +216,7 @@ curl -X POST http://localhost:8000/api/documents/upload \
 | kb_ids | array | 否 | 知识库ID列表，指定查询范围 |
 | use_web_search | boolean | 否 | 是否启用联网搜索，默认false |
 | search_mode | string | 否 | 搜索模式：`simple` / `function_calling` / `agent`，默认 `simple` |
-| deep_thinking | string | 否 | 深度思考开关：`on` / `off`，默认 `off`（有校验器，其他取值返回 422）。所选模型不具备 `reasoning` 能力时该值被**强制视为 `off`**（服务端 `should_think` 兜底），不报错 |
+| deep_thinking | string | 否 | 深度思考开关：`on` / `off`，默认 `off`（有校验器，其他取值返回 422）。服务端按所选模型的**思考可控性**兜底，见下方「`deep_thinking` 的实际语义」 |
 | model_id | string | 否 | 本次回答使用的模型，取自 `GET /api/models/available`；不传则用任务路由默认模型。不可选/不存在返回 **400**（不静默忽略） |
 
 **成功响应** (200) —— 固定 7 个字段：
@@ -439,6 +439,28 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 - `model_name` / `display_name` 是快照：管理员改了或删了 deployment，历史不该跟着变；
 - 这里只做归因展示。**用量/成本/延迟统计不查这张表**——那是 `model_usage_daily`
   按天聚合（provider × model × task，含 tokens 与成本），`sessions.messages` 不是报表库。
+
+#### `deep_thinking` 的实际语义
+
+开关不是「发出去就生效」——它取决于**所选模型的思考可控性**（`thinking_control`）：
+
+| thinking_control | 含义 | 服务端行为 |
+|---|---|---|
+| `off` | 模型不会思考 | 强制 `think=False`，不发送思考参数 |
+| `switchable` | 能开能关 | `on` → 开；`off` → 关 |
+| `always_on` | 会思考但关不掉 | **不发送**任何思考参数（传 `off` 是假象） |
+
+客户端只在 `switchable` 时展示可用的开关，其余两种置灰。`always_on` 的典型例子是
+LM Studio 上的 Qwen3：`reasoning_effort` / `chat_template_kwargs.enable_thinking` /
+`enable_thinking` / `think` 四个参数实测全被忽略（reasoning_tokens 290 → 274，采样波动）。
+
+> 「有没有通用协议」的答案是**没有**。现实里是五套并存：Ollama 的 `think`、
+> Anthropic 的 `thinking.budget_tokens`、OpenAI o 系列的 `reasoning_effort`、
+> Gemini 的 `thinkingConfig.thinkingBudget`、以及 vLLM/SGLang 的
+> `chat_template_kwargs.enable_thinking`。更麻烦的是兼容端点普遍会**静默丢弃**
+> 不认识的字段，于是「发了」和「生效」无法从响应里区分。所以可控性做成
+> 逐模型的显式声明（`model_deployments.reasoning_control`），默认 `auto`
+> 只在协议明确时判为可关。
 
 ### 1.4 搜索模式说明
 
@@ -1511,7 +1533,7 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | POST | `/api/admin/models/index/rebuild?force=false` | 按 DB 待应用 Embedding 配置后台重建索引（P3；`force=true` 可强制重跑） |
 | POST | `/api/admin/models/index/rollback` | 把上一次重建前的备份集合与旧 Embedding 路由回滚（P3） |
 | POST | `/api/admin/models/apply` | 校验 DB 配置并热应用到在线 registry |
-| GET | `/api/models/available` | **用户面**（只需登录）：可选的对话模型列表 + 当前默认模型；只含 `user_selectable=true` 且有 `chat` 能力的模型，不返回 provider/单价。`default_model_id` 取 `answer_direct`（`deep_thinking` 默认 off 实际走的路径），缺失时才回退 `answer`；`default_supports_reasoning` 给出默认模型是否具备思考能力（默认模型可能不对外开放、不在 `models` 里，前端据此决定深度思考开关是否可用） |
+| GET | `/api/models/available` | **用户面**（只需登录）：可选的对话模型列表 + 当前默认模型；只含 `user_selectable=true` 且有 `chat` 能力的模型，不返回 provider/单价。`default_model_id` 取 `answer_direct`（`deep_thinking` 默认 off 实际走的路径），缺失时才回退 `answer`；每个模型带 `thinking_control`（`off` / `switchable` / `always_on`），另有 `default_thinking_control` 描述默认模型（默认模型可能不对外开放、不在 `models` 里）。只有 `switchable` 才允许开启深度思考 |
 
 保存 Provider/Model/Route 只写入 DB；点击“校验并应用”（或调用 `apply`）后才会替换在线模型，新请求立即使用新配置，在途请求继续使用旧实例。
 

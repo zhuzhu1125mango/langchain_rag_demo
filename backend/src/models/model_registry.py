@@ -52,6 +52,9 @@ class ModelDeployment(Base):
     enabled = Column(Boolean, nullable=False, default=True)
     # 是否允许终端用户按会话选择该模型（默认否：新能力默认关闭，不因升级生效）
     user_selectable = Column(Boolean, nullable=False, default=False, server_default="false")
+    # 思考能否用协议关掉：auto（按 provider 协议推断）/ switchable / always_on。
+    # 与 capabilities 里的 reasoning 是两件事：会思考 ≠ 能关掉思考。
+    reasoning_control = Column(String(16), nullable=False, default="auto", server_default="auto")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

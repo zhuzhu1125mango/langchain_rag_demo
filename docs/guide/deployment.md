@@ -1678,12 +1678,27 @@ legacy 路径始终保留，删掉 registry 文件与 DB 配置就退回 env。
   对话页输入框工具条最左侧就是选择器；只有一个可选项且它就是默认模型时不显示。
 - 用户的选择存在浏览器本地（按用户隔离），**没有**写入用户表：这是前端偏好，
   不跨设备同步。要跨设备统一再加用户级字段。
-- **深度思考开关按模型能力启用**：模型的 `capabilities` 含 `reasoning` 才能点，否则置灰
-  （`aria-disabled`，悬停说明原因）；切到不支持的模型时开关自动复位为关。
-  判断依据是**逐模型的能力**，不是全局 `OLLAMA_SUPPORTS_THINKING`——后者只说明这个部署
-  接受思考参数。同一个 provider 下 qwen3 天生会思考、qwen2.5 完全不会，用全局开关判断
-  等于让用户打开一个没有效果的开关。服务端 `should_think` 同样对无 `reasoning` 能力的
-  模型强制关闭，所以绕过 UI 直接调接口也不会把「不思考的模型」推去思考。
+- **深度思考开关按「思考可控性」启用**，判定字段是 `thinking_control`：
+
+  | 取值 | 含义 | 界面 |
+  |---|---|---|
+  | `off` | 模型不会思考 | 置灰「深度思考·不支持」 |
+  | `switchable` | 能开能关 | 可点，默认关 |
+  | `always_on` | 会思考但关不掉 | 置灰「深度思考·不可关闭」 |
+
+  判断依据是**逐模型的事实**，不是全局 `OLLAMA_SUPPORTS_THINKING`——后者只说明这个部署
+  接受思考参数。同 provider 下 qwen3 会思考、qwen2.5 不会，而 qwen3 在 LM Studio 上
+  又关不掉：三种情况在界面上必须是三种表现，不能被一个布尔压平。切到不可控的模型时
+  开关自动复位为关；服务端 `should_think` 同样兜底（`off` 强制关、`always_on` 不发参数），
+  所以绕过 UI 直接调接口也不会造成「以为关掉了」。
+
+  **可控性怎么声明**：`model_deployments.reasoning_control`（默认 `auto`）。
+  `auto` 只在协议明确时判为可关（Ollama 的 `think`）；`openai_compatible` 默认判为
+  `always_on`，因为兼容端点五花八门且普遍静默丢弃不认识的字段。确认端点真的照做之后，
+  把它改成 `switchable`（管理面 `PATCH /api/admin/models/deployments/{id}` 带
+  `{"reasoning_control": "switchable"}` + `apply`），届时平台会对 `think=False`
+  发送 `chat_template_kwargs.enable_thinking=false`（vLLM/SGLang 的 Qwen3 用它）。
+  o1/o3/o4 走 `reasoning_effort`。
 
 **两个失败语义要分清**：
 

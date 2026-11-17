@@ -380,47 +380,84 @@ class TestCatalogDefaultModel:
         assert body["default_model_id"] == "thinking"
 
 
-class TestReasoningCapability:
-    """「这个模型能不能思考」是逐模型的事实，不是全局开关。
+class TestThinkingControl:
+    """「会不会思考」和「关不关得掉」是两件事，不能压成一个布尔。
 
-    同一 provider 下 qwen3 天生会思考、qwen2.5 完全不会。用全局的
-    `OLLAMA_SUPPORTS_THINKING` 判断，等于告诉用户「这个模型能开深度思考」，
-    打开后拿到的却是同一个更慢的回答——又一次「承诺了没做到」。
+    同一 provider 下 qwen3 天生会思考、qwen2.5 完全不会；而 qwen3 在 LM Studio
+    上又关不掉（实测发什么参数都照样思考）。这三种情况在界面上必须是三种表现，
+    否则就会出现「开关亮着但点了没反应」。
     """
 
-    def test_reasoning_model_true(self, monkeypatch):
-        reg = _Registry([_resolved("qwen3", caps=("chat", "stream", "reasoning"))])
+    @staticmethod
+    def _openai(caps=("chat", "reasoning"), declared="auto"):
+        return ModelConfig(
+            id="m",
+            provider="p1",
+            model="m",
+            capabilities=list(caps),
+            reasoning_control=declared,
+        )
+
+    def test_model_without_reasoning_is_off(self):
+        from src.services.model_registry import THINKING_OFF, resolve_thinking_control
+
+        model = self._openai(caps=("chat",))
+        provider = ProviderConfig(id="p1", type="ollama")
+
+        assert resolve_thinking_control(model, provider) == THINKING_OFF
+
+    def test_ollama_reasoning_model_is_switchable_by_default(self):
+        """Ollama 的 `think` 是明确协议，auto 可以放心判为可关。"""
+        from src.services.model_registry import THINKING_SWITCHABLE, resolve_thinking_control
+
+        model = self._openai()
+        provider = ProviderConfig(id="p1", type="ollama")
+
+        assert resolve_thinking_control(model, provider) == THINKING_SWITCHABLE
+
+    def test_openai_compatible_defaults_to_always_on(self):
+        """兼容端点不猜「也许支持」：猜错的代价是开关点了没反应。"""
+        from src.services.model_registry import THINKING_ALWAYS_ON, resolve_thinking_control
+
+        model = self._openai()
+        provider = ProviderConfig(id="p1", type="openai_compatible", base_url="http://x/v1")
+
+        assert resolve_thinking_control(model, provider) == THINKING_ALWAYS_ON
+
+    def test_declared_switchable_overrides_auto(self):
+        """确认过端点真的照做（如 vLLM/SGLang 的 chat_template_kwargs）再声明。"""
+        from src.services.model_registry import THINKING_SWITCHABLE, resolve_thinking_control
+
+        model = self._openai(declared="switchable")
+        provider = ProviderConfig(id="p1", type="openai_compatible", base_url="http://x/v1")
+
+        assert resolve_thinking_control(model, provider) == THINKING_SWITCHABLE
+
+    def test_declared_always_on_overrides_ollama_auto(self):
+        """Ollama 上也有忽略 think 的模型，声明应当压过推断。"""
+        from src.services.model_registry import THINKING_ALWAYS_ON, resolve_thinking_control
+
+        model = self._openai(declared="always_on")
+        provider = ProviderConfig(id="p1", type="ollama")
+
+        assert resolve_thinking_control(model, provider) == THINKING_ALWAYS_ON
+
+    def test_registry_lookup_by_id(self, monkeypatch):
+        reg = _Registry([_resolved("qwen3", caps=("chat", "reasoning"))])
         monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
 
-        assert model_manager.model_supports_reasoning("qwen3") is True
-
-    def test_plain_model_false(self, monkeypatch):
-        reg = _Registry([_resolved("qwen25")])
-        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
-
-        assert model_manager.model_supports_reasoning("qwen25") is False
-
-    def test_unknown_model_returns_none(self, monkeypatch):
-        """查不到就是不知道：返回 None 让调用方沿用默认，而不是断言「不能思考」。"""
-        reg = _Registry([_resolved("qwen25")])
-        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
-
-        assert model_manager.model_supports_reasoning("ghost") is None
-
-    def test_empty_id_returns_none(self, monkeypatch):
-        """未选模型（走默认路由）时不该在这里下结论。"""
-        reg = _Registry([_resolved("qwen25")])
-        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
-
-        assert model_manager.model_supports_reasoning("") is None
-        assert model_manager.model_supports_reasoning(None) is None
+        # _provider() 是 ollama → auto 判为可关
+        assert model_manager.model_thinking_control("qwen3") == "switchable"
+        assert model_manager.model_thinking_control("ghost") is None
+        assert model_manager.model_thinking_control("") is None
+        assert model_manager.model_thinking_control(None) is None
 
 
-class TestCatalogDefaultReasoning:
-    """目录要告诉前端「默认模型能不能思考」。
+class TestCatalogThinkingControl:
+    """目录要告诉前端「这个模型能不能开关思考」。
 
-    默认模型可能**没开放**给用户（不在 models 里），前端拿不到它的 capabilities，
-    而「不选模型」时用的正是它。少了这个字段，深度思考开关的状态只能靠猜。
+    默认模型可能**没开放**给用户（不在 models 里），前端拿不到它的能力，
+    而「不选模型」时用的正是它。
     """
 
     @staticmethod
@@ -441,25 +478,50 @@ class TestCatalogDefaultReasoning:
         class _R:
             def __init__(self):
                 self.config = SimpleNamespace(models=[resolved.model])
+                self.providers = {resolved.provider.id: resolved.provider}
                 self.source = "test"
 
             def resolve(self, task, **kwargs):
                 return SimpleNamespace(primary=resolved, fallbacks=[], source="test")
 
+            def get_model(self, model_id):
+                if model_id != resolved.model.id:
+                    raise KeyError(model_id)
+                return resolved
+
         return _R()
 
-    def test_true_when_default_has_reasoning(self, monkeypatch):
+    def test_switchable_when_declared(self, monkeypatch):
         resolved = _resolved("r1", caps=("chat", "reasoning"))
+        resolved.model.reasoning_control = "switchable"
         monkeypatch.setattr(model_manager, "_get_registry", lambda: self._reg(resolved))
 
         body = self._client().get("/api/models/available").json()
 
-        assert body["default_supports_reasoning"] is True
+        assert body["default_thinking_control"] == "switchable"
+        assert body["models"][0]["thinking_control"] == "switchable"
 
-    def test_false_when_default_is_plain_chat(self, monkeypatch):
+    def test_off_when_model_cannot_think(self, monkeypatch):
         resolved = _resolved("r1")
         monkeypatch.setattr(model_manager, "_get_registry", lambda: self._reg(resolved))
 
         body = self._client().get("/api/models/available").json()
 
-        assert body["default_supports_reasoning"] is False
+        assert body["default_thinking_control"] == "off"
+        assert body["models"][0]["thinking_control"] == "off"
+
+    def test_empty_when_no_default_route(self, monkeypatch):
+        """没有默认路由时不编一个值出来，前端按「未知」处理。"""
+        resolved = _resolved("r1", caps=("chat", "reasoning"))
+        reg = self._reg(resolved)
+
+        def _boom(task, **kwargs):
+            raise KeyError(task)
+
+        reg.resolve = _boom
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+
+        body = self._client().get("/api/models/available").json()
+
+        assert body["default_thinking_control"] == ""
+        assert body["models"][0]["thinking_control"] == "switchable"

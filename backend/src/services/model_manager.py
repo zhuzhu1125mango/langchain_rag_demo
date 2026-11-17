@@ -25,6 +25,7 @@ from src.services.model_registry import (
     ResolvedModel,
     ResolvedRoute,
     RouteConfig,
+    resolve_thinking_control,
 )
 
 logger = logging.getLogger(__name__)
@@ -336,13 +337,13 @@ class ModelManager:
             return None
         return resolved
 
-    def model_supports_reasoning(self, model_id: Optional[str]) -> Optional[bool]:
-        """指定模型是否具备思考能力；查不到时返回 None（不知道就别替人决定）。
+    def model_thinking_control(self, model_id: Optional[str]) -> Optional[str]:
+        """指定模型的思考可控性：off / switchable / always_on；查不到返回 None。
 
         为什么不看 `settings.model.OLLAMA_SUPPORTS_THINKING`：那是「这个部署能接
-        思考参数吗」的总闸，不区分模型。同一 provider 下 qwen3 天生会思考、
-        qwen2.5 完全不会，用全局值判断等于告诉用户「这个模型能开思考」，
-        打开后拿到的却是同一个更慢的回答。
+        思考参数吗」的总闸，既不区分模型、也不说明「关不关得掉」。同一 provider 下
+        qwen3 会思考、qwen2.5 完全不会；而 qwen3 在 LM Studio 上又关不掉——
+        这几种情况在界面上必须是三种不同的表现，不能被一个全局布尔压平。
         """
         if not model_id:
             return None
@@ -350,7 +351,7 @@ class ModelManager:
             resolved = self._get_registry().get_model(model_id)
         except Exception:
             return None
-        return bool(resolved.model.has("reasoning"))
+        return resolve_thinking_control(resolved.model, resolved.provider)
 
     def build_user_model_group(
         self,

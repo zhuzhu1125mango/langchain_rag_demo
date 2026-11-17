@@ -39,21 +39,32 @@ class TestShouldThink:
         这一条不是「顺手过滤」：开关对一个不会思考的模型打开，用户得到的是
         同一个更慢的回答，还会以为自己在用深度思考。
         """
-        assert should_think("on", supports_reasoning=False) is False
+        assert should_think("on", thinking_control="off") is False
 
     def test_non_reasoning_model_forces_off_even_when_global_disabled(self, monkeypatch):
         """全局开关也没开时，仍然要给出明确的 False，而不是 None。"""
         monkeypatch.setattr(settings.model, "OLLAMA_SUPPORTS_THINKING", False)
-        assert should_think("on", supports_reasoning=False) is False
+        assert should_think("on", thinking_control="off") is False
 
-    def test_reasoning_model_follows_switch(self):
-        assert should_think("on", supports_reasoning=True) is True
-        assert should_think("off", supports_reasoning=True) is False
+    def test_switchable_model_follows_switch(self):
+        assert should_think("on", thinking_control="switchable") is True
+        assert should_think("off", thinking_control="switchable") is False
 
-    def test_unknown_capability_keeps_global_behavior(self):
-        """能力未知（没选模型 / 注册表查不到）时不替用户改主意。"""
-        assert should_think("on", supports_reasoning=None) is True
-        assert should_think("off", supports_reasoning=None) is False
+    def test_always_on_model_is_not_pretended_to_be_off(self):
+        """会思考但关不掉 → None（不发参数），而不是 False。
+
+        传 False 只会制造「我们关掉了」的假象：LM Studio 上的 qwen3 实测发
+        `reasoning_effort` / `chat_template_kwargs.enable_thinking` /
+        `enable_thinking` / `think` 都照样思考（reasoning_tokens 290→274）。
+        既然关不掉，就别假装能关——日志里也该看得出这一点。
+        """
+        assert should_think("on", thinking_control="always_on") is None
+        assert should_think("off", thinking_control="always_on") is None
+
+    def test_unknown_control_keeps_global_behavior(self):
+        """可控性未知（没选模型 / 注册表查不到）时不替用户改主意。"""
+        assert should_think("on", thinking_control=None) is True
+        assert should_think("off", thinking_control=None) is False
 
 
 class TestMessageRequestDeepThinking:

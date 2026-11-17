@@ -101,6 +101,9 @@ class ModelConfig(BaseModel):
     capabilities: List[str] = Field(default_factory=lambda: ["chat", "stream"])
     # 是否出现在「用户可选模型」目录里。False 的模型只能由路由间接使用。
     user_selectable: bool = False
+    # 思考能否用协议关掉：auto（按 provider 协议推断）/ switchable / always_on。
+    # 与 capabilities 里的 reasoning 是两件事：会思考 ≠ 关得掉思考。
+    reasoning_control: str = "auto"
     context_window: int = 0
     max_output_tokens: int = 0
     embedding_dimension: int = 0
@@ -143,6 +146,37 @@ class ResolvedModel:
     provider: ProviderConfig
     task: str
     fallback: bool = False
+
+
+# 思考可控性的三种取值（`resolve_thinking_control` 返回其中之一）
+THINKING_OFF = "off"                # 模型不会思考
+THINKING_SWITCHABLE = "switchable"  # 能通过协议参数关掉
+THINKING_ALWAYS_ON = "always_on"    # 会思考但关不掉
+
+
+def resolve_thinking_control(model: ModelConfig, provider: ProviderConfig) -> str:
+    """这个模型的思考能不能被关掉。
+
+    三种事实要分开，混在一起就会在界面上骗人：
+    - `capabilities` 里没有 `reasoning` → 模型压根不会思考（off）
+    - 有 `reasoning` 且协议能关 → switchable
+    - 有 `reasoning` 但关不掉 → always_on（LM Studio 上的 qwen3 就是这种：
+      发 `reasoning_effort` / `chat_template_kwargs.enable_thinking` /
+      `enable_thinking` / `think` 都照样思考）
+
+    `auto` 的推断刻意保守：只有 Ollama 的 `think` 是明确协议，才判可关；
+    `openai_compatible` 那边关思考的参数五花八门，而且很多端点会把不认识的字段
+    静默丢掉、照样思考——猜错的代价是「开关点了没反应」，比没有开关更糟。
+    所以默认 always_on，管理员确认端点真的照做后再改成 switchable。
+    """
+    if not model.has("reasoning"):
+        return THINKING_OFF
+    declared = (model.reasoning_control or "auto").strip().lower()
+    if declared in (THINKING_SWITCHABLE, THINKING_ALWAYS_ON):
+        return declared
+    if provider.type == "ollama":
+        return THINKING_SWITCHABLE
+    return THINKING_ALWAYS_ON
 
 
 @dataclass

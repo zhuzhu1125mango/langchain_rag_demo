@@ -10,6 +10,15 @@ import { api } from '@/utils/axios'
  * 敏感字段，用户面就会「因为类型相同」被顺手带出去。
  */
 
+/**
+ * 模型的思考可控性。三态而不是布尔，因为「不会思考」和「关不掉」对用户是两件事，
+ * 提示语不同，也都不能让开关亮着：
+ * - `off`：模型没有思考能力
+ * - `switchable`：能开能关（只有这种才允许点深度思考开关）
+ * - `always_on`：会思考但关不掉（LM Studio 上的 qwen3 就是这种）
+ */
+export type ThinkingControl = 'off' | 'switchable' | 'always_on'
+
 export interface AvailableModel {
   id: string
   display_name: string
@@ -17,6 +26,8 @@ export interface AvailableModel {
   context_window: number
   /** 是否是「不传 model_id 时实际使用的模型」，UI 用来标默认 */
   is_default: boolean
+  /** 思考可控性（服务端按模型能力 + provider 协议算好） */
+  thinking_control: ThinkingControl
 }
 
 export interface AvailableModelsResponse {
@@ -24,11 +35,11 @@ export interface AvailableModelsResponse {
   /** answer 路由的默认模型 id；路由没配时为空串 */
   default_model_id: string
   /**
-   * 默认模型是否具备思考能力。单独给一个字段，是因为默认模型可能**没有开放**
-   * 给用户（不在 `models` 里），前端拿不到它的 capabilities；而「不选模型」时
-   * 用的正是它。空 `default_model_id` 时该值无意义，按「未知」处理。
+   * 默认模型的思考可控性；空串 = 没有默认路由（能力无从判断）。
+   * 单独给这个字段，是因为默认模型可能**没有开放**给用户（不在 `models` 里），
+   * 前端拿不到它的 capabilities，而「不选模型」时用的正是它。
    */
-  default_supports_reasoning: boolean
+  default_thinking_control: ThinkingControl | ''
   /** 配置来源：database / file / legacy-env，仅用于排查，不展示给用户 */
   source: string
 }

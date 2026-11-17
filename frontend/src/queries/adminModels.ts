@@ -35,6 +35,11 @@ export interface AdminModel {
   enabled: boolean
   /** 是否允许终端用户在选择器里选它（管理员开启后才出现在 /api/models/available） */
   user_selectable: boolean
+  /**
+   * 思考能否用协议关掉：auto（按协议推断）/ switchable / always_on。
+   * 「会思考」由 capabilities 里的 reasoning 表示，两者是不同的事实。
+   */
+  reasoning_control: string
 }
 
 export interface AdminRoute {
@@ -83,6 +88,7 @@ export interface ModelPayload {
   price_currency?: string
   enabled?: boolean
   user_selectable?: boolean
+  reasoning_control?: string
 }
 
 export interface RoutePayload {

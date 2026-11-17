@@ -142,23 +142,29 @@ LLM_DIRECT_TEMPLATE = """
 def should_think(
     deep_thinking: str = "off",
     *,
-    supports_reasoning: Optional[bool] = None,
+    thinking_control: Optional[str] = None,
 ) -> Optional[bool]:
     """深度思考开关决策。
 
     Args:
         deep_thinking: 前端开关值。
-        supports_reasoning: 本次实际要用的模型是否具备思考能力。
-            `False` → 强制关闭：模型没有这个能力，开关开着只能得到一个更慢的回答，
-            不会得到「思考」；`None` → 未知（未指定模型 / 注册表查不到），
-            不替用户做决定，沿用全局开关。
+        thinking_control: 本次实际要用的模型的思考可控性
+            （`off` / `switchable` / `always_on`，见 `resolve_thinking_control`）。
+            `None` 表示未知（未指定模型 / 注册表查不到）。
 
     Returns:
         True: 开启思考；False: 关闭思考；
-        None: 不干预，使用模型默认行为（模型不支持思考时）。
+        None: 不干预，使用模型默认行为。
+
+    为什么 `always_on` 返回 None 而不是 False：那种模型关不掉（LM Studio 上的
+    qwen3 实测发什么参数都照样思考）。传 False 只会制造「我们关掉了」的假象，
+    而实际行为没变——不如什么都不发，让「关不掉」这件事在日志里是诚实的。
     """
-    if supports_reasoning is False:
+    if thinking_control == "off":
+        # 模型压根不会思考：明确关闭，别让它带着思考参数去跑
         return False
+    if thinking_control == "always_on":
+        return None
     if not settings.model.OLLAMA_SUPPORTS_THINKING:
         return None
     return deep_thinking == "on"

@@ -69,6 +69,8 @@ class ModelUpsert(BaseModel):
     display_name: Optional[str] = None
     capabilities: Optional[List[str]] = None
     user_selectable: Optional[bool] = None
+    # auto（按协议推断）/ switchable（能关掉思考）/ always_on（关不掉）
+    reasoning_control: Optional[str] = None
     context_window: Optional[int] = None
     max_output_tokens: Optional[int] = None
     embedding_dimension: Optional[int] = None
