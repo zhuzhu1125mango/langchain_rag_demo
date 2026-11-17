@@ -1511,7 +1511,7 @@ GET 响应仅返回 `has_api_key` / `api_key_hint`。
 | POST | `/api/admin/models/index/rebuild?force=false` | 按 DB 待应用 Embedding 配置后台重建索引（P3；`force=true` 可强制重跑） |
 | POST | `/api/admin/models/index/rollback` | 把上一次重建前的备份集合与旧 Embedding 路由回滚（P3） |
 | POST | `/api/admin/models/apply` | 校验 DB 配置并热应用到在线 registry |
-| GET | `/api/models/available` | **用户面**（只需登录）：可选的对话模型列表 + 当前默认模型；只含 `user_selectable=true` 且有 `chat` 能力的模型，不返回 provider/单价 |
+| GET | `/api/models/available` | **用户面**（只需登录）：可选的对话模型列表 + 当前默认模型；只含 `user_selectable=true` 且有 `chat` 能力的模型，不返回 provider/单价。`default_model_id` 取 `answer_direct`（`deep_thinking` 默认 off 实际走的路径），缺失时才回退 `answer` |
 
 保存 Provider/Model/Route 只写入 DB；点击“校验并应用”（或调用 `apply`）后才会替换在线模型，新请求立即使用新配置，在途请求继续使用旧实例。
 

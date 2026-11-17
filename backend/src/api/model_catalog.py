@@ -33,11 +33,16 @@ async def list_available_models(current_user: CurrentUser = Depends(get_current_
     """
     registry = model_manager.registry
 
+    # 「默认」必须标在用户实际会用的那个模型上。`deep_thinking` 默认 off，
+    # 生成走 `answer_direct` 路由；只有它缺失时才回退到 `answer`（思考路径）。
+    # 标错不会报错，只会让人以为默认在用的是思考模型——实测两者延迟差 3 倍以上。
     default_model_id = ""
-    try:
-        default_model_id = registry.resolve("answer").primary.model.id
-    except Exception:  # noqa: BLE001 —— 没配 answer 路由时目录仍然可用，只是没有「默认」标记
-        logger.warning("模型目录：answer 路由解析失败，前端将无默认标记")
+    for task in ("answer_direct", "answer"):
+        try:
+            default_model_id = registry.resolve(task).primary.model.id
+            break
+        except Exception:  # noqa: BLE001 —— 单条路由缺失不影响目录可用，继续试下一条
+            logger.warning("模型目录：%s 路由解析失败", task)
 
     models = [
         {

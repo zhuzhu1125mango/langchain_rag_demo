@@ -320,3 +320,61 @@ class TestServedModelReported:
         self._chain()._record_model_outcome(state, group)
 
         assert "generation" not in state.model_holder
+
+
+class TestCatalogDefaultModel:
+    """「默认」要标在用户实际会用的模型上。
+
+    `deep_thinking` 默认 off → 生成走 `answer_direct`；把它标成 `answer`（思考路径）
+    不会报错，只会让人以为默认是思考模型。实测两个模型延迟差 3 倍以上，
+    这种「标签错但功能正常」的缺陷只能靠测试钉住。
+    """
+
+    class _TaskRegistry:
+        """按 task 返回不同主模型的注册表。"""
+
+        def __init__(self, mapping):
+            self._mapping = mapping
+            self.config = SimpleNamespace(models=[m.model for m in mapping.values()])
+            self.source = "test"
+
+        def resolve(self, task, **kwargs):
+            if task not in self._mapping:
+                raise KeyError(task)
+            return SimpleNamespace(primary=self._mapping[task], fallbacks=[], source="test")
+
+        def get_model(self, model_id):
+            for m in self._mapping.values():
+                if m.model.id == model_id:
+                    return m
+            raise KeyError(model_id)
+
+    def _client(self):
+        from src.api.model_catalog import router
+        from src.auth import get_current_user
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+        app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="u-1")
+        return TestClient(app)
+
+    def test_prefers_answer_direct_over_answer(self, monkeypatch):
+        reg = self._TaskRegistry({
+            "answer": _resolved("thinking"),
+            "answer_direct": _resolved("plain"),
+        })
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+
+        body = self._client().get("/api/models/available").json()
+
+        assert body["default_model_id"] == "plain", "默认应是 deep_thinking=off 实际走的那个"
+        assert [m["id"] for m in body["models"] if m["is_default"]] == ["plain"]
+
+    def test_falls_back_to_answer_when_no_direct_route(self, monkeypatch):
+        """只有思考路由时（老配置）仍要能标出默认，不能空着。"""
+        reg = self._TaskRegistry({"answer": _resolved("thinking")})
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+
+        body = self._client().get("/api/models/available").json()
+
+        assert body["default_model_id"] == "thinking"
