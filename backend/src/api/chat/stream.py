@@ -248,6 +248,7 @@ async def stream_answer(
         record_learning=True,
         stopped=False,
         error=None,
+        model_holder: Optional[dict] = None,
     ) -> bool:
         # LEARN W-B：记录策略执行样本（短路路径按开关补采各策略结果）。
         # 置于 DB 会话之外——补采会重跑策略投票（含 fast LLM 调用），避免期间占用连接。
@@ -306,9 +307,11 @@ async def stream_answer(
                 message_payload["error"] = error
             # 模型归因：按消息存，跟随答案一起持久化（主流做法是「每条消息带 metadata」，
             # 而不是给会话只记一个模型——同一会话里用户随时可能换模型）。
-            # 读闭包里的 model_holder 而不是加三个参数：停止 / 失败 / 正常三条落库路径
-            # 都在同一请求作用域内，显式传参要改三处，漏一处就少一半历史。
-            message_payload.update(_model_attribution(model_holder))
+            # 显式传参而不是读闭包：`model_holder` 是 generate() 的局部变量，而本函数
+            # 定义在 stream_answer() 作用域，闭包根本取不到它——一开始就是这么写的，
+            # 被 ruff 的 F821 拦下（否则每次落库都会 NameError，而且只在真实请求里炸，
+            # 单测覆盖不到）。
+            message_payload.update(_model_attribution(model_holder or {}))
             # 原子追加（服务端 jsonb 拼接）
             assistant_msg_count = await append_session_message(db, session.id, message_payload)
 
@@ -480,6 +483,7 @@ async def stream_answer(
                     full_answer, sources, source_metadata,
                     dedupe_steps(reasoning_steps), thinking_text,
                     record_learning=False, stopped=True,
+                    model_holder=model_holder,
                 )
             )
             _stream_finalize_tasks.add(partial_task)
@@ -505,6 +509,7 @@ async def stream_answer(
                         full_answer, sources, source_metadata,
                         dedupe_steps(reasoning_steps), thinking_text,
                         record_learning=False, stopped=True, error=error_text,
+                        model_holder=model_holder,
                     )
                 )
                 defer_task(save_task)
@@ -581,7 +586,8 @@ async def stream_answer(
                     )
             try:
                 needs = await save_assistant_message(
-                    full_answer + suffix, sources, source_metadata, final_reasoning, thinking_text
+                    full_answer + suffix, sources, source_metadata, final_reasoning, thinking_text,
+                    model_holder=model_holder,
                 )
             except Exception as e:
                 log_exception(
