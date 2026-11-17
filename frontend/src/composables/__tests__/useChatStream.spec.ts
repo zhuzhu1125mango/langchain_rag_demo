@@ -244,14 +244,16 @@ describe('请求构造', () => {
 })
 
 describe('SSE 事件分发', () => {
-  it('end 带 model_fallback=true 时在消息上留痕（不能静默换模型）', async () => {
-    stubSseFetch(['data: {"type":"end","model_id":"default-model","model_fallback":true}\n\n'])
+  it('end 带 model_fallback=true 时在消息上留痕，并记下实际作答模型名', async () => {
+    stubSseFetch([
+      'data: {"type":"end","model_id":"default-model","model_name":"Llama 3 8B","model_fallback":true}\n\n'
+    ])
     const h = mountStream()
     h.selectedModelId.value = 'chosen-model'
 
     await h.api.sendMessage('问')
 
-    expect(assistantOf(h.store).modelFallback).toBe(true)
+    expect(assistantOf(h.store).modelFallback).toEqual({ answeredBy: 'Llama 3 8B' })
   })
 
   it('end 未标记回落时不留痕（默认路径不该出现提示）', async () => {

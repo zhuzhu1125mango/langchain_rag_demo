@@ -148,27 +148,46 @@ class GenerationMixin:
         """
         if state is None:
             return
+        from src.services.message_payload import build_generation_info
+
         requested = getattr(state, "model_id", None)
         served_index = getattr(llm, "last_served_index", None)
         targets = getattr(llm, "targets", None) or []
-        used_id = None
-        if served_index is not None and served_index < len(targets):
-            used_id = getattr(getattr(targets[served_index], "model", None), "id", None)
+        target = (
+            targets[served_index]
+            if served_index is not None and served_index < len(targets)
+            else None
+        )
 
         # 下标 0 是用户自己选的那个；>0 说明是 fallback 接手的
         fallback = bool(requested) and served_index not in (None, 0)
         state.model_fallback = state.model_fallback or fallback
-        state.resolved_model_id = used_id or state.resolved_model_id
+
+        generation = None
+        if target is not None:
+            model = getattr(target, "model", None)
+            provider = getattr(target, "provider", None)
+            model_id = getattr(model, "id", "") or ""
+            if model_id:
+                state.resolved_model_id = model_id
+                # 存快照而不是只存 id：配置改名/删除后，历史消息仍要说得清当时跑的是什么
+                generation = build_generation_info(
+                    model_id=model_id,
+                    model_name=getattr(model, "model", "") or "",
+                    display_name=getattr(model, "display_name", "") or "",
+                    provider_type=getattr(provider, "type", "") or "",
+                    selected_by="user" if requested else "default",
+                    fallback=fallback,
+                    fallback_from=requested if fallback else None,
+                )
 
         holder = getattr(state, "model_holder", None)
         if holder is not None:
-            holder.update(
-                {
-                    "requested": requested,
-                    "used": state.resolved_model_id,
-                    "fallback": bool(state.model_fallback),
-                }
-            )
+            holder["requested"] = requested
+            holder["used"] = state.resolved_model_id
+            holder["fallback"] = bool(state.model_fallback)
+            if generation:
+                holder["generation"] = generation
 
     async def _stream_with_retry(self, prompt, source_texts, source_metadata, answer_type, max_retries=2, state: Optional[_PipelineState] = None, think=None):
         """

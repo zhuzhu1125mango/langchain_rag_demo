@@ -314,7 +314,8 @@ data: {"type": "content", "content": "回答片段"}
 
 data: {"type": "end", "message_id": "消息ID", "session_id": "会话ID", "sources": [...],
        "answer_type": "llm_direct|function_calling|agent|...", "reasoning": [...],
-       "model_id": "实际产出本条回答的模型ID", "model_fallback": false}
+       "model_id": "实际产出本条回答的模型ID",
+       "model_name": "该模型的展示名（快照）", "model_fallback": false}
 
 data: {"type": "title", "session_id": "会话ID", "title": "新生成的会话标题"}
 
@@ -329,9 +330,10 @@ data: {"type": "error", "error": "错误信息（已脱敏）", "request_id": "�
 - `reasoning` 为分步过程事件，前端渲染为答案气泡上方的可折叠时间线；`thinking` 为模型原始思考增量，供折叠面板实时展示
 - `end` 事件**不含** `title`：标题生成已改为后台任务（避免推迟流完成信号），完成后**在 `end` 之后**补发独立的 `title` 事件。客户端断开时标签生成任务仍会落库，仅 `title` 事件丢失，刷新侧栏可见新标题
 - `end` 事件的来源字段名为 `sources`（非 `sources_metadata`），每项含 `source_type` 为 `kb` 或 `web`；网页来源额外含 `url` 字段供前端跳转
-- `end.model_id` 是**实际产出**本条回答的模型（请求里 `model_id` 只在选中的模型真的服务了本次生成时才等于它）；
-  `end.model_fallback=true` 表示请求指定的模型在生成时失败、由默认路由的模型接手。两者供客户端如实告知用户
-  「这句答案是谁说的」——静默换模型比报错更难排查
+- `end.model_id` / `end.model_name` 是**实际产出**本条回答的模型（请求里的 `model_id` 只在选中的模型真的
+  服务了本次生成时才等于它）；`end.model_fallback=true` 表示请求指定的模型在生成时失败、由默认路由的模型接手。
+  供客户端如实告知用户「这句答案是谁说的」——静默换模型比报错更难排查。
+  这三个值与落库的 `generation` 块同源，刷新历史后仍能看到同样的结论
 - 会话不存在等错误在**流开始前**无法以 4xx 返回时，会以 `200 + error 事件` 形式下发；非流式接口同场景返回 404
 - 在途生成超过单用户上限（默认 5）时，`POST /api/chat/stream` 直接返回 **429**（在用户消息落库之前拒绝，不留「有问无答」）
 
@@ -400,8 +402,16 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
       "content": "助手回答",
       "sources": [...],
       "timestamp": "2024-01-01T12:00:05",
-      "model_id": "产出这条回答的模型ID（仅当注册表配置了多模型时存在）",
-      "model_fallback": true
+      "generation": {
+        "schema_version": 1,
+        "model_id": "qwen3-8b",
+        "model_name": "qwen3:8b",
+        "display_name": "Qwen3 8B",
+        "provider_type": "openai_compatible",
+        "selected_by": "user",
+        "fallback": true,
+        "fallback_from": "gpt-4o-mini"
+      }
     }
   ],
   "created_at": "2024-01-01T12:00:00",
@@ -409,9 +419,26 @@ curl -N "http://localhost:8000/api/chat/runs/<run_id>/stream?after=12"
 }
 ```
 
-> 助手消息里的 `model_id` / `model_fallback` 是**按消息**存的模型归因：同一会话里用户随时可能换模型，
-> 所以不能只在会话上记一个。`model_fallback=true` 表示这条回答本该由用户选的模型产出，
-> 但它在生成时失败、由默认路由的模型接手。只存不展示——主流产品不在每条消息上贴模型名。
+**助手消息的 `generation` 块（生成归因，v1）**
+
+按消息存，不是会话级——同一会话里用户随时可能换模型，会话上记一个必然对不上。
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| schema_version | int | 归因块版本；加字段时递增，读侧按版本分支 |
+| model_id | string | 配置侧的部署 id，用于回连 `model_deployments` |
+| model_name | string | 上游真实模型名（如 `qwen3:8b`），**快照** |
+| display_name | string | 展示名，为空时读侧应回退到 `model_name`，**快照** |
+| provider_type | string | 协议族：`ollama` / `openai_compatible`（不存 provider_id：那是可被改名的内部标签） |
+| selected_by | string | `user`（用户选的）/ `default`（走默认路由） |
+| fallback | bool | 所选模型生成时失败、由 fallback 接手 |
+| fallback_from | string | 发生回落时原本请求的模型 id（不回落不出现） |
+
+三条读侧约定：
+- **块不存在 = 未记录**（历史消息、legacy 单模型），不等于「用了默认模型」；
+- `model_name` / `display_name` 是快照：管理员改了或删了 deployment，历史不该跟着变；
+- 这里只做归因展示。**用量/成本/延迟统计不查这张表**——那是 `model_usage_daily`
+  按天聚合（provider × model × task，含 tokens 与成本），`sessions.messages` 不是报表库。
 
 ### 1.4 搜索模式说明
 

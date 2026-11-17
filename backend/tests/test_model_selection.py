@@ -207,7 +207,7 @@ class TestCatalogEndpoint:
 
 
 class TestServedModelReported:
-    """「谁答的」要能被看见。
+    """「谁答的」要能被看见，而且要说得清是哪一份配置。
 
     ChatModelGroup 内部的 fallback 是静默的：主模型失败会自动试下一个，
     调用方无从得知换了模型。不记录这件事，「用户选了 A、A 挂了、实际是 B 答完」
@@ -225,77 +225,98 @@ class TestServedModelReported:
         return _Chain()
 
     @staticmethod
-    def _fake_group(served_index, model_ids):
+    def _fake_group(served_index, models):
+        """models: [(id, upstream_name, display_name, provider_type), ...]"""
+        from types import SimpleNamespace
+
+        targets = [
+            SimpleNamespace(
+                model=SimpleNamespace(id=mid, model=name, display_name=display),
+                provider=SimpleNamespace(type=ptype),
+            )
+            for mid, name, display, ptype in models
+        ]
+        return SimpleNamespace(last_served_index=served_index, targets=targets)
+
+    @staticmethod
+    def _state(model_id):
+        from types import SimpleNamespace
+
         return SimpleNamespace(
-            last_served_index=served_index,
-            targets=[SimpleNamespace(model=SimpleNamespace(id=mid)) for mid in model_ids],
+            model_id=model_id,
+            resolved_model_id=None,
+            model_fallback=False,
+            model_holder={},
         )
 
-    def test_user_model_served_is_not_flagged(self):
-        state = SimpleNamespace(
-            model_id="chosen", resolved_model_id=None, model_fallback=False, model_holder={}
+    def test_user_model_served_records_snapshot(self):
+        state = self._state("chosen")
+        group = self._fake_group(
+            0,
+            [
+                ("chosen", "qwen3:8b", "Qwen3 8B", "openai_compatible"),
+                ("default", "llama3:8b", "Llama 3 8B", "ollama"),
+            ],
         )
 
-        self._chain()._record_model_outcome(state, self._fake_group(0, ["chosen", "default"]))
+        self._chain()._record_model_outcome(state, group)
 
-        assert state.model_holder == {"requested": "chosen", "used": "chosen", "fallback": False}
+        gen = state.model_holder["generation"]
+        assert gen["model_id"] == "chosen"
+        assert gen["model_name"] == "qwen3:8b", "要存上游名，配置改名后仍说得清当时跑的是什么"
+        assert gen["display_name"] == "Qwen3 8B"
+        assert gen["provider_type"] == "openai_compatible"
+        assert gen["selected_by"] == "user"
+        assert gen["fallback"] is False
+        assert "fallback_from" not in gen, "没回落就不该出现回落来源"
+        assert gen["schema_version"] == 1
 
-    def test_group_fallback_is_flagged_with_used_model(self):
-        state = SimpleNamespace(
-            model_id="chosen", resolved_model_id=None, model_fallback=False, model_holder={}
+    def test_group_fallback_records_from_which_model(self):
+        state = self._state("chosen")
+        group = self._fake_group(
+            1,
+            [
+                ("chosen", "qwen3:8b", "Qwen3 8B", "openai_compatible"),
+                ("default", "llama3:8b", "Llama 3 8B", "ollama"),
+            ],
         )
 
-        self._chain()._record_model_outcome(state, self._fake_group(1, ["chosen", "default"]))
+        self._chain()._record_model_outcome(state, group)
 
-        assert state.model_holder["fallback"] is True
-        assert state.model_holder["used"] == "default"
+        gen = state.model_holder["generation"]
+        assert gen["model_id"] == "default"
+        assert gen["fallback"] is True
+        assert gen["fallback_from"] == "chosen"
         assert state.model_fallback is True
 
-    def test_no_selection_never_flagged(self):
+    def test_default_route_is_not_marked_as_fallback(self):
         """没选模型时本来就用默认，不能报「回落」——那是误报。"""
-        state = SimpleNamespace(
-            model_id=None, resolved_model_id=None, model_fallback=False, model_holder={}
-        )
+        state = self._state(None)
+        group = self._fake_group(0, [("default", "llama3:8b", "Llama 3 8B", "ollama")])
 
-        self._chain()._record_model_outcome(state, self._fake_group(0, ["default"]))
+        self._chain()._record_model_outcome(state, group)
 
-        assert state.model_holder["fallback"] is False
+        gen = state.model_holder["generation"]
+        assert gen["selected_by"] == "default"
+        assert gen["fallback"] is False
+        assert state.model_fallback is False
 
     def test_missing_holder_does_not_raise(self):
         """非流式路径没有出口容器，记录逻辑必须容忍 None。"""
-        state = SimpleNamespace(
-            model_id="chosen", resolved_model_id=None, model_fallback=False, model_holder=None
-        )
+        state = self._state("chosen")
+        state.model_holder = None
+        group = self._fake_group(1, [("chosen", "a", "A", "ollama"), ("default", "b", "B", "ollama")])
 
-        self._chain()._record_model_outcome(state, self._fake_group(1, ["chosen", "default"]))
+        self._chain()._record_model_outcome(state, group)
 
         assert state.model_fallback is True
+        assert state.resolved_model_id == "default"
 
+    def test_no_served_target_records_nothing(self):
+        """一次都没调成功（全挂）：不能编一个模型名出来，宁可不写。"""
+        state = self._state("chosen")
+        group = self._fake_group(None, [("chosen", "a", "A", "ollama")])
 
-class TestModelAttributionPersisted:
-    """落库时写进消息的模型归因字段。
+        self._chain()._record_model_outcome(state, group)
 
-    这类字段的丢失很隐蔽：答案本身照常显示，只有翻 JSON 或回看历史时才发现
-    「这条不知道是谁答的」。所以钉住键名与「无值不写键」的语义。
-    """
-
-    def test_both_written_when_fallback(self):
-        from src.api.chat.stream import _model_attribution
-
-        extra = _model_attribution({"requested": "a", "used": "b", "fallback": True})
-
-        assert extra == {"model_id": "b", "model_fallback": True}
-
-    def test_no_fallback_key_when_normal(self):
-        """正常路径不该出现 model_fallback=false——「存在即发生」比布尔值更好查。"""
-        from src.api.chat.stream import _model_attribution
-
-        extra = _model_attribution({"requested": "a", "used": "a", "fallback": False})
-
-        assert extra == {"model_id": "a"}
-
-    def test_empty_holder_writes_nothing(self):
-        """legacy 单模型 / 取消失败路径：holder 为空，不能写出空字段。"""
-        from src.api.chat.stream import _model_attribution
-
-        assert _model_attribution({}) == {}
+        assert "generation" not in state.model_holder

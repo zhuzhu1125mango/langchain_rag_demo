@@ -336,7 +336,11 @@ export function useChatStream(options: UseChatStreamOptions) {
             // 用户选了模型、但该模型在生成时失败、由 fallback 接手：把这件事挂到
             // 这条消息上。不提示的话，用户会以为自己在用 A，实际是 B 答的。
             if (data.model_fallback === true) {
-              chatStore.updateMessage(lastMsg.id, { modelFallback: true })
+              chatStore.updateMessage(lastMsg.id, {
+                modelFallback: {
+                  answeredBy: typeof data.model_name === 'string' ? data.model_name : undefined
+                }
+              })
             }
             // 后端 message_id 同步替换前端临时 id：前端先用临时 id 占位渲染，
             // 流结束后用后端正式 ID 替换，确保后续反馈/关联操作能定位到真实消息。

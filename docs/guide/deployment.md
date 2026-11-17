@@ -1690,6 +1690,12 @@ legacy 路径始终保留，删掉 registry 文件与 DB 配置就退回 env。
 `last_served_index` 记录实际服务的模型，`end.model_id` 回传。不做这件事的话，
 「用户以为在用 A、实际是 B 答的」将无从发现。
 
+**归因怎么存**：按消息写进 `sessions.messages[].generation`（版本化块，见
+`src/services/message_payload.py`），存的是**快照**（上游模型名 + 展示名 + 协议族），
+不是只存 id——否则管理员改了 deployment，历史回看会「说现在的话」。
+历史消息没有这个块表示「未记录」，不要当成「用了默认模型」。
+**统计不要查这张表**：`model_usage_daily` 才有按天的 provider × model × task 聚合（含 tokens 与成本）。
+
 ## 9. 故障排查
 
 ### 9.1 日志排查

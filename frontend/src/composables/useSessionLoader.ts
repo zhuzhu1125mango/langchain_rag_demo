@@ -31,10 +31,17 @@ export function useSessionLoader() {
         source_metadata?: RawSourceMeta[]
         error?: string
         stopped?: boolean
-        /** 产出这条回答的模型（历史里存着，用于回看与排查） */
-        model_id?: string
-        /** 当时发生过回落：所选模型不可用，由默认模型作答 */
-        model_fallback?: boolean
+        /** 生成归因快照（v1）；历史上的消息没有这个块，表示「未记录」，不是「默认模型」 */
+        generation?: {
+          schema_version?: number
+          model_id?: string
+          model_name?: string
+          display_name?: string
+          provider_type?: string
+          selected_by?: 'user' | 'default'
+          fallback?: boolean
+          fallback_from?: string
+        }
       }
 
       interface SessionResponse {
@@ -61,8 +68,15 @@ export function useSessionLoader() {
           error: msg.error,
           stopped: msg.stopped,
           // 只在真发生过回落时挂这个键：保持「存在即有回落」的不变式，
-          // 与流式路径（end.model_fallback=true 才写）一致，避免出现一堆 false
-          ...(msg.model_fallback === true ? { modelFallback: true } : {}),
+          // 与流式路径（end.model_fallback=true 才写）一致，避免出现一堆 false。
+          // answeredBy 取快照里的展示名——配置改名/删除后仍说得清当时是谁答的。
+          ...(msg.generation?.fallback === true
+            ? {
+                modelFallback: {
+                  answeredBy: msg.generation.display_name || msg.generation.model_name
+                }
+              }
+            : {}),
           sources: msg.source_metadata?.map((meta, idx: number) => ({
             source: meta.filename || meta.document_id || 'unknown',
             score: meta.score || 0,

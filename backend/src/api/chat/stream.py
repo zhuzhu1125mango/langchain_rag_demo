@@ -18,6 +18,7 @@ from src.services.rag_chain import RAGChain
 from src.services.reasoning import dedupe_steps
 from src.services.vector_store import VectorStoreManager
 from src.services.session_service import append_session_message
+from src.services.message_payload import build_assistant_message_payload
 from src.services.learning_engine import learning_engine
 from src.services.pipeline.state import set_ab_config, reset_ab_config
 from src.services.chat_run import (
@@ -51,20 +52,6 @@ router = APIRouter(tags=["chat"])
 # B2-3：流式收尾（后台答案校验 + 落库）任务引用集，防止 fire-and-forget 任务被 GC。
 # 客户端在 end 后断连时该任务仍会完成，保证助手消息（含校验警告）落库。
 _stream_finalize_tasks: set = set()
-
-
-def _model_attribution(holder: dict) -> dict:
-    """把模型选择结果转成消息里要存的字段（只保留有值的键）。
-
-    单独抽成纯函数是为了能被直接测：模型归因一旦丢了，「这条答案是谁答的」
-    就永久丢失，而它只能靠历史回看发现问题——在 DB 里翻 JSON 才知道漏了。
-    """
-    extra: dict = {}
-    if holder.get("used"):
-        extra["model_id"] = holder["used"]
-    if holder.get("fallback"):
-        extra["model_fallback"] = True
-    return extra
 
 
 def _reject_run_limit(exc: RunLimitExceeded, session_id) -> HTTPException:
@@ -286,32 +273,22 @@ async def stream_answer(
                 # 被外层 except Exception 吞成"回答已生成但保存失败"。
                 return False
 
-            message_payload = {
-                "id": assistant_message_id,
-                "role": "assistant",
-                "content": full_answer,
-                "sources": sources,
-                "source_metadata": source_metadata,
-                "timestamp": datetime.now().isoformat(),
-                "execution_id": execution_id,
-            }
-            if reasoning:
-                message_payload["reasoning"] = reasoning
-            if thinking:
-                message_payload["thinking"] = thinking
-            # 中断/失败状态随消息持久化：刷新或切回会话时仍能复现
-            # “已停止/生成失败”，而不是只剩一条孤立的用户问题。
-            if stopped:
-                message_payload["stopped"] = True
-            if error:
-                message_payload["error"] = error
-            # 模型归因：按消息存，跟随答案一起持久化（主流做法是「每条消息带 metadata」，
-            # 而不是给会话只记一个模型——同一会话里用户随时可能换模型）。
+            # 形状由 services.message_payload 的契约保证（含生成归因块的版本与快照语义）。
             # 显式传参而不是读闭包：`model_holder` 是 generate() 的局部变量，而本函数
-            # 定义在 stream_answer() 作用域，闭包根本取不到它——一开始就是这么写的，
-            # 被 ruff 的 F821 拦下（否则每次落库都会 NameError，而且只在真实请求里炸，
-            # 单测覆盖不到）。
-            message_payload.update(_model_attribution(model_holder or {}))
+            # 定义在 stream_answer() 作用域，闭包取不到它（曾因此每次落库 NameError）。
+            message_payload = build_assistant_message_payload(
+                message_id=assistant_message_id,
+                content=full_answer,
+                sources=sources,
+                source_metadata=source_metadata,
+                timestamp=datetime.now().isoformat(),
+                reasoning=reasoning,
+                thinking=thinking,
+                execution_id=execution_id,
+                stopped=stopped,
+                error=error,
+                generation=(model_holder or {}).get("generation"),
+            )
             # 原子追加（服务端 jsonb 拼接）
             assistant_msg_count = await append_session_message(db, session.id, message_payload)
 
@@ -605,6 +582,7 @@ async def stream_answer(
         finalize_task.add_done_callback(_stream_finalize_tasks.discard)
 
         # C7：end 事件先发——校验与标题生成均在其后，不再推迟流完成信号
+        served = model_holder.get('generation') or {}
         end_payload = {
             'type': 'end',
             'message_id': assistant_message_id,
@@ -613,9 +591,11 @@ async def stream_answer(
             'answer_type': answer_type,
             'reasoning': final_reasoning,
             # 本条回答由哪个模型产出；用户选了模型却发生回落时 fallback=True，
-            # 前端据此在答案下方给出提示（不静默替换）
-            'model_id': model_holder.get('used') or selected_model_id or None,
-            'model_fallback': bool(model_holder.get('fallback')),
+            # 前端据此在答案下方给出提示（不静默替换）。
+            # model_name 给的是快照里的展示名，前端不必再查目录就能说清「谁答的」。
+            'model_id': served.get('model_id') or selected_model_id or None,
+            'model_name': served.get('display_name') or served.get('model_name') or None,
+            'model_fallback': bool(served.get('fallback')),
         }
         logger.info(f"SSE end payload: {end_payload}")
         yield f"data: {json.dumps(end_payload)}\n\n"

@@ -121,10 +121,14 @@ export interface Message {
   stopped?: boolean
   /**
    * 用户选了模型，但该模型在生成时失败、由默认路由的模型接手作答。
-   * 只作用于本次会话的这条消息（未持久化）：刷新后自行消失，
-   * 因为「这条答案是谁答的」目前没有落到消息记录里。
+   *
+   * 存在即发生（不写 false），`answeredBy` 是当时实际作答模型的展示名——
+   * 来自落库快照，所以配置改名/删除后仍然说得清。与后端
+   * `messages[].generation.fallback` 一一对应。
    */
-  modelFallback?: boolean
+  modelFallback?: {
+    answeredBy?: string
+  }
   /** AM-2：待人工审批的高危工具调用（approval_required 事件）。 */
   approval?: {
     /** 审批 ID（回执接口使用）。 */
