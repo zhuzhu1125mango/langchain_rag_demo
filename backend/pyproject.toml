@@ -72,7 +72,7 @@ dependencies = [
     "tenacity==9.2.1",
     "backoff==2.2.1",
     "aiofiles==25.1.0",
-    "cachetools==7.2.4",
+    "cachetools==8.0.0",
     "python-dateutil==4.0.0",
     "pytz==2026.6",
     "certifi==2026.10.23",
