@@ -1695,6 +1695,9 @@ legacy 路径始终保留，删掉 registry 文件与 DB 配置就退回 env。
 不是只存 id——否则管理员改了 deployment，历史回看会「说现在的话」。
 历史消息没有这个块表示「未记录」，不要当成「用了默认模型」。
 **统计不要查这张表**：`model_usage_daily` 才有按天的 provider × model × task 聚合（含 tokens 与成本）。
+两条管道 id 同源（都是部署 id），能按 `(date, model_id, task)` 对账；但用量按天聚合、没有
+message_id，**单条消息的成本无法回答**——这是 2026-11-17 的明确取舍，不是待修复的缺陷
+（决策与重评条件见 `docs/design/model-provider-registry-2026-10.md` §13）。
 
 ## 9. 故障排查
 

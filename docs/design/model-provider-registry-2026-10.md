@@ -396,3 +396,50 @@ P1 不改 Embedding 的 Milvus schema，只把构造入口收敛到 registry；P
 - 缓存失效：重建/回滚后全量删除 `rag:semcache:*`；意图分类示例向量、Wiki 编译、联网搜索 rerank 兜底的 Embedding 实例按 registry 代次自动刷新。
 - Reranker：`model_manager.get_reranker_model()` 读取可选 `rerank` 路由；`KBReranker` 在 registry 代次变化时重建实例，未配置路由时保持 env 行为。
 - 验证：见 §12.6 末行（后端 1207 passed / 105 skipped；前端 131 passed）。Milvus 重建流程使用 fake client 单测覆盖，未在真实 Milvus 上执行端到端切换。
+
+## 13. 归因与成本的边界（2026-11-17）
+
+模型相关的数据分两条管道，**不要试图把它们直接 join 起来**。
+
+### 13.1 两个管道各回答什么
+
+| 问题 | 数据位置 | 粒度 |
+|---|---|---|
+| 这条回答是哪个模型答的、是不是回落来的 | `sessions.messages[].generation` | 每条消息 |
+| 某天某模型被调了多少次、多少 token、多少钱 | `model_usage_daily` | 天 × provider × model × task |
+
+`generation` 块（schema v1，见 `src/services/message_payload.py`）存的是**快照**：
+`model_id`（回连配置）+ `model_name` / `display_name` / `provider_type`（写入时的真实情况）。
+存快照而不是只用外键，是因为管理员随时会改 deployment 的名字或删掉它——
+历史回看不能「说现在的话」。生产表里早就有同样的现象：
+`legacy-answer/qwen3:4b` 与更早的 `legacy-direct/qwen2.5:3b-instruct` 并存。
+
+### 13.2 实测：两边 id 同源
+
+- 生产 `model_usage_daily` 的 `model_id` 是部署 id（`legacy-answer` / `legacy-direct` / `legacy-fast`），
+  `model_name` 是上游名（`qwen3:4b` / `qwen2.5:3b-instruct`）
+- 容器内实测（替身模型触发记账，只动内存缓冲不落库）：
+  - 正常路径：`usage.model_id` == `generation.model_id` == `legacy-answer`
+  - **回落路径**：用量记**两条**（失败者 + 接手者，供错误率），快照指向接手者并带 `fallback_from`
+  - 未选模型：`selected_by=default`、`fallback=false`，用量照常记账
+
+所以「消息说用了谁」与「账上记了谁」能按 `(date, model_id, task)` 对上；
+但**不能**回答「这一条花了多少钱」——用量是按天聚合，没有 message_id。
+
+### 13.3 决策（2026-11-17）：不做消息级成本
+
+| 选项 | 取舍 |
+|---|---|
+| **A（采用）** 成本按天/按模型看，消息只做归因 | 简单，满足「哪个模型贵、哪个模型慢」的判断 |
+| B 给用量管道加 `run_id` 维度 | 能对到单次请求，但写入量翻倍、要改表与 flush 逻辑 |
+
+选 A 的理由：目前一天几十次调用，B 的收益（逐条成本）没有使用场景；
+而它会明显抬高写入并引入新的失败点。**重新评估的触发条件**：出现
+「按用户/按会话计费」「单条成本异常要定位到具体请求」这类需求时再上 B，
+届时用 `run_id` 而不是 `message_id`（一次请求可能触发多次 LLM 调用）。
+
+### 13.4 因此，写报表时不要这样做
+
+- ❌ `select ... from sessions, jsonb_array_elements(messages)` 之后 join 用量表算成本
+- ❌ 用 `generation.model_name` 去 group by 成本（它是快照，历史会变）
+- ✅ 成本 ← `model_usage_daily`（按 `model_id`）；归因 ← `generation`（按消息）
