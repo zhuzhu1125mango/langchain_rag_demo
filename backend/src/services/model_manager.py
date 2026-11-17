@@ -336,6 +336,22 @@ class ModelManager:
             return None
         return resolved
 
+    def model_supports_reasoning(self, model_id: Optional[str]) -> Optional[bool]:
+        """指定模型是否具备思考能力；查不到时返回 None（不知道就别替人决定）。
+
+        为什么不看 `settings.model.OLLAMA_SUPPORTS_THINKING`：那是「这个部署能接
+        思考参数吗」的总闸，不区分模型。同一 provider 下 qwen3 天生会思考、
+        qwen2.5 完全不会，用全局值判断等于告诉用户「这个模型能开思考」，
+        打开后拿到的却是同一个更慢的回答。
+        """
+        if not model_id:
+            return None
+        try:
+            resolved = self._get_registry().get_model(model_id)
+        except Exception:
+            return None
+        return bool(resolved.model.has("reasoning"))
+
     def build_user_model_group(
         self,
         model_id: str,

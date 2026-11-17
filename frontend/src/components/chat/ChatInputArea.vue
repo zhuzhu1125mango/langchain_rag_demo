@@ -117,13 +117,17 @@
               @update:model-value="emit('update:selectedModelId', $event)"
             />
             <button
-              @click="emit('toggle-deep-thinking')"
+              @click="onToggleDeepThinking"
               :title="deepThinkingTitle"
+              :aria-disabled="deepThinkingDisabled ? 'true' : undefined"
+              :aria-pressed="deepThinkingDisabled ? undefined : deepThinking"
               :class="[
                 'flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-full transition-colors',
-                deepThinking
-                  ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
-                  : 'text-content-muted hover:bg-surface-hover'
+                deepThinkingDisabled
+                  ? 'text-content-subtle opacity-60 cursor-not-allowed'
+                  : deepThinking
+                    ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400'
+                    : 'text-content-muted hover:bg-surface-hover'
               ]"
             >
               <BrainCircuit class="w-3.5 h-3.5" />
@@ -221,6 +225,7 @@
  * @props deepThinking - 深度思考开关（开=模型先推理再回答，关=直接生成）
  * @props deepThinkingLabel - 深度思考按钮文案
  * @props deepThinkingTitle - 深度思考按钮悬停提示
+ * @props deepThinkingDisabled - 当前模型没有思考能力时为 true，开关置灰不可点
  * @props availableModels - 用户可选的模型列表（后端已按 user_selectable + chat 过滤）
  * @props selectedModelId - 当前选中的模型 id（空串=默认模型）
  * @props defaultModelId - 默认模型 id，用于在「默认」项上标出具体是哪个
@@ -261,6 +266,8 @@ const props = defineProps<{
   deepThinking: boolean
   deepThinkingLabel: string
   deepThinkingTitle: string
+  /** 当前模型不具备思考能力：开关置灰、不可点（默认 false，避免老调用方缺省报错） */
+  deepThinkingDisabled?: boolean
   availableModels: AvailableModel[]
   selectedModelId: string
   defaultModelId: string
@@ -331,5 +338,17 @@ function onInput(): void {
 /** 点击发送按钮或按下 Enter 时触发，将发送事件委托给父组件处理。 */
 function onSend(): void {
   emit('send')
+}
+
+/**
+ * 深度思考开关的点击入口。
+ *
+ * 不用 `disabled` 属性而是 `aria-disabled` + 这里拦一道：禁用按钮在多数浏览器里
+ * 不显示 `title`，用户只会看到一个灰掉的开关、不知道为什么灰。现在提示照常可见，
+ * 点击也照样拦得住（键盘 Enter/Space 同样走这里）。
+ */
+function onToggleDeepThinking(): void {
+  if (props.deepThinkingDisabled) return
+  emit('toggle-deep-thinking')
 }
 </script>

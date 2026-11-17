@@ -23,6 +23,12 @@ export interface AvailableModelsResponse {
   models: AvailableModel[]
   /** answer 路由的默认模型 id；路由没配时为空串 */
   default_model_id: string
+  /**
+   * 默认模型是否具备思考能力。单独给一个字段，是因为默认模型可能**没有开放**
+   * 给用户（不在 `models` 里），前端拿不到它的 capabilities；而「不选模型」时
+   * 用的正是它。空 `default_model_id` 时该值无意义，按「未知」处理。
+   */
+  default_supports_reasoning: boolean
   /** 配置来源：database / file / legacy-env，仅用于排查，不展示给用户 */
   source: string
 }

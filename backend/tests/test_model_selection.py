@@ -378,3 +378,88 @@ class TestCatalogDefaultModel:
         body = self._client().get("/api/models/available").json()
 
         assert body["default_model_id"] == "thinking"
+
+
+class TestReasoningCapability:
+    """「这个模型能不能思考」是逐模型的事实，不是全局开关。
+
+    同一 provider 下 qwen3 天生会思考、qwen2.5 完全不会。用全局的
+    `OLLAMA_SUPPORTS_THINKING` 判断，等于告诉用户「这个模型能开深度思考」，
+    打开后拿到的却是同一个更慢的回答——又一次「承诺了没做到」。
+    """
+
+    def test_reasoning_model_true(self, monkeypatch):
+        reg = _Registry([_resolved("qwen3", caps=("chat", "stream", "reasoning"))])
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+
+        assert model_manager.model_supports_reasoning("qwen3") is True
+
+    def test_plain_model_false(self, monkeypatch):
+        reg = _Registry([_resolved("qwen25")])
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+
+        assert model_manager.model_supports_reasoning("qwen25") is False
+
+    def test_unknown_model_returns_none(self, monkeypatch):
+        """查不到就是不知道：返回 None 让调用方沿用默认，而不是断言「不能思考」。"""
+        reg = _Registry([_resolved("qwen25")])
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+
+        assert model_manager.model_supports_reasoning("ghost") is None
+
+    def test_empty_id_returns_none(self, monkeypatch):
+        """未选模型（走默认路由）时不该在这里下结论。"""
+        reg = _Registry([_resolved("qwen25")])
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+
+        assert model_manager.model_supports_reasoning("") is None
+        assert model_manager.model_supports_reasoning(None) is None
+
+
+class TestCatalogDefaultReasoning:
+    """目录要告诉前端「默认模型能不能思考」。
+
+    默认模型可能**没开放**给用户（不在 models 里），前端拿不到它的 capabilities，
+    而「不选模型」时用的正是它。少了这个字段，深度思考开关的状态只能靠猜。
+    """
+
+    @staticmethod
+    def _client():
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from src.api.model_catalog import router
+        from src.auth import get_current_user
+
+        app = FastAPI()
+        app.include_router(router, prefix="/api")
+        app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(user_id="u-1")
+        return TestClient(app)
+
+    @staticmethod
+    def _reg(resolved):
+        class _R:
+            def __init__(self):
+                self.config = SimpleNamespace(models=[resolved.model])
+                self.source = "test"
+
+            def resolve(self, task, **kwargs):
+                return SimpleNamespace(primary=resolved, fallbacks=[], source="test")
+
+        return _R()
+
+    def test_true_when_default_has_reasoning(self, monkeypatch):
+        resolved = _resolved("r1", caps=("chat", "reasoning"))
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: self._reg(resolved))
+
+        body = self._client().get("/api/models/available").json()
+
+        assert body["default_supports_reasoning"] is True
+
+    def test_false_when_default_is_plain_chat(self, monkeypatch):
+        resolved = _resolved("r1")
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: self._reg(resolved))
+
+        body = self._client().get("/api/models/available").json()
+
+        assert body["default_supports_reasoning"] is False

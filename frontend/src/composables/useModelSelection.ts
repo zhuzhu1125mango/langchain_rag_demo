@@ -78,5 +78,28 @@ export function useModelSelection() {
     { immediate: true }
   )
 
-  return { models, defaultModelId, selectedModelId }
+  /**
+   * 本次实际会用的模型。空选择时是「默认模型」——它可能不在 `models` 里
+   * （默认模型本身可以不对用户开放），此时取列表里标了 is_default 的那个来认能力。
+   */
+  const effectiveModel = computed(
+    () => models.value.find(m => m.id === selectedModelId.value) ?? models.value.find(m => m.is_default)
+  )
+
+  /**
+   * 能否开启深度思考：`true` 支持、`false` 不支持、`null` 未知。
+   *
+   * 三态而不是布尔：目录还没回来时把开关灰掉会闪一下，而「未知」和
+   * 「确定不支持」对用户是两件事。只在确知不支持时才禁用，后台也会再兜一层
+   * （`should_think` 对无思考能力的模型强制关闭），所以前端即使猜错也害不了人。
+   */
+  const supportsReasoning = computed<boolean | null>(() => {
+    if (effectiveModel.value) return effectiveModel.value.capabilities.includes('reasoning')
+    if (!catalog.value) return null
+    // 没有默认路由就没有「不选模型时会用谁」这回事，能力无从判断
+    if (!catalog.value.default_model_id) return null
+    return catalog.value.default_supports_reasoning
+  })
+
+  return { models, defaultModelId, selectedModelId, effectiveModel, supportsReasoning }
 }

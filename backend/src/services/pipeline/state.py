@@ -139,13 +139,26 @@ LLM_DIRECT_TEMPLATE = """
 
 
 # 深度思考开关决策（on/off 两态，前端开关透传）
-def should_think(deep_thinking: str = "off") -> Optional[bool]:
+def should_think(
+    deep_thinking: str = "off",
+    *,
+    supports_reasoning: Optional[bool] = None,
+) -> Optional[bool]:
     """深度思考开关决策。
+
+    Args:
+        deep_thinking: 前端开关值。
+        supports_reasoning: 本次实际要用的模型是否具备思考能力。
+            `False` → 强制关闭：模型没有这个能力，开关开着只能得到一个更慢的回答，
+            不会得到「思考」；`None` → 未知（未指定模型 / 注册表查不到），
+            不替用户做决定，沿用全局开关。
 
     Returns:
         True: 开启思考；False: 关闭思考；
         None: 不干预，使用模型默认行为（模型不支持思考时）。
     """
+    if supports_reasoning is False:
+        return False
     if not settings.model.OLLAMA_SUPPORTS_THINKING:
         return None
     return deep_thinking == "on"

@@ -37,9 +37,12 @@ async def list_available_models(current_user: CurrentUser = Depends(get_current_
     # 生成走 `answer_direct` 路由；只有它缺失时才回退到 `answer`（思考路径）。
     # 标错不会报错，只会让人以为默认在用的是思考模型——实测两者延迟差 3 倍以上。
     default_model_id = ""
+    default_supports_reasoning = False
     for task in ("answer_direct", "answer"):
         try:
-            default_model_id = registry.resolve(task).primary.model.id
+            primary = registry.resolve(task).primary.model
+            default_model_id = primary.id
+            default_supports_reasoning = primary.has("reasoning")
             break
         except Exception:  # noqa: BLE001 —— 单条路由缺失不影响目录可用，继续试下一条
             logger.warning("模型目录：%s 路由解析失败", task)
@@ -58,5 +61,8 @@ async def list_available_models(current_user: CurrentUser = Depends(get_current_
     return {
         "models": models,
         "default_model_id": default_model_id,
+        # 默认模型可能没开放给用户（不在 models 里），前端就拿不到它的能力；
+        # 而「不选模型」时用的正是它。少了这个字段，深度思考开关的状态只能靠猜。
+        "default_supports_reasoning": default_supports_reasoning,
         "source": registry.source,
     }

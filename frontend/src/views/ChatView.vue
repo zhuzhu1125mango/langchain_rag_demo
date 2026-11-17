@@ -78,6 +78,7 @@
         :deep-thinking="deepThinking"
         :deep-thinking-label="deepThinkingLabel"
         :deep-thinking-title="deepThinkingTitle"
+        :deep-thinking-disabled="deepThinkingDisabled"
         :available-models="availableModels"
         :selected-model-id="selectedModelId"
         :default-model-id="defaultModelId"
@@ -105,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useKnowledgeBases } from '@/queries/kb'
@@ -141,19 +142,44 @@ const useWebSearch = ref(false)
 const searchStatus = ref<'idle' | 'searching' | 'done' | 'failed'>('idle')
 /** 深度思考开关：开=模型先推理再回答，关=直接生成回答（对齐主流产品交互） */
 const deepThinking = ref(false)
-const deepThinkingLabel = computed(() => (deepThinking.value ? '深度思考·开' : '深度思考·关'))
-const deepThinkingTitle = computed(() =>
-  deepThinking.value
-    ? '已开启深度思考：模型先推理再回答，适合复杂问题'
-    : '开启深度思考：模型先推理再回答，适合复杂问题'
-)
-function toggleDeepThinking(): void {
-  deepThinking.value = !deepThinking.value
-}
 
 // 用户可选模型：列表来自 /api/models/available，选择按用户存在 localStorage。
 // 管理员的开放范围决定列表内容，前端只决定「界面上能不能点」——真校验在后端。
-const { models: availableModels, defaultModelId, selectedModelId } = useModelSelection()
+const { models: availableModels, defaultModelId, selectedModelId, supportsReasoning } =
+  useModelSelection()
+
+/**
+ * 只有具备思考能力的模型才允许开这个开关。
+ *
+ * 三态（支持/不支持/未知）里只在**确知不支持**时禁用：目录还没回来就灰掉会闪一下，
+ * 而「未知」本来就该沿用默认行为。后端 `should_think` 对无思考能力的模型强制关闭，
+ * 所以这里即使判断不出，也不会真的把一个没有思考能力的模型推去「思考」。
+ */
+const deepThinkingDisabled = computed(() => supportsReasoning.value === false)
+
+const deepThinkingLabel = computed(() => {
+  if (deepThinkingDisabled.value) return '深度思考·不支持'
+  return deepThinking.value ? '深度思考·开' : '深度思考·关'
+})
+const deepThinkingTitle = computed(() => {
+  if (deepThinkingDisabled.value) {
+    return '当前模型不具备思考能力，选一个支持思考的模型才能开启'
+  }
+  return deepThinking.value
+    ? '已开启深度思考：模型先推理再回答，适合复杂问题'
+    : '开启深度思考：模型先推理再回答，适合复杂问题'
+})
+
+// 切到不支持的模型时把开关复位：留着一个「开着但点不亮」的状态，
+// 换回支持思考的模型时会莫名其妙地又变成开启。
+watch(deepThinkingDisabled, disabled => {
+  if (disabled) deepThinking.value = false
+})
+
+function toggleDeepThinking(): void {
+  if (deepThinkingDisabled.value) return
+  deepThinking.value = !deepThinking.value
+}
 
 // 子组件实例引用：用于调用子组件暴露的方法
 const messageListRef = ref<InstanceType<typeof ChatMessageList> | null>(null)
