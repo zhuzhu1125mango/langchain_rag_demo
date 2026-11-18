@@ -1700,6 +1700,25 @@ legacy 路径始终保留，删掉 registry 文件与 DB 配置就退回 env。
   发送 `chat_template_kwargs.enable_thinking=false`（vLLM/SGLang 的 Qwen3 用它）。
   o1/o3/o4 走 `reasoning_effort`。
 
+  **当所有模型都不可控时（LM Studio 就是这种情况）**：开关恒为灰，此时产品上
+  退化成「用模型当档位」——选择器选项直接标出 `· 会思考` / `· 直答`，
+  「选模型」即「选要不要思考」。这不是妥协的文案，而是事实：思考能否关闭
+  由推理服务决定，模型选择是这个部署里唯一可用的开关。
+
+  实测记录（LM Studio，qwen3-4b，`temperature=0`、每个用例换问句以排除缓存）：
+
+  | 请求体 | reasoning_tokens |
+  |---|---|
+  | 不发 | 188 |
+  | `chat_template_kwargs: {enable_thinking: false}`（`/v1` 与 `/api/v0` 都试过） | 130 |
+  | `reasoning_effort: "none"` | 283 |
+  | 提示词追加 `/no_think` | 314 |
+
+  全部照样思考 → 该端点不转发这些字段，只能判 `always_on`。要让开关真正可用，
+  需要一个认参数的端点：`llama-server`（`--jinja`，请求体收
+  `chat_template_kwargs` 与 `reasoning_effort`）或 Ollama 的 `think`；接上之后
+  把该模型的 `reasoning_control` 改成 `switchable`，界面立刻变可点，代码不用动。
+
 **两个失败语义要分清**：
 
 | 时机 | 行为 |

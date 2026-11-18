@@ -20,7 +20,7 @@
         :key="m.id"
         :value="m.id"
       >
-        {{ m.display_name }}
+        {{ optionLabel(m) }}
       </option>
     </select>
     <ChevronDown class="pointer-events-none absolute right-2 w-3 h-3 text-content-muted" />
@@ -39,6 +39,8 @@
  *   所以永远保留第一项。
  * - 只有一个可选项且它就是默认模型时不渲染：一个只有一个选项的下拉是噪音。
  *   但若「唯一可选项 ≠ 默认模型」，仍然渲染——否则用户永远选不到那个模型。
+ * - 选项末尾标出思考档位（「会思考」/「直答」）：本地部署里思考能否关闭取决于模型，
+ *   于是「选模型」事实上就是「选要不要思考」。不标出来，用户只能靠猜谁快谁准。
  */
 import { computed } from 'vue'
 import { ChevronDown, Cpu } from '@lucide/vue'
@@ -57,13 +59,30 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
 }>()
 
-/** 默认模型的展示名：默认模型可能本身不可选，所以不能只从 models 里找 */
-const defaultModelName = computed(() => {
-  const hit = props.models.find(m => m.id === props.defaultModelId)
-  return hit?.display_name || '默认模型'
-})
+/** 默认模型条目：默认模型可能本身不可选，所以不能只从 models 里找 */
+const defaultModel = computed(() => props.models.find(m => m.id === props.defaultModelId))
 
-const defaultOptionLabel = computed(() => `默认 · ${defaultModelName.value}`)
+const defaultModelName = computed(() => defaultModel.value?.display_name || '默认模型')
+
+/**
+ * 档位后缀：在这个部署里「选模型」就是「选要不要思考」，不写出来用户看不出来。
+ *
+ * `switchable` 不加后缀——那种模型由工具条上的深度思考开关控制，再加文字是重复。
+ * `always_on` 与 `off` 都不可控，所以必须靠模型名自己说明白。
+ */
+function tierSuffix(control?: string): string {
+  if (control === 'always_on') return ' · 会思考'
+  if (control === 'off') return ' · 直答'
+  return ''
+}
+
+function optionLabel(m: AvailableModel): string {
+  return `${m.display_name}${tierSuffix(m.thinking_control)}`
+}
+
+const defaultOptionLabel = computed(
+  () => `默认 · ${defaultModelName.value}${tierSuffix(defaultModel.value?.thinking_control)}`
+)
 
 /** 唯一可选项恰好就是默认模型时隐藏：没有第二个选择，控件只是噪音。 */
 const visible = computed(() => {
@@ -72,11 +91,12 @@ const visible = computed(() => {
   return true
 })
 
-const title = computed(() =>
-  props.modelValue
+const title = computed(() => {
+  const current = props.modelValue
     ? `当前使用：${props.models.find(m => m.id === props.modelValue)?.display_name ?? props.modelValue}\n切换后对下一条消息生效`
     : `当前使用默认模型：${defaultModelName.value}\n选择其它模型只影响你之后发送的消息`
-)
+  return `${current}\n标「会思考」的模型总会先推理（更慢、更适合复杂问题）；标「直答」的直接回答`
+})
 
 /**
  * 选中态与未选中态的样式必须**整串二选一**，不能把公共部分写在 `class`、

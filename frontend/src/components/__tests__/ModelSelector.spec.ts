@@ -3,14 +3,21 @@ import { mount } from '@vue/test-utils'
 import ModelSelector from '../chat/ModelSelector.vue'
 import type { AvailableModel } from '@/queries/models'
 
-function model(id: string, displayName: string, isDefault = false): AvailableModel {
+// 默认给 `switchable`：思考由工具条上的开关控制，选项文案不带后缀，
+// 这样「可见性/交互」那几组断言只关心选择器本身，不被档位文字干扰。
+function model(
+  id: string,
+  displayName: string,
+  isDefault = false,
+  control: AvailableModel['thinking_control'] = 'switchable'
+): AvailableModel {
   return {
     id,
     display_name: displayName,
-    capabilities: ['chat', 'stream'],
+    capabilities: control === 'off' ? ['chat', 'stream'] : ['chat', 'stream', 'reasoning'],
     context_window: 32768,
     is_default: isDefault,
-    thinking_control: 'off'
+    thinking_control: control
   }
 }
 
@@ -80,5 +87,31 @@ describe('ModelSelector 交互', () => {
     expect(byDefault).toContain('text-content-muted')
     // 互斥：两个状态不能同时带上对方的主色/灰字，否则谁生效取决于 CSS 产物顺序
     expect(byDefault).not.toContain('text-primary-600')
+  })
+})
+
+describe('ModelSelector 档位标注', () => {
+  it('总会思考的模型标「会思考」——否则用户只能靠猜谁慢', () => {
+    const wrapper = mountSelector([model('m1', 'Qwen3 4B', true, 'always_on'), model('m2', 'X')], '', 'm1')
+
+    expect(wrapper.findAll('option').map(o => o.text())).toContain('Qwen3 4B · 会思考')
+  })
+
+  it('不会思考的模型标「直答」', () => {
+    const wrapper = mountSelector([model('m1', 'Qwen2.5 7B', true, 'off'), model('m2', 'X')], '', 'm1')
+
+    expect(wrapper.findAll('option').map(o => o.text())).toContain('Qwen2.5 7B · 直答')
+  })
+
+  it('可开关的模型不加后缀：档位由开关控制，再写一遍是重复', () => {
+    const wrapper = mountSelector([model('m1', 'Qwen3 4B', true, 'switchable'), model('m2', 'X')], '', 'm1')
+
+    expect(wrapper.findAll('option').map(o => o.text())).toContain('Qwen3 4B')
+  })
+
+  it('「默认」项也要带档位，否则默认档位无从得知', () => {
+    const wrapper = mountSelector([model('m1', 'Qwen2.5 7B', true, 'off'), model('m2', 'X')], '', 'm1')
+
+    expect(wrapper.findAll('option')[0]?.text()).toBe('默认 · Qwen2.5 7B · 直答')
   })
 })

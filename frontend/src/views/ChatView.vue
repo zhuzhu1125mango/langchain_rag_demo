@@ -162,17 +162,19 @@ const deepThinkingDisabled = computed(() => {
   return control !== null && control !== 'switchable'
 })
 
+// 不可控时这里不再是一个「开关」，而是一个说明：档位由模型决定。
+// 文案必须指向下一步动作（去选择器换模型），否则灰掉的按钮只会让人困惑。
 const deepThinkingLabel = computed(() => {
-  if (thinkingControl.value === 'always_on') return '深度思考·不可关闭'
+  if (thinkingControl.value === 'always_on') return '深度思考·始终开'
   if (deepThinkingDisabled.value) return '深度思考·不支持'
   return deepThinking.value ? '深度思考·开' : '深度思考·关'
 })
 const deepThinkingTitle = computed(() => {
   if (thinkingControl.value === 'always_on') {
-    return '该模型总是先思考，且无法通过接口关闭，因此开关不可用'
+    return '该模型总会先推理，且接口无法关闭；想要直答请选择标注「直答」的模型'
   }
   if (deepThinkingDisabled.value) {
-    return '当前模型不具备思考能力，选一个支持思考的模型才能开启'
+    return '当前模型直接回答；想让它先推理请选择标注「会思考」的模型'
   }
   return deepThinking.value
     ? '已开启深度思考：模型先推理再回答，适合复杂问题'
