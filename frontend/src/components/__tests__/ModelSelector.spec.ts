@@ -98,7 +98,11 @@ describe('ModelSelector 档位标注', () => {
   })
 
   it('不会思考的模型标「直答」', () => {
-    const wrapper = mountSelector([model('m1', 'Qwen2.5 7B', true, 'off'), model('m2', 'X')], '', 'm1')
+    const wrapper = mountSelector(
+      [model('m1', 'Qwen2.5 7B', true, 'off'), model('m2', 'X'), model('m3', 'Y', false, 'always_on')],
+      '',
+      'm1'
+    )
 
     expect(wrapper.findAll('option').map(o => o.text())).toContain('Qwen2.5 7B · 直答')
   })
@@ -110,8 +114,76 @@ describe('ModelSelector 档位标注', () => {
   })
 
   it('「默认」项也要带档位，否则默认档位无从得知', () => {
-    const wrapper = mountSelector([model('m1', 'Qwen2.5 7B', true, 'off'), model('m2', 'X')], '', 'm1')
+    const wrapper = mountSelector(
+      [model('m1', 'Qwen2.5 7B', true, 'off'), model('m2', 'X'), model('m3', 'Y', false, 'always_on')],
+      '',
+      'm1'
+    )
 
     expect(wrapper.findAll('option')[0]?.text()).toBe('默认 · Qwen2.5 7B · 直答')
+  })
+})
+
+describe('ModelSelector 两档点击即切', () => {
+  const direct = () => model('m1', 'Qwen2.5 7B', true, 'off')
+  const thinking = () => model('m2', 'Qwen3 4B', false, 'always_on')
+
+  it('两个档位互斥时用按钮，而不是下拉', () => {
+    const wrapper = mountSelector([direct(), thinking()], '', 'm1')
+
+    expect(wrapper.find('button[data-tier]').exists()).toBe(true)
+    expect(wrapper.find('select').exists()).toBe(false)
+  })
+
+  it('按钮上显示当前档位，而不是模型名', () => {
+    const wrapper = mountSelector([direct(), thinking()], '', 'm1')
+    expect(wrapper.find('button[data-tier]').text()).toBe('直答')
+
+    const swapped = mountSelector([direct(), thinking()], 'm2', 'm1')
+    expect(swapped.find('button[data-tier]').text()).toBe('会思考')
+  })
+
+  it('点一下切到「当前不是的那个」，再点切回来', async () => {
+    const wrapper = mountSelector([direct(), thinking()], '', 'm1')
+
+    await wrapper.find('button[data-tier]').trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['m2'])
+  })
+
+  it('当前已是思考档时，点击回到直答档', async () => {
+    const wrapper = mountSelector([direct(), thinking()], 'm2', 'm1')
+
+    await wrapper.find('button[data-tier]').trigger('click')
+    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual(['m1'])
+  })
+
+  it('两个模型都是直答时退回下拉：按钮上「直答↔直答」没有意义', () => {
+    const wrapper = mountSelector(
+      [model('m1', 'Qwen2.5 7B', true, 'off'), model('m2', 'Qwen2.5 3B', false, 'off')],
+      '',
+      'm1'
+    )
+
+    expect(wrapper.find('button[data-tier]').exists()).toBe(false)
+    expect(wrapper.find('select').exists()).toBe(true)
+  })
+
+  it('多于两个模型时退回下拉：没法用「另一个」指代', () => {
+    const wrapper = mountSelector(
+      [model('m1', 'A', true, 'off'), model('m2', 'B', false, 'off'), thinking()],
+      '',
+      'm1'
+    )
+
+    expect(wrapper.find('button[data-tier]').exists()).toBe(false)
+    expect(wrapper.find('select').exists()).toBe(true)
+  })
+
+  it('悬停提示说清「当前是哪个模型、点了会变成哪个」', () => {
+    const wrapper = mountSelector([direct(), thinking()], '', 'm1')
+    const title = wrapper.find('button[data-tier]').attributes('title') ?? ''
+
+    expect(title).toContain('Qwen2.5 7B')
+    expect(title).toContain('Qwen3 4B')
   })
 })

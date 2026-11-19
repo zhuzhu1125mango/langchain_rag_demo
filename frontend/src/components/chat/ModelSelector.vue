@@ -4,26 +4,41 @@
     class="relative flex items-center"
     :title="title"
   >
-    <Cpu
-      class="pointer-events-none absolute left-2.5 w-3.5 h-3.5"
-      :class="modelValue ? 'text-primary-600 dark:text-primary-400' : 'text-content-muted'"
-    />
-    <select
-      :value="modelValue"
-      aria-label="选择回答使用的模型"
-      :class="selectClass"
-      @change="onChange"
+    <!-- 只有两个互斥档位时，下拉是多余的：一次点击就能换档，还省掉「打开-选择-收起」三步 -->
+    <button
+      v-if="isTierToggle"
+      type="button"
+      :class="toggleClass"
+      :title="toggleTitle"
+      :aria-label="toggleLabel"
+      :data-tier="currentTier"
+      @click="onToggleTier"
     >
-      <option value="">{{ defaultOptionLabel }}</option>
-      <option
-        v-for="m in models"
-        :key="m.id"
-        :value="m.id"
+      <component :is="currentTier === 'off' ? Zap : BrainCircuit" class="w-3.5 h-3.5" />
+      <span>{{ currentTierLabel }}</span>
+    </button>
+    <template v-else>
+      <Cpu
+        class="pointer-events-none absolute left-2.5 w-3.5 h-3.5"
+        :class="modelValue ? 'text-primary-600 dark:text-primary-400' : 'text-content-muted'"
+      />
+      <select
+        :value="modelValue"
+        aria-label="选择回答使用的模型"
+        :class="selectClass"
+        @change="onChange"
       >
-        {{ optionLabel(m) }}
-      </option>
-    </select>
-    <ChevronDown class="pointer-events-none absolute right-2 w-3 h-3 text-content-muted" />
+        <option value="">{{ defaultOptionLabel }}</option>
+        <option
+          v-for="m in models"
+          :key="m.id"
+          :value="m.id"
+        >
+          {{ optionLabel(m) }}
+        </option>
+      </select>
+      <ChevronDown class="pointer-events-none absolute right-2 w-3 h-3 text-content-muted" />
+    </template>
   </div>
 </template>
 
@@ -41,9 +56,12 @@
  *   但若「唯一可选项 ≠ 默认模型」，仍然渲染——否则用户永远选不到那个模型。
  * - 选项末尾标出思考档位（「会思考」/「直答」）：本地部署里思考能否关闭取决于模型，
  *   于是「选模型」事实上就是「选要不要思考」。不标出来，用户只能靠猜谁快谁准。
+ * - **恰好两个互斥档位时改成「点击即切」的按钮**：二元选择用下拉要三步
+ *   （打开-选-收起），按钮一步就够。多于两个、或两个档位相同，仍用下拉——
+ *   按钮上「直答↔直答」没有意义，而「另一个」在多选项里也无法指代。
  */
 import { computed } from 'vue'
-import { ChevronDown, Cpu } from '@lucide/vue'
+import { BrainCircuit, ChevronDown, Cpu, Zap } from '@lucide/vue'
 import type { AvailableModel } from '@/queries/models'
 
 const props = defineProps<{
@@ -97,6 +115,72 @@ const title = computed(() => {
     : `当前使用默认模型：${defaultModelName.value}\n选择其它模型只影响你之后发送的消息`
   return `${current}\n标「会思考」的模型总会先推理（更慢、更适合复杂问题）；标「直答」的直接回答\n快捷键 Alt+M 依次切换`
 })
+
+/** 档位名：界面只说档位，模型名放 tooltip——「用哪个模型」用户不关心，关心的是快还是准 */
+const TIER_LABEL: Record<string, string> = {
+  off: '直答',
+  always_on: '会思考',
+  switchable: '会思考'
+}
+
+/** 当前档位对应的模型：空选择时就是默认模型；默认模型不在列表时取第一项 */
+const currentModel = computed(
+  () =>
+    props.models.find(m => m.id === props.modelValue) ??
+    props.models.find(m => m.id === props.defaultModelId) ??
+    props.models[0]
+)
+
+const otherModel = computed(() => props.models.find(m => m.id !== currentModel.value?.id))
+
+const currentTier = computed(() => currentModel.value?.thinking_control ?? 'off')
+const currentTierLabel = computed(() => TIER_LABEL[currentTier.value] ?? '直答')
+
+/**
+ * 什么时候用「点击即切」而不是下拉。
+ *
+ * 两个条件的组合，不是数量本身：
+ * 1. 恰好两个可选项——多一个就没法用「另一个」来指代；
+ * 2. 两者档位不同——两个都是直答时，按钮上「直答↔直答」毫无意义。
+ * 不满足就退回下拉，宁可多两次点击，也不要一个说不清状态的按钮。
+ */
+const isTierToggle = computed(() => {
+  if (props.models.length !== 2) return false
+  const [a, b] = props.models
+  if (!a || !b) return false
+  return (a.thinking_control === 'off') !== (b.thinking_control === 'off')
+})
+
+const toggleLabel = computed(
+  () => `当前档位：${currentTierLabel.value}，点击切换到${TIER_LABEL[otherModel.value?.thinking_control ?? 'off']}`
+)
+
+const toggleTitle = computed(() => {
+  const current = currentModel.value
+  const other = otherModel.value
+  if (!current || !other) return toggleLabel.value
+  return `当前：${current.display_name}（${TIER_LABEL[current.thinking_control] ?? '直答'}）\n点击切换到：${other.display_name}（${TIER_LABEL[other.thinking_control] ?? '直答'}）\n快捷键 Alt+M 也可以切换`
+})
+
+/**
+ * 按钮样式沿用下拉的两个状态：当前用的是**非默认**模型时高亮，
+ * 用默认模型时保持中性。这样「我改过档位」和「我一直用默认」能一眼区分。
+ */
+const toggleClass = computed(() => {
+  const base =
+    'flex items-center gap-1.5 rounded-full pl-2.5 pr-3 py-1.5 text-xs cursor-pointer ' +
+    'transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500'
+  return props.modelValue
+    ? `${base} bg-primary-50 dark:bg-primary-900/30 text-primary-600 dark:text-primary-400 hover:bg-primary-100`
+    : `${base} text-content-muted hover:bg-surface-hover`
+})
+
+/** 点一下换另一个：不记忆方向，永远切到「当前不是的那个」 */
+function onToggleTier(): void {
+  const other = otherModel.value
+  if (!other) return
+  emit('update:modelValue', other.id)
+}
 
 /**
  * 选中态与未选中态的样式必须**整串二选一**，不能把公共部分写在 `class`、
