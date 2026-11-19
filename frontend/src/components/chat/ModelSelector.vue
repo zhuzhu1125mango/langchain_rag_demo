@@ -95,7 +95,7 @@ const title = computed(() => {
   const current = props.modelValue
     ? `当前使用：${props.models.find(m => m.id === props.modelValue)?.display_name ?? props.modelValue}\n切换后对下一条消息生效`
     : `当前使用默认模型：${defaultModelName.value}\n选择其它模型只影响你之后发送的消息`
-  return `${current}\n标「会思考」的模型总会先推理（更慢、更适合复杂问题）；标「直答」的直接回答`
+  return `${current}\n标「会思考」的模型总会先推理（更慢、更适合复杂问题）；标「直答」的直接回答\n快捷键 Alt+M 依次切换`
 })
 
 /**

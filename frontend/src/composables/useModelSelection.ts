@@ -104,5 +104,19 @@ export function useModelSelection() {
     return catalog.value.default_thinking_control || null
   })
 
-  return { models, defaultModelId, selectedModelId, effectiveModel, thinkingControl }
+  /**
+   * 循环顺序里的下一个模型：默认 → 各可选模型 → 回到默认。
+   *
+   * 抽成纯函数是为了能直接测：快捷键绑定本身很难测，但「循环顺序对不对、
+   * 遇到已失效的 id 会不会卡住」是这个功能里最容易错的部分。
+   */
+  function nextModelId(): string {
+    const order = ['', ...models.value.map(m => m.id)]
+    const index = order.indexOf(selectedModelId.value)
+    // 选中的模型已被管理员关掉时 indexOf 返回 -1，下一步回到默认而不是卡住
+    if (index === -1) return ''
+    return order[(index + 1) % order.length] ?? ''
+  }
+
+  return { models, defaultModelId, selectedModelId, effectiveModel, thinkingControl, nextModelId }
 }

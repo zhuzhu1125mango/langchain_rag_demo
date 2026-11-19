@@ -92,7 +92,7 @@
         @toggle-kb-id="toggleKBById"
         @toggle-web-search="useWebSearch = !useWebSearch"
         @toggle-deep-thinking="toggleDeepThinking"
-        @update:selected-model-id="selectedModelId = $event"
+        @update:selected-model-id="changeModel"
       />
     </div>
 
@@ -106,7 +106,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore } from '@/stores/chat'
 import { useKnowledgeBases } from '@/queries/kb'
@@ -119,6 +119,7 @@ import ChatMessageList from '@/components/chat/ChatMessageList.vue'
 import ChatInputArea from '@/components/chat/ChatInputArea.vue'
 import { useChatStream } from '@/composables/useChatStream'
 import { useModelSelection } from '@/composables/useModelSelection'
+import { useToast } from '@/composables/useToast'
 import { useChatAssist } from '@/composables/useChatAssist'
 import { useSessionLoader } from '@/composables/useSessionLoader'
 import { useMessageInteractions } from '@/composables/useMessageInteractions'
@@ -134,6 +135,7 @@ import { useMessageInteractions } from '@/composables/useMessageInteractions'
  */
 
 const chatStore = useChatStore()
+const toast = useToast()
 const router = useRouter()
 const questionInput = ref('')
 const showKBSelector = ref(false)
@@ -145,8 +147,57 @@ const deepThinking = ref(false)
 
 // 用户可选模型：列表来自 /api/models/available，选择按用户存在 localStorage。
 // 管理员的开放范围决定列表内容，前端只决定「界面上能不能点」——真校验在后端。
-const { models: availableModels, defaultModelId, selectedModelId, thinkingControl } =
-  useModelSelection()
+const {
+  models: availableModels,
+  defaultModelId,
+  selectedModelId,
+  thinkingControl,
+  nextModelId
+} = useModelSelection()
+
+/** 档位后缀（与选择器文案一致）：toast 里也要说清「会思考」还是「直答」 */
+function tierHint(control: string | null | undefined): string {
+  if (control === 'always_on') return '（会思考）'
+  if (control === 'off') return '（直答）'
+  return ''
+}
+
+/**
+ * 切换模型并给出反馈。
+ *
+ * 为什么必须有这条 toast：模型是这个产品里的「档位」，切完没有任何反馈，
+ * 用户只能靠盯着选择器的小字确认；而流式回答进行中切换时，更容易误以为
+ * 当前这条回答会跟着变（实际只影响下一条）。
+ */
+function changeModel(modelId: string): void {
+  if (modelId === selectedModelId.value) return
+  selectedModelId.value = modelId
+  const name = availableModels.value.find(m => m.id === modelId)?.display_name
+    ?? availableModels.value.find(m => m.is_default)?.display_name
+    ?? '默认模型'
+  toast.info(
+    `已切换到 ${name}${modelId === '' ? '（默认）' : ''}${tierHint(thinkingControl.value)}`,
+    chatStore.isTyping ? '当前回答不受影响，下一条消息生效' : undefined
+  )
+}
+
+/**
+ * 快捷键 Alt+M：按「默认 → 各模型 → 默认」循环切换。
+ *
+ * 加 `preventDefault` 是因为 macOS 上 Option+M 会输入字符 µ；
+ * 中文输入法组合中（isComposing）不拦截，否则会和候选词选择打架。
+ */
+function onModelShortcut(e: KeyboardEvent): void {
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.isComposing) return
+  if (e.key.toLowerCase() !== 'm') return
+  e.preventDefault()
+  const next = nextModelId()
+  if (next === selectedModelId.value) return
+  changeModel(next)
+}
+
+onMounted(() => window.addEventListener('keydown', onModelShortcut))
+onBeforeUnmount(() => window.removeEventListener('keydown', onModelShortcut))
 
 /**
  * 只有**思考可关**的模型才允许动这个开关。

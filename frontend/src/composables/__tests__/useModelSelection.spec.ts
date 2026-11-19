@@ -10,7 +10,7 @@
  * `default_thinking_control`。
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { ref, type Ref } from 'vue'
+import { ref, nextTick, type Ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
 
 const catalog: Ref<unknown> = ref(null)
@@ -130,5 +130,100 @@ describe('useModelSelection.thinkingControl', () => {
     const { thinkingControl } = useModelSelection()
 
     expect(thinkingControl.value).toBeNull()
+  })
+})
+
+describe('useModelSelection.nextModelId', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false
+    }))
+    setActivePinia(createPinia())
+    localStorage.clear()
+    catalog.value = null
+    isSuccess.value = false
+  })
+
+  function seed(): ReturnType<typeof useModelSelection> {
+    setCatalog({
+      models: [model('a', 'switchable'), model('b', 'off', true)],
+      default_model_id: 'b',
+      default_thinking_control: 'off'
+    })
+    return useModelSelection()
+  }
+
+  it('按「默认 → 各模型 → 默认」循环', () => {
+    const h = seed()
+
+    expect(h.nextModelId()).toBe('a')
+    h.selectedModelId.value = 'a'
+    expect(h.nextModelId()).toBe('b')
+    h.selectedModelId.value = 'b'
+    expect(h.nextModelId()).toBe('')
+  })
+
+  it('选中的模型已被关掉（不在列表里）时回到默认，而不是卡住', () => {
+    const h = seed()
+    h.selectedModelId.value = 'removed'
+
+    expect(h.nextModelId()).toBe('')
+  })
+
+  it('没有可选模型时只有默认一项，切换是空操作', () => {
+    setCatalog({ models: [], default_model_id: '', default_thinking_control: '' })
+    const h = useModelSelection()
+
+    expect(h.nextModelId()).toBe('')
+  })
+})
+
+describe('选择记忆', () => {
+  beforeEach(() => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false
+    }))
+    setActivePinia(createPinia())
+    localStorage.clear()
+    catalog.value = {
+      models: [model('a', 'switchable'), model('b', 'off', true)],
+      default_model_id: 'b',
+      default_thinking_control: 'off'
+    }
+    isSuccess.value = true
+  })
+
+  it('选择落盘后，重新创建组合式函数仍读回同一个模型', async () => {
+    const first = useModelSelection()
+    first.selectedModelId.value = 'a'
+    await nextTick()
+
+    const second = useModelSelection()
+
+    expect(second.selectedModelId.value).toBe('a')
+  })
+
+  it('切回默认时删键而不是存空串——否则「默认」和「没选过」会变成两种状态', async () => {
+    const first = useModelSelection()
+    first.selectedModelId.value = 'a'
+    await nextTick()
+    first.selectedModelId.value = ''
+    await nextTick()
+
+    expect(Object.keys(localStorage)).toHaveLength(0)
   })
 })
