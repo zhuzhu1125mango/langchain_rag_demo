@@ -1684,7 +1684,7 @@ legacy 路径始终保留，删掉 registry 文件与 DB 配置就退回 env。
   |---|---|---|
   | `off` | 模型不会思考 | 置灰「深度思考·不支持」 |
   | `switchable` | 能开能关 | 可点，默认关 |
-  | `always_on` | 会思考但关不掉 | 置灰「深度思考·不可关闭」 |
+  | `always_on` | 会思考但关不掉 | 置灰「深度思考·始终开」 |
 
   判断依据是**逐模型的事实**，不是全局 `OLLAMA_SUPPORTS_THINKING`——后者只说明这个部署
   接受思考参数。同 provider 下 qwen3 会思考、qwen2.5 不会，而 qwen3 在 LM Studio 上
@@ -1741,8 +1741,72 @@ legacy 路径始终保留，删掉 registry 文件与 DB 配置就退回 env。
 message_id，**单条消息的成本无法回答**——这是 2026-11-17 的明确取舍，不是待修复的缺陷
 （决策与重评条件见 `docs/design/model-provider-registry-2026-10.md` §13）。
 
-## 9. 故障排查
+### 7.11 本地推理服务的冷启动与并发加载（LM Studio 实测，2026-11-23）
 
+本机 LM Studio 上量到的三个事实，决定了本地模型该怎么放：
+
+| 场景 | 结果 | 说明 |
+|---|---|---|
+| 单个模型连打 5 次（3B） | **5/5 成功**，首次 3.9~6.4s，之后 0.08s | 首次是加载，不是推理 |
+| 清空驻留后，7B / Qwen3 / 3B / bge-m3 **同时**请求 | **3/4 失败**：`InternalServerError` 500 + `Failed to load model` 400 | 只有抢到加载权的那个成功 |
+| 三个 chat 模型都 `lms load` 常驻后，重跑同一并发探针 | **4/4 成功** | 无加载窗口，就不再 500 |
+
+根因不是模型本身：**LM Studio 不能并发加载模型**——落在加载窗口里的请求直接 500
+（不是排队等一等）。串行加载是可以的（实测 7B 驻留时再加载 3B 能成），但两个模型会
+互相挤占内存，加载时间从 3.9s 涨到 5.9~6.4s。而一次真实问答恰好要三个模型接力——
+embedding（意图分类）→ 3B（意图路由）→ 7B（生成）——所以**冷启动后的第一个问题最容易踩到**，
+而且它不报错，只是静默降级成 `direct_llm`：
+
+```
+意图路由 LLM 调用超时 timeout=15.0
+意图路由: mode=direct_llm, reason=LLM 路由失败，降级为直接回答
+```
+
+「降级成直接回答」意味着**这一轮绕过了知识库检索**，用户只看到「回答没有引用来源」。
+
+实测（2026-11-23，冷启动 + 显式选知识库）确认这条链路是通的：`意图路由: mode=hybrid`、
+`answer_type=knowledge_base`、`sources=3`——即冷启动不再吃掉检索。代价是首字延迟，
+冷启动那一轮检索 7.7s、生成 17.7s。
+
+#### 7.11.1 超时值必须大于冷加载时间
+
+`INTENT_ROUTER_LLM_TIMEOUT` 默认已由 5.0 提到 **15.0**（`backend/src/config.py`）。
+因为 3B 冷加载实测 **3.9~6.4s**（空闲 3.9s；7B 同时驻留、内存吃紧时 5.9~6.4s）：
+5 秒这条线正好跨在冷加载时间上，于是「有时降级、有时不降级」——间歇性故障最难查，
+用户只看到「这次回答怎么没引用来源」。也不要盲目调大——2026-10 曾有 60s 版本，
+首字延迟被拖到 105s。15s 覆盖冷加载上限（~6.4s）+ 一次慢推理（~4s）。
+
+#### 7.11.2 要不要常驻：先算显存账
+
+| 模型 | 占用 |
+|---|---|
+| `qwen2.5-3b-instruct` | 1.93 GB |
+| `qwen2.5-7b-instruct` | 4.68 GB |
+| `qwen3-4b` | 2.50 GB |
+| `text-embedding-bge-m3` | 1.16 GB |
+| **合计** | **约 10.3 GB** |
+
+**判据：可用显存（或统一内存）≥ 11 GB 才考虑全常驻。** 本机是 RTX 3050 Laptop
+**4 GB 显存 / 15.7 GB 内存**，三个模型加起来放不下——强行 `lms load` 全部只能靠
+内存/CPU 兜着跑，实测 Qwen3 单次从 1.5s 涨到 11.5s，且内存只剩 1.6 GB 余量。
+这种机器上正确的取向是**减少同时驻留的模型数量**（例如把 `intent_router` /
+`query_rewrite` / `title_generation` 全指到主回答模型，让一轮请求只涉及
+「一个 chat + 一个 embedding」），而不是硬常驻。
+
+显存够的机器这样做（`ttl` 单位秒，设大以避免闲置后回到冷态）：
+
+```bash
+lms load qwen2.5-7b-instruct --ttl 86400
+lms load qwen2.5-3b-instruct --ttl 86400
+lms load qwen3-4b          --ttl 86400
+lms ps                     # 确认 TTL 与驻留列表
+```
+
+LM Studio 界面里对应的是 Developer → Server Settings 的 JIT / TTL 选项；关掉自动卸载
+等价于「常驻」。**改完要复验**：`docker exec backend-prod python scripts/check_model_endpoint.py ...`
+四项全绿，再发一条消息看 `end.model_fallback` 是否为 false、`answer_type` 是否仍走检索。
+
+## 9. 故障排查
 ### 9.1 日志排查
 
 ```bash

@@ -216,6 +216,14 @@ question_processor / kb_comparator / document_analyzer / knowledge_graph_generat
 
 - `INTENT_ROUTER_LLM_TIMEOUT` 默认 3.0 → 5.0（C2 关闭思考后 qwen3:4b 的 JSON 分类通常 1~3 秒可完成；冷启动场景 3 秒偏紧）；降级逻辑不变。
 
+> **补记（2026-11-23）：5.0 → 15.0。** 换到 LM Studio（`openai_compatible`）后重新量：
+> 3B 冷加载 **3.9~6.4s**（空闲 3.9s，7B 同时驻留、内存吃紧时 5.9~6.4s）——5s 这条线
+> 正好跨在冷加载时间上，于是「冷启动的第一个请求有时降级 `direct_llm`、有时不降级」，
+> 降级后只留一行 WARNING，用户只看到「回答没有引用来源」。
+> 同机还量到 LM Studio **不能并发加载模型**（4 个模型同时冷启动，3 个拿到 500），
+> 冷启动期降级概率远高于 C6 时的 Ollama 场景。
+> 15s 的取值依据与「不要更大」的理由见 `docs/guide/deployment.md` §7.11。
+
 **C7. 标题生成移出关键路径（P4）**
 
 - [chat.py](../../backend/src/api/chat.py#L435-L461)：`end` 事件先发送（不含 title）；标题生成改为 `asyncio.create_task` 后台执行，完成后经同一 SSE 连接补发 `{"type":"title","title":"..."}`；

@@ -368,8 +368,16 @@ class IntentRouterSettings(BaseSettings):
 
     # 是否启用 LLM 语义路由层
     INTENT_ROUTER_USE_LLM: bool = True
-    # LLM 路由超时时间（秒），超时自动降级到规则路由（C6：3.0→5.0，为冷启动留余量）
-    INTENT_ROUTER_LLM_TIMEOUT: float = 5.0
+    # LLM 路由超时时间（秒），超时自动降级到规则路由。
+    # 演进：3.0 → 5.0（C6，为冷启动留余量）→ 15.0（2026-11-23，实测值定的）。
+    # 为什么是 15 而不是 5：本地 LM Studio 上 3B 冷加载实测 3.9~6.4s（机器空闲
+    # 3.9s；7B 同时驻留、内存吃紧时 5.9~6.4s）——5s 这条线正好跨在冷加载时间上，
+    # 于是"冷启动的第一个请求有时降级、有时不降级"，降级后静默绕过检索，
+    # 只在日志里留一行 WARNING，用户只看到"回答没有引用来源"。间歇性故障最难查。
+    # 为什么不是更大（如 60）：超时是"白等"的上限——2026-10 曾有 60s 版本，
+    # 首字延迟被拖到 105s。15s 覆盖冷加载上限（~6.4s）+ 一次慢推理（~4s），
+    # 留在人类还能等的区间内。
+    INTENT_ROUTER_LLM_TIMEOUT: float = 15.0
     # 最低置信度阈值，低于此值走 DIRECT_LLM
     INTENT_ROUTER_CONFIDENCE_THRESHOLD: float = 0.4
     # 两意图最高分差小于此值时触发澄清
