@@ -1806,6 +1806,39 @@ LM Studio 界面里对应的是 Developer → Server Settings 的 JIT / TTL 选�
 等价于「常驻」。**改完要复验**：`docker exec backend-prod python scripts/check_model_endpoint.py ...`
 四项全绿，再发一条消息看 `end.model_fallback` 是否为 false、`answer_type` 是否仍走检索。
 
+#### 7.11.3 意图路由用哪个模型（2026-11-23 定为 7B）
+
+`intent_router` 原来挂 3B（快、省），但实测它在**闲聊判定**上不可靠。4 个问题 × 3 轮
+（默认温度、同一批 prompt、模型组在进程内注入，不改配置）：
+
+| 问题 | 3B（平均 2.15s） | 7B（平均 8.75s） |
+|---|---|---|
+| 生产环境怎么部署？ | `agent_research` ×3 | `kb_only` ×3 |
+| 你好，今天心情不错 | `hybrid` / `direct_llm` / `hybrid` | `direct_llm` ×3 |
+| 帮我查一下今天的天气怎么样 | `web_search` ×3 | `web_search` ×3 |
+| 这套系统里最容易被忽略的坑是什么？ | `agent_research` / `hybrid` / `hybrid` | `agent_research` / `kb_only` / `kb_only` |
+
+- **慢 4 倍**（8.75s vs 2.15s），代价明确。
+- **3B 把闲聊判成 `hybrid`**（2/3 轮）→ 触发一次无意义的检索；7B 三轮全判 `direct_llm`。
+- 「怎么部署」3B 判 `agent_research`、7B 判 `kb_only`：后者更贴题也更省。
+- 这笔开销不是每条消息都付：embedding 分类器先跑，命中就不进 LLM 路由。
+
+因此只把 `intent_router` 的主模型换成 `qwen2.5-7b-instruct`（`answer_direct` / `answer` /
+`fast` / `title_generation` 不动，3B 仍服务内部短任务）。回滚：
+
+```bash
+# 取回全部路由，改 intent_router 的 primary 为 3B 的 deployment id，再整体 PUT
+curl -s -H "Authorization: Bearer <JWT>" http://127.0.0.1:8001/api/admin/models/routes
+curl -s -X PUT -H "Authorization: Bearer <JWT>" -H "Content-Type: application/json" \
+     -d @routes.json http://127.0.0.1:8001/api/admin/models/routes
+curl -s -X POST -H "Authorization: Bearer <JWT>" http://127.0.0.1:8001/api/admin/models/apply
+```
+
+`PUT /routes` 是**覆盖式**（不在列表里的 task 会被删掉），所以必须整表提交，别只发一条。
+
+**已知遗留**：`title_generation` / `query_rewrite` 仍在 3B 上，标题生成虽是后台任务，
+但会把 3B 拉起来与 7B 争内存。若继续遇到加载抖动，下一步就是把这两个也并到 7B。
+
 ## 9. 故障排查
 ### 9.1 日志排查
 
