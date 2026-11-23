@@ -21,6 +21,9 @@ from src.services.model_adapters import build_embeddings, build_route_models
 from src.utils.error_handling import ErrorSeverity, log_exception
 from src.services.model_registry import (
     DEFAULT_REGISTRY_PATH,
+    THINKING_ALWAYS_ON,
+    THINKING_OFF,
+    THINKING_SWITCHABLE,
     ModelRegistry,
     ResolvedModel,
     ResolvedRoute,
@@ -353,6 +356,36 @@ class ModelManager:
             return None
         return resolve_thinking_control(resolved.model, resolved.provider)
 
+    def same_tier_task(
+        self,
+        selected: ResolvedModel,
+        *,
+        think: Optional[bool] = None,
+        default_task: str = "answer",
+    ) -> str:
+        """与所选模型**同档位**的那条路由名，用来决定「挂了让谁接手」。
+
+        「同档位」的意思是：直答档兜直答档，会思考档兜会思考档。
+
+        为什么要按档位而不是「把默认路由整条塞进来」：那样会出现
+        「用户选了直答、主模型抖了一下、最后答出来的是一个会思考的慢答案」，
+        或反过来「选了会思考却被静默换成直答」——等于在用户不知情时换掉了档位，
+        而档位正是这个界面上唯一的选择语义。
+
+        `think` 优先于档位：可切换的模型（`switchable`）在开关关掉时，这一轮
+        实际就是直答，兜底也该找直答的模型。
+        """
+        if think is not None:
+            return "answer_direct" if think is False else "answer"
+
+        control = resolve_thinking_control(selected.model, selected.provider)
+        if control == THINKING_OFF:
+            return "answer_direct"
+        if control in (THINKING_SWITCHABLE, THINKING_ALWAYS_ON):
+            return "answer"
+        # 档位判不出来（老配置/未知 provider）：退回调用方给的 task，不硬编一个
+        return default_task
+
     def build_user_model_group(
         self,
         model_id: str,
@@ -364,9 +397,13 @@ class ModelManager:
     ) -> Any:
         """按用户选择的模型构造模型组；不可选时返回 None（调用方回落默认）。
 
-        为什么把默认路由的模型放进 fallbacks：用户选了 A、而 A 的服务挂了，
-        「什么都不答」比「用默认模型答出来并告知」更糟。ChatModelGroup 会按顺序
-        尝试，且每个 target 各自记用量与熔断，所以成本归因不会串到默认模型上。
+        兜底只在**同档位**内找（见 `same_tier_task`）：选了 A、A 的服务挂了，
+        「什么都不答」比「换个同档位的答出来并告知」更糟，但「换个别的档位答出来」
+        更糟——那不是降级，是替用户改了选择。同档位没有候选时不兜底，
+        由上层报错并告知，宁可不答也不换档。
+
+        ChatModelGroup 会按顺序尝试，且每个 target 各自记用量与熔断，
+        所以成本归因不会串到兜底的模型上。
         """
         selected = self.resolve_user_model(model_id)
         if selected is None:
@@ -374,12 +411,14 @@ class ModelManager:
 
         fallbacks: List[ResolvedModel] = []
         try:
-            route = self._get_registry().resolve(task)
+            route = self._get_registry().resolve(
+                self.same_tier_task(selected, think=think, default_task=task)
+            )
             for item in [route.primary, *route.fallbacks]:
                 if item.model.id != selected.model.id:
                     fallbacks.append(item)
         except Exception:
-            # 默认路由不可用不该让「用户选择」整体失效，只是没有兜底
+            # 同档位路由不可用不该让「用户选择」整体失效，只是没有兜底
             pass
 
         resolved_route = ResolvedRoute(

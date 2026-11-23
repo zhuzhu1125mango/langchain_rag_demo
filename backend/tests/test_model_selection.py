@@ -136,6 +136,95 @@ class TestBuildGroup:
         assert "a" in ids
 
 
+class TestTierBoundFallback:
+    """兜底只在同档位内发生：换了档位就不是降级，是替用户改了选择。
+
+    线上配置的具体形态（2026-11-23）：
+    - `answer_direct`：qwen2.5-7b（直答）→ qwen2.5-3b（直答，仅兜底、不对用户开放）
+    - `answer`：qwen3-4b（会思考）→ 空
+
+    于是「选 7B，7B 挂了」应该落到 3B，而不是落到会思考的 Qwen3；
+    「选 Qwen3，Qwen3 挂了」则没有兜底——同档位里没有第二个会思考的模型。
+    """
+
+    class _TaskMapRegistry:
+        """按 task 返回不同主备的注册表（_Registry 忽略了 task，这里必须区分）。"""
+
+        def __init__(self, models, routes):
+            self._models = {m.model.id: m for m in models}
+            self._routes = routes
+            self.config = SimpleNamespace(models=[m.model for m in models])
+            self.source = "test"
+
+        def get_model(self, model_id):
+            if model_id not in self._models:
+                raise KeyError(model_id)
+            return self._models[model_id]
+
+        def resolve(self, task, **kwargs):
+            if task not in self._routes:
+                raise KeyError(task)
+            primary_id, fallback_ids = self._routes[task]
+            return SimpleNamespace(
+                task=task,
+                primary=self._models[primary_id],
+                fallbacks=[self._models[i] for i in fallback_ids],
+                config=RouteConfig(primary=primary_id, fallbacks=list(fallback_ids)),
+                source="test",
+            )
+
+    @staticmethod
+    def _models():
+        # d7b/d3b 只有 chat（→ off 档），q3 带 reasoning 且是 ollama provider（→ switchable 档）
+        return _resolved("d7b"), _resolved("d3b"), _resolved("q3", caps=("chat", "reasoning"))
+
+    def _patch(self, monkeypatch, routes):
+        direct, small, think = self._models()
+        reg = self._TaskMapRegistry(
+            [direct, small, think], routes or {"answer": ("q3", []), "answer_direct": ("d7b", ["d3b"])}
+        )
+        monkeypatch.setattr(model_manager, "_get_registry", lambda: reg)
+        return reg
+
+    def test_direct_choice_falls_back_to_direct_not_to_thinking(self, monkeypatch):
+        self._patch(monkeypatch, None)
+
+        group = model_manager.build_user_model_group("d7b", think=False)
+
+        ids = [t.model.id for t in group.targets]
+        assert ids == ["d7b", "d3b"], "选了直答，兜底必须是直答；掉到 Qwen3 等于偷偷换了档位"
+
+    def test_thinking_choice_does_not_fall_back_to_direct(self, monkeypatch):
+        self._patch(monkeypatch, None)
+
+        group = model_manager.build_user_model_group("q3", think=None)
+
+        assert [t.model.id for t in group.targets] == ["q3"], "同档位没有候选就不兜底，不能降级成直答"
+
+    def test_no_same_tier_candidate_means_single_target(self, monkeypatch):
+        self._patch(monkeypatch, {"answer": ("q3", []), "answer_direct": ("d7b", [])})
+
+        group = model_manager.build_user_model_group("d7b", think=False)
+
+        assert [t.model.id for t in group.targets] == ["d7b"]
+
+    def test_switchable_with_thinking_off_is_direct_tier(self, monkeypatch):
+        """可切换的模型在开关关掉时，这一轮就是直答，兜底找直答的模型。"""
+        self._patch(monkeypatch, None)
+
+        group = model_manager.build_user_model_group("q3", think=False)
+
+        assert [t.model.id for t in group.targets] == ["q3", "d7b", "d3b"]
+
+    def test_missing_tier_route_degrades_to_no_fallback(self, monkeypatch):
+        """只有 `answer` 路由的老配置里选直答模型：没有 answer_direct 可查，别炸。"""
+        self._patch(monkeypatch, {"answer": ("q3", [])})
+
+        group = model_manager.build_user_model_group("d7b", think=False)
+
+        assert [t.model.id for t in group.targets] == ["d7b"]
+
+
 class TestSelectLlmFallback:
     """运行时回落：选的时候可用、跑的时候不可用，要回落并留痕。"""
 

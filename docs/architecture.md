@@ -96,6 +96,7 @@
 
 - `answer` / `fast` / `embedding` 为必需路由；其他聊天任务未单独配置时回退 `fast` 路由。
 - 主模型失败按 route `fallbacks` 降级；本地主模型降级到外部 Provider 需显式 `allow_external_fallback`（默认禁止，避免数据出域）。
+- **用户选模型时的兜底守档位**：选直答档只在 `answer_direct` 链里找兜底，选会思考档只在 `answer` 链里找；同档位没有候选就不兜底（报错并告知），不跨档位替换——那等于替用户改了选择。见 `ModelManager.same_tier_task` 与设计文档 §14。
 - `agent_decision` 只接受声明 `tools` 的模型；Embedding 维度必须与 `EMBEDDING_DIMENSION` 一致。
 - 配置代次（`registry_generation`）变化时，`RAGChain` / `TitleGenerator` / `WikiCompiler` 的模型缓存自动失效；在途请求继续使用旧实例。
 

@@ -443,3 +443,30 @@ P1 不改 Embedding 的 Milvus schema，只把构造入口收敛到 registry；P
 - ❌ `select ... from sessions, jsonb_array_elements(messages)` 之后 join 用量表算成本
 - ❌ 用 `generation.model_name` 去 group by 成本（它是快照，历史会变）
 - ✅ 成本 ← `model_usage_daily`（按 `model_id`）；归因 ← `generation`（按消息）
+
+## 14. 兜底只在同档位内发生（2026-11-23）
+
+用户选的不是「模型名」，而是「直答 / 会思考」这一档（见 `thinking_control` 三态）。
+所以运行时兜底也必须守档位，不能把整条默认路由塞进 fallbacks。
+
+规则（`ModelManager.same_tier_task`）：
+
+| 本轮实际档位 | 兜底来源路由 |
+|---|---|
+| 直答（`off`，或 `switchable` 且开关关掉） | `answer_direct` |
+| 会思考（`always_on`，或 `switchable` 且开关打开） | `answer` |
+| 档位判不出来（无 reasoning 能力声明且老配置） | 调用方传入的 task |
+
+这条规则修掉的真实缺陷：曾经「用户选 7B（直答）→ 7B 抖动 → 静默用 Qwen3（会思考）答完」，
+用户等了 3 倍时间，还以为自己选的是快的那档。**那不是降级，是替用户改了选择。**
+
+对应线上配置（2026-11-23）：
+
+- `answer_direct`：`qwen2.5-7b-instruct` → `qwen2.5-3b-instruct`（直答兜直答）
+- `answer`：`qwen3-4b` → **空**（同档位里没有第二个会思考的模型，就不兜底）
+
+`qwen2.5-3b-instruct` 仍然 `user_selectable=false`：它不出现在选择器里，
+只服务 `intent_router` / `query_rewrite` / `title_generation` / `fast`，
+以及直答档主模型失败时的兜底。它若真的答了用户的问题，`generation` 块会如实写成
+它（`fallback=true` + `fallback_from`），前端也会提示「由 X 回答」——
+看不见的模型替用户回答可以接受，**静默**替用户回答不可以。
