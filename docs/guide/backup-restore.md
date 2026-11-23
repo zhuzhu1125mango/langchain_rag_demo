@@ -531,7 +531,7 @@ Milvus/MinIO 只读生产 → 验 ready / 登录 / 问答 / 停机。写操作�
 | schema | 还原库 `d5e6f7a8b9c0`；回滚镜像内置 head 只到 `c4d5e6f7a8b9` → **库比镜像新**（回滚的常态） |
 | 启动 | `/health/ready` 200，**27s（热）/ 48s（冷）**，四项 `database/redis/milvus/minio` 全 ok |
 | 登录 | 200，token 272 字符（旧代码能读带 `is_admin` 列的新用户表） |
-| 问答 | `knowledge_base` / 3 引用 / 341~1159 字；多次跑答案长度波动属模型非确定性，与回滚无关（问题固定为「备份怎么恢复？恢复后要确认什么？」） |
+| 问答 | `knowledge_base` / 3 引用 / 341~1159 字；多次跑答案长度波动属模型非确定性，与回滚无关（探针用固定的恢复类问句，**此处不复述原句**） |
 | 停机（生成中） | `docker stop` **3~4s**、**ExitCode 137**、客户端收到 **11~15KB 无 `end` 帧**、日志停在 `Waiting for connections to close` |
 
 **两条代价（已回写 §5.2）**：
