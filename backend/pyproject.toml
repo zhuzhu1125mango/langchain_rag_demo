@@ -12,9 +12,9 @@ classifiers = [
 dependencies = [
     "fastapi==0.136.3",
     "uvicorn==0.49.0",
-    "pydantic==2.14.3",
-    "pydantic-settings==2.16.2",
-    "python-multipart==0.0.33",
+    "pydantic==2.14.4",
+    "pydantic-settings==2.16.3",
+    "python-multipart==0.0.34",
     "PyYAML>=6.0.2,<7",
     "click==8.5.1",
     "colorama==0.4.6",
@@ -27,7 +27,7 @@ dependencies = [
     "langchain-core==1.8.0",
     "langchain-text-splitters==1.1.3",
     "langchain-ollama==1.1.0",
-    "langsmith==0.14.17",
+    "langsmith==0.16.0",
     "pymilvus==3.0.2",
     "pymilvus-model==0.3.2",
     "minio==7.2.20",
@@ -59,7 +59,7 @@ dependencies = [
     # 生产镜像建不出来。上界压到 2.14.1 之前是为了复用已缓存的 2.14.0 wheel
     # （2.14.1 也是另一份 199MB）。torch 只是 sentence-transformers 的传递依赖，
     # 待网络窗口恢复后解除上界。
-    "torch>=2.13,<2.14.1",
+    "torch>=2.13,<2.15.1",
     "httpx==0.28.1",
     "httpx-sse==0.4.3",
     "aiohttp==3.14.5",
@@ -75,7 +75,7 @@ dependencies = [
     "cachetools==7.2.4",
     "python-dateutil==4.0.0",
     "pytz==2026.6",
-    "certifi==2026.10.23",
+    "certifi==2026.11.20",
     "charset-normalizer==3.5.2",
     # OPS-6：filelock 4.x 修复 CVE-2026-112940。上游已放宽：unstructured 0.27.37 起
     # 允许 filelock<5.0.0,>=4.2.1（2026-11-13 核对），但当前 pin 的 0.27.34 仍锁 <4.0.0。
@@ -90,7 +90,7 @@ dependencies = [
     # OPS-6：soupsieve 2.9.2 有 CVE-2026-126190（多项式时间 DoS）与
     # CVE-2026-126191（选择器编译指数级 ReDoS），修复版 4.0.0 / 3.0.2。
     # 传递自 beautifulsoup4（只要求 soupsieve>=1.6.1），提升为直接依赖固定 4.1。
-    "soupsieve==4.1",
+    "soupsieve==4.1.3",
     "cryptography==50.0.2",
     # OPS-6：以下两项为传递依赖，提升为直接依赖以固定修复版本（Trivy HIGH/CRITICAL）。
     # transformers 无法固定到 5.x：4.57.6 是最后一个 4.x（2026-11-13 复核，无 4.57.7），
@@ -98,12 +98,12 @@ dependencies = [
     # 与主依赖 aiofiles==25.1.0 硬冲突。故 4.x 的 3 条 CVE 在 .trivyignore 登记并限制加载来源。
     "pillow>=13.0.0",
     "urllib3>=2.8.0",
-    "grpcio==1.85.1",
+    "grpcio==1.85.3",
     "protobuf==7.36.2",
     "rich==15.0.0",
     "markdown-it-py==4.3.0",
     "Pygments==2.21.0",
-    "typer==0.29.1",
+    "typer==0.29.2",
     "tqdm==4.70.1",
     "pandas==3.1.0",
     "joblib==1.6.0",
@@ -122,7 +122,7 @@ start = "start:main"
 [dependency-groups]
 dev = [
     "pytest==9.2.0",
-    "pytest-asyncio==1.4.1.post1",
+    "pytest-asyncio==1.5.0",
     "pytest-cov==7.1.0",
     "pytest-mock==3.17.0",
     "black==26.10.1",
