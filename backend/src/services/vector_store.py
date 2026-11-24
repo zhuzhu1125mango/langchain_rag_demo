@@ -196,6 +196,7 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         max_sections=5,
         max_distance=12,
         skip_score=None,
+        min_section_score=None,
     ):
         """把入选块所属**二级小节**的其余块补齐（整节回填）。
 
@@ -217,6 +218,10 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
                 达到该值时直接不补——重排已经把答案放在手里，再按结构铺开只会稀释
                 注意力（实测「前后端监听哪个端口」5 块 → 24 块，答案并未变好）。
                 None 表示不启用。
+            min_section_score: 小节分数下限。只补父块分数 ≥ 该值的小节；None 表示不筛。
+                为什么要筛：一场问答常同时命中「正文小节」和「沾边小节」，后者（如
+                5.1 决策矩阵那种一行一块的表格）块数多、分数低，铺开后会把正文挤出
+                注意力的中心——实测 16 块里 9 块来自 §5，答案从 7 步缩成 3 行。
 
         Returns:
             原地块在前，整节其余块按「小节轮转」追加：小节之间按父块分数降序，
@@ -323,6 +328,17 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         ordered_sections = sorted(
             groups, key=lambda k: (-section_score.get(k, 0.0), str(k))
         )
+        if min_section_score is not None:
+            eligible = [
+                k for k in ordered_sections if section_score.get(k, 0.0) >= min_section_score
+            ]
+            if not eligible:
+                logger.debug(
+                    "整节回填跳过：%d 个小节分数均低于下限 %.3f",
+                    len(ordered_sections), min_section_score,
+                )
+                return docs
+            ordered_sections = eligible
         interleaved: list = []
         if ordered_sections:
             depth = max(len(groups[k]) for k in ordered_sections)

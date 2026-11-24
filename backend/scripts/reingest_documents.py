@@ -369,10 +369,22 @@ async def reingest_one(
 
 
 async def main_async(args) -> int:
+    # 脚本进程不复用 Web 进程的在线 registry。不显式加载 DB 配置时，get_embeddings()
+    # 会退回 legacy env（Ollama），而本机已改用 LM Studio —— 于是 --commit 删完旧向量、
+    # 写入 0 块，文档被置 failed、切片清空。2026-11-24 就是这样把 backup-restore.md
+    # 灌空的（靠 ① 备份的旧正文 + 原有对象才恢复）。
+    # 因此：加载必须发生在任何写操作之前，且失败即退出（没有可用 embedding 就不动生产）。
+    from src.services.model_manager import model_manager
+
+    if not await model_manager.load_from_db():
+        print("拒绝执行：无法从 DB 加载模型注册表（embedding 会退回 legacy 配置）")
+        return 2
+
     specs = parse_doc_specs(args.doc)
     print("重灌文档" + ("（执行模式）" if args.commit else "（预演模式，不写入）"))
     print(f"  集合   : {settings.milvus.MILVUS_COLLECTION_NAME}")
     print(f"  切分   : {settings.processing.CHUNK_SIZE}/{settings.processing.CHUNK_OVERLAP}")
+    print(f"  模型   : source={model_manager.registry.source}")
 
     results = []
     for filename, source in specs:

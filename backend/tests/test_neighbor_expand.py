@@ -294,6 +294,42 @@ class TestExpandSections:
         base = [_sec_doc(25, "答案", 0.99)]
         out = asyncio.run(vs.expand_sections(base, budget_chars=5000, skip_score=None))
         assert len(out) == 2
+
+    def test_min_section_score_drops_offtopic_section(self):
+        """只补够分的小节：沾边的回滚小节（0.338）不该和正文小节（0.5）一起铺开。
+
+        实测代价：两个小节都铺时 16 块里 9 块来自回滚小节，答案从 7 步缩成 3 行。
+        """
+        rollback = f"{H1} > 5. 回滚"
+        rows = []
+        for idx in (30, 31, 32):
+            row = _row("d1", idx, f"决策矩阵行{idx}")
+            row["heading_path"] = f"{rollback} > 5.1 决策矩阵"
+            rows.append(row)
+        rows.append(_sec_row(26, "4.1 剩余步骤"))
+        rows.append(_sec_row(28, "4.2 恢复后必做", sub="4.2 恢复后必做"))
+
+        vs = _sec_vs(rows)
+        base = [
+            _doc("d1", 39, "5.3 迁移回滚", 0.338, heading_path=f"{rollback} > 5.3 数据库迁移回滚"),
+            _sec_doc(25, "4.1 第 7~8 步", 0.5),
+        ]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, min_section_score=0.4))
+        contents = [d.page_content for d in out]
+        assert "4.1 剩余步骤" in contents
+        assert "4.2 恢复后必做" in contents
+        assert not any(c.startswith("决策矩阵行") for c in contents)
+
+    def test_min_section_score_none_keeps_all(self):
+        rollback = f"{H1} > 5. 回滚"
+        row = _row("d1", 30, "决策矩阵行")
+        row["heading_path"] = f"{rollback} > 5.1 决策矩阵"
+        vs = _sec_vs([row])
+        base = [
+            _doc("d1", 39, "5.3", 0.338, heading_path=f"{rollback} > 5.3 数据库迁移回滚"),
+        ]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, min_section_score=None))
+        assert len(out) == 2
         """预算有限时先补「紧挨着的块」，而不是让排名第一的小节把预算吃满。
 
         实测原型：7.3 演练记录（0.746，表格行，离原地块 40+ 块远）与 4.1（0.5，

@@ -181,6 +181,7 @@ class KBRetrievalService:
                     max_sections=settings.processing.KB_SECTION_EXPAND_MAX_SECTIONS,
                     max_distance=settings.processing.KB_SECTION_EXPAND_MAX_DISTANCE,
                     skip_score=settings.processing.KB_SECTION_EXPAND_SKIP_SCORE,
+                    min_section_score=settings.processing.KB_SECTION_EXPAND_MIN_SECTION_SCORE,
                 )
                 try:
                     from src.services.pipeline.state import _request_retrieval_timings
