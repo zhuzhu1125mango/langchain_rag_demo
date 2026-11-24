@@ -62,6 +62,24 @@ def read_env_keys(path: str) -> set:
     return keys
 
 
+def read_documented_keys(path: str, env_keys: set) -> set:
+    """模板中「已记载」的键 = 未注释的 `KEY=` 行 ∪ 注释形式的文档行（`# KEY=`）。
+
+    为什么要算上注释行：模板把「默认关闭、按需开启」的可选项写成注释
+    （如 `# KB_SECTION_EXPAND_ENABLED=false`），而真实部署的 `.env.prod` 会把它
+    取消注释来启用。只看未注释行的话，任何启用了可选功能的环境都会让校验 A 永久
+    报红——而「一直红的检查」等于没有检查。校验 A 的原意是「模板里没记载过这个键」，
+    注释行显然属于记载。
+    """
+    documented = set(env_keys)
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            m = DOC_KEY_RE.match(line)
+            if m:
+                documented.add(m.group(1))
+    return documented
+
+
 def read_compose_vars(path: str) -> set:
     """提取 compose 文件中所有 ${VAR} 插值引用的键集合。"""
     if not os.path.exists(path):
@@ -101,6 +119,7 @@ def main() -> int:
     failures = []
 
     example_keys = read_env_keys(ENV_EXAMPLE)
+    example_documented = read_documented_keys(ENV_EXAMPLE, example_keys)
 
     used_keys = set()
     for compose_path, env_path in COMPOSE_ENV_PAIRS:
@@ -109,7 +128,8 @@ def main() -> int:
             used_keys |= keys
 
     # 校验 A：example 覆盖 dev ∪ prod 实际使用的键
-    missing_in_example = sorted(used_keys - example_keys)
+    # （「覆盖」指模板里记载过，注释形式的可选键也算——见 read_documented_keys）
+    missing_in_example = sorted(used_keys - example_documented)
     if missing_in_example:
         failures.append(
             f"校验 A 失败: .env.example 缺少以下在用键 ({len(missing_in_example)} 个):\n  "
@@ -133,17 +153,7 @@ def main() -> int:
     # 校验 C：config.py 声明的全部配置字段须在 .env.example 记载
     # （含注释形式的内联文档行，模板以此记载可选/默认配置）
     config_fields = read_config_fields(CONFIG_PY)
-    documented = {
-        k.lower()
-        for k in (
-            example_keys
-            | {
-                m.group(1)
-                for m in (DOC_KEY_RE.match(line) for line in open(ENV_EXAMPLE, encoding="utf-8"))
-                if m
-            }
-        )
-    }
+    documented = {k.lower() for k in example_documented}
     missing_config = sorted(f for f in config_fields if f.lower() not in documented)
     if missing_config:
         failures.append(
