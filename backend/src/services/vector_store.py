@@ -189,7 +189,14 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         )
         return out
 
-    async def expand_sections(self, docs, budget_chars=None, max_sections=5, max_distance=12):
+    async def expand_sections(
+        self,
+        docs,
+        budget_chars=None,
+        max_sections=5,
+        max_distance=12,
+        skip_score=None,
+    ):
         """把入选块所属**二级小节**的其余块补齐（整节回填）。
 
         与 `expand_neighbors` 的分工：那个补「物理相邻的一块」，这个补「同一小节的
@@ -206,6 +213,10 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
             max_distance: 只补离原地块 `chunk_index` 差不超过该值的块。太远的块
                 多半是同一 H2 下的另一张表/另一个子主题（实测 7.3 演练记录里
                 相距 40 块的两段表格），补进来只有噪声。None 表示不限。
+            skip_score: 高分跳过阈值。**原始入选块**（不含邻块/整节块）的最高重排分
+                达到该值时直接不补——重排已经把答案放在手里，再按结构铺开只会稀释
+                注意力（实测「前后端监听哪个端口」5 块 → 24 块，答案并未变好）。
+                None 表示不启用。
 
         Returns:
             原地块在前，整节其余块按「小节轮转」追加：小节之间按父块分数降序，
@@ -229,6 +240,22 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
             })
         if not base:
             return docs
+        # 高分跳过：只看**原始入选块**。邻块继承父块分数，拿它们参与判定等于自己给
+        # 自己投票；而首块分数特别高时（如 0.97）说明重排已定位到答案，补整节是纯噪声。
+        if skip_score is not None:
+            original = [
+                float(d.metadata.get("rerank_score") or 0.0)
+                for d in docs
+                if not d.metadata.get("neighbor_expand")
+                and not d.metadata.get("section_expand")
+            ]
+            top = max(original) if original else 0.0
+            if top >= skip_score:
+                logger.debug(
+                    "整节回填跳过：首块重排分 %.3f ≥ 阈值 %.3f（%d 块保持原样）",
+                    top, skip_score, len(docs),
+                )
+                return docs
         pairs = section_prefixes(base)[:max_sections]
         if not pairs:
             return docs

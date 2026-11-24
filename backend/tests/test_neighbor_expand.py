@@ -263,6 +263,37 @@ class TestExpandSections:
         base = [_doc("d1", 113, "表头", 0.746, heading_path=f"{table_sec} > 7.3 演练记录")]
         out = asyncio.run(vs.expand_sections(base, budget_chars=5000, max_distance=12))
         assert out == base
+
+    def test_high_score_skips_expansion(self):
+        """首块重排分够高说明已经找对了，不再按结构铺开（省上下文）。"""
+        vs = _sec_vs([_sec_row(24, "整节块")])
+        base = [_sec_doc(25, "答案就在这块", 0.972)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, skip_score=0.9))
+        assert out == base
+        assert vs.milvus_service.calls == []  # 连补查都不发
+
+    def test_medium_score_still_expands(self):
+        """0.746 这种「可能是空壳」的分数不足以判定已找准，仍要回填。"""
+        vs = _sec_vs([_sec_row(24, "整节块")])
+        base = [_sec_doc(25, "半截答案", 0.746)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, skip_score=0.9))
+        assert [d.page_content for d in out] == ["半截答案", "整节块"]
+
+    def test_skip_ignores_inherited_scores(self):
+        """邻块继承来的 0.97 不能触发跳过——那等于自己给自己投票。"""
+        vs = _sec_vs([_sec_row(24, "整节块")])
+        base = [_sec_doc(25, "原始块 0.5", 0.5)]
+        neighbor = _doc("d1", 26, "邻块", 0.97, neighbor_expand=True)
+        out = asyncio.run(
+            vs.expand_sections(base + [neighbor], budget_chars=5000, skip_score=0.9)
+        )
+        assert "整节块" in [d.page_content for d in out]
+
+    def test_skip_disabled_when_threshold_none(self):
+        vs = _sec_vs([_sec_row(24, "整节块")])
+        base = [_sec_doc(25, "答案", 0.99)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, skip_score=None))
+        assert len(out) == 2
         """预算有限时先补「紧挨着的块」，而不是让排名第一的小节把预算吃满。
 
         实测原型：7.3 演练记录（0.746，表格行，离原地块 40+ 块远）与 4.1（0.5，
