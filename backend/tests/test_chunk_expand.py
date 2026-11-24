@@ -15,9 +15,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.services.chunk_expand import (  # noqa: E402
+    merge_appended,
     merge_with_neighbors,
     neighbor_positions,
     same_heading_as_parent,
+    section_prefix,
+    section_prefixes,
 )
 
 
@@ -145,3 +148,80 @@ class TestMergeWithNeighbors:
         nbs = [_row("d1", 6)]
         merge_with_neighbors(base, nbs)
         assert len(base) == 1 and len(nbs) == 1
+
+
+class TestSectionPrefix:
+    # 整节回填的取数边界：算错前缀 = 把别的章节或整篇文档塞进上下文
+    H1 = "备份 / 恢复 / 回滚与容量 Runbook（SEC-13 / OPS-1）"
+
+    def test_three_levels_returns_parent_section(self):
+        path = f"{self.H1} > 4. 恢复 > 4.1 恢复顺序（不可打乱）"
+        assert section_prefix(path) == f"{self.H1} > 4. 恢复"
+
+    def test_sibling_subsection_maps_to_same_prefix(self):
+        """4.1 与 4.2 必须归到同一个前缀，否则「选中 4.1」带不出 4.2。"""
+        a = section_prefix(f"{self.H1} > 4. 恢复 > 4.1 恢复顺序")
+        b = section_prefix(f"{self.H1} > 4. 恢复 > 4.2 恢复后必做")
+        assert a == b == f"{self.H1} > 4. 恢复"
+
+    def test_two_levels_is_refused(self):
+        """只有两级时去掉最后一段会退化成一级标题 = 整篇文档，必须拒绝。"""
+        assert section_prefix(f"{self.H1} > 4. 恢复") == ""
+
+    def test_single_level_is_refused(self):
+        assert section_prefix(self.H1) == ""
+
+    def test_empty_heading_is_refused(self):
+        assert section_prefix("") == ""
+        assert section_prefix(None) == ""
+
+    def test_extra_whitespace_tolerated(self):
+        path = f"  {self.H1}   >   4. 恢复   >   4.1 恢复顺序  "
+        assert section_prefix(path) == f"{self.H1} > 4. 恢复"
+
+
+class TestSectionPrefixes:
+    def test_dedupes_and_keeps_first_seen_order(self):
+        rows = [
+            _row("d1", 25, heading="A > 4. 恢复 > 4.1 顺序"),
+            _row("d2", 7, heading="B > 2. 备份 > 2.1 全量"),
+            _row("d1", 26, heading="A > 4. 恢复 > 4.1 顺序"),
+        ]
+        assert section_prefixes(rows) == [("d1", "A > 4. 恢复"), ("d2", "B > 2. 备份")]
+
+    def test_rows_without_prefix_are_skipped(self):
+        rows = [
+            _row("d1", 1, heading="A > 1. 概览"),
+            _row("d1", 2, heading=""),
+        ]
+        assert section_prefixes(rows) == []
+
+
+class TestMergeAppended:
+    def test_appends_in_given_order(self):
+        """整节回填按 chunk_index 升序追加，让模型读到完整正文而不是打散的块。"""
+        base = [_row("d1", 25)]
+        extras = [_row("d1", 24), _row("d1", 26), _row("d1", 28)]
+        out = merge_appended(base, extras)
+        assert [r["id"] for r in out] == ["d1#25", "d1#24", "d1#26", "d1#28"]
+
+    def test_skips_already_present_chunk(self):
+        base = [_row("d1", 25)]
+        out = merge_appended(base, [_row("d1", 25), _row("d1", 26)])
+        assert [r["id"] for r in out] == ["d1#25", "d1#26"]
+
+    def test_budget_skips_oversized_and_keeps_going(self):
+        base = [_row("d1", 25, "a" * 100)]
+        extras = [_row("d1", 26, "b" * 5000), _row("d1", 27, "c" * 50)]
+        out = merge_appended(base, extras, budget_chars=200)
+        assert [r["id"] for r in out] == ["d1#25", "d1#27"]
+
+    def test_base_never_dropped(self):
+        base = [_row("d1", 25, "a" * 500)]
+        out = merge_appended(base, [_row("d1", 26, "b" * 10)], budget_chars=100)
+        assert [r["id"] for r in out] == ["d1#25"]
+
+    def test_none_budget_is_unlimited(self):
+        base = [_row("d1", 25, "a" * 500)]
+        out = merge_appended(base, [_row("d1", 26, "b" * 10)], budget_chars=None)
+        assert len(out) == 2

@@ -39,6 +39,26 @@
 3. **不超预算**：超预算的邻块跳过继续看下一个，而不是整批放弃；
 4. **顺序稳定**：原地块按原顺序在前，邻块按「原地块顺序 → 先 -1 后 +1」追加；
 5. **只做一层**：不递归补邻块的邻块（否则预算是唯一约束，会一路扩散）。
+
+## 整节回填（2026-11-24 追加）
+
+`chunk_index ± 1` 补不到「小节被切成 6 块、最相关的那块根本没排进 top_k」的情况。
+实测（`backup-restore.md`，问「数据库备份怎么恢复？恢复后要确认什么？」）：
+
+- §4.2「恢复后必做」= chunk 28，在候选池（20 条）里，被重排压到**第 12 名、0.064**；
+- 原因不是召回失败：`bge-reranker-base` 偏字面重叠，chunk 28 是四条命令清单
+  （`rag:semcache` / `EMBEDDING_DIMENSION` / `/index/status` / P95），不含
+  「数据库/备份/恢复」这些字面词；而 chunk 113 是一张写着「PG 恢复 | MinIO 恢复」的
+  演练记录表头，0.746 排第一；
+- TOP_K 从 3 提到 5 也进不来（第 12 名比第 5 名远得多）。
+
+所以整节回填按**文档结构**取数（`heading_path` 前缀 like），绕开重排判断。
+三条边界与 ±1 不同，都已被单测钉住：
+
+1. **要求三级标题**：只有两级时「去最后一段」会退化成整篇文档，直接拒绝；
+2. **按小节轮转 + 距离上限**：高分小节常常是占满位置的表格行，让它先吃满预算
+   就会把正文小节挤出去（实测 §7.3 先吃掉 2171 字符，§4.2 照旧进不来）；
+3. **补进来的块不进相关性门禁**：沿用父块分数，参与平均分等于用复制分数投票。
 """
 
 from __future__ import annotations
@@ -46,6 +66,9 @@ from __future__ import annotations
 from typing import Any, Dict, Iterable, List, Sequence, Tuple
 
 Position = Tuple[str, int]
+
+# heading_path 的分段符（与入库时的拼接口径一致："H1 > H2 > H3"）
+SECTION_SEP = " > "
 
 
 def _pos(row: Dict[str, Any], doc_key: str, index_key: str) -> Position | None:
@@ -193,4 +216,94 @@ def merge_with_neighbors(
             if nb_id:
                 used_ids.add(nb_id)
             used_chars += grow
+    return out
+
+
+def section_prefix(
+    heading_path: str,
+    *,
+    sep: str = SECTION_SEP,
+    min_depth: int = 3,
+) -> str:
+    """返回小节前缀（父级 heading 路径），不满足条件时返回空串。
+
+    例：`"部署 > 4. 恢复 > 4.1 恢复顺序"` → `"部署 > 4. 恢复"`。
+
+    ## 为什么要求 `min_depth=3`
+
+    只去掉**最后一段**，得到的是「入选块所属的二级小节」。若文档层级只有两层
+    （`"部署 > 4. 恢复"`），去掉最后一段就退化成一级标题 —— 那等于「整篇文档」，
+    预算会把上下文塞满、噪声盖过答案。这类层级不满足 `min_depth`，直接不回填：
+    宁可少补，也不要把整篇文档拖进来。
+
+    文档层级恰好是 `H1 > H2 > H3` 时（本项目 guide 文档的常见形态），
+    返回的 `H2` 前缀正是「4. 恢复」这一节，含 4.1 / 4.2 / 4.3 全部子小节。
+    """
+    parts = [p.strip() for p in (heading_path or "").split(sep) if p.strip()]
+    if len(parts) < min_depth:
+        return ""
+    return sep.join(parts[:-1])
+
+
+def section_prefixes(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    heading_key: str = "heading_path",
+    doc_key: str = "document_id",
+    index_key: str = "chunk_index",
+) -> List[Tuple[str, str]]:
+    """原地块需要的 `(document_id, 小节前缀)` 列表，按首次出现顺序去重。
+
+    `max_sections` 由调用方截断（避免一次请求回填十几个小节）。
+    """
+    out: List[Tuple[str, str]] = []
+    seen: set[Tuple[str, str]] = set()
+    for row in rows:
+        pos = _pos(row, doc_key, index_key)
+        if pos is None:
+            continue
+        doc, _ = pos
+        prefix = section_prefix(str(row.get(heading_key) or ""))
+        if not prefix:
+            continue
+        key = (doc, prefix)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
+def merge_appended(
+    base: Sequence[Dict[str, Any]],
+    extras: Iterable[Dict[str, Any]],
+    *,
+    budget_chars: int | None = None,
+    content_key: str = "content",
+    id_key: str = "id",
+) -> List[Dict[str, Any]]:
+    """把「整节补查回来的块」按调用方给的顺序追加到原地块后面。
+
+    与 `merge_with_neighbors` 的差别只在**追加顺序由调用方决定**（整节回填要按
+    `chunk_index` 升序，让模型读到的是一节完整的正文，而不是打散的块），
+    去重与预算语义完全一致：
+
+    - 已在原地块里的不再追加；
+    - 超预算的块跳过、继续看下一块（不是整批放弃）；
+    - 原地块本身超预算也照留（预算只约束「补不补」）。
+    """
+    out: List[Dict[str, Any]] = list(base)
+    used_ids = {row.get(id_key) for row in out if row.get(id_key)}
+    used_chars = sum(len(row.get(content_key) or "") for row in out)
+    for row in extras:
+        row_id = row.get(id_key)
+        if row_id and row_id in used_ids:
+            continue
+        grow = len(row.get(content_key) or "")
+        if budget_chars is not None and used_chars + grow > budget_chars:
+            continue
+        out.append(row)
+        if row_id:
+            used_ids.add(row_id)
+        used_chars += grow
     return out

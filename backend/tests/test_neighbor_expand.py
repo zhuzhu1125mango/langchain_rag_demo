@@ -122,6 +122,184 @@ class _Chain(RetrievalMixin):
         return True
 
 
+class _FakeSectionMilvus:
+    """整节补查的假实现：按 `(document_id, 前缀)` 过滤，记录调用参数。"""
+
+    def __init__(self, rows=None, exc=None):
+        self.rows = rows or []
+        self.exc = exc
+        self.calls = []
+
+    async def fetch_chunks_by_heading_prefix(self, prefixes):
+        self.calls.append(list(prefixes))
+        if self.exc:
+            raise self.exc
+        out = []
+        for doc, prefix in prefixes:
+            for r in self.rows:
+                if r["document_id"] == doc and str(r["heading_path"]).startswith(f"{prefix} > "):
+                    out.append(r)
+        return out
+
+
+def _sec_vs(rows=None, exc=None):
+    vs = VectorStoreManager()
+    vs.milvus_service = _FakeSectionMilvus(rows, exc)
+    return vs
+
+
+H1 = "Runbook"
+SEC = f"{H1} > 4. 恢复"
+
+
+def _sec_doc(idx, text, score, sub="4.1 恢复顺序"):
+    return _doc("d1", idx, text, score, heading_path=f"{SEC} > {sub}")
+
+
+def _sec_row(idx, text, sub="4.1 恢复顺序"):
+    row = _row("d1", idx, text)
+    row["heading_path"] = f"{SEC} > {sub}"
+    return row
+
+
+class TestExpandSections:
+    def test_appends_whole_section_in_chunk_order(self):
+        rows = [
+            _sec_row(28, "4.2 恢复后必做：清 semcache / 核维度", sub="4.2 恢复后必做"),
+            _sec_row(24, "4.1 第 1~6 步"),
+            _sec_row(26, "4.1 剩余步骤"),
+        ]
+        vs = _sec_vs(rows)
+        base = [_sec_doc(25, "4.1 第 7~8 步", 0.5)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=4000))
+
+        assert [d.page_content for d in out] == [
+            "4.1 第 7~8 步",
+            "4.1 第 1~6 步",
+            "4.1 剩余步骤",
+            "4.2 恢复后必做：清 semcache / 核维度",
+        ]
+
+    def test_section_chunks_inherit_parent_score_and_flag(self):
+        vs = _sec_vs([_sec_row(28, "4.2 恢复后必做", sub="4.2 恢复后必做")])
+        base = [_sec_doc(25, "4.1", 0.5)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=4000))
+        added = out[1]
+        assert added.metadata["section_expand"] is True
+        assert added.metadata["rerank_score"] == 0.5
+        assert added.metadata["score"] == 0.5
+
+    def test_base_documents_are_the_same_objects(self):
+        vs = _sec_vs([_sec_row(24, "x")])
+        base = [_sec_doc(25, "原地块", 0.9)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=4000))
+        assert out[0] is base[0]
+
+    def test_fetch_failure_returns_base_unchanged(self):
+        vs = _sec_vs(exc=RuntimeError("milvus timeout"))
+        base = [_sec_doc(25, "原地块", 0.9)]
+        assert asyncio.run(vs.expand_sections(base, budget_chars=4000)) == base
+
+    def test_two_level_heading_does_not_query(self):
+        """只有两级标题时前缀为空（回填等于整篇文档），必须一次都不查。"""
+        vs = _sec_vs([])
+        base = [_doc("d1", 5, "x", 0.9, heading_path=f"{H1} > 4. 恢复")]
+        assert asyncio.run(vs.expand_sections(base, budget_chars=4000)) == base
+        assert vs.milvus_service.calls == []
+
+    def test_budget_zero_disables(self):
+        vs = _sec_vs([_sec_row(24, "x")])
+        base = [_sec_doc(25, "原地块", 0.9)]
+        assert asyncio.run(vs.expand_sections(base, budget_chars=0)) == base
+        assert vs.milvus_service.calls == []
+
+    def test_max_sections_caps_queries(self):
+        vs = _sec_vs([])
+        # 五个块分属五个不同小节：上限 2 时只能查两个前缀
+        base = [
+            _doc("d1", i, "x", 0.9, heading_path=f"A > {i}. 小节 > {i}.1 子节")
+            for i in range(1, 6)
+        ]
+        asyncio.run(vs.expand_sections(base, budget_chars=4000, max_sections=2))
+        assert vs.milvus_service.calls == [[("d1", "A > 1. 小节"), ("d1", "A > 2. 小节")]]
+
+    def test_budget_limits_total_context(self):
+        rows = [_sec_row(24, "甲" * 3000)]
+        vs = _sec_vs(rows)
+        base = [_sec_doc(25, "乙" * 500, 0.5)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=1000))
+        assert len(out) == 1  # 3000 字符的整节块被预算挡住
+
+    def test_round_robin_gives_every_section_a_turn(self):
+        """预算只够补两块时，高分表格小节与低分正文小节各拿一块。
+
+        不轮转的话，高分小节会连拿两块，正文小节一块都拿不到——这正是
+        §4.2 被 7.3 演练记录挤掉的形态。
+        """
+        table_sec = "RB > 7. 演练（每季度）"
+        rows = []
+        for idx in (110, 111, 112):
+            row = _row("d1", idx, "表" * 400)
+            row["heading_path"] = f"{table_sec} > 7.3 演练记录"
+            rows.append(row)
+        rows.append(_sec_row(26, "4.1 剩余步骤"))
+
+        vs = _sec_vs(rows)
+        base = [
+            _doc("d1", 113, "表头", 0.746, heading_path=f"{table_sec} > 7.3 演练记录"),
+            _sec_doc(25, "4.1 第 7~8 步", 0.5),
+        ]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=430))
+        contents = [d.page_content for d in out]
+        assert "4.1 剩余步骤" in contents          # 低分小节也拿到了名额
+        assert contents.count("表" * 400) == 1      # 高分小节没有连拿
+
+    def test_far_chunks_of_same_section_are_skipped(self):
+        """同一小节里相距 40 块的表格行属于另一个子主题，不该被补进来。"""
+        table_sec = "RB > 7. 演练（每季度）"
+        far = _row("d1", 70, "很远" * 5)
+        far["heading_path"] = f"{table_sec} > 7.3 演练记录"
+        vs = _sec_vs([far])
+        base = [_doc("d1", 113, "表头", 0.746, heading_path=f"{table_sec} > 7.3 演练记录")]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, max_distance=12))
+        assert out == base
+        """预算有限时先补「紧挨着的块」，而不是让排名第一的小节把预算吃满。
+
+        实测原型：7.3 演练记录（0.746，表格行，离原地块 40+ 块远）与 4.1（0.5，
+        紧邻 4.2）。按小节顺序排会把预算全给前者，4.2 永远进不来。
+        """
+        table_sec = "RB > 7. 演练（每季度）"
+        rows = []
+        # 排名第一的表格小节：远处的兄弟行，内容很长
+        for idx in (70, 71, 72):
+            row = _row("d1", idx, "表" * 400)
+            row["heading_path"] = f"{table_sec} > 7.3 演练记录"
+            rows.append(row)
+        # 结构上紧邻的 4.2
+        rows.append(_sec_row(28, "4.2 恢复后必做", sub="4.2 恢复后必做"))
+
+        vs = _sec_vs(rows)
+        base = [
+            _doc("d1", 113, "演练记录表头", 0.746,
+                 heading_path=f"{table_sec} > 7.3 演练记录"),
+            _sec_doc(25, "4.1 第 7~8 步", 0.5),
+        ]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=300))
+        contents = [d.page_content for d in out]
+        assert "4.2 恢复后必做" in contents
+        # 远处的表格行被预算挡住，紧邻的 4.2 没有被挤掉
+        assert "表" * 400 not in contents
+
+
+class TestGateIgnoresSectionChunks:
+    def test_average_is_computed_on_base_only(self):
+        base = [_sec_doc(25, "高分块", 0.9), _sec_doc(39, "低分块", 0.2)]
+        expanded = [_sec_doc(28, "整节块", 0.9)]
+        expanded[0].metadata["section_expand"] = True
+        avg, _ = asyncio.run(_Chain()._calculate_relevance("q", base + expanded))
+        assert avg == pytest.approx(0.55)
+
+
 class TestGateIgnoresExpandedChunks:
     def test_average_is_computed_on_base_only(self):
         base = [_doc("d1", 5, "高分块", 0.9), _doc("d1", 9, "低分块", 0.2)]

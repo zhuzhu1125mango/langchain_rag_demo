@@ -10,9 +10,12 @@ from langchain_core.documents import Document
 from pymilvus.exceptions import MilvusException
 
 from src.services.chunk_expand import (
+    merge_appended,
     merge_with_neighbors,
     neighbor_positions,
     same_heading_as_parent,
+    section_prefix,
+    section_prefixes,
 )
 from src.services.milvus_service import MilvusService
 from src.utils.async_singleton import AsyncSingleton
@@ -183,6 +186,147 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         logger.debug(
             "邻块回填：%d 块 → %d 块（+%d，预算 %s 字符）",
             len(docs), len(out), n_added, budget_chars,
+        )
+        return out
+
+    async def expand_sections(self, docs, budget_chars=None, max_sections=5, max_distance=12):
+        """把入选块所属**二级小节**的其余块补齐（整节回填）。
+
+        与 `expand_neighbors` 的分工：那个补「物理相邻的一块」，这个补「同一小节的
+        全部块」。前者解决「步骤被切成两半」，后者解决「最相关的那块根本没排进
+        top_k」——后者是 ±1 够不到的：实测 §4.2「恢复后必做」在候选池第 12 名
+        （重排分 0.064），要补它就必须跳过重排、按文档结构取数。
+
+        调用点同样必须在**截断到 TOP_K 之后**，否则补进来的块会被一并截掉。
+
+        Args:
+            docs: 已排序、已截断的 Document 列表（通常是邻块回填后的结果）。
+            budget_chars: 总字符上限（含现有全部块）。None 表示不限。
+            max_sections: 最多回填几个小节，避免一次请求铺开十几节。
+            max_distance: 只补离原地块 `chunk_index` 差不超过该值的块。太远的块
+                多半是同一 H2 下的另一张表/另一个子主题（实测 7.3 演练记录里
+                相距 40 块的两段表格），补进来只有噪声。None 表示不限。
+
+        Returns:
+            原地块在前，整节其余块按「小节轮转」追加：小节之间按父块分数降序，
+            小节内部按结构距离升序。补查失败或层级不足（只有两级标题）时原样返回。
+        """
+        if not docs or budget_chars == 0:
+            return docs
+        base = []
+        for d in docs:
+            doc_id = str(d.metadata.get("document_id", ""))
+            idx = d.metadata.get("chunk_index")
+            if not doc_id or idx is None:
+                continue
+            base.append({
+                "id": f"{doc_id}#{int(idx)}",
+                "document_id": doc_id,
+                "chunk_index": int(idx),
+                "content": d.page_content,
+                "heading_path": str(d.metadata.get("heading_path") or ""),
+                "_doc": d,
+            })
+        if not base:
+            return docs
+        pairs = section_prefixes(base)[:max_sections]
+        if not pairs:
+            return docs
+
+        try:
+            rows = await self.milvus_service.fetch_chunks_by_heading_prefix(pairs)
+        except Exception as e:  # noqa: BLE001 —— 回填失败不能影响检索主链路
+            log_exception(
+                logger, e, action="vector_store.expand_sections",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="整节回填失败，返回原检索结果",
+                sections=len(pairs),
+            )
+            return docs
+        if not rows:
+            return docs
+
+        for row in rows:
+            row["id"] = f'{row.get("document_id")}#{int(row.get("chunk_index", -1))}'
+
+        # 追加顺序：按小节「轮转」，小节之间按父块分数降序，小节内部按结构距离升序。
+        #
+        # 为什么必须轮转，而不是「先排完一个再排下一个」「按距离全局排」：
+        # 排名第一的块常常属于一个占满位置的表格小节（本例 7.3 演练记录 5 块表格行）。
+        # 两种朴素排法都会让它先吃满预算，真正需要的小节被挤出上下文——
+        # 2026-11-24 实测：按小节顺序排时 §7.3 先吃掉 2171 字符，§4.2「恢复后必做」
+        # 照旧没进来；按距离全局排时 §7.3 的相邻表格行仍然排在 §4.2 前面。
+        # 轮转保证「每个小节都能轮到一次」，预算在它们之间摊开。
+        section_parents: dict = {}
+        section_score: dict = {}
+        for d in docs:
+            doc_id = str(d.metadata.get("document_id", ""))
+            prefix = section_prefix(str(d.metadata.get("heading_path") or ""))
+            idx = d.metadata.get("chunk_index")
+            if idx is None:
+                continue
+            section_parents.setdefault((doc_id, prefix), []).append(int(idx))
+            score = float(d.metadata.get("rerank_score") or 0.0)
+            key = (doc_id, prefix)
+            section_score[key] = max(section_score.get(key, 0.0), score)
+
+        def _section_key(row):
+            return (
+                str(row.get("document_id", "")),
+                section_prefix(str(row.get("heading_path") or "")),
+            )
+
+        def _distance(row):
+            parents = section_parents.get(_section_key(row)) or []
+            idx = int(row.get("chunk_index", -1))
+            if not parents:
+                return 0
+            return min(abs(idx - p) for p in parents)
+
+        groups: dict = {}
+        for row in rows:
+            dist = _distance(row)
+            # 太远的块多半是同一 H2 下的另一张表/另一个子主题，补进来只有噪声
+            if max_distance is not None and dist > max_distance:
+                continue
+            groups.setdefault(_section_key(row), []).append((dist, row))
+        for items in groups.values():
+            items.sort(key=lambda pair: (pair[0], int(pair[1].get("chunk_index", -1))))
+
+        ordered_sections = sorted(
+            groups, key=lambda k: (-section_score.get(k, 0.0), str(k))
+        )
+        interleaved: list = []
+        if ordered_sections:
+            depth = max(len(groups[k]) for k in ordered_sections)
+            for i in range(depth):
+                for key in ordered_sections:
+                    bucket = groups[key]
+                    if i < len(bucket):
+                        interleaved.append(bucket[i][1])
+
+        merged = merge_appended(base, interleaved, budget_chars=budget_chars)
+
+        # 整节补进来的块沿用「把它带进来的那个原地块」的分数：
+        # 不编 0 分，否则下游按分数排序或做相关性门禁时它会莫名沉底/被清掉。
+        parent_score = section_score
+
+        out = []
+        n_added = 0
+        for item in merged:
+            if item.get("_doc") is not None:
+                out.append(item["_doc"])
+                continue
+            doc = self._results_to_documents([item])[0]
+            score = parent_score.get(_section_key(item), 0.0)
+            doc.metadata["rerank_score"] = score
+            doc.metadata["score"] = score
+            doc.metadata["section_expand"] = True
+            out.append(doc)
+            n_added += 1
+        logger.debug(
+            "整节回填：%d 块 → %d 块（+%d，小节 %d 个，预算 %s 字符）",
+            len(docs), len(out), n_added, len(pairs), budget_chars,
         )
         return out
 

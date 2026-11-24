@@ -75,11 +75,14 @@ class RetrievalMixin:
         if not docs or len(docs) == 0:
             return 0.0, False
 
-        # 邻块回填进来的块不参与门禁：它们的分数是**沿用父块的**，不是自己被打出来的。
+        # 邻块 / 整节回填进来的块不参与门禁：它们的分数是**沿用父块的**，不是自己被打出来的。
         # 让它们参与平均分等于用「复制过的分数」重新投票——回填越多，平均分越向父块靠，
         # 阈值判定会被这次改动悄悄改掉。门禁只看原始入选的块，与回填前逐位一致。
         gate_docs = [
-            d for d in docs if not getattr(d, "metadata", {}).get("neighbor_expand")
+            d
+            for d in docs
+            if not getattr(d, "metadata", {}).get("neighbor_expand")
+            and not getattr(d, "metadata", {}).get("section_expand")
         ] or docs
 
         # 优先复用 reranker 真实相关性分数（接上 KB_RELEVANCE_SCORE_THRESHOLD）。

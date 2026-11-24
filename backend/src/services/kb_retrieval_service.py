@@ -170,6 +170,26 @@ class KBRetrievalService:
                     _request_retrieval_timings.set(timings)
                 except Exception:  # noqa: BLE001 —— 埋点失败不影响检索
                     pass
+            # 整节回填：补「同一小节的其余块」。必须在邻块回填之后——
+            # 邻块是物理相邻的零散块，整节是结构性补齐；反过来会让 ±1 变成冗余。
+            if settings.processing.KB_SECTION_EXPAND_ENABLED and docs:
+                t_section = time.time()
+                before = len(docs)
+                docs = await vector_store.expand_sections(
+                    docs,
+                    budget_chars=settings.processing.KB_SECTION_EXPAND_BUDGET_CHARS,
+                    max_sections=settings.processing.KB_SECTION_EXPAND_MAX_SECTIONS,
+                    max_distance=settings.processing.KB_SECTION_EXPAND_MAX_DISTANCE,
+                )
+                try:
+                    from src.services.pipeline.state import _request_retrieval_timings
+
+                    timings = dict(_request_retrieval_timings.get() or {})
+                    timings["section_expand_ms"] = int((time.time() - t_section) * 1000)
+                    timings["section_expand_added"] = len(docs) - before
+                    _request_retrieval_timings.set(timings)
+                except Exception:  # noqa: BLE001 —— 埋点失败不影响检索
+                    pass
             return docs
         finally:
             if PROMETHEUS_AVAILABLE:

@@ -196,9 +196,61 @@ class SearchMixin:
                 out.append({**row, "score": 0.0})
         return out
 
+    async def fetch_chunks_by_heading_prefix(self, prefixes: Sequence[tuple]) -> List[Dict[str, Any]]:
+        """按 `(document_id, heading 前缀)` 取同一小节的其余切片（整节回填专用）。
+
+        为什么不用检索：整节回填要的是**文档结构**，不是相似度。实测（2026-11-24）
+        `4.2 恢复后必做` 在候选池里、却被重排压到第 12 名（0.064），任何 top_k
+        都救不回来——它字面上不含「数据库/备份/恢复」这些词。按 heading 取数，
+        等于直接问文档「这一节还有哪几块」。
+
+        Args:
+            prefixes: `(document_id, heading 前缀)` 列表，调用方已去重并截断。
+                前缀形如 `"部署 > 4. 恢复"`，本方法在末尾补 `" > "` 做子级匹配。
+
+        Returns:
+            命中的切片（字段同检索结果，另含 `id`）。没有子级时返回空列表。
+        """
+        if not prefixes:
+            return []
+        out: List[Dict[str, Any]] = []
+        seen: set = set()
+        for doc, prefix in prefixes:
+            child_prefix = f"{prefix} > "
+            # LIKE 的 `%` / `_` 是通配符，heading 里可能出现（如 EMBEDDING_DIMENSION）：
+            # 只做引号转义，真值判定交给下面的 Python 前缀校验（宁可多查、不可错判）
+            literal = str(prefix).replace("\\", "\\\\").replace('"', '\\"')
+            expr = (
+                f'document_id == "{self._safe_id(doc)}" '
+                f'&& heading_path like "{literal} > %"'
+            )
+            try:
+                rows = await self.client.query(
+                    collection_name=settings.milvus.MILVUS_COLLECTION_NAME,
+                    filter=expr,
+                    output_fields=["id", *self._base_output_fields()],
+                )
+            except Exception as e:  # noqa: BLE001 —— 回填失败只降级为「不补」，不能拖垮检索
+                log_exception(
+                    logger, e, action="milvus.search.fetch_section",
+                    message="整节补查失败，本次不回填（检索结果仍可用）",
+                    document_id=str(doc)[:8],
+                    prefix_len=len(prefix),
+                )
+                continue
+            for row in rows or []:
+                heading = str(row.get("heading_path") or "")
+                if not heading.startswith(child_prefix):
+                    continue  # LIKE 通配符放宽导致的越界命中，丢掉
+                key = (str(row.get("document_id")), int(row.get("chunk_index", -1)))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({**row, "score": 0.0})
+        return out
+
     async def search_hybrid(self, query, k=3, document_ids=None, kb_ids=None, query_embedding=None, source_kind=None, exclude_source_kinds=None):
         """混合检索入口：dense + sparse，返回经 RRF 融合与 Cross-Encoder 重排序后的结果。
-
         Args:
             query: 用户查询文本。
             k: 最终返回结果数量上限。
