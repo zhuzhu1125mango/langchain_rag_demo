@@ -339,9 +339,10 @@ async def simulate(vs, docs, threshold: float, p) -> Dict[str, Any]:
         min_section_score=threshold,
     )
     added = [d for d in out if d.metadata.get("section_expand")]
+    # 只留小节名（H2）：完整 heading_path 会把 H1 顶到前面，截断后看不出补的是哪一节
     sections = sorted(
         {
-            section_prefix(str(d.metadata.get("heading_path") or "")) or "（未分级）"
+            (section_prefix(str(d.metadata.get("heading_path") or "")) or "（未分级）").split(" > ")[-1]
             for d in added
         }
     )
