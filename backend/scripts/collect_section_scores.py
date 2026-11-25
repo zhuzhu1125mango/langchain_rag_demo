@@ -411,8 +411,13 @@ async def section_sizes(vs, rows: Sequence[Dict[str, Any]]) -> Dict[Tuple[str, s
     return tally
 
 
-async def simulate(vs, docs, threshold: float, p) -> Dict[str, Any]:
-    """按某个小节分数下限模拟一次整节回填，返回上下文规模与新增小节。"""
+async def simulate(vs, docs, threshold: float, p, query=None, title_gap=None) -> Dict[str, Any]:
+    """按某个小节分数下限模拟一次整节回填，返回上下文规模与新增小节。
+
+    `title_gap` 透传给 `expand_sections`：带上它就是「开了子节标题闸门」的那一档，
+    不带就是现状。脚本不把它做成扫描维度——两个维度一起扫会让组合数翻倍，而
+    闸门的正确用法是「开关前后各跑一遍同批题」。
+    """
     out = await vs.expand_sections(
         list(docs),
         budget_chars=p.KB_SECTION_EXPAND_BUDGET_CHARS,
@@ -420,6 +425,8 @@ async def simulate(vs, docs, threshold: float, p) -> Dict[str, Any]:
         max_distance=p.KB_SECTION_EXPAND_MAX_DISTANCE,
         skip_score=p.KB_SECTION_EXPAND_SKIP_SCORE,
         min_section_score=threshold,
+        query=query,
+        title_gap=title_gap,
     )
     added = [d for d in out if d.metadata.get("section_expand")]
     # 只留小节名（H2）：完整 heading_path 会把 H1 顶到前面，截断后看不出补的是哪一节
@@ -483,6 +490,7 @@ async def answer_with_threshold(
     facts: Sequence[str],
     *,
     expand: bool = True,
+    title_gap: Optional[float] = None,
 ) -> Dict[str, Any]:
     """按指定阈值真跑一次问答（`expand=False` 时不回填，作为基准）。
 
@@ -494,8 +502,13 @@ async def answer_with_threshold(
     没有基准就回答不了「回填让答案变好还是变坏」，只能看到「都一样」。
     """
     p = settings.processing
-    snapshot = (p.KB_SECTION_EXPAND_ENABLED, p.KB_SECTION_EXPAND_MIN_SECTION_SCORE)
+    snapshot = (
+        p.KB_SECTION_EXPAND_ENABLED,
+        p.KB_SECTION_EXPAND_MIN_SECTION_SCORE,
+        p.KB_SECTION_EXPAND_TITLE_GAP,
+    )
     p.KB_SECTION_EXPAND_ENABLED = expand
+    p.KB_SECTION_EXPAND_TITLE_GAP = title_gap
     if threshold is not None:
         p.KB_SECTION_EXPAND_MIN_SECTION_SCORE = threshold
     clear_semantic_cache()
@@ -505,7 +518,11 @@ async def answer_with_threshold(
             question, kb_ids=list(kb_ids) or None, deep_thinking="off"
         )
     finally:
-        (p.KB_SECTION_EXPAND_ENABLED, p.KB_SECTION_EXPAND_MIN_SECTION_SCORE) = snapshot
+        (
+            p.KB_SECTION_EXPAND_ENABLED,
+            p.KB_SECTION_EXPAND_MIN_SECTION_SCORE,
+            p.KB_SECTION_EXPAND_TITLE_GAP,
+        ) = snapshot
     cov = fact_coverage(answer, facts)
     return {
         "coverage": cov["ratio"],
@@ -525,6 +542,7 @@ async def answer_averaged(
     rounds: int,
     *,
     expand: bool = True,
+    title_gap: Optional[float] = None,
 ) -> Dict[str, Any]:
     """同一格跑 `rounds` 次取平均；每次都先清语义缓存，否则第二次起拿到的是缓存答案。
 
@@ -533,7 +551,10 @@ async def answer_averaged(
     这里只是把同一格多跑几次再聚合。
     """
     per_run = [
-        await answer_with_threshold(chain, question, kb_ids, threshold, facts, expand=expand)
+        await answer_with_threshold(
+            chain, question, kb_ids, threshold, facts,
+            expand=expand, title_gap=title_gap,
+        )
         for _ in range(max(1, rounds))
     ]
     return aggregate_runs(per_run, facts)
@@ -588,6 +609,7 @@ def print_question(idx: int, record: Dict[str, Any]) -> None:
 
 async def main_async(args) -> int:
     questions, default_kb, thresholds = load_questions(args.questions, args.q, args.kb)
+    title_gap = args.title_gap
     if not default_kb and any(not q["kb_ids"] for q in questions):
         raise InputError("没有 kb_ids：用 --kb 或题目文件的 kb_ids 指定知识库，避免全库检索")
     if args.answer and any(not q["facts"] for q in questions):
@@ -623,6 +645,7 @@ async def main_async(args) -> int:
         f"  当前配置：TOP_K={args.top_k} 预算={p.KB_SECTION_EXPAND_BUDGET_CHARS} "
         f"skip={p.KB_SECTION_EXPAND_SKIP_SCORE} min_section={p.KB_SECTION_EXPAND_MIN_SECTION_SCORE} "
         f"max_distance={p.KB_SECTION_EXPAND_MAX_DISTANCE}"
+        + (f" title_gap={title_gap}" if title_gap is not None else "")
     )
     if not args.answer:
         print("  提示：未开 --answer，只采集分数分布；「答案是否变好」这一列会是空的。")
@@ -705,7 +728,7 @@ async def main_async(args) -> int:
             record["baseline"] = baseline
 
             for t in thresholds:
-                sim = await simulate(vs, docs, t, p)
+                sim = await simulate(vs, docs, t, p, query=item["question"], title_gap=title_gap)
                 if args.answer and item["facts"] and not record["skip_triggered"]:
                     sim.update(
                         await answer_averaged(
@@ -715,6 +738,7 @@ async def main_async(args) -> int:
                             t,
                             item["facts"],
                             args.rounds,
+                            title_gap=title_gap,
                         )
                     )
                 elif args.answer and record["skip_triggered"]:
@@ -867,6 +891,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     ap.add_argument("--out", help="把完整结果另存为 JSON")
+    ap.add_argument(
+        "--title-gap",
+        type=float,
+        default=None,
+        help="启用子节标题闸门（如 0.15）。不带则测现状；与不带的那次对比即为该闸门的 A/B",
+    )
     return ap
 
 

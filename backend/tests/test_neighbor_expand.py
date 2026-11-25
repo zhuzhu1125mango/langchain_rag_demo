@@ -125,10 +125,11 @@ class _Chain(RetrievalMixin):
 class _FakeSectionMilvus:
     """整节补查的假实现：按 `(document_id, 前缀)` 过滤，记录调用参数。"""
 
-    def __init__(self, rows=None, exc=None):
+    def __init__(self, rows=None, exc=None, vectors=None):
         self.rows = rows or []
         self.exc = exc
         self.calls = []
+        self.embeddings = _FakeEmbeddings(vectors or {})
 
     async def fetch_chunks_by_heading_prefix(self, prefixes):
         self.calls.append(list(prefixes))
@@ -142,9 +143,19 @@ class _FakeSectionMilvus:
         return out
 
 
-def _sec_vs(rows=None, exc=None):
+class _FakeEmbeddings:
+    """按表查向量；没登记过的文本直接报错，避免测试悄悄用上未预期的标题。"""
+
+    def __init__(self, table):
+        self.table = table
+
+    async def aembed_documents(self, texts):
+        return [self.table[t] for t in texts]
+
+
+def _sec_vs(rows=None, exc=None, vectors=None):
     vs = VectorStoreManager()
-    vs.milvus_service = _FakeSectionMilvus(rows, exc)
+    vs.milvus_service = _FakeSectionMilvus(rows, exc, vectors)
     return vs
 
 
@@ -384,3 +395,81 @@ class TestGateIgnoresExpandedChunks:
         before = asyncio.run(_Chain()._calculate_relevance("q", base))
         after = asyncio.run(_Chain()._calculate_relevance("q", base + expanded))
         assert before == after
+
+
+class TestTitleGapGate:
+    """子节标题闸门：只看「未命中子节标题是否比已命中的更贴问题」。
+
+    向量用 2 维手写，cos 值可直接心算：
+      [1,0] 与问题同向 → 1.0；[0,1] 正交 → 0.0。
+    """
+
+    Q = "恢复后要确认什么"
+    VEC = {
+        "恢复后要确认什么": [1.0, 0.0],
+        "恢复后必做": [1.0, 0.0],   # 与问题同向
+        "恢复顺序": [0.0, 1.0],     # 与问题正交
+        "部分恢复": [0.0, 1.0],
+    }
+
+    def _rows(self):
+        return [
+            _sec_row(24, "第一步", sub="4.1 恢复顺序"),
+            _sec_row(25, "第二步", sub="4.1 恢复顺序"),
+            _sec_row(28, "确认清单", sub="4.2 恢复后必做"),
+            _sec_row(29, "单库恢复", sub="4.3 部分恢复"),
+        ]
+
+    def test_expands_when_unhit_subsection_matches_question(self):
+        vs = _sec_vs(self._rows(), vectors=self.VEC)
+        base = [_sec_doc(24, "第一步", 0.5)]
+        out = asyncio.run(
+            vs.expand_sections(base, budget_chars=5000, query=self.Q, title_gap=0.15)
+        )
+        # 未命中的「恢复后必做」1.0 - 已命中的「恢复顺序」0.0 = 1.0 >= 0.15 → 铺
+        assert len(out) == 4
+
+    def test_skips_when_hit_subsection_already_matches(self):
+        vec = dict(self.VEC)
+        vec["恢复后必做"] = [0.0, 1.0]   # 未命中不贴问题
+        vs = _sec_vs(self._rows(), vectors=vec)
+        base = [_sec_doc(24, "第一步", 0.5)]
+        out = asyncio.run(
+            vs.expand_sections(base, budget_chars=5000, query=self.Q, title_gap=0.15)
+        )
+        # 1.0（已命中）− 0.0（未命中）= −1.0 < 0.15 → 不铺
+        assert out == base
+
+    def test_gate_off_keeps_old_behaviour(self):
+        vs = _sec_vs(self._rows(), vectors=self.VEC)
+        base = [_sec_doc(24, "第一步", 0.5)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, query=self.Q))
+        assert len(out) == 4  # title_gap=None 时不启用闸门
+
+    def test_no_unhit_subsection_means_skip(self):
+        """该节所有子节都命中了，补不出新内容 —— 即使闸门开着也不该铺。"""
+        vs = _sec_vs(self._rows(), vectors=self.VEC)
+        base = [
+            _sec_doc(24, "第一步", 0.5),
+            _sec_doc(28, "确认清单", 0.5, sub="4.2 恢复后必做"),
+            _sec_doc(29, "单库恢复", 0.5, sub="4.3 部分恢复"),
+        ]
+        out = asyncio.run(
+            vs.expand_sections(base, budget_chars=5000, query=self.Q, title_gap=0.15)
+        )
+        assert [d.metadata["chunk_index"] for d in out] == [24, 28, 29]
+
+    def test_embedding_failure_degrades_to_expand(self):
+        """算不出差值时必须退回「照常铺」，不能变成「都不铺」。"""
+        vs = _sec_vs(self._rows(), vectors={})  # 空表 → 查向量直接 KeyError
+        base = [_sec_doc(24, "第一步", 0.5)]
+        out = asyncio.run(
+            vs.expand_sections(base, budget_chars=5000, query=self.Q, title_gap=0.15)
+        )
+        assert len(out) == 4
+
+    def test_blank_query_does_not_gate(self):
+        vs = _sec_vs(self._rows(), vectors=self.VEC)
+        base = [_sec_doc(24, "第一步", 0.5)]
+        out = asyncio.run(vs.expand_sections(base, budget_chars=5000, query="", title_gap=0.15))
+        assert len(out) == 4

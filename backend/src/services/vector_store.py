@@ -10,12 +10,16 @@ from langchain_core.documents import Document
 from pymilvus.exceptions import MilvusException
 
 from src.services.chunk_expand import (
+    SECTION_SEP,
+    bare_heading,
     merge_appended,
     merge_with_neighbors,
     neighbor_positions,
     same_heading_as_parent,
     section_prefix,
     section_prefixes,
+    similarity_gap,
+    split_clauses,
 )
 from src.services.milvus_service import MilvusService
 from src.utils.async_singleton import AsyncSingleton
@@ -197,6 +201,8 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         max_distance=12,
         skip_score=None,
         min_section_score=None,
+        query=None,
+        title_gap=None,
     ):
         """把入选块所属**二级小节**的其余块补齐（整节回填）。
 
@@ -222,6 +228,13 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
                 为什么要筛：一场问答常同时命中「正文小节」和「沾边小节」，后者（如
                 5.1 决策矩阵那种一行一块的表格）块数多、分数低，铺开后会把正文挤出
                 注意力的中心——实测 16 块里 9 块来自 §5，答案从 7 步缩成 3 行。
+            query: 原始问题。只有传了它才能启用 `title_gap` 闸门。
+            title_gap: 子节标题闸门（与 `min_section_score` 是两道独立闸门）。
+                逐节算「未命中子节标题」与问题子句的最高相似度，减去「已命中子节标题」
+                的最高相似度；差值 < 该值的节不铺。None 表示不启用。
+                为什么需要：小节几何完全相同的两题可能一个该铺一个不该铺——差别在
+                「问题是否指向了没命中的那个子节」，而分数、块数、节内覆盖率都看不见
+                这件事（详见 `chunk_expand` 里的实测记录）。
 
         Returns:
             原地块在前，整节其余块按「小节轮转」追加：小节之间按父块分数降序，
@@ -339,6 +352,17 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
                 )
                 return docs
             ordered_sections = eligible
+        if title_gap is not None and query:
+            gaps = await self._section_title_gaps(query, ordered_sections, groups, docs)
+            if gaps is not None:
+                kept = [k for k in ordered_sections if (gaps.get(k) or -1.0) >= title_gap]
+                if not kept:
+                    logger.debug(
+                        "整节回填跳过：%d 个小节的子节标题缺口均低于 %.2f",
+                        len(ordered_sections), title_gap,
+                    )
+                    return docs
+                ordered_sections = kept
         interleaved: list = []
         if ordered_sections:
             depth = max(len(groups[k]) for k in ordered_sections)
@@ -370,6 +394,73 @@ class VectorStoreManager(AsyncSingleton["VectorStoreManager"]):
         logger.debug(
             "整节回填：%d 块 → %d 块（+%d，小节 %d 个，预算 %s 字符）",
             len(docs), len(out), n_added, len(pairs), budget_chars,
+        )
+        return out
+
+    async def _section_title_gaps(self, query, sections, groups, docs):
+        """逐节算「未命中子节标题 − 已命中子节标题」与问题子句的相似度差。
+
+        Returns:
+            dict[key, float]，或 None 表示算不出来（无子句 / 无子节标题 / embedding
+            不可用）。**失败必须降级成「照常铺」，不能降级成「都不铺」**——后者会让
+            一次 embedding 抖动把整节回填静默关掉，且只在日志里留一行 debug。
+        """
+        clauses = split_clauses(query)
+        if not clauses or not sections:
+            return None
+
+        def h3_of(path) -> str:
+            seg = [s.strip() for s in str(path or "").split(SECTION_SEP)]
+            return bare_heading(seg[2]) if len(seg) >= 3 else ""
+
+        all_titles: dict = {}
+        for key, items in groups.items():
+            for _dist, row in items:
+                title = h3_of(row.get("heading_path"))
+                if title:
+                    all_titles.setdefault(key, set()).add(title)
+
+        hit_titles: dict = {}
+        for d in docs:
+            key = (
+                str(d.metadata.get("document_id", "")),
+                section_prefix(str(d.metadata.get("heading_path") or "")),
+            )
+            title = h3_of(d.metadata.get("heading_path"))
+            if title:
+                hit_titles.setdefault(key, set()).add(title)
+
+        pool = sorted({t for k in sections for t in all_titles.get(k, ())})
+        if not pool:
+            return None
+        try:
+            embed = self.milvus_service.embeddings
+            clause_vecs = await embed.aembed_documents(clauses)
+            title_vecs = await embed.aembed_documents(pool)
+        except Exception as e:  # noqa: BLE001 —— 判据算不出来就退化成「照常铺」
+            log_exception(
+                logger, e, action="vector_store.section_title_gaps",
+                severity=ErrorSeverity.RECOVERABLE,
+                message="子节标题闸门计算失败，本次不启用该闸门",
+                sections=len(sections),
+            )
+            return None
+
+        vec_of = dict(zip(pool, title_vecs))
+        out = {}
+        for key in sections:
+            hit_set = hit_titles.get(key, set())
+            hit_vecs = [vec_of[t] for t in hit_set if t in vec_of]
+            unhit_vecs = [
+                vec_of[t] for t in all_titles.get(key, ())
+                if t not in hit_set and t in vec_of
+            ]
+            gap = similarity_gap(clause_vecs, hit_vecs, unhit_vecs)
+            if gap is not None:
+                out[key] = gap
+        logger.debug(
+            "子节标题缺口：%s",
+            {k[1].split(SECTION_SEP)[-1]: round(v, 3) for k, v in out.items()},
         )
         return out
 

@@ -12,15 +12,20 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.services.chunk_expand import (  # noqa: E402
+    bare_heading,
     merge_appended,
     merge_with_neighbors,
     neighbor_positions,
     same_heading_as_parent,
     section_prefix,
     section_prefixes,
+    similarity_gap,
+    split_clauses,
 )
 
 
@@ -225,3 +230,71 @@ class TestMergeAppended:
         base = [_row("d1", 25, "a" * 500)]
         out = merge_appended(base, [_row("d1", 26, "b" * 10)], budget_chars=None)
         assert len(out) == 2
+
+
+class TestBareHeading:
+    """标题去编号：编号在向量里是噪声，语义差异在标题正文。"""
+
+    def test_strips_numeric_prefix(self):
+        assert bare_heading("4.2 恢复后必做") == "恢复后必做"
+
+    def test_strips_single_level(self):
+        assert bare_heading("5. 回滚") == "回滚"
+
+    def test_strips_letter_suffix(self):
+        # 真实语料里有 "2.2.1a 只换一个服务时的坑"，不带字母后缀会剩下一个孤立的 "a"
+        assert bare_heading("2.2.1a 只换一个服务时的坑") == "只换一个服务时的坑"
+
+    def test_keeps_text_that_does_not_start_with_number(self):
+        assert bare_heading("API 网关设计") == "API 网关设计"
+
+    def test_handles_date_like_heading(self):
+        # 日期开头的标题不当编号剥（否则 "2026-11-04 第六批" 会被切成 "-11-04 第六批"）
+        assert bare_heading("2026-11-04 第六批") == "2026-11-04 第六批"
+
+    def test_empty(self):
+        assert bare_heading("") == ""
+        assert bare_heading(None) == ""
+
+
+class TestSplitClauses:
+    def test_splits_on_question_marks(self):
+        assert split_clauses("怎么恢复？恢复后要确认什么？") == ["怎么恢复", "恢复后要确认什么"]
+
+    def test_drops_short_fragments(self):
+        assert split_clauses("呢？数据库备份怎么恢复？") == ["数据库备份怎么恢复"]
+
+    def test_no_punctuation_keeps_whole(self):
+        assert split_clauses("你好，今天心情不错") == ["你好，今天心情不错"]
+
+    def test_empty(self):
+        assert split_clauses("") == []
+
+
+class TestSimilarityGap:
+    """差值 = 未命中子节标题的最高相似度 − 已命中子节标题的最高相似度。"""
+
+    Q = [1.0, 0.0]
+
+    def test_positive_when_unhit_matches(self):
+        gap = similarity_gap([self.Q], [[0.0, 1.0]], [[1.0, 0.0]])
+        assert gap == pytest.approx(1.0)
+
+    def test_negative_when_hit_already_matches(self):
+        gap = similarity_gap([self.Q], [[1.0, 0.0]], [[0.0, 1.0]])
+        assert gap == pytest.approx(-1.0)
+
+    def test_none_when_no_unhit_title(self):
+        # 该节子节全部命中 -> 补不出新内容，交给调用方跳过
+        assert similarity_gap([self.Q], [[1.0, 0.0]], []) is None
+
+    def test_none_when_no_clause(self):
+        assert similarity_gap([], [[1.0, 0.0]], [[1.0, 0.0]]) is None
+
+    def test_empty_hit_treated_as_zero(self):
+        gap = similarity_gap([self.Q], [], [[1.0, 0.0]])
+        assert gap == pytest.approx(1.0)
+
+    def test_zero_vector_does_not_blow_up(self):
+        gap = similarity_gap([self.Q], [[0.0, 0.0]], [[1.0, 0.0]])
+        assert gap == pytest.approx(1.0)

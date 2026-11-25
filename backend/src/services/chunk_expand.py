@@ -63,7 +63,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Sequence, Tuple
+import math
+import re
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 Position = Tuple[str, int]
 
@@ -307,3 +309,83 @@ def merge_appended(
             used_ids.add(row_id)
         used_chars += grow
     return out
+
+
+# ---------------------------------------------------------------------------
+# 子节标题闸门（2026-11-25）
+#
+# 为什么需要它：整节回填是「按结构铺开」，它不知道这一节里未命中的子节是否与问题
+# 有关。实测两题的小节几何完全相同（命中块都在 4.1、该节 6 块、命中覆盖率 3/6），
+# 结果却相反——「备份怎么恢复？恢复后要确认什么？」该铺（答案在 4.2，0.25→0.92），
+# 「恢复第一步做什么？备份文件怎么导入？」不该铺（答案全在 4.1，1.00→0.67）。
+# 分数、块数、节内覆盖率都分不开这两者；差别在**未命中的子节标题与问题子句的语义距离**。
+#
+# 判据（逐节）：该节「未命中子节标题」与问题子句的最高相似度，减去「已命中子节标题」
+# 的最高相似度。差值为正且够大 → 答案可能就在没命中的那边 → 值得铺；否则说明检索
+# 已经命中正确子节，铺开只是引入同节噪声。
+#
+# 为什么不用 LLM 判断「这些片段够不够」：实测两次都失败。第一次 5 题全判「部分」
+# （含基准覆盖率 1.00 的三题）；第二次改成逐点摘原文，Q1/Q5 五个要点全摘到了原文，
+# 判定行仍写「部分」。这类主观判断在「字面像答案、实际不是答案」的语料上不可靠。
+# 标题相似度是纯几何量，可复现、可解释。
+# ---------------------------------------------------------------------------
+
+_HEADING_NUM_RE = re.compile(r"^\d+(?:\.\d+)*[a-z]?[.、\s]+")
+_CLAUSE_SPLIT_RE = re.compile(r"[？?。；;！!]")
+
+# 短于这个长度的子句不参与比较（"怎么做""呢"这类几乎没有语义）
+MIN_CLAUSE_CHARS = 3
+
+
+def bare_heading(title: str) -> str:
+    """去掉小节标题的编号前缀：`4.2 恢复后必做` → `恢复后必做`。
+
+    编号在向量里是噪声：`4.1` 与 `4.2` 的差异几乎全在数字上，而语义差异在标题正文。
+    """
+    return _HEADING_NUM_RE.sub("", (title or "").strip()).strip()
+
+
+def split_clauses(question: str) -> List[str]:
+    """把问题按问号/分号/句号拆成子句，丢弃过短的片段。
+
+    为什么要拆：一个问句里常带两个不同的诉求（"怎么恢复？恢复后要确认什么？"），
+    它们各自指向不同的子节。整句去比会被前半句主导，后半句的诉求被平均掉。
+    """
+    return [
+        part.strip()
+        for part in _CLAUSE_SPLIT_RE.split(question or "")
+        if len(part.strip()) >= MIN_CLAUSE_CHARS
+    ]
+
+
+def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    dot = math.fsum(x * y for x, y in zip(a, b))
+    na = math.sqrt(math.fsum(x * x for x in a))
+    nb = math.sqrt(math.fsum(y * y for y in b))
+    if na < 1e-9 or nb < 1e-9:
+        return 0.0
+    return dot / (na * nb)
+
+
+def similarity_gap(
+    clause_vecs: Sequence[Sequence[float]],
+    hit_vecs: Sequence[Sequence[float]],
+    unhit_vecs: Sequence[Sequence[float]],
+) -> Optional[float]:
+    """未命中子节标题的最高相似度 − 已命中子节标题的最高相似度。
+
+    Returns:
+        None 表示「该节没有未命中的子节」（全都命中了，补也补不出新内容），调用方
+        应据此跳过该节。已命中为空时按 0 处理——那意味着连一个子节标题都没对上，
+        此时任何未命中子节的相似度都算作正收益，交由阈值判断。
+    """
+    if not clause_vecs or not unhit_vecs:
+        return None
+    best_unhit = max(
+        _cosine(clause, title) for clause in clause_vecs for title in unhit_vecs
+    )
+    best_hit = max(
+        (_cosine(clause, title) for clause in clause_vecs for title in hit_vecs),
+        default=0.0,
+    )
+    return best_unhit - best_hit
