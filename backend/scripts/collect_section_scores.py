@@ -231,6 +231,81 @@ def section_table(docs: Sequence[Any]) -> Tuple[List[Dict[str, Any]], int]:
     return rows, unclassified
 
 
+def _sim_at(sims: Dict[Any, Any], t: float) -> Optional[Dict[str, Any]]:
+    """按阈值取单元格，兼容 JSON 回放时的字符串键。
+
+    实时运行时键是 float；`json.load` 之后同一份报告里的键会变成 "0.4"。
+    不做这个兼容，回放历史报告会把所有阈值判成同一个空签名，合并成一整组。
+    """
+    cell = sims.get(t)
+    if cell is None:
+        cell = sims.get(str(t))
+    return cell
+
+
+def pool_thresholds(
+    records: Sequence[Dict[str, Any]],
+    thresholds: Sequence[float],
+) -> List[Dict[str, Any]]:
+    """把「上下文完全相同」的阈值合并成一组，并把组内所有运行合并计算覆盖率。
+
+    为什么必须合并：0.40 与 0.50 在这批题上产出的块数、字符、新增小节逐一相同，
+    也就是说它们对模型是**同一个输入**。分开算时 0.40 得 0.717、0.50 得 0.778，
+    差异全部来自生成抽样——合并 6 次运行后是 0.747，这才是这两个阈值共同的真值。
+
+    合并还有第二个好处：同一组内轮次翻倍，噪声按 sqrt 收缩。
+    """
+    def _sig(t: float) -> tuple:
+        return tuple(
+            (r["question"], s["chunks"], s["chars"], tuple(s["added_sections"]))
+            for r in records
+            for s in [_sim_at(r["simulations"], t)]
+            if s
+        )
+
+    buckets: Dict[tuple, List[float]] = {}
+    for t in thresholds:
+        buckets.setdefault(_sig(t), []).append(t)
+
+    out: List[Dict[str, Any]] = []
+    for members in buckets.values():
+        runs: List[float] = []
+        chars: List[int] = []
+        for t in members:
+            for r in records:
+                s = _sim_at(r["simulations"], t)
+                if not s:
+                    continue
+                runs.extend(s.get("coverage_runs") or [])
+                chars.append(int(s.get("chars") or 0))
+        out.append(
+            {
+                "thresholds": sorted(members),
+                "runs": len(runs),
+                "coverage": round(sum(runs) / len(runs), 3) if runs else None,
+                "avg_chars": round(sum(chars) / len(chars)) if chars else None,
+            }
+        )
+    return out
+
+
+def pick_group(
+    groups: Sequence[Dict[str, Any]],
+    tolerance: float,
+) -> Optional[Dict[str, Any]]:
+    """在覆盖率不差于最优（容差内）的组里挑上下文最省的一个；并列取较小阈值。
+
+    「取较小阈值」是保守选择：等价意味着这批题上看不出差别，那就别用更严的那档
+    ——更严的阈值在没测到的题上更容易把该铺的小节挡掉。
+    """
+    scored = [g for g in groups if g.get("coverage") is not None]
+    if not scored:
+        return None
+    best = max(g["coverage"] for g in scored)
+    near = [g for g in scored if g["coverage"] >= best - tolerance]
+    return min(near, key=lambda g: (g.get("avg_chars") or 0, g["thresholds"][0]))
+
+
 def summarize(records: Sequence[Dict[str, Any]], thresholds: Sequence[float]) -> List[Dict[str, Any]]:
     """跨题汇总：每个阈值下「平均覆盖率 / 平均块数 / 平均字符」。
 
@@ -239,7 +314,7 @@ def summarize(records: Sequence[Dict[str, Any]], thresholds: Sequence[float]) ->
     """
     out: List[Dict[str, Any]] = []
     for t in thresholds:
-        sims = [r["simulations"].get(t) for r in records]
+        sims = [_sim_at(r["simulations"], t) for r in records]
         sims = [s for s in sims if s]
         covered = [s for s in sims if s.get("coverage") is not None]
         spreads = [
@@ -712,24 +787,16 @@ async def main_async(args) -> int:
 
     # 上下文等价分组：不同阈值可能在这批题上产出**完全相同**的检索结果。
     # 此时它们之间任何覆盖率差异都只可能来自生成噪声（实测：同一 12 块 2902 字符，
-    # 0.4 覆盖 0.67、0.5 覆盖 1.00），拿它选阈值就是把噪声当信号。
-    def _signature(t: float) -> tuple:
-        return tuple(
-            (r["question"], s["chunks"], s["chars"], tuple(s["added_sections"]))
-            for r in records
-            for s in [r["simulations"].get(t)]
-            if s
-        )
-
-    groups: Dict[tuple, List[float]] = {}
-    for t in thresholds:
-        groups.setdefault(_signature(t), []).append(t)
-    equivalent = {t: g for g in groups.values() if len(g) > 1 for t in g}
-    for group in groups.values():
-        if len(group) > 1:
+    # 0.4 三次得 0.67、0.5 三次得 1.00/1.00/0.67），拿它选阈值就是把噪声当信号。
+    pooled = pool_thresholds(records, thresholds)
+    for group in pooled:
+        if len(group["thresholds"]) > 1:
+            cov = f"{group['coverage']:.3f}" if group["coverage"] is not None else "-"
             print(
-                f"\n  阈值 {' / '.join(f'{t:.2f}' for t in group)} 在这批题上产出的上下文完全相同"
-                "（块数、字符、新增小节一致），它们之间的覆盖率差异属于生成噪声，不能据此选阈值。"
+                f"\n  阈值 {' / '.join(f'{t:.2f}' for t in group['thresholds'])} "
+                "在这批题上产出的上下文完全相同（块数、字符、新增小节一致），"
+                f"合并 {group['runs']} 次运行后覆盖 {cov}；"
+                "分开比较只会比出抽样噪声。"
             )
 
     if not answered:
@@ -740,25 +807,17 @@ async def main_async(args) -> int:
             "这个样本量只能看趋势，换个题就可能反过来。"
         )
     else:
-        best_cov = max(r["avg_coverage"] for r in answered)
-        near = [r for r in answered if r["avg_coverage"] >= best_cov - COVERAGE_TOLERANCE]
-        # 等价组只留一个代表（组内取最小阈值，偏保守），避免用噪声挑出更严的那档
-        seen: set = set()
-        candidates = []
-        for row in near:
-            key = tuple(sorted(equivalent.get(row["threshold"], [row["threshold"]])))
-            if key in seen:
-                continue
-            seen.add(key)
-            candidates.append(row)
-        pick = min(candidates, key=lambda r: r["avg_chars"] or 0)
-        same = equivalent.get(pick["threshold"])
-        extra = f"；{' / '.join(f'{t:.2f}' for t in same)} 与本值等价" if same else ""
-        print(
-            f"\n覆盖率不差于最优 {best_cov:.3f}（容差 {COVERAGE_TOLERANCE}）的阈值里，"
-            f"上下文最省的是 {pick['threshold']:.2f}"
-            f"（覆盖 {pick['avg_coverage']:.3f}、{pick['avg_chars']} 字符）{extra}。"
-        )
+        pick = pick_group(pooled, COVERAGE_TOLERANCE)
+        if pick is None:
+            print("\n没有可用的分组覆盖率，无法推荐。")
+        else:
+            names = " / ".join(f"{t:.2f}" for t in pick["thresholds"])
+            print(
+                f"\n按「上下文等价则合并」后的分组比较（容差 {COVERAGE_TOLERANCE}）："
+                f"推荐 {pick['thresholds'][0]:.2f}"
+                f"（组内 {names}，合并 {pick['runs']} 次运行覆盖 {pick['coverage']:.3f}、"
+                f"平均 {pick['avg_chars']} 字符）。等价时取较小阈值，避免在没测到的题上误挡小节。"
+            )
 
     if args.out:
         Path(args.out).write_text(

@@ -25,6 +25,8 @@ from scripts.collect_section_scores import (  # noqa: E402
     fact_coverage,
     load_questions,
     normalize,
+    pick_group,
+    pool_thresholds,
     section_table,
     summarize,
 )
@@ -214,6 +216,53 @@ class TestAggregateRuns:
     def test_empty_runs_rejected(self):
         with pytest.raises(ValueError):
             aggregate_runs([], ["a"])
+
+
+class TestPoolThresholds:
+    """同上下文阈值必须合并后再比——分开比只会比出抽样噪声。"""
+
+    def _records(self, specs):
+        # specs: [(chunks, chars, coverage_runs)]，所有题共用同一组阈值
+        records = [{"question": "q", "simulations": {}}]
+        for t, (chunks, chars, runs) in specs.items():
+            records[0]["simulations"][t] = {
+                "chunks": chunks,
+                "chars": chars,
+                "added_sections": [],
+                "coverage_runs": runs,
+                "coverage": sum(runs) / len(runs),
+            }
+        return records
+
+    def test_same_context_is_pooled(self):
+        records = self._records(
+            {0.4: (7, 2769, [0.67, 0.67, 1.0]), 0.5: (7, 2769, [0.67, 0.67, 0.67])}
+        )
+        groups = pool_thresholds(records, [0.4, 0.5])
+        assert len(groups) == 1
+        group = groups[0]
+        assert group["thresholds"] == [0.4, 0.5]
+        assert group["runs"] == 6  # 两档各 3 次，合并后噪声按 sqrt 收缩
+        assert group["coverage"] == pytest.approx(0.725, abs=1e-3)
+
+    def test_different_context_stays_separate(self):
+        records = self._records(
+            {0.4: (7, 2769, [1.0]), 0.5: (17, 4921, [0.25])}
+        )
+        groups = pool_thresholds(records, [0.4, 0.5])
+        assert len(groups) == 2
+        assert {tuple(g["thresholds"]) for g in groups} == {(0.4,), (0.5,)}
+
+    def test_pick_prefers_fewer_chars_then_lower_threshold(self):
+        groups = [
+            {"thresholds": [0.4, 0.5], "coverage": 0.747, "avg_chars": 2780, "runs": 30},
+            {"thresholds": [0.3], "coverage": 0.583, "avg_chars": 3246, "runs": 15},
+        ]
+        pick = pick_group(groups, tolerance=0.05)
+        assert pick["thresholds"][0] == 0.4  # 等价组里取小
+
+    def test_pick_none_without_coverage(self):
+        assert pick_group([{"thresholds": [0.4], "coverage": None}], 0.05) is None
 
 
 class TestSummarize:
