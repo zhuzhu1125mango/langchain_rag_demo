@@ -1988,6 +1988,21 @@ KB_SECTION_EXPAND_MIN_SECTION_SCORE=0.4
 
 > 预算取值：4000 时 §4.2 仍被 §7.3 的表格行挤掉（实测），5000 才能容下完整的 §4。
 
+**这两个阈值怎么复验**：`0.4` 目前只有一道题的分数分布支撑（0.5 该铺、0.338 不该铺），
+换个问题就可能反过来。要判定它是否成立，用离线采集脚本拿同一批题的三个数
+（小节父块分、铺开后的上下文规模、答案覆盖率）：
+
+```bash
+docker cp backend/scripts/collect_section_scores.py backend-prod:/tmp/
+docker exec backend-prod python scripts/collect_section_scores.py \
+    --questions /tmp/q.json --answer --out /tmp/section.json
+```
+
+题目文件里每题给一句 `question` 和一组 `facts`（答对就必须出现的短字符串，如
+`restore.sh`、`rag:semcache`）——没有 `facts` 就不做答案评判，脚本只输出分数分布，
+**不会**拿「答案变长」冒充「答案变好」。样本少于 5 题时脚本明确不给推荐阈值。
+每条 fact 的命中按「小写 + 去标点空白」比对，`rag:semcache` 与 `rag:semcache:*` 视为同一条。
+
 ## 9. 故障排查
 ### 9.1 日志排查
 

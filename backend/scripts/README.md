@@ -26,6 +26,11 @@
 | 脚本 | 用途 |
 |---|---|
 | `run_eval.py` | 检索质量离线评估（BM25 栈 + 评估语料），指标低于阈值非零退出；CI rag-eval job 使用 |
+| `collect_section_scores.py` | 整节回填判据采集：逐题输出小节父块分数、各阈值下的上下文规模与答案覆盖率；样本 < 5 不给推荐阈值 |
+
+`collect_section_scores.py` 用于复验 `KB_SECTION_EXPAND_MIN_SECTION_SCORE` / `SKIP_SCORE`：
+题目文件里每题给 `facts` 才会算覆盖率（`--answer`），否则只输出分数分布。完整参数
+与口径见脚本头部说明，取舍背景见 `docs/guide/deployment.md` §7.13。
 
 ## OCR 深度解析类（P0-2b，需先 `uv sync --group ocr-mineru` / `--group ocr-paddle`）
 
