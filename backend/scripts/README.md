@@ -29,8 +29,10 @@
 | `collect_section_scores.py` | 整节回填判据采集：逐题输出小节父块分数、各阈值下的上下文规模与答案覆盖率；样本 < 5 不给推荐阈值 |
 
 `collect_section_scores.py` 用于复验 `KB_SECTION_EXPAND_MIN_SECTION_SCORE` / `SKIP_SCORE`：
-题目文件里每题给 `facts` 才会算覆盖率（`--answer`），否则只输出分数分布。完整参数
-与口径见脚本头部说明，取舍背景见 `docs/guide/deployment.md` §7.13。
+题目文件里每题给 `facts` 才会算覆盖率（`--answer`），否则只输出分数分布。每格默认跑 1 次，
+同一份上下文的覆盖率实测可差 0.33（生成噪声），要比较接近的方案加 `--rounds 3` 取平均；
+脚本会自动标注「上下文完全相同」的阈值组，并按 fact 命中率列出不稳定的点。
+完整参数与口径见脚本头部说明，取舍背景见 `docs/guide/deployment.md` §7.13。
 
 ## OCR 深度解析类（P0-2b，需先 `uv sync --group ocr-mineru` / `--group ocr-paddle`）
 

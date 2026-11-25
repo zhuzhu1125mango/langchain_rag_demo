@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from scripts.collect_section_scores import (  # noqa: E402
     InputError,
+    aggregate_runs,
     fact_coverage,
     load_questions,
     normalize,
@@ -165,6 +166,54 @@ class TestSectionTable:
         rows, unclassified = section_table([_doc(1, 0.9, "部署 > 4. 恢复")])
         assert rows == []
         assert unclassified == 1
+
+
+class TestAggregateRuns:
+    """`--rounds` 的聚合语义：均值而非末次，且不稳定的 fact 要被看见。"""
+
+    def _run(self, cov, matched, missing, chars=100):
+        return {
+            "coverage": cov,
+            "matched": matched,
+            "missing": missing,
+            "answer_len": chars,
+            "elapsed_s": 10.0,
+        }
+
+    def test_mean_not_last_run(self):
+        agg = aggregate_runs(
+            [
+                self._run(0.67, ["a", "b"], ["c"]),
+                self._run(0.67, ["a", "b"], ["c"]),
+                self._run(1.0, ["a", "b", "c"], []),
+            ],
+            ["a", "b", "c"],
+        )
+        # 末次是 1.0；均值才是 0.78
+        assert agg["coverage"] == pytest.approx(0.78, abs=1e-3)
+        assert agg["coverage_runs"] == [0.67, 0.67, 1.0]
+        assert agg["coverage_min"] == 0.67 and agg["coverage_max"] == 1.0
+
+    def test_unstable_fact_reported(self):
+        agg = aggregate_runs(
+            [self._run(0.5, ["a"], ["b"]), self._run(1.0, ["a", "b"], [])],
+            ["a", "b"],
+        )
+        # b 在 2 次里命中 1 次：这种边缘点最该被看见，而不是按末次判成「命中」
+        assert agg["fact_hit_rate"]["b"] == 0.5
+        assert agg["unstable_facts"] == ["b"]
+
+    def test_stable_facts_not_flagged(self):
+        agg = aggregate_runs(
+            [self._run(0.5, ["a"], ["b"]), self._run(0.5, ["a"], ["b"])],
+            ["a", "b"],
+        )
+        assert agg["unstable_facts"] == []
+        assert agg["fact_hit_rate"] == {"a": 1.0, "b": 0.0}
+
+    def test_empty_runs_rejected(self):
+        with pytest.raises(ValueError):
+            aggregate_runs([], ["a"])
 
 
 class TestSummarize:

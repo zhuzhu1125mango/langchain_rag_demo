@@ -242,6 +242,11 @@ def summarize(records: Sequence[Dict[str, Any]], thresholds: Sequence[float]) ->
         sims = [r["simulations"].get(t) for r in records]
         sims = [s for s in sims if s]
         covered = [s for s in sims if s.get("coverage") is not None]
+        spreads = [
+            round((s["coverage_max"] - s["coverage_min"]), 3)
+            for s in covered
+            if s.get("coverage_max") is not None and s.get("coverage_min") is not None
+        ]
         out.append(
             {
                 "threshold": t,
@@ -250,6 +255,9 @@ def summarize(records: Sequence[Dict[str, Any]], thresholds: Sequence[float]) ->
                 "avg_coverage": (
                     round(sum(s["coverage"] for s in covered) / len(covered), 3)
                     if covered else None
+                ),
+                "avg_spread": (
+                    round(sum(spreads) / len(spreads), 3) if spreads else None
                 ),
                 "avg_chunks": (
                     round(sum(s["chunks"] for s in sims) / len(sims), 1) if sims else None
@@ -357,6 +365,41 @@ async def simulate(vs, docs, threshold: float, p) -> Dict[str, Any]:
     }
 
 
+def aggregate_runs(
+    per_run: Sequence[Dict[str, Any]],
+    facts: Sequence[str],
+) -> Dict[str, Any]:
+    """把同一格的多次运行合并成「平均覆盖率 + 每轮明细 + 每个 fact 的命中率」。
+
+    为什么不能只留最后一次：同一份上下文连跑两次，覆盖率实测可以差 0.33
+    （2026-11-25：12 块 / 2902 字符不变，0.4 得 0.67、0.5 得 1.00）。单次结果
+    分不清「阈值有效」和「这一次运气好」。
+
+    为什么按 fact 统计命中率而不是取某一次：`facts` 是「答对就必须出现」的点，
+    「3 次里命中 2 次」本身就是信息——它说明这个点处于模型能力的边缘，
+    换一次运行就可能掉。只报最后一次的 matched/missing 会把这种不稳定藏起来。
+    """
+    if not per_run:
+        raise ValueError("aggregate_runs 需要至少一次运行结果")
+    n = len(per_run)
+    covs = [float(r.get("coverage") or 0.0) for r in per_run]
+    rates = {
+        f: round(sum(1 for r in per_run if f in (r.get("matched") or [])) / n, 2)
+        for f in facts
+    }
+    return {
+        "coverage": round(sum(covs) / n, 3),
+        "coverage_runs": covs,
+        "coverage_min": min(covs),
+        "coverage_max": max(covs),
+        "fact_hit_rate": rates,
+        # 介于 0 和 1 之间 = 有时命中有时不命中，最该被看见的那类
+        "unstable_facts": [f for f, v in rates.items() if 0 < v < 1],
+        "answer_len": round(sum(int(r.get("answer_len") or 0) for r in per_run) / n),
+        "elapsed_s": round(sum(float(r.get("elapsed_s") or 0.0) for r in per_run), 1),
+    }
+
+
 async def answer_with_threshold(
     chain,
     question: str,
@@ -365,7 +408,7 @@ async def answer_with_threshold(
     facts: Sequence[str],
     *,
     expand: bool = True,
-):
+) -> Dict[str, Any]:
     """按指定阈值真跑一次问答（`expand=False` 时不回填，作为基准）。
 
     临时改内存里的 `KB_SECTION_EXPAND_MIN_SECTION_SCORE` 并强制开启整节回填：
@@ -398,6 +441,44 @@ async def answer_with_threshold(
     }
 
 
+async def answer_averaged(
+    chain,
+    question: str,
+    kb_ids: Sequence[str],
+    threshold: Optional[float],
+    facts: Sequence[str],
+    rounds: int,
+    *,
+    expand: bool = True,
+) -> Dict[str, Any]:
+    """同一格跑 `rounds` 次取平均；每次都先清语义缓存，否则第二次起拿到的是缓存答案。
+
+    不清缓存时重复运行会得到**完全相同**的答案，方差恒为 0，
+    「多次取平均」就变成了自欺欺人——所以清缓存这一步由 `answer_with_threshold` 负责，
+    这里只是把同一格多跑几次再聚合。
+    """
+    per_run = [
+        await answer_with_threshold(chain, question, kb_ids, threshold, facts, expand=expand)
+        for _ in range(max(1, rounds))
+    ]
+    return aggregate_runs(per_run, facts)
+
+
+def _cov_text(cell: Dict[str, Any]) -> str:
+    """把覆盖率渲染成「均值(最小值~最大值)」；多次运行不一致时才显示区间。
+
+    只显示均值会把「三次里有一次掉到 0.33」藏起来，而那种不稳定恰恰是
+    选阈值时最该看的东西。
+    """
+    if cell.get("coverage") is None:
+        return "-"
+    text = f"{cell['coverage']:.2f}"
+    lo, hi = cell.get("coverage_min"), cell.get("coverage_max")
+    if lo is not None and hi is not None and abs(hi - lo) > 1e-9:
+        text += f"({lo:.2f}~{hi:.2f})"
+    return text
+
+
 def print_question(idx: int, record: Dict[str, Any]) -> None:
     print(f"\n=== Q{idx} {record['question']}")
     print(
@@ -423,13 +504,11 @@ def print_question(idx: int, record: Dict[str, Any]) -> None:
     print(f"    {'阈值':>5} {'块':>4} {'字符':>6} {'新增':>4}  新增小节 / 覆盖率")
     bl = record.get("baseline")
     if bl:
-        cov = f"{bl['coverage']:.2f}" if bl.get("coverage") is not None else "-"
-        print(f"    {'基准':>5} {bl['chunks']:>4} {bl['chars']:>6} {0:>4}  （不回填） {cov}")
+        print(f"    {'基准':>5} {bl['chunks']:>4} {bl['chars']:>6} {0:>4}  （不回填） {_cov_text(bl)}")
     for t in record["threshold_order"]:
         s = record["simulations"][t]
-        cov = f"{s['coverage']:.2f}" if s.get("coverage") is not None else "-"
         secs = "、".join(s["added_sections"]) if s["added_sections"] else "（无）"
-        print(f"    {t:>5.2f} {s['chunks']:>4} {s['chars']:>6} {s['added_chunks']:>4}  {secs[:46]} {cov}")
+        print(f"    {t:>5.2f} {s['chunks']:>4} {s['chars']:>6} {s['added_chunks']:>4}  {secs[:46]} {_cov_text(s)}")
 
 
 async def main_async(args) -> int:
@@ -461,7 +540,9 @@ async def main_async(args) -> int:
 
     print("采集整节回填判据")
     print(
-        f"  题数 {len(questions)} / 阈值 {thresholds} / 答案评估 {'开' if args.answer else '关'}"
+        f"  题数 {len(questions)} / 阈值 {thresholds} / "
+        f"答案评估 {'开' if args.answer else '关'}"
+        + (f"（每格 {args.rounds} 次取平均）" if args.answer else "")
     )
     print(
         f"  当前配置：TOP_K={args.top_k} 预算={p.KB_SECTION_EXPAND_BUDGET_CHARS} "
@@ -536,12 +617,13 @@ async def main_async(args) -> int:
             }
             if args.answer and item["facts"]:
                 baseline.update(
-                    await answer_with_threshold(
+                    await answer_averaged(
                         chain,
                         item["question"],
                         item["kb_ids"],
                         None,
                         item["facts"],
+                        args.rounds,
                         expand=False,
                     )
                 )
@@ -551,8 +633,13 @@ async def main_async(args) -> int:
                 sim = await simulate(vs, docs, t, p)
                 if args.answer and item["facts"] and not record["skip_triggered"]:
                     sim.update(
-                        await answer_with_threshold(
-                            chain, item["question"], item["kb_ids"], t, item["facts"]
+                        await answer_averaged(
+                            chain,
+                            item["question"],
+                            item["kb_ids"],
+                            t,
+                            item["facts"],
+                            args.rounds,
                         )
                     )
                 elif args.answer and record["skip_triggered"]:
@@ -569,12 +656,16 @@ async def main_async(args) -> int:
 
     summary = summarize(records, thresholds)
     print("\n=== 汇总（按阈值）")
-    print(f"  {'阈值':>5} {'题数':>4} {'评估':>4} {'平均覆盖':>8} {'平均块':>6} {'平均字符':>8}")
+    print(
+        f"  {'阈值':>5} {'题数':>4} {'评估':>4} {'平均覆盖':>8} {'波动':>6}"
+        f" {'平均块':>6} {'平均字符':>8}"
+    )
     for row in summary:
         cov = f"{row['avg_coverage']:.3f}" if row["avg_coverage"] is not None else "-"
+        spread = f"{row['avg_spread']:.2f}" if row["avg_spread"] is not None else "-"
         print(
             f"  {row['threshold']:>5.2f} {row['questions']:>4} {row['answered']:>4}"
-            f" {cov:>8} {row['avg_chunks']:>6} {row['avg_chars']:>8}"
+            f" {cov:>8} {spread:>6} {row['avg_chunks']:>6} {row['avg_chars']:>8}"
         )
 
     answered = [r for r in summary if r["answered"]]
@@ -612,6 +703,12 @@ async def main_async(args) -> int:
             )
         else:
             print("  没有任何题因回填而低于基准。")
+
+    if answered and args.rounds == 1:
+        print(
+            "\n  注意：每格只跑了 1 次。实测同一份上下文的覆盖率可差 0.33，"
+            "小于这个幅度的差异不可信；要定论请加 --rounds 3。"
+        )
 
     # 上下文等价分组：不同阈值可能在这批题上产出**完全相同**的检索结果。
     # 此时它们之间任何覆盖率差异都只可能来自生成噪声（实测：同一 12 块 2902 字符，
@@ -700,6 +797,15 @@ def build_parser() -> argparse.ArgumentParser:
         "--answer",
         action="store_true",
         help="真跑问答并按 facts 算覆盖率（慢，每题每阈值一次生成）",
+    )
+    ap.add_argument(
+        "--rounds",
+        type=int,
+        default=1,
+        help=(
+            "每格跑几次取平均。同一份上下文实测可差 0.33（生成噪声），"
+            "要比较相差 0.33 以内的阈值必须 ≥3；每轮都会先清语义缓存"
+        ),
     )
     ap.add_argument("--out", help="把完整结果另存为 JSON")
     return ap
