@@ -357,16 +357,29 @@ async def simulate(vs, docs, threshold: float, p) -> Dict[str, Any]:
     }
 
 
-async def answer_with_threshold(chain, question: str, kb_ids: Sequence[str], threshold: float, facts: Sequence[str]):
-    """按指定阈值真跑一次问答，返回 (sim 之外的指标)。
+async def answer_with_threshold(
+    chain,
+    question: str,
+    kb_ids: Sequence[str],
+    threshold: Optional[float],
+    facts: Sequence[str],
+    *,
+    expand: bool = True,
+):
+    """按指定阈值真跑一次问答（`expand=False` 时不回填，作为基准）。
 
     临时改内存里的 `KB_SECTION_EXPAND_MIN_SECTION_SCORE` 并强制开启整节回填：
     要衡量「这个阈值下的答案」，就得让线上那条路真的按这个阈值走。
+
+    为什么必须有 `expand=False` 的基准：小节分数普遍在 0.8 以上时，0~0.5 的所有阈值
+    都放行，四行结果一模一样——看起来「阈值无所谓」，其实是**对照组缺失**。
+    没有基准就回答不了「回填让答案变好还是变坏」，只能看到「都一样」。
     """
     p = settings.processing
     snapshot = (p.KB_SECTION_EXPAND_ENABLED, p.KB_SECTION_EXPAND_MIN_SECTION_SCORE)
-    p.KB_SECTION_EXPAND_ENABLED = True
-    p.KB_SECTION_EXPAND_MIN_SECTION_SCORE = threshold
+    p.KB_SECTION_EXPAND_ENABLED = expand
+    if threshold is not None:
+        p.KB_SECTION_EXPAND_MIN_SECTION_SCORE = threshold
     clear_semantic_cache()
     started = time.time()
     try:
@@ -408,6 +421,10 @@ def print_question(idx: int, record: Dict[str, Any]) -> None:
             # 分数只说明整节相关，不说明铺开的是 4.1 还是 4.2
             print(f"      └ {'、'.join(row['children'])[:64]}")
     print(f"    {'阈值':>5} {'块':>4} {'字符':>6} {'新增':>4}  新增小节 / 覆盖率")
+    bl = record.get("baseline")
+    if bl:
+        cov = f"{bl['coverage']:.2f}" if bl.get("coverage") is not None else "-"
+        print(f"    {'基准':>5} {bl['chunks']:>4} {bl['chars']:>6} {0:>4}  （不回填） {cov}")
     for t in record["threshold_order"]:
         s = record["simulations"][t]
         cov = f"{s['coverage']:.2f}" if s.get("coverage") is not None else "-"
@@ -468,6 +485,7 @@ async def main_async(args) -> int:
             "unclassified": 0,
             "sections": [],
             "simulations": {},
+            "baseline": None,
             "threshold_order": list(thresholds),
             "error": None,
         }
@@ -505,6 +523,30 @@ async def main_async(args) -> int:
                 row["section_chars"] = size.get("chars")
             record["sections"] = rows
 
+            # 基准：完全不回填（等价于整节回填关闭）。没有这一行，当所有阈值都放行时
+            # 四行结果一样，会被误读成「阈值无所谓」，其实是缺了对照组。
+            baseline: Dict[str, Any] = {
+                "chunks": len(docs),
+                "chars": sum(len(d.page_content or "") for d in docs),
+                "added_chunks": 0,
+                "added_sections": [],
+                "coverage": None,
+                "answer_len": None,
+                "elapsed_s": None,
+            }
+            if args.answer and item["facts"]:
+                baseline.update(
+                    await answer_with_threshold(
+                        chain,
+                        item["question"],
+                        item["kb_ids"],
+                        None,
+                        item["facts"],
+                        expand=False,
+                    )
+                )
+            record["baseline"] = baseline
+
             for t in thresholds:
                 sim = await simulate(vs, docs, t, p)
                 if args.answer and item["facts"] and not record["skip_triggered"]:
@@ -537,6 +579,62 @@ async def main_async(args) -> int:
 
     answered = [r for r in summary if r["answered"]]
     sample = max((r["answered"] for r in answered), default=0)
+
+    # 基准行：不回填。必须**只和评估过阈值的题**比——基准跑的是全部题（含被 skip 的），
+    # 阈值行只统计有覆盖率的题；分母不同的时候相减，等于把「题不一样」当成「效果不同」。
+    evaluated = [
+        r for r in records
+        if any(s.get("coverage") is not None for s in r["simulations"].values())
+    ]
+    bl_rows = [
+        r["baseline"] for r in evaluated
+        if r.get("baseline") and r["baseline"].get("coverage") is not None
+    ]
+    if bl_rows:
+        print(
+            f"\n  基准（不回填，同 {len(bl_rows)} 题）: 平均覆盖 "
+            f"{sum(r['coverage'] for r in bl_rows) / len(bl_rows):.3f}"
+            f" / 平均块 {sum(r['chunks'] for r in bl_rows) / len(bl_rows):.1f}"
+            f" / 平均字符 {round(sum(r['chars'] for r in bl_rows) / len(bl_rows))}"
+        )
+        worse = [
+            r["question"][:18] for r in evaluated
+            if r.get("baseline") and r["baseline"].get("coverage") is not None
+            and any(
+                s.get("coverage") is not None and s["coverage"] < r["baseline"]["coverage"]
+                for s in r["simulations"].values()
+            )
+        ]
+        if worse:
+            print(
+                "  回填后覆盖率低于基准的题：" + "、".join(worse)
+                + "（分数高不等于该铺：小节块数多时，铺开只是把答案挤出注意力中心）"
+            )
+        else:
+            print("  没有任何题因回填而低于基准。")
+
+    # 上下文等价分组：不同阈值可能在这批题上产出**完全相同**的检索结果。
+    # 此时它们之间任何覆盖率差异都只可能来自生成噪声（实测：同一 12 块 2902 字符，
+    # 0.4 覆盖 0.67、0.5 覆盖 1.00），拿它选阈值就是把噪声当信号。
+    def _signature(t: float) -> tuple:
+        return tuple(
+            (r["question"], s["chunks"], s["chars"], tuple(s["added_sections"]))
+            for r in records
+            for s in [r["simulations"].get(t)]
+            if s
+        )
+
+    groups: Dict[tuple, List[float]] = {}
+    for t in thresholds:
+        groups.setdefault(_signature(t), []).append(t)
+    equivalent = {t: g for g in groups.values() if len(g) > 1 for t in g}
+    for group in groups.values():
+        if len(group) > 1:
+            print(
+                f"\n  阈值 {' / '.join(f'{t:.2f}' for t in group)} 在这批题上产出的上下文完全相同"
+                "（块数、字符、新增小节一致），它们之间的覆盖率差异属于生成噪声，不能据此选阈值。"
+            )
+
     if not answered:
         print("\n没有答案数据，得不出阈值；分数分布见上表。")
     elif sample < MIN_SAMPLE_FOR_RECOMMENDATION:
@@ -547,11 +645,22 @@ async def main_async(args) -> int:
     else:
         best_cov = max(r["avg_coverage"] for r in answered)
         near = [r for r in answered if r["avg_coverage"] >= best_cov - COVERAGE_TOLERANCE]
-        pick = min(near, key=lambda r: r["avg_chars"] or 0)
+        # 等价组只留一个代表（组内取最小阈值，偏保守），避免用噪声挑出更严的那档
+        seen: set = set()
+        candidates = []
+        for row in near:
+            key = tuple(sorted(equivalent.get(row["threshold"], [row["threshold"]])))
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(row)
+        pick = min(candidates, key=lambda r: r["avg_chars"] or 0)
+        same = equivalent.get(pick["threshold"])
+        extra = f"；{' / '.join(f'{t:.2f}' for t in same)} 与本值等价" if same else ""
         print(
             f"\n覆盖率不差于最优 {best_cov:.3f}（容差 {COVERAGE_TOLERANCE}）的阈值里，"
             f"上下文最省的是 {pick['threshold']:.2f}"
-            f"（覆盖 {pick['avg_coverage']:.3f}、{pick['avg_chars']} 字符）。"
+            f"（覆盖 {pick['avg_coverage']:.3f}、{pick['avg_chars']} 字符）{extra}。"
         )
 
     if args.out:
