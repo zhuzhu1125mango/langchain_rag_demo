@@ -2116,6 +2116,47 @@ curl -I http://localhost:8001/health
 curl -I http://localhost:9094
 ```
 
+### 9.5 Docker 镜像层报错：先看存储后端，别急着删镜像
+
+**症状**（2026-11-25 实测，Windows + Docker Desktop 29.9.3）：
+
+- 所有容器同时 `Exited (255)`，`docker compose up -d` 起不来；
+- 报 `apply layer error ... missing parent "moby/5571/sha256:..." bucket: not found`；
+- 删掉镜像重新拉取后，改报 `unable to prepare extraction snapshot: AlreadyExists:
+  target snapshot "sha256:..." already exists`。
+
+**第一步永远是看存储后端**：
+
+```bash
+docker info --format "{{.Driver}} | {{.DriverStatus}}"
+# overlayfs | [[driver-type io.containerd.snapshotter.v1]]   ← containerd 镜像存储
+```
+
+只有 `io.containerd.snapshotter.v1` 才适用下面的结论。如果显示的是经典 graph driver
+（`overlay2` 且没有 `driver-type`），同样的报错另有原因（磁盘满、graph driver 元数据损坏），
+不要套这个配方。
+
+**实测无效的四条**（都试过，别重复）：
+
+| 动作 | 结果 |
+|---|---|
+| `docker rmi` + 重新 `pull` | 只救回**没被 buildkit 引用**的镜像（本例 postgres / redis），其余撞号 |
+| `docker save` → `rmi` → `docker load` | 无效：坏的是快照的父链记录，内容本身没丢 |
+| `docker builder prune -af`（清 38GB 构建缓存） | 无效 |
+| `docker system prune -a -f`（清空全部镜像） | 无效，且把可用镜像也删了 |
+| 重启 Docker Desktop | 无效：快照库在磁盘上，重启不回收孤立记录 |
+
+**有效的一条**：Settings → General → 取消勾选 **Use containerd for pulling and storing
+images** → Apply & restart。切换后走经典 overlay2，是另一套独立的库，坏索引被绕开。
+
+**代价与边界**：镜像要全部重拉，本地构建的 backend/frontend 要重建；**命名卷不受影响**
+（卷不归镜像存储管）。反过来，Clean / Purge data、`docker system prune --volumes` 会连卷一起删——
+生产库在里面，**没有备份不要点**。备份可以用还能跑的镜像做，例如
+`docker run --rm -v rag-prod_postgres_data_prod:/data -v /c/temp:/bk redis:7.2-alpine tar czf /bk/pg.tgz -C /data .`。
+
+**教训**：看到 `missing parent` / `AlreadyExists` 这类**快照层**报错，先 `docker info` 判断后端，
+再决定动不动镜像。这次先删镜像，结果把「一次开关」变成了「重拉 + 重建 + 两轮排查」。
+
 ---
 
 ## 附录：端口汇总
