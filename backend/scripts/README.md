@@ -26,7 +26,12 @@
 | 脚本 | 用途 |
 |---|---|
 | `run_eval.py` | 检索质量离线评估（BM25 栈 + 评估语料），指标低于阈值非零退出；CI rag-eval job 使用 |
-| `collect_section_scores.py` | 整节回填判据采集：逐题输出小节父块分数、各阈值下的上下文规模与答案覆盖率；样本 < 5 不给推荐阈值 |
+| `collect_section_scores.py` | 整节回填判据采集：逐题输出小节父块分数、各阈值下的上下文规模与答案覆盖率；样本 < 5 不给推荐阈值。带 `--title-gap 0.15` 即为子节标题闸门那一档，与不带的那次对比就是 A/B |
+
+`eval_questions/title_gap_holdout.json` 是子节标题闸门的 **holdout 题集**（10 题，取自
+`deployment.md` §1/§3/§4/§9、`architecture.md` §3、`backup-restore.md` §6，与切阈值用的 5 题
+无重叠）。它的用途是避免「在同一批题上调参又验证」——改动闸门相关逻辑后，请用**没参与调参**
+的题重跑，而不是回放这 10 题。`note` 字段说明每题预期跨/集中哪个子节，脚本会忽略它。
 
 `collect_section_scores.py` 用于复验 `KB_SECTION_EXPAND_MIN_SECTION_SCORE` / `SKIP_SCORE`：
 题目文件里每题给 `facts` 才会算覆盖率（`--answer`），否则只输出分数分布。每格默认跑 1 次，

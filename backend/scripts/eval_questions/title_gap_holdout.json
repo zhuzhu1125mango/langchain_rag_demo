@@ -1,0 +1,56 @@
+{
+  "top_k": 3,
+  "thresholds": [0.4],
+  "questions": [
+    {
+      "question": "跑这套系统需要什么版本的 Python、Node.js 和 Docker？最低内存和磁盘要多少？",
+      "facts": ["3.10", "Node.js", "8GB", "50GB"],
+      "note": "deployment §1，预期跨 1.1 基础依赖 + 1.3 资源要求"
+    },
+    {
+      "question": "开发环境和生产环境的 PostgreSQL、Milvus、Redis 端口分别是多少？",
+      "facts": ["5433", "5434", "19531", "6380"],
+      "note": "deployment §1.2，预期集中在一个子节"
+    },
+    {
+      "question": "前端本地开发怎么启动？开发服务器监听哪个端口？",
+      "facts": ["pnpm dev", "5173"],
+      "note": "deployment §3.4 + 3.5，预期跨两个子节"
+    },
+    {
+      "question": "生产环境首次部署必须配置哪些密钥？开放注册默认是什么状态？",
+      "facts": ["SECRET_KEY", "ADMIN_KEY", "AUTH_ALLOW_REGISTRATION"],
+      "note": "deployment §4.2，预期集中"
+    },
+    {
+      "question": "生产环境的前端、后端 API、Grafana 分别用什么端口？",
+      "facts": ["8080", "8001", "3001"],
+      "note": "deployment §4.4，预期集中"
+    },
+    {
+      "question": "服务起来后怎么逐个确认数据库、Milvus、MinIO、Redis 都连得上？",
+      "facts": ["SELECT 1", "pymilvus", "redis-cli ping"],
+      "note": "deployment §9.2，预期集中"
+    },
+    {
+      "question": "模型调用失败时怎么降级？Provider 熔断的打开条件和恢复条件是什么？",
+      "facts": ["fallback", "3 次", "60s", "半开"],
+      "note": "architecture §3：模型路由层 + 熔断，预期跨两个子节"
+    },
+    {
+      "question": "流式接口会推送哪些事件？标题是什么时候发的？",
+      "facts": ["StreamingResponse", "reasoning", "title"],
+      "note": "architecture §3 流式响应（1 块），预期集中"
+    },
+    {
+      "question": "Milvus 的容量怎么估算？10GB 原始文本大约占多少？",
+      "facts": ["448", "5 倍"],
+      "note": "backup §6.1 + 6.2，预期跨两个子节"
+    },
+    {
+      "question": "宿主机磁盘、内存、Milvus 检索延迟到多少就该处理了？",
+      "facts": ["70%", "85%", "500ms"],
+      "note": "backup §6.3，预期集中"
+    }
+  ]
+}
